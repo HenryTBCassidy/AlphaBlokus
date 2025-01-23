@@ -17,25 +17,25 @@ coloredlogs.install(level='INFO')
 
 # TODO: Add args for whether or not to log out data
 args = RunConfig(
-    run_name="run_with_timings_1",
-    num_generations=30,
-    num_eps=100,  # TODO: These can happen in parallel
+    run_name="tiny_check_run_1",
+    num_generations=1,  # 30
+    num_eps=10,  # 100 TODO: These can happen in parallel
     temp_threshold=15,
     update_threshold=0.55,
-    max_queue_length=10000,  # TODO: Why is this so high?
-    num_arena_matches=50,  # TODO: These can happen in parallel
+    max_queue_length=10,  # 10000 TODO: Why is this so high?
+    num_arena_matches=2,  # 50 TODO: These can happen in parallel
     root_directory=Path('./temp/'),
     load_model=False,
     load_folder_file=[Path(p) for p in ('/dev/models/8x100x50', 'best.pth.tar')],
-    num_generations_lookback=10,  # This is how many iterations of training history the algorith will look back
+    num_generations_lookback=1,  # 10 This is how many iterations of training history the algorith will look back
     mcts_config=MCTSConfig(
-        num_mcts_sims=25,
+        num_mcts_sims=2, # 25
         cpuct=1
     ),
     net_config=NetConfig(
         learning_rate=0.001,  # TODO: Make a schedule for this
         dropout=0.3,
-        epochs=10,
+        epochs=1, # 10
         batch_size=10,
         cuda=True,
         num_channels=512,
@@ -47,7 +47,6 @@ args.run_directory.mkdir(parents=True, exist_ok=True)
 
 def main():
     setup_logging(args.log_directory)
-    logging.basicConfig(level="INFO", filemode="w+", force=True)
     start = time.perf_counter()
     log.info('Loading %s...', Game.__name__)
 

@@ -4,7 +4,7 @@ import sys
 import time
 from collections import deque
 from dataclasses import dataclass
-from enum import Enum
+from enum import StrEnum
 from pickle import Pickler, Unpickler
 from random import shuffle
 
@@ -20,11 +20,11 @@ from neuralnet import NeuralNet
 log = logging.getLogger(LOGGER_NAME)
 
 
-class CycleStage(Enum):
-    SelfPlay = 1
-    Training = 2
-    Arena = 3
-    WholeCycle = 4
+class CycleStage(StrEnum):
+    SelfPlay = "SelfPlay"
+    Training = "Training"
+    Arena = "Arena"
+    WholeCycle = "WholeCycle"
 
     def __repr__(self):
         return self._name_
@@ -125,7 +125,7 @@ class Coach:
                     iteration_train_examples += self.execute_episode()
                 self_play_end_time = time.perf_counter()
                 self.timings.append(TimingsLoggable(
-                    generation=generation, cycle_stage=CycleStage(1),
+                    generation=generation, cycle_stage=CycleStage.SelfPlay,
                     time_elapsed=self_play_end_time - self_play_start_time
                 ))
                 # Save the generation examples to the history
@@ -157,7 +157,7 @@ class Coach:
             training_end_time = time.perf_counter()
 
             self.timings.append(TimingsLoggable(
-                generation=generation, cycle_stage=CycleStage(2),
+                generation=generation, cycle_stage=CycleStage.Training,
                 time_elapsed=training_end_time - training_start_time
             ))
 
@@ -175,7 +175,7 @@ class Coach:
 
             arena_end_time = time.perf_counter()
             self.timings.append(TimingsLoggable(
-                generation=generation, cycle_stage=CycleStage(3),
+                generation=generation, cycle_stage=CycleStage.Arena,
                 time_elapsed=arena_end_time - arena_start_time
             ))
 
@@ -191,7 +191,7 @@ class Coach:
 
             generation_end_time = time.perf_counter()
             self.timings.append(TimingsLoggable(
-                generation=generation, cycle_stage=CycleStage(4),
+                generation=generation, cycle_stage=CycleStage.WholeCycle,
                 time_elapsed=generation_end_time - generation_start_time
             ))
 
