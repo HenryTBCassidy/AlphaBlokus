@@ -1,19 +1,40 @@
 import logging
 import os
 import sys
+import time
 from collections import deque
+from dataclasses import dataclass
+from enum import Enum
 from pickle import Pickler, Unpickler
 from random import shuffle
 
 import numpy as np
+import pandas as pd
 from tqdm import tqdm
 
 from arena import Arena
+from config import RunConfig, LOGGER_NAME
 from mcts import MCTS
 from neuralnet import NeuralNet
-from config import RunConfig, LOGGER_NAME
 
 log = logging.getLogger(LOGGER_NAME)
+
+
+class CycleStage(Enum):
+    SelfPlay = 1
+    Training = 2
+    Arena = 3
+    WholeCycle = 4
+
+    def __repr__(self):
+        return self._name_
+
+
+@dataclass
+class TimingsLoggable:
+    generation: int
+    cycle_stage: CycleStage
+    time_elapsed: float
 
 
 class Coach:
@@ -23,19 +44,17 @@ class Coach:
     """
 
     def __init__(self, game, nnet: NeuralNet, run_config: RunConfig):
-        """
-
-        :param game:
-        :param nnet:
-        :param run_config:
-        """
         self.game = game
         self.nnet = nnet
         self.pnet = self.nnet.__class__(self.game, run_config)  # the competitor network
         self.run_config = run_config
         self.mcts = MCTS(self.game, self.nnet, self.run_config.mcts_config)
-        self.train_examples_history = []  # History of examples from args.num_iters_for_train_examples_history latest iterations
+
+        # List of Generations, each generation is a list of every board state, pi vector and whether that won or lost
+        # i.e. list[list[training_example]]
+        self.train_examples_history = []
         self.skip_first_self_play = False  # can be overriden in loadTrainExamples()
+        self.timings: list[TimingsLoggable] = []
 
     def execute_episode(self):
         """
@@ -49,10 +68,11 @@ class Coach:
         uses temp=0.
 
         Returns:
-            train_examples: a list of examples of the form (canonical_board, currPlayer, pi,v)
+            train_examples: a list of examples of the form [canonical_board, pi, v]
                            pi is the MCTS informed policy vector, v is +1 if
                            the player eventually won the game, else -1.
         """
+        # Has form: [board, current player, pi vector, end result of game (initially not known so = None)
         train_examples = []
         board = self.game.get_init_board()
         cur_player = 1
@@ -65,6 +85,9 @@ class Coach:
 
             pi = self.mcts.get_action_prob(canonical_board, temp=temp)
             sym = self.game.get_symmetries(canonical_board, pi)
+
+            # Because the board could have up to 4 fold rotation symmetry and flip symmetry, artificially add these
+            # Positions into the network so the algorithm doesn't get a random preference for certain directions
             for b, p in sym:
                 train_examples.append([b, cur_player, p, None])
 
@@ -79,8 +102,10 @@ class Coach:
     def learn(self):
         """
         Performs num_generations iterations with num_eps episodes of self-play in each
-        generation. After every generation, it retrains neural network with
-        examples in train_examples (which has a maximum length of max_queue_length).
+        generation.
+
+        After every generation, it retrains neural network with examples in train_examples.
+
         It then pits the new neural network against the old one and accepts it
         only if it wins >= update_threshold fraction of games.
         """
@@ -88,19 +113,25 @@ class Coach:
         for generation in range(1, self.run_config.num_generations + 1):
             # bookkeeping
             log.info(f'Starting Iter #{generation} ...')
+            generation_start_time = time.perf_counter()
             # examples of the generation
             if not self.skip_first_self_play or generation > 1:
                 iteration_train_examples = deque([], maxlen=self.run_config.max_queue_length)
 
                 log.info(f'Starting Self Play For Generation #{generation} ...')
+                self_play_start_time = time.perf_counter()
                 for _ in tqdm(range(self.run_config.num_eps), desc="Self Play"):
                     self.mcts = MCTS(self.game, self.nnet, self.run_config.mcts_config)  # reset search tree
                     iteration_train_examples += self.execute_episode()
-
-                # save the generation examples to the history
+                self_play_end_time = time.perf_counter()
+                self.timings.append(TimingsLoggable(
+                    generation=generation, cycle_stage=CycleStage(1),
+                    time_elapsed=self_play_end_time - self_play_start_time
+                ))
+                # Save the generation examples to the history
                 self.train_examples_history.append(iteration_train_examples)
 
-            if len(self.train_examples_history) > self.run_config.num_iters_for_train_examples_history:
+            if len(self.train_examples_history) > self.run_config.num_generations_lookback:
                 log.warning(
                     f"Removing the oldest entry in train_examples. len(trainExamplesHistory) = "
                     f"{len(self.train_examples_history)}")
@@ -109,7 +140,7 @@ class Coach:
             # NB! the examples were collected using the model from the previous generation, so (i-1)
             self.save_self_play_history(generation - 1)
 
-            # shuffle examples before training
+            # Shuffle examples before training
             train_examples = []
             for e in self.train_examples_history:
                 train_examples.extend(e)
@@ -120,10 +151,20 @@ class Coach:
             self.pnet.load_checkpoint(filename='temp.pth.tar')
             pmcts = MCTS(self.game, self.pnet, self.run_config.mcts_config)
 
+            log.info(f'Starting Training For Generation #{generation} ...')
+            training_start_time = time.perf_counter()
             self.nnet.train(train_examples, generation)
+            training_end_time = time.perf_counter()
+
+            self.timings.append(TimingsLoggable(
+                generation=generation, cycle_stage=CycleStage(2),
+                time_elapsed=training_end_time - training_start_time
+            ))
+
             nmcts = MCTS(self.game, self.nnet, self.run_config.mcts_config)
 
-            log.info('PITTING AGAINST PREVIOUS VERSION')
+            log.info(f'PITTING AGAINST PREVIOUS VERSION For Generation #{generation} ...')
+            arena_start_time = time.perf_counter()
             arena = Arena(lambda x: np.argmax(pmcts.get_action_prob(x, temp=0)),
                           lambda x: np.argmax(nmcts.get_action_prob(x, temp=0)), self.game)
 
@@ -131,6 +172,12 @@ class Coach:
                 self.run_config.num_arena_matches,
                 generation=generation, directory=self.run_config.arena_data_directory
             )
+
+            arena_end_time = time.perf_counter()
+            self.timings.append(TimingsLoggable(
+                generation=generation, cycle_stage=CycleStage(3),
+                time_elapsed=arena_end_time - arena_start_time
+            ))
 
             log.info('NEW/PREV WINS : %d / %d ; DRAWS : %d' % (nwins, pwins, draws))
             if pwins + nwins == 0 or float(nwins) / (pwins + nwins) < self.run_config.update_threshold:
@@ -141,6 +188,24 @@ class Coach:
                 log.info('ACCEPTING NEW MODEL')
                 self.nnet.save_checkpoint(filename=f"accepted_{generation}.pth.tar")
                 self.nnet.save_checkpoint(filename='best.pth.tar')
+
+            generation_end_time = time.perf_counter()
+            self.timings.append(TimingsLoggable(
+                generation=generation, cycle_stage=CycleStage(4),
+                time_elapsed=generation_end_time - generation_start_time
+            ))
+
+        self._write_timings()
+
+    def _write_timings(self):
+        start = time.perf_counter()
+        self.run_config.timings_directory.mkdir(parents=True, exist_ok=True)
+
+        pd.DataFrame([log_data.__dict__ for log_data in self.timings]).to_parquet(
+            self.run_config.timings_directory / f"timings.parquet")
+
+        end = time.perf_counter()
+        logging.info(f"Took {end - start} seconds to write timings data!")
 
     @staticmethod
     def get_self_play_filename(generation) -> str:

@@ -19,6 +19,7 @@ AlphaGo Zero, Alpha Zero and MuZero algorithms (respetively below):
 
 Additionally, this codebase is heavily inspired by:
 - [Alpha Zero General](https://github.com/suragnair/alpha-zero-general)
+- [AplhaZero](https://github.com/michaelnny/alpha_zero?tab=readme-ov-file)
 
 ## Project Outline
 

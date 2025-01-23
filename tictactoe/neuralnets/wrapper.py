@@ -97,7 +97,7 @@ class NNetWrapper(NeuralNet):
                 t.set_postfix(Loss_pi=pi_losses, Loss_v=v_losses)
 
                 log_data.append(
-                    [generation, epoch, batch_number, l_pi.clone(), l_v.clone(), total_loss.clone(),
+                    [generation, epoch, batch_number, l_pi.detach(), l_v.detach(), total_loss.detach(),
                      deepcopy(pi_losses.avg), deepcopy(v_losses.avg)])
 
                 # compute gradient and do SGD step

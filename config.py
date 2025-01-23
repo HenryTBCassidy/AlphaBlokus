@@ -27,12 +27,12 @@ class RunConfig:
     num_eps: int  # Number of complete self-play games to simulate during each generation
     temp_threshold: int  # TODO: Annotate
     update_threshold: float  # New neural net will be accepted if this threshold or more of games are won.
-    max_queue_length: int  # Number of game examples to train the neural networks.
+    max_queue_length: int  # Num board states remembered per generation (greater than num_moves bc of symmetry calc).
     num_arena_matches: int  # Number of games to play during arena play to determine if new net will be accepted.
     root_directory: Path  # Folder name of root where program runs
     load_model: bool  # TODO: Annotate
     load_folder_file: list[Path]  # TODO: Annotate
-    num_iters_for_train_examples_history: int  # Number of iterations allowed in history i.e. buffer size
+    num_generations_lookback: int  # Number of generations remembered during training i.e. buffer size
     mcts_config: MCTSConfig  # Class holding parameters used in Monte Carlo Tree Search
     net_config: NetConfig  # Class holding useful variables to parameterise neural net
 
@@ -41,6 +41,9 @@ class RunConfig:
 
     @property
     def log_directory(self): return self.run_directory / "Logs"
+
+    @property
+    def timings_directory(self): return self.run_directory / "Timings"
 
     @property
     def self_play_history_directory(self): return self.run_directory / "SelfPlayHistory"

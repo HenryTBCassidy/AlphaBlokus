@@ -17,19 +17,19 @@ coloredlogs.install(level='INFO')
 
 # TODO: Add args for whether or not to log out data
 args = RunConfig(
-    run_name="check_logging_works_1",
-    num_generations=30,  # TODO: These can happen in parallel
-    num_eps=100,
+    run_name="run_with_timings_1",
+    num_generations=30,
+    num_eps=100,  # TODO: These can happen in parallel
     temp_threshold=15,
     update_threshold=0.55,
-    max_queue_length=200000,  # TODO: Why is this so high?
+    max_queue_length=10000,  # TODO: Why is this so high?
     num_arena_matches=50,  # TODO: These can happen in parallel
     root_directory=Path('./temp/'),
     load_model=False,
     load_folder_file=[Path(p) for p in ('/dev/models/8x100x50', 'best.pth.tar')],
-    num_iters_for_train_examples_history=200,  # TODO: What is this?
+    num_generations_lookback=10,  # This is how many iterations of training history the algorith will look back
     mcts_config=MCTSConfig(
-        num_mcts_sims=20,
+        num_mcts_sims=25,
         cpuct=1
     ),
     net_config=NetConfig(
