@@ -3,11 +3,11 @@ import math
 
 import numpy as np
 
-from config import MCTSConfig
+from config import MCTSConfig, LOGGER_NAME
 
 EPS = 1e-8
 
-log = logging.getLogger(__name__)
+log = logging.getLogger(LOGGER_NAME)
 
 
 class MCTS:

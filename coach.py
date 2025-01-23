@@ -11,9 +11,9 @@ from tqdm import tqdm
 from arena import Arena
 from mcts import MCTS
 from neuralnet import NeuralNet
-from config import RunConfig
+from config import RunConfig, LOGGER_NAME
 
-log = logging.getLogger(__name__)
+log = logging.getLogger(LOGGER_NAME)
 
 
 class Coach:

@@ -7,9 +7,10 @@ from dataclasses import dataclass
 
 from tqdm import tqdm
 
+from config import LOGGER_NAME
 from game import Game
 
-log = logging.getLogger(__name__)
+log = logging.getLogger(LOGGER_NAME)
 
 
 @dataclass

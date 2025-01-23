@@ -11,7 +11,7 @@ from torch import optim
 from tqdm import tqdm
 
 from neuralnet import NeuralNet
-from config import RunConfig
+from config import RunConfig, LOGGER_NAME
 from utils import AverageMeter
 
 sys.path.append('..')
@@ -27,7 +27,7 @@ Date: Jan 5, 2018.
 
 Based on (copy-pasted from) the NNet by SourKream and Surag Nair.
 """
-log = logging.getLogger(__name__)
+log = logging.getLogger(LOGGER_NAME)
 
 
 @dataclass

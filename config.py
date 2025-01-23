@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+LOGGER_NAME: str = "Alpha"
+
 
 @dataclass
 class MCTSConfig:
@@ -36,6 +38,9 @@ class RunConfig:
 
     @property
     def run_directory(self): return self.root_directory / self.run_name
+
+    @property
+    def log_directory(self): return self.run_directory / "Logs"
 
     @property
     def self_play_history_directory(self): return self.run_directory / "SelfPlayHistory"

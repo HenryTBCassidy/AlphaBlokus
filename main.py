@@ -5,18 +5,19 @@ from pathlib import Path
 import coloredlogs
 
 from coach import Coach
-from config import RunConfig, NetConfig, MCTSConfig
+from config import RunConfig, NetConfig, MCTSConfig, LOGGER_NAME
 from tictactoe.tictactoegame import TicTacToeGame as Game
 from tictactoe.neuralnets.wrapper import NNetWrapper
+from utils import setup_logging
 
-log = logging.getLogger(__name__)
+log = logging.getLogger(LOGGER_NAME)
 
 # Change this to DEBUG to see more info.
 coloredlogs.install(level='INFO')
 
 # TODO: Add args for whether or not to log out data
 args = RunConfig(
-    run_name="full_run_because_why_not_1",
+    run_name="check_logging_works_1",
     num_generations=30,  # TODO: These can happen in parallel
     num_eps=100,
     temp_threshold=15,
@@ -42,19 +43,14 @@ args = RunConfig(
 )
 
 args.run_directory.mkdir(parents=True, exist_ok=True)
-logging_file = args.run_directory / f'{args.run_name}.logs'
-
-logging.basicConfig(
-    filename=logging_file,  # Specify the log file name
-    level=logging.INFO,  # Set the logging level to INFO
-    format='%(asctime)s - %(levelname)s - %(message)s',  # Define the log message format
-    filemode="w", force=True
-)
 
 
 def main():
+    setup_logging(args.log_directory)
+    logging.basicConfig(level="INFO", filemode="w+", force=True)
     start = time.perf_counter()
     log.info('Loading %s...', Game.__name__)
+
     g = Game(3)
 
     log.info('Loading %s...', NNetWrapper.__name__)
@@ -73,7 +69,8 @@ def main():
         log.info("Loading 'trainExamples' from file...")
         c.load_train_examples()
 
-    log.info('Starting the learning process 🎉')
+    log.info('Starting the learning process ')
+
     c.learn()
     end = time.perf_counter()
     log.info(f"Total time elapsed: {end - start}")
