@@ -56,3 +56,6 @@ class RunConfig:
 
     @property
     def arena_data_directory(self): return self.run_directory / "ArenaData"
+
+    @property
+    def report_directory(self): return self.run_directory / "Reporting"

@@ -8,11 +8,12 @@ from core.config import LOGGER_NAME
 from tictactoe.neuralnets.wrapper import NNetWrapper
 from tictactoe.tictactoegame import TicTacToeGame as Game
 from utils import setup_logging, load_args
+from reporting import create_html_report
 
 log = logging.getLogger(LOGGER_NAME)
 coloredlogs.install(level='INFO')
 
-args = load_args("full_run.json")
+args = load_args("test_run.json")
 
 
 def main():
@@ -48,6 +49,7 @@ def main():
 
     c.learn()
     nnet.collect_training_data()
+    create_html_report(args)
     end = time.perf_counter()
     log.info(f"Total time elapsed: {end - start}")
 
