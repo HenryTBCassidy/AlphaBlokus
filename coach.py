@@ -131,19 +131,16 @@ class Coach:
                 # Save the generation examples to the history
                 self.train_examples_history.append(iteration_train_examples)
 
-            if len(self.train_examples_history) > self.run_config.num_generations_lookback:
-                log.warning(
-                    f"Removing the oldest entry in train_examples. len(trainExamplesHistory) = "
-                    f"{len(self.train_examples_history)}")
-                self.train_examples_history.pop(0)
             # backup history to a file
             # NB! the examples were collected using the model from the previous generation, so (i-1)
             self.save_self_play_history(generation - 1)
 
-            # Shuffle examples before training
+            idx = self._get_index_for_generation_lookback(generation)
             train_examples = []
-            for e in self.train_examples_history:
+            for e in self.train_examples_history[idx:]:
                 train_examples.extend(e)
+
+            # Shuffle examples before training
             shuffle(train_examples)
 
             # training new network, keeping a copy of the old one
@@ -196,6 +193,26 @@ class Coach:
             ))
 
         self._write_timings()
+
+    def _get_index_for_generation_lookback(self, generation: int) -> int:
+        # Lookback index to retrieve data from relevant generations
+        # To get window size, I've fit the line:
+        # y = a*x + b to the points (x=0, y=5) and (x=2*max_window_size, y=max_window_size)
+        # This allows a good combination of forgetting earlier games but retaining good memory as iterations go on
+
+        if generation <= 5:
+            return 0
+
+        def get_window_size(max_val: int) -> int:
+            if generation < 2 * max_val:
+                return round(generation * (max_val - 5) / (2 * max_val) + 5)
+            else:
+                return max_val
+
+        window_size = get_window_size(self.run_config.max_generations_lookback)
+        history_length = len(self.train_examples_history)
+
+        return history_length - window_size
 
     def _write_timings(self):
         start = time.perf_counter()

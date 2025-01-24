@@ -32,7 +32,7 @@ class RunConfig:
     root_directory: Path  # Folder name of root where program runs
     load_model: bool  # TODO: Annotate
     load_folder_file: list[Path]  # TODO: Annotate
-    num_generations_lookback: int  # Number of generations remembered during training i.e. buffer size
+    max_generations_lookback: int  # Maximum number of generations remembered during training i.e. buffer size
     mcts_config: MCTSConfig  # Class holding parameters used in Monte Carlo Tree Search
     net_config: NetConfig  # Class holding useful variables to parameterise neural net
 
