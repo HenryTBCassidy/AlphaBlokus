@@ -3,7 +3,7 @@ import math
 
 import numpy as np
 
-from config import MCTSConfig, LOGGER_NAME
+from core.config import MCTSConfig, LOGGER_NAME
 
 EPS = 1e-8
 

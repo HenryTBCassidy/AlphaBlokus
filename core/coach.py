@@ -12,10 +12,10 @@ import numpy as np
 import pandas as pd
 from tqdm import tqdm
 
-from arena import Arena
-from config import RunConfig, LOGGER_NAME
-from mcts import MCTS
-from neuralnet import NeuralNet
+from core.arena import Arena
+from core.config import RunConfig, LOGGER_NAME
+from core.mcts import MCTS
+from core.interfaces import INeuralNetWrapper
 
 log = logging.getLogger(LOGGER_NAME)
 
@@ -43,7 +43,7 @@ class Coach:
     in Game and NeuralNet. args are specified in main.py.
     """
 
-    def __init__(self, game, nnet: NeuralNet, run_config: RunConfig):
+    def __init__(self, game, nnet: INeuralNetWrapper, run_config: RunConfig):
         self.game = game
         self.nnet = nnet
         self.pnet = self.nnet.__class__(self.game, run_config)  # the competitor network

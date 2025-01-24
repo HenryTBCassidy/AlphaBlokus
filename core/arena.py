@@ -7,8 +7,8 @@ from dataclasses import dataclass
 
 from tqdm import tqdm
 
-from config import LOGGER_NAME
-from game import Game
+from core.config import LOGGER_NAME
+from core.interfaces import IGame
 
 log = logging.getLogger(LOGGER_NAME)
 
@@ -26,7 +26,7 @@ class Arena:
     An Arena class where any 2 agents can be pit against each other.
     """
 
-    def __init__(self, player1, player2, game: Game, display=None):
+    def __init__(self, player1, player2, game: IGame, display=None):
         """
         Input:
             player 1,2: two functions that takes board as input, return action
