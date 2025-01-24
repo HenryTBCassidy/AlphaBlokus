@@ -17,7 +17,7 @@ coloredlogs.install(level='INFO')
 
 # TODO: Add args for whether or not to log out data
 args = RunConfig(
-    run_name="run_with_timings_2",
+    run_name="tiny_check_run_1",
     num_generations=1,  # 30
     num_eps=10,  # 100 TODO: These can happen in parallel
     temp_threshold=15,
