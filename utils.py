@@ -1,10 +1,13 @@
+import atexit
 import json
 import logging
-import pathlib
-
-import atexit
 import logging.config
 import logging.handlers
+from pathlib import Path
+
+from dataclass_wizard import fromdict
+
+from core.config import RunConfig
 
 
 class AverageMeter(object):
@@ -26,8 +29,16 @@ class AverageMeter(object):
         self.avg = self.sum / self.count
 
 
-def setup_logging(log_dir: pathlib.Path):
-    config_file = pathlib.Path("logging_config.json")
+def load_args(filename: str):
+    root_dir = Path("run_configurations")
+    with open(root_dir / filename, "r") as f:
+        args_json = json.load(f)
+
+    return fromdict(RunConfig, args_json)
+
+
+def setup_logging(log_dir: Path):
+    config_file = Path("logging_config.json")
     with open(config_file) as f_in:
         config = json.load(f_in)
 

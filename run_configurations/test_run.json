@@ -1,0 +1,24 @@
+{
+  "run_name": "test_run",
+  "num_generations": 2,
+  "num_eps": 10,
+  "temp_threshold": 15,
+  "update_threshold": 0.55,
+  "max_queue_length": 10,
+  "num_arena_matches": 2,
+  "root_directory": "./temp/",
+  "load_model": "False",
+  "max_generations_lookback": 1,
+  "mcts_config": {
+    "num_mcts_sims": 2,
+    "cpuct": 1
+  },
+  "net_config": {
+    "learning_rate": 0.001,
+    "dropout": 0.3,
+    "epochs": 1,
+    "batch_size": 10,
+    "cuda": "True",
+    "num_channels": 512
+  }
+}

@@ -1,7 +1,7 @@
 import sys
 
 sys.path.append('..')
-from game import Game
+from core.interfaces import IGame
 from .tictactoeboard import Board
 import numpy as np
 
@@ -11,7 +11,7 @@ Based on the OthelloGame then getGameEnded() was adapted to new rules.
 """
 
 
-class TicTacToeGame(Game):
+class TicTacToeGame(IGame):
     def __init__(self, n=3):
         super().__init__()
         self.n = n

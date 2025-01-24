@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from config import NetConfig
+from core.config import NetConfig
 
 
 class AlphaTicTacToe(nn.Module):

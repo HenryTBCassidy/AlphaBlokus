@@ -1,22 +1,25 @@
 import logging
+import os
 import sys
 import time
 from copy import deepcopy
 from dataclasses import dataclass
-from pickle import Pickler
+from pathlib import Path
+from pickle import Pickler, Unpickler
 
 import numpy as np
+import pandas as pd
 import torch
 from torch import optim
 from tqdm import tqdm
 
-from neuralnet import NeuralNet
-from config import RunConfig, LOGGER_NAME
+from core.config import RunConfig, LOGGER_NAME
+from core.interfaces import INeuralNetWrapper
 from utils import AverageMeter
 
 sys.path.append('..')
 
-from .tictactocnnet import AlphaTicTacToe as nnet
+from tictactoe.neuralnets.tictactocnnet import AlphaTicTacToe as nnet
 from tictactoe.tictactoegame import TicTacToeGame as Game
 
 """
@@ -42,7 +45,7 @@ class TrainingDataLoggable:
     average_v_loss: float  # Average value loss of all batches so far
 
 
-class NNetWrapper(NeuralNet):
+class NNetWrapper(INeuralNetWrapper):
     def __init__(self, game: Game, args: RunConfig):
         super().__init__(game, args)
         self.args = args
@@ -56,7 +59,10 @@ class NNetWrapper(NeuralNet):
 
     def train(self, examples, generation: int):
         """
-        examples: list of examples, each example is of form (board, pi, v)
+        Input:
+            examples: List of examples, each example is of form (board, pi, v)
+                      board is the canonical board, pi is the MCTS informed policy vector, v is the value from MCTS.
+            generation: Current iteration number in the self-play, train and compare network stage.
         """
         optimizer = optim.Adam(self.nnet.parameters())
 
@@ -109,7 +115,7 @@ class NNetWrapper(NeuralNet):
 
     def predict(self, board):
         """
-        board: np array with board
+        board: canonical form
         """
         # timing
         # start = time.perf_counter()
@@ -161,6 +167,29 @@ class NNetWrapper(NeuralNet):
 
         end = time.perf_counter()
         logging.info(f"Took {end - start} seconds to bring data back from GPU and write for generation # {generation}!")
+
+    def collect_training_data(self):
+        logging.info(f"Collecting pickled training data into one dataframe for whole run ...")
+        start = time.perf_counter()
+
+        def loader(filepath: Path):
+            with open(filepath, "rb") as f:
+                data = Unpickler(f).load()
+            return pd.DataFrame(data)
+
+        files = [file for file in os.listdir(self.args.training_data_directory) if ".data" in file]
+
+        dataframe = pd.concat(
+            [loader(self.args.training_data_directory / f) for f in files], copy=False
+        ).assign(
+            average_loss=lambda df: df.average_pi_loss + df.average_v_loss
+        ).astype(
+            {'pi_loss': 'float64', 'v_loss': 'float64', 'total_loss': 'float64'}
+        )
+        end = time.perf_counter()
+
+        dataframe.to_parquet(f"{self.args.training_data_directory / 'data.parquet'}")
+        logging.info(f"Took {end - start} seconds to collect, convert and write data!")
 
     def save_checkpoint(self, filename: str):
         folder = self.args.net_directory
