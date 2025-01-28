@@ -53,6 +53,6 @@ class AlphaTicTacToe(nn.Module):
                       training=self.training)
 
         pi = self.fc3(x)  # batch_size * action_size
-        v = self.fc4(x)  # batch_size * num_players
+        v = self.fc4(x)  # batch_size
 
         return F.log_softmax(pi, dim=1), torch.tanh(v)

@@ -19,7 +19,7 @@ from utils import AverageMeter
 
 sys.path.append('..')
 
-from tictactoe.neuralnets.tictactocnnet import AlphaTicTacToe as nnet
+from tictactoe.neuralnets.tictactoenet import AlphaTicTacToe as nnet
 from tictactoe.tictactoegame import TicTacToeGame as Game
 
 """

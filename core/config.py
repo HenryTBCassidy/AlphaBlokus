@@ -18,6 +18,7 @@ class NetConfig:
     batch_size: int
     cuda: bool
     num_channels: int
+    num_residual_blocks: int
 
 
 # TODO: Add args for whether or not to log out data
