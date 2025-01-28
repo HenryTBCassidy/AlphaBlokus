@@ -1,6 +1,6 @@
 {
-  "run_name": "full_run_1",
-  "num_generations": 30,
+  "run_name": "num_gen_50.window_25.mcts_sim_200.run_1",
+  "num_generations": 50,
   "num_eps": 100,
   "temp_threshold": 15,
   "update_threshold": 0.55,
@@ -8,9 +8,9 @@
   "num_arena_matches": 100,
   "root_directory": "./temp/",
   "load_model": "False",
-  "max_generations_lookback": 15,
+  "max_generations_lookback": 25,
   "mcts_config": {
-    "num_mcts_sims": 100,
+    "num_mcts_sims": 200,
     "cpuct": 1
   },
   "net_config": {
@@ -19,6 +19,7 @@
     "epochs": 5,
     "batch_size": 32,
     "cuda": "True",
-    "num_channels": 512
+    "num_channels": 512,
+    "num_residual_blocks": 8
   }
 }

@@ -19,6 +19,7 @@
     "epochs": 1,
     "batch_size": 10,
     "cuda": "True",
-    "num_channels": 512
+    "num_channels": 512,
+    "num_residual_blocks": 1
   }
 }
