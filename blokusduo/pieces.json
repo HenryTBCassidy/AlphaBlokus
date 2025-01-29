@@ -1,0 +1,262 @@
+[
+  {
+    "name": "1-Piece",
+    "id": 1,
+    "basis_orientations": [
+      "Identity"
+    ],
+    "fill_values": [
+      [1]
+    ]
+  },
+  {
+    "name": "2-Piece",
+    "id": 2,
+    "basis_orientations": [
+      "Identity", "Rot90"
+    ],
+    "length": 2,
+    "width": 1,
+    "fill_values": [
+      [1],
+      [1]
+    ]
+  },
+  {
+    "name": "3L-Piece",
+    "id": 3,
+    "basis_orientations": [
+      "Identity", "Rot90", "Rot180", "Rot270"
+    ],
+    "fill_values": [
+      [1, 0],
+      [1, 1]
+    ]
+  },
+  {
+    "name": "3-Piece",
+    "id": 4,
+    "basis_orientations": [
+      "Identity", "Rot90"
+    ],
+    "fill_values": [
+      [1],
+      [1],
+      [1]
+    ]
+  },
+  {
+    "name": "4-Piece",
+    "id": 5,
+    "basis_orientations": [
+      "Identity", "Rot90"
+    ],
+    "fill_values": [
+      [1],
+      [1],
+      [1],
+      [1]
+    ]
+  },
+  {
+    "name": "4L-Piece",
+    "id": 6,
+    "basis_orientations": [
+      "Identity", "Rot90", "Rot180", "Rot270",
+      "Flip", "Flip90", "Flip180", "Flip270"
+    ],
+    "fill_values": [
+      [1, 0],
+      [1, 0],
+      [1, 1]
+    ]
+  },
+  {
+    "name": "4Z-Piece",
+    "id": 7,
+    "basis_orientations": [
+      "Identity", "Rot90",
+      "Flip", "Flip90"
+    ],
+    "fill_values": [
+      [1, 1, 0],
+      [0, 1, 1]
+    ]
+  },
+  {
+    "name": "Square-Piece",
+    "id": 8,
+    "basis_orientations": [
+      "Identity"
+    ],
+    "fill_values": [
+      [1, 1],
+      [1, 1]
+    ]
+  },
+  {
+    "name": "4T-Piece",
+    "id": 9,
+    "basis_orientations": [
+      "Identity", "Rot90", "Rot180", "Rot270"
+    ],
+    "fill_values": [
+      [0, 1, 0],
+      [1, 1, 1]
+    ]
+  },
+  {
+    "name": "F-Piece",
+    "id": 10,
+    "basis_orientations": [
+      "Identity", "Rot90", "Rot180", "Rot270",
+      "Flip", "Flip90", "Flip180", "Flip270"
+    ],
+    "fill_values": [
+      [0, 1, 1],
+      [1, 1, 0],
+      [0, 1, 0]
+    ]
+  },
+  {
+    "name": "I-Piece",
+    "id": 11,
+    "basis_orientations": [
+      "Identity", "Rot90"
+    ],
+    "fill_values": [
+      [1],
+      [1],
+      [1],
+      [1],
+      [1]
+    ]
+  },
+  {
+    "name": "L-Piece",
+    "id": 12,
+    "basis_orientations": [
+      "Identity", "Rot90", "Rot180", "Rot270",
+      "Flip", "Flip90", "Flip180", "Flip270"
+    ],
+    "fill_values": [
+      [1, 0],
+      [1, 0],
+      [1, 0],
+      [1, 1]
+    ]
+  },
+  {
+    "name": "N-Piece",
+    "id": 13,
+    "basis_orientations": [
+      "Identity", "Rot90", "Rot180", "Rot270",
+      "Flip", "Flip90", "Flip180", "Flip270"
+    ],
+    "fill_values": [
+      [0, 1],
+      [1, 1],
+      [1, 0],
+      [1, 0]
+    ]
+  },
+  {
+    "name": "P-Piece",
+    "id": 14,
+    "basis_orientations": [
+      "Identity", "Rot90", "Rot180", "Rot270",
+      "Flip", "Flip90", "Flip180", "Flip270"
+    ],
+    "fill_values": [
+      [1, 1],
+      [1, 1],
+      [1, 0]
+    ]
+  },
+  {
+    "name": "T-Piece",
+    "id": 15,
+    "basis_orientations": [
+      "Identity", "Rot90", "Rot180", "Rot270"
+    ],
+    "fill_values": [
+      [1, 1, 1],
+      [0, 1, 0],
+      [0, 1, 0]
+    ]
+  },
+  {
+    "name": "U-Piece",
+    "id": 16,
+    "basis_orientations": [
+      "Identity", "Rot90", "Rot180", "Rot270"
+    ],
+    "fill_values": [
+      [1, 0, 1],
+      [1, 1, 1]
+    ]
+  },
+  {
+    "name": "V-Piece",
+    "id": 17,
+    "basis_orientations": [
+      "Identity", "Rot90", "Rot180", "Rot270"
+    ],
+    "fill_values": [
+      [0, 0, 1],
+      [0, 0, 1],
+      [1, 1, 1]
+    ]
+  },
+  {
+    "name": "W-Piece",
+    "id": 18,
+    "basis_orientations": [
+      "Identity", "Rot90", "Rot180", "Rot270"
+    ],
+    "fill_values": [
+      [0, 0, 1],
+      [0, 1, 1],
+      [1, 1, 0]
+    ]
+  },
+  {
+    "name": "X-Piece",
+    "id": 19,
+    "basis_orientations": [
+      "Identity"
+    ],
+    "fill_values": [
+      [0, 1, 0],
+      [1, 1, 1],
+      [0, 1, 0]
+    ]
+  },
+  {
+    "name": "Y-Piece",
+    "id": 20,
+    "basis_orientations": [
+      "Identity", "Rot90", "Rot180", "Rot270",
+      "Flip", "Flip90", "Flip180", "Flip270"
+    ],
+    "fill_values": [
+      [0, 1],
+      [1, 1],
+      [0, 1],
+      [0, 1]
+    ]
+  },
+  {
+    "name": "Z-Piece",
+    "id": 21,
+    "basis_orientations": [
+      "Identity", "Rot90",
+      "Flip", "Flip90"
+    ],
+    "fill_values": [
+      [1, 1, 0],
+      [0, 1, 0],
+      [0, 1, 1]
+    ]
+  }
+]

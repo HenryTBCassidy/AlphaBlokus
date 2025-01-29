@@ -1,6 +1,5 @@
 import logging
 import os
-import sys
 import time
 from copy import deepcopy
 from dataclasses import dataclass
@@ -13,13 +12,10 @@ import torch
 from torch import optim
 from tqdm import tqdm
 
+from blokusduo.neuralnets.net import AlphaBlokusDuo as nnet
 from core.config import RunConfig, LOGGER_NAME
 from core.interfaces import INeuralNetWrapper
 from utils import AverageMeter
-
-sys.path.append('..')
-
-from blokusduo.neuralnets.blokusduonet import AlphaBlokusDuo as nnet
 
 log = logging.getLogger(LOGGER_NAME)
 

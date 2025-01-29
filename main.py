@@ -5,8 +5,8 @@ import coloredlogs
 
 from core.coach import Coach
 from core.config import LOGGER_NAME
-from tictactoe.neuralnets.wrapper import NNetWrapper
-from tictactoe.tictactoegame import TicTacToeGame as Game
+from blokusduo.neuralnets.wrapper import NNetWrapper
+from tictactoe.game import TicTacToeGame as Game
 from utils import setup_logging, load_args
 from reporting import create_html_report
 
@@ -26,7 +26,7 @@ def main():
     g = Game(3)
 
     log.info('Loading %s...', NNetWrapper.__name__)
-    nnet = NNetWrapper(g, args)
+    nnet = NNetWrapper(args)
 
     # TODO: Fix this
     if args.load_model:

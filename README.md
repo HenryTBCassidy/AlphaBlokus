@@ -34,21 +34,17 @@ Training an algorithm to play this simple game is a quick check the basics are w
 - [x] Enable logging for debugging in future runs
 - [x] Enable time logging 
 - [x] Figure out how to buffer training examples
-- [ ] Experiment with ResNet architecture
-- [ ] Add a learning rate scheduler
-- [ ] Draw with/be competitive with a perfect Tic-Tac-Toe bot
+- [x] Experiment with ResNet architecture
+- [x] Draw with/be competitive with a perfect Tic-Tac-Toe bot
 
-### Blokus
+### Blokus Duo
 
 - [x] Design input and figure out representation for use with net
 - [ ] Figure out board representation and efficient algorithm for calculating available moves (using caching)
 - [ ] Optimise training time
+- [ ] Add a learning rate scheduler
 
 Can use connect 4 as a debugging step if the above isn't working
-### Connect 4
-
-- [ ] Can I train the algorithm faster than other sources i.e in this [article](https://medium.com/oracledevs/lessons-from-alpha-zero-part-6-hyperparameter-tuning-b1cfcbe4ca9a)
-- [ ] Experiment with parameter tuning to optimise later work
 
 ### Become the best blokus playing AI on the planet
 Play 100 games of blokus against the best Blokus AIs in the world and win > 50%

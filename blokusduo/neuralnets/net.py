@@ -72,9 +72,10 @@ class AlphaBlokusDuo(nn.Module):
         batch_size * board_y * (board_x + 4) = batch_size * 14 * 18
         """
         self.board_y, self.board_x = 14, 18
-        # Stack of 14 * 14 planes for each of the 94 "pieces" + 1 for do nothing move.
-        # Piece planes are obtained by treating each unique rotation or flip of a piece as an entirely new plane
-        self.action_size = 14, 14, 95
+        # Stack of 14 * 14 planes for each of the 91 pieces planes
+        # Piece planes are obtained by treating each unique rotation or flip of a piece as an entirely new plane/piece
+        # Add one for a do nothing move
+        self.action_size = (14*14*91) + 1
         self.config = config
 
         conv_out_y_x = calc_conv2d_output((self.board_y, self.board_x), 3, 1, 1)
@@ -123,7 +124,7 @@ class AlphaBlokusDuo(nn.Module):
             nn.BatchNorm2d(num_features=2),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(2 * conv_out, math.prod(self.action_size)),
+            nn.Linear(2 * conv_out, self.action_size),
         )
 
     def forward(self, x):
@@ -135,7 +136,7 @@ class AlphaBlokusDuo(nn.Module):
                     each direction to have dimensions 14 x 18.
                     batch_size * board_y * (board_x + 4) = batch_size * 14 * 18
 
-        :return: Policy tensor pi, probability of next move to take:   batch_size * 18620
+        :return: Policy tensor pi, probability of next move to take:   batch_size * 17837
         :return: Value vector v of expected result of player:          batch_size * 1
         """
 
@@ -144,7 +145,7 @@ class AlphaBlokusDuo(nn.Module):
         features = self.residual_blocks(conv_block_out)     # batch_size * num_channels * board_x_conv * board_y_conv
 
         # Predict raw logits distributions wrt policy
-        pi_logits = self.policy_head(features)              # batch_size * 18620 (which is 14 x 14 x 95)
+        pi_logits = self.policy_head(features)              # batch_size * 17837 (which is 14 x 14 x 91 + 1)
 
         # Predict evaluated value from current player's perspective.
         value = self.value_head(features)                   # batch_size

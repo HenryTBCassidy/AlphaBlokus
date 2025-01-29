@@ -1,14 +1,7 @@
-import sys
-
-sys.path.append('..')
-from core.interfaces import IGame
-from .tictactoeboard import Board
 import numpy as np
 
-"""
-Game class implementation for the game of TicTacToe.
-Based on the OthelloGame then getGameEnded() was adapted to new rules.
-"""
+from core.interfaces import IGame
+from .board import Board
 
 
 class TicTacToeGame(IGame):

@@ -1,6 +1,5 @@
 import logging
 import os
-import sys
 import time
 from copy import deepcopy
 from dataclasses import dataclass
@@ -15,12 +14,9 @@ from tqdm import tqdm
 
 from core.config import RunConfig, LOGGER_NAME
 from core.interfaces import INeuralNetWrapper
+from tictactoe.neuralnets.net import AlphaTicTacToe as nnet
+from tictactoe.game import TicTacToeGame as Game
 from utils import AverageMeter
-
-sys.path.append('..')
-
-from tictactoe.neuralnets.tictactoenet import AlphaTicTacToe as nnet
-from tictactoe.tictactoegame import TicTacToeGame as Game
 
 """
 NeuralNet wrapper class for the TicTacToeNNet.
