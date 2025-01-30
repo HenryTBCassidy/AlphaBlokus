@@ -1,0 +1,60 @@
+# TODO
+INFRA:
+	- Add total run time as stat
+	- Add functionality to load in existing training data and models to kick off from where we started
+	- Change dataclasses to use pydantic
+
+ALGORITHM:
+	- Learning rate scheduler like in article (i.e learn slowly then quickly then slowly again)
+	- Investigate parallel MCTS
+	- Make blokus game class:
+		- Must be able to check all available moves
+		- Must be able to interface between net outputting a move and actualising that into a board move
+		- Board must also contain information about which pieces have been played by either side
+
+NEURAL NET API:
+	- Need to be able to turn 14x14 game board representation into 14x18 net representation encoding pieces 	played.
+	- Need to be able to turn any net output into the corresponding board move.
+	- Need to be able to mask net output to only have values for possible moves.
+
+NEURAL NET ARCHITECTURE:
+	- Add option for resnset in tic tac toe
+	- Make Net able to produce output for any board move
+
+	
+RESEARCH:
+	- Compare resnet to regular runs
+	- Trying fucking around with the cpuct
+	- Does it help to change the number of MCTS as the game length increases? i.e rely on the net and its 
+	evaluation capacity at the start of the game and go deeper as the game nears and end?
+	- Figure out how many epochs we need
+	- See if using a separate input for pieces played helps the net at all. 
+
+PRESENTING:
+	- SelfPlay:
+		- Number of games
+		- Black And White Win Rate
+		- Draw rate is probably a good metric.
+		- Game length
+	- Training:
+		- Cross entropy loss
+		- MSE Loss of validation score
+		- Learning Rate
+		- Window Size
+		- Number of Samples
+		- Training Time
+	- Eval:
+		- Prediction accuracy
+		- Perplexity
+		- Win rate against Pentobi
+
+	- Plot the mean squared error of validation score
+	- Plot the percentage of correct moves it figures during training
+	- If you can get elo that would be ideal
+	- Want to plot game length as a function of generation.
+	- Draw rate is probably a good metric.
+
+Conv next, saying layer norm is better. Convnext 2020
+Preference based learning. 
+unsloth
+clearing stuff of the GPU
