@@ -10,11 +10,10 @@ class IGame:
     def __init__(self):
         pass
 
-    def get_init_board(self):
+    def initialise_board(self):
         """
         Returns:
-            A representation of the board (ideally this is the form
-            that will be the input to your neural network)
+            A representation of the board (ideally this is the form that will be the input to your neural network)
         """
         raise NotImplementedError
 

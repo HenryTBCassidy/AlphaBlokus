@@ -4,6 +4,7 @@ import math
 import numpy as np
 
 from core.config import MCTSConfig, LOGGER_NAME
+from core.interfaces import IGame, INeuralNetWrapper
 
 EPS = 1e-8
 
@@ -15,7 +16,7 @@ class MCTS:
     This class handles the MCTS tree.
     """
 
-    def __init__(self, game, nnet, config: MCTSConfig):
+    def __init__(self, game: IGame, nnet: INeuralNetWrapper, config: MCTSConfig):
         self.game = game
         self.nnet = nnet
         self.config = config
@@ -71,7 +72,7 @@ class MCTS:
         state for the current player, then its value is -v for the other player.
 
         Returns:
-            v: the negative of the value of the current canonicalBoard
+            v: the negative of the value of the current canonical_board
         """
 
         s = self.game.string_representation(canonical_board)

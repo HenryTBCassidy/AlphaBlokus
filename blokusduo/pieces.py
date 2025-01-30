@@ -5,6 +5,7 @@ from pathlib import Path
 
 import numpy as np
 from dataclass_wizard import fromdict
+from nptyping import NDArray
 
 
 class Orientation(StrEnum):
@@ -46,36 +47,98 @@ class Piece:
     fill_values: list[list[int]]  # Converted into np.array, this dtype is not yet supported by dataclass_wizard
 
     @property
-    def identity(self) -> np.array: return np.array(self.fill_values)
+    def identity(self) -> NDArray: return np.array(self.fill_values)
 
     @property
-    def rot90(self) -> np.array: return np.rot90(self.identity)
+    def rot90(self) -> NDArray: return np.rot90(self.identity)
 
     @property
-    def rot180(self) -> np.array: return np.rot90(self.identity, 2)
+    def rot180(self) -> NDArray: return np.rot90(self.identity, 2)
 
     @property
-    def rot270(self) -> np.array: return np.rot90(self.identity, 3)
+    def rot270(self) -> NDArray: return np.rot90(self.identity, 3)
 
     @property
-    def flip(self) -> np.array: return np.flip(self.identity, axis=1)
+    def flip(self) -> NDArray: return np.flip(self.identity, axis=1)
 
     @property
-    def flip90(self) -> np.array: return np.rot90(self.flip)
+    def flip90(self) -> NDArray: return np.rot90(self.flip)
 
     @property
-    def flip180(self) -> np.array: return np.rot90(self.flip, 2)
+    def flip180(self) -> NDArray: return np.rot90(self.flip, 2)
 
     @property
-    def flip270(self) -> np.array: return np.rot90(self.flip, 3)
+    def flip270(self) -> NDArray: return np.rot90(self.flip, 3)
 
 
-def pieces_loader(filename: Path) -> list[Piece]:
+class BidirectionalDict(dict):
+    """
+    Dictionary which you add a (key, value) pair to, also populates (value, key) into dict.
+    Useful for making sure there is a one to one mapping between data
+    """
+
+    def __setitem__(self, key, val):
+        dict.__setitem__(self, key, val)
+        dict.__setitem__(self, val, key)
+
+    def __delitem__(self, key):
+        dict.__delitem__(self, self[key])
+        dict.__delitem__(self, key)
+
+
+class PieceManager:
+    """
+    Class for holding pieces and helping convert actions into actual piece moves or allowing the net to understand a
+    piece.
+    Knows how to turn a piece_id and orientation into
+    """
+
+    def __init__(self, pieces: list[Piece]):
+        self.pieces = {p.id: p for p in pieces}
+        self._piece_orientation_lookup = self.populate_lookup(pieces)
+
+    def get_piece_with_orientation(self, piece_id: int, orientation: Orientation) -> NDArray:
+        piece = self.pieces[piece_id]
+        match orientation:
+            case Orientation.Identity: return piece.identity
+            case Orientation.Rot90: return piece.rot90
+            case Orientation.Rot180: return piece.rot180
+            case Orientation.Rot270: return piece.rot270
+            case Orientation.Flip: return piece.flip
+            case Orientation.Flip90: return piece.flip90
+            case Orientation.Flip180: return piece.flip180
+            case Orientation.Flip270: return piece.flip270
+            case _: raise ValueError(f"Trying to find Orientation {orientation}, could not match value!")
+
+    def get_piece_orientation(self, piece_orientation_id: int) -> tuple[int, Orientation]:
+        return self._piece_orientation_lookup[piece_orientation_id]
+
+    def get_piece_orientation_id(self, piece_orientation: tuple[int, Orientation]) -> int:
+        return self._piece_orientation_lookup[piece_orientation]
+
+    @property
+    def num_entries(self) -> int:
+        return len(self._piece_orientation_lookup)
+
+    @staticmethod
+    def populate_lookup(pieces: list[Piece]) -> BidirectionalDict:
+        lookup = BidirectionalDict()
+        i = 1  # Ids so they start at 1
+        for p in pieces:
+            for o in p.basis_orientations:
+                lookup[i] = p.id, o
+                i += 1
+            i += 1
+
+        return lookup
+
+
+def pieces_loader(filename: Path) -> PieceManager:
     """
     Helper method for loading in the pieces from the target json file
     Runs checks to make sure data is not corrupted
     :param filename: File location of pieces in json format
-    :return: list[Piece]
+    :return: PieceManager
     """
     with open(filename, "rb") as f:
         d = json.load(f)
@@ -93,4 +156,11 @@ def pieces_loader(filename: Path) -> list[Piece]:
     if not len(ids) == len(result):
         raise AssertionError(f"Ids are not unique! Found {len(ids)} unique ids for {len(result)} pieces.")
 
-    return result
+    piece_manager = PieceManager(pieces=result)
+
+    if piece_manager.num_entries != 2 * 91:  # twice 91 since values are put in both ways
+        raise ValueError(
+            f"Expected {2 * 91} entries in PieceManager, got {piece_manager.num_entries}."
+            f"Error constructing Piece-Orientation <-> id lookup!")
+
+    return piece_manager

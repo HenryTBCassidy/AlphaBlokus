@@ -15,7 +15,7 @@ from tqdm import tqdm
 from core.arena import Arena
 from core.config import RunConfig, LOGGER_NAME
 from core.mcts import MCTS
-from core.interfaces import INeuralNetWrapper
+from core.interfaces import INeuralNetWrapper, IGame
 
 log = logging.getLogger(LOGGER_NAME)
 
@@ -43,7 +43,7 @@ class Coach:
     in Game and NeuralNet. args are specified in main.py.
     """
 
-    def __init__(self, game, nnet: INeuralNetWrapper, run_config: RunConfig):
+    def __init__(self, game: IGame, nnet: INeuralNetWrapper, run_config: RunConfig):
         self.game = game
         self.nnet = nnet
         self.pnet = self.nnet.__class__(self.game, run_config)  # the competitor network
@@ -53,7 +53,7 @@ class Coach:
         # List of Generations, each generation is a list of every board state, pi vector and whether that won or lost
         # i.e. list[list[training_example]]
         self.train_examples_history = []
-        self.skip_first_self_play = False  # can be overriden in loadTrainExamples()
+        self.skip_first_self_play = False  # Can override in loadTrainExamples()
         self.timings: list[TimingsLoggable] = []
 
     def execute_episode(self):
@@ -68,13 +68,13 @@ class Coach:
         uses temp=0.
 
         Returns:
-            train_examples: a list of examples of the form [canonical_board, pi, v]
-                           pi is the MCTS informed policy vector, v is +1 if
-                           the player eventually won the game, else -1.
+            train_examples: A list of examples of the form [canonical_board, pi, v]
+                            pi is the MCTS informed policy vector.
+                            v is +1 if the player eventually won the game, else -1.
         """
         # Has form: [board, current player, pi vector, end result of game (initially not known so = None)
         train_examples = []
-        board = self.game.get_init_board()
+        board = self.game.initialise_board()
         cur_player = 1
         episode_step = 0
 

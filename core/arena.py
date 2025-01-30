@@ -55,7 +55,7 @@ class Arena:
         """
         players = [self.player2, None, self.player1]
         cur_player = 1
-        board = self.game.get_init_board()
+        board = self.game.initialise_board()
         it = 0
 
         for player in players[0], players[2]:

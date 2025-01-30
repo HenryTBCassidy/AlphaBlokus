@@ -9,7 +9,7 @@ class TicTacToeGame(IGame):
         super().__init__()
         self.n = n
 
-    def get_init_board(self):
+    def initialise_board(self):
         # return initial board (numpy board)
         b = Board(self.n)
         return np.array(b.pieces)
@@ -83,6 +83,7 @@ class TicTacToeGame(IGame):
 
     def string_representation(self, board):
         # 8x8 numpy array (canonical board)
+        # TODO: Maybe change this if it's an np array is to string is depreciated
         return board.tostring()
 
     @staticmethod

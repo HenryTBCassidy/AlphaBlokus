@@ -75,7 +75,7 @@ class AlphaBlokusDuo(nn.Module):
         # Stack of 14 * 14 planes for each of the 91 pieces planes
         # Piece planes are obtained by treating each unique rotation or flip of a piece as an entirely new plane/piece
         # Add one for a do nothing move
-        self.action_size = (14*14*91) + 1
+        self.action_size = (14 * 14 * 91) + 1  # TODO: Get this from the game object (maybe)
         self.config = config
 
         conv_out_y_x = calc_conv2d_output((self.board_y, self.board_x), 3, 1, 1)
@@ -140,14 +140,14 @@ class AlphaBlokusDuo(nn.Module):
         :return: Value vector v of expected result of player:          batch_size * 1
         """
 
-        x = x.view(-1, 1, self.board_x, self.board_y)       # batch_size * 1 * board_x * board_y
-        conv_block_out = self.conv_block(x)                 # batch_size * num_channels * board_x_conv * board_y_conv
-        features = self.residual_blocks(conv_block_out)     # batch_size * num_channels * board_x_conv * board_y_conv
+        x = x.view(-1, 1, self.board_x, self.board_y)  # batch_size * 1 * board_x * board_y
+        conv_block_out = self.conv_block(x)  # batch_size * num_channels * board_x_conv * board_y_conv
+        features = self.residual_blocks(conv_block_out)  # batch_size * num_channels * board_x_conv * board_y_conv
 
         # Predict raw logits distributions wrt policy
-        pi_logits = self.policy_head(features)              # batch_size * 17837 (which is 14 x 14 x 91 + 1)
+        pi_logits = self.policy_head(features)  # batch_size * 17837 (which is 14 x 14 x 91 + 1)
 
         # Predict evaluated value from current player's perspective.
-        value = self.value_head(features)                   # batch_size
+        value = self.value_head(features)  # batch_size
 
         return F.log_softmax(pi_logits, dim=1), value
