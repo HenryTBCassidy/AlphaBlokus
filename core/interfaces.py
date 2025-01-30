@@ -44,7 +44,7 @@ class IGame:
         """
         raise NotImplementedError
 
-    def get_valid_moves(self, board, player):
+    def valid_move_masking(self, board, player):
         """
         Input:
             board: current board

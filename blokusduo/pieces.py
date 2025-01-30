@@ -97,7 +97,7 @@ class PieceManager:
         self.pieces = {p.id: p for p in pieces}
         self._piece_orientation_lookup = self.populate_lookup(pieces)
 
-    def get_piece_with_orientation(self, piece_id: int, orientation: Orientation) -> NDArray:
+    def get_piece_orientation_array(self, piece_id: int, orientation: Orientation) -> NDArray:
         piece = self.pieces[piece_id]
         match orientation:
             case Orientation.Identity: return piece.identity
@@ -109,6 +109,15 @@ class PieceManager:
             case Orientation.Flip180: return piece.flip180
             case Orientation.Flip270: return piece.flip270
             case _: raise ValueError(f"Trying to find Orientation {orientation}, could not match value!")
+
+    def all_piece_id_basis_orientations(self):
+        """
+        Generator returns tuple[piece_id, orientation]
+        :return:
+        """
+        for piece_id, piece in self.pieces.items():
+            for orientation in piece.basis_orientations:
+                yield piece_id, orientation
 
     def get_piece_orientation(self, piece_orientation_id: int) -> tuple[int, Orientation]:
         return self._piece_orientation_lookup[piece_orientation_id]

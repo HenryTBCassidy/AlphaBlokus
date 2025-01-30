@@ -33,7 +33,7 @@ class TicTacToeGame(IGame):
         b.execute_move(move, player)
         return b.pieces, -player
 
-    def get_valid_moves(self, board, player):
+    def valid_move_masking(self, board, player):
         # return a fixed size binary vector
         valids = [0] * self.get_action_size()
         b = Board(self.n)

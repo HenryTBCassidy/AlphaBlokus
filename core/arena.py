@@ -70,7 +70,7 @@ class Arena:
                 # self.display(board)
             action = players[cur_player + 1](self.game.get_canonical_form(board, cur_player))
 
-            valids = self.game.get_valid_moves(self.game.get_canonical_form(board, cur_player), 1)
+            valids = self.game.valid_move_masking(self.game.get_canonical_form(board, cur_player), 1)
 
             if valids[action] == 0:
                 log.error(f'Action {action} is not valid!')
