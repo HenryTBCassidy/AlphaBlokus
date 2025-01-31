@@ -1,14 +1,15 @@
 from collections import deque
 from copy import deepcopy
+from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
+from typing import Optional, Generator
 
 import numpy as np
+from nptyping import NDArray
 
 from blokusduo.pieces import pieces_loader, Piece, Orientation, PieceManager
 from core.interfaces import IGame
-from nptyping import Shape, NDArray
-from typing import Optional, Any
 
 
 # TODO: Seems to me like there are two important but distinct board objects.
@@ -17,7 +18,7 @@ from typing import Optional, Any
 #       Potentially we should make this distinction more concrete so we know which Board object we have at any time.
 
 
-# TODO: Make this available to all games & change framework to use it?
+# TODO: Make this available to all games & change framework to use it? Using +/- 1 everywhere is a bit pants
 class Side(StrEnum):
     White = "White"
     Black = "Black"
@@ -42,6 +43,15 @@ class CoordinateIndexDecoder:
         return x, y
 
 
+# TODO: Generalise the project to use some inheritance of an Action later
+@dataclass
+class Action:
+    piece_id: int
+    orientation: Orientation
+    x_coordinate: int
+    y_coordinate: int
+
+
 class Player:
     def __init__(self, side: Side, pieces: dict[int, Piece]):
         self.side = side
@@ -50,12 +60,15 @@ class Player:
         self.pieces_remaining = deepcopy(pieces)
 
         # TODO: Don't forget you need this for the encoded region and scoring
+        #       Can potentially just change this to last id played since we are already updating the encoded region
         self.piece_ids_played: deque[int] = deque()
+
+        # TODO: Maybe it makes more sense to have the corners to place to be on each player?
 
 
 class MoveCache:
     """
-    It is super inefficient to check the whole board everytime you want to make a move (and also not human-like).
+    It is super inefficient to check the whole board every time you want to make a move (and also not human-like).
     We can only place pieces touching an existing corner, so if we keep track of where the corners are on the board, we
     save a lot of computation.
     We keep track for each colour.
@@ -64,7 +77,7 @@ class MoveCache:
     """
 
     def __init__(self):
-        # TODO: Needs to be able to split by side
+        # TODO: Needs to be able to split by side (or not if the corners live on the player)
         #       Lookup comes from a corner coordinate, (x, y)
         #       Probably is dict[Side, dict[coordinate, list_of_tried_ids]
         #       Needs to have a cleanup method
@@ -78,14 +91,13 @@ class BlokusDuoBoard:
     One of these should be initialised everytime we start a game of BlokusDuo.
     """
 
-    def __init__(self, pieces: dict[int, Piece]):
+    def __init__(self, piece_manager: PieceManager):
         """
         Called when a game of BlokusDuo is initiated
-        :param pieces (list[Piece]): List of pieces for game
+        :param piece_manager (dict[int, Piece])
         """
-        # TODO: I know it will look weird but it's faster to calculate the total number of initial moves on init
-        #       and store that somewhere so implement this!
         self.n = 14
+        self.piece_manager = piece_manager
 
         # Canonically will have black start in top left and white in bottom right
         # Black encoded region will be on the left and White encoded region on the right of the board
@@ -96,8 +108,8 @@ class BlokusDuoBoard:
         # Also track which pieces we have already tried for a corner.
         # TODO: FIX self._move_cache =
 
-        self._white_player = Player(Side("White"), pieces)
-        self._black_player = Player(Side("Black"), pieces)
+        self._white_player = Player(Side("White"), piece_manager.pieces)
+        self._black_player = Player(Side("Black"), piece_manager.pieces)
 
         # Encode information about which pieces white and black have played by adding these arrays to the White and
         # Black sections of the board (after reshaping).
@@ -122,47 +134,50 @@ class BlokusDuoBoard:
 
     def insert_piece(
             self,
-            piece_id: int,
-            piece_shape: NDArray,
-            x_coord: int,
-            y_coord: int,
+            action: Action,
             player: int
     ) -> None:
         """
 
-        :param piece_id: id a piece to place.
-        :param piece_shape: numpy array containing 1 or 0 representing piece shape.
-        :param x_coord: x coordinate for where to insert top left square of above array.
-        :param y_coord: corresponding y coordinate, note board origin is the bottom left corner of the board.
+        :param action: (Action) Holds piece_id, orientation, x and y coordinates for move (origin is bottom left square)
         :param player: (int) 1 for White and -1 for Black
         :return:
         """
         # TODO: Maybe check for index out of bound exceptions? Should have been passed a valid action but you never know
-        # TODO: WHEN WE INSERT A PIECE WE NEED TO UPDATE POSSIBLE CORNERS FOR WHITE/BLACK TO PLAY
         # Remember the origin is the bottom left corner of the board
         # We insert the piece with its top left corner in the x, y coordinate given
 
-        piece = piece_shape * player  # Make correct colour
-        length_idx, width_idx = CoordinateIndexDecoder.to_idx(board_size=self.n, coordinate=(x_coord, y_coord))
+        piece_orientation = self.piece_manager.get_piece_orientation_array(action.piece_id, action.orientation)
+        sided_piece_orientation = piece_orientation * player  # Make correct colour
+        length_idx, width_idx = CoordinateIndexDecoder.to_idx(board_size=self.n,
+                                                              coordinate=(action.x_coordinate, action.y_coordinate))
 
-        piece_length, piece_width = piece.shape
+        piece_length, piece_width = sided_piece_orientation.shape
         for i in range(piece_length):
             for j in range(piece_width):
-                self._board_representation[length_idx + i, width_idx + j] = piece[i, j]
+                self._board_representation[length_idx + i, width_idx + j] = sided_piece_orientation[i, j]
 
         if player == 1:
-            self._white_pieces_played_encoded_region[piece_id - 1] = 1
-            self._white_player.piece_ids_played.append(piece_id)
-            del self._white_player.pieces_remaining[piece_id]
+            self._white_pieces_played_encoded_region[action.piece_id - 1] = 1
+            self._white_player.piece_ids_played.append(action.piece_id)
+            del self._white_player.pieces_remaining[action.piece_id]
 
         if player == -1:
-            self._black_pieces_played_encoded_region[piece_id - 1] = -1
-            self._black_player.piece_ids_played.append(piece_id)
-            del self._black_player.pieces_remaining[piece_id]
+            self._black_pieces_played_encoded_region[action.piece_id - 1] = -1
+            self._black_player.piece_ids_played.append(action.piece_id)
+            del self._black_player.pieces_remaining[action.piece_id]
+
+        # TODO: WHEN WE INSERT A PIECE WE NEED TO UPDATE POSSIBLE CORNERS FOR WHITE/BLACK TO PLAY
+        #       This includes both adding new corners for selection and removing some
+        #       Don't forget that a move Black makes could change White's corners and vice versa
+        # raise NotImplementedError()
 
     def valid_moves(self, player: int) -> NDArray:
         # TODO: THIS IS HARD, need to be efficient!
-        #
+        #       ALGORITHM:
+        #       If we have just started the game (aka cached corners == 0), output is valid_start_moves
+        #       (injected by Game class on init)
+        #       Else after we make a move, we cache the (x,y) coordinates around the corners of a piece
 
         if player == 1:
             _player = self._white_player
@@ -239,15 +254,15 @@ class BlokusDuoGame(IGame):
         self.board: Optional[BlokusDuoBoard] = None
 
         # Calculate all possible starting moves on game init and cache to save time, pass cache to board object
-        # everytime we start a new game
-        self.initial_moves = self._calculate_and_cache_initial_moves()
+        # everytime we start a new game. Dictionary indexed by player (1 White, -1 Black)
+        self.initial_actions: dict[int, list[Action]] = self._calculate_and_cache_initial_actions()
 
     def calculate_legal_actions_for_piece_orientation(
             self,
             piece_id: int,
             orientation: Orientation,
             start: tuple[int, int]
-    ) -> tuple[int, Orientation, int, int]:
+    ) -> Generator[Action, None, None]:
         # Think about this as iterating over the piece, moving the board the other way
         # Want to return actions => piece_id, orientation, x_coord, y_coord
         piece_orientation = self.piece_manager.get_piece_orientation_array(piece_id, orientation)
@@ -256,15 +271,15 @@ class BlokusDuoGame(IGame):
             for j in range(width):
                 if piece_orientation[(i, j)] == 1:
                     coordinate = CoordinateIndexDecoder.to_coordinate(self.board_size, (start[0] - i, start[1] - j))
-                    yield piece_id, orientation, coordinate[0], coordinate[1]
+                    yield Action(piece_id, orientation, coordinate[0], coordinate[1])
 
-    def _calculate_and_cache_initial_moves(self) -> dict[int, list[tuple]]:
+    def _calculate_and_cache_initial_actions(self) -> dict[int, list[Action]]:
         # TODO: Figure out what data to store this as
         # TODO: Perhaps we should build the net pi policy masking here too
         # Initialise a board just for this calculation
-        board = BlokusDuoBoard(self.piece_manager.pieces)
+        board = BlokusDuoBoard(self.piece_manager)
         # Dict of player int (1 for White, -1 for Black) into list of all actions
-        start_moves: dict[int, list[tuple]] = {1: [], -1: []}
+        start_moves: dict[int, list[Action]] = {1: [], -1: []}
         for piece_id, orientation in self.piece_manager.all_piece_id_basis_orientations():
             start_moves[1] += self.calculate_legal_actions_for_piece_orientation(piece_id, orientation,
                                                                                  board.white_start)
@@ -277,8 +292,9 @@ class BlokusDuoGame(IGame):
         We are only allowed to call this when we are starting a game of BlokusDuo.
         :return: BlokusDuoBoard
         """
+        # TODO: Pass in the initial moves here.
         # Initialise a clean new BlokusDuo board.
-        self.board = BlokusDuoBoard(self.piece_manager.pieces)
+        self.board = BlokusDuoBoard(self.piece_manager)
         return self.board
 
     # TODO: Can I remove this?
@@ -301,31 +317,28 @@ class BlokusDuoGame(IGame):
 
     # TODO: Think it makes the most sense to not have to pass the net into this function but we'll leave it in the
     #       signature before we refactor.
+    #       Having looked at MCTS, this needs to return an updated Board object, could even be a new board entirely.
     def get_next_state(
             self,
             canonical_board: NDArray,
             player: int,
-            action: tuple[int, Orientation, int, int]
+            action: Action
     ) -> tuple[NDArray, int]:
         """
 
         :param canonical_board: Board in a form the net can accept
         :param player: (int), either 1 for White or -1 for Black
-        :param action: tuple of piece id, basis orientation, x and y coordinate.
+        :param action: (Action) Contains piece id, basis orientation, x and y coordinate.
                        NB: The origin for the x, y coordinate is the bottom left corner of the board
         :return: canonical_form, next_player: Return the board in the net representation and the negative of the player.
         """
-        piece_id = action[0]
-        orientation = action[1]
-        x = action[2]
-        y = action[3]
 
-        piece_shape = self.piece_manager.get_piece_orientation_array(piece_id=piece_id, orientation=orientation)
-        self.board.insert_piece(piece_id=piece_id, piece_shape=piece_shape, x_coord=x, y_coord=y, player=player)
+        self.board.insert_piece(action=action, player=player)
 
         return self.board.net_representation, -player
 
     # TODO: Figure out which version of the board this is / is it needed
+    # TODO: I think maybe this method should live on the board object
     def valid_move_masking(self, board, player: int) -> NDArray:
         """
 
@@ -338,6 +351,7 @@ class BlokusDuoGame(IGame):
         raise NotImplementedError()
 
     # TODO: The way this was implemented is hacky and I don't like it
+    # I think game_ended should maybe live on the board?
     def get_game_ended(self, board: BlokusDuoBoard, player: int) -> float:
         """
         Input:

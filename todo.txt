@@ -20,6 +20,7 @@ NEURAL NET API:
 NEURAL NET ARCHITECTURE:
 	- Add option for resnset in tic tac toe
 	- Make Net able to produce output for any board move
+	- Add regularisation term on to loss function
 
 	
 RESEARCH:

@@ -28,6 +28,9 @@ class MCTS:
         self.Es = {}  # stores game.getGameEnded ended for board s
         self.Vs = {}  # stores game.getValidMoves for board s
 
+    # TODO: Might have to change object passed in here to either board or a different type of board object
+    # TODO: The board is going to need some sort of checkpoint method to set itself back to the state it had before
+    #       It is passed into here because the search method modifies state
     def get_action_prob(self, canonical_board, temp=1):
         """
         This function performs numMCTSSims simulations of MCTS starting from
@@ -55,6 +58,7 @@ class MCTS:
         probs = [x / counts_sum for x in counts]
         return probs
 
+    # TODO: Change board object being passed in
     def search(self, canonical_board):
         """
         This function performs one iteration of MCTS. It is recursively called
@@ -78,7 +82,7 @@ class MCTS:
         s = self.game.string_representation(canonical_board)
 
         if s not in self.Es:
-            self.Es[s] = self.game.get_game_ended(canonical_board, 1)
+            self.Es[s] = self.game.get_game_ended(canonical_board, 1) # TODO: Player always White
         if self.Es[s] != 0:
             # terminal node
             return -self.Es[s]
@@ -86,8 +90,8 @@ class MCTS:
         if s not in self.Ps:
             # leaf node
             self.Ps[s], v = self.nnet.predict(canonical_board)
-            valids = self.game.valid_move_masking(canonical_board, 1)
-            self.Ps[s] = self.Ps[s] * valids  # masking invalid moves
+            valids = self.game.valid_move_masking(canonical_board, 1) # TODO: Player always White
+            self.Ps[s] = self.Ps[s] * valids  # masking invalid moves # TODO: Just assign Ps[s} once
             sum_Ps_s = np.sum(self.Ps[s])
             if sum_Ps_s > 0:
                 self.Ps[s] /= sum_Ps_s  # renormalize
@@ -109,6 +113,9 @@ class MCTS:
         best_act = -1
 
         # pick the action with the highest upper confidence bound
+        # TODO: This is a terrible way of iterating for BlokusDuo for the vast majority of board states, the set of
+        #       legal moves is much lower than the theoretical set of all possible moves i.e the action_size
+        #       TLDR: Iterate over the valid moves
         for a in range(self.game.get_action_size()):
             if valids[a]:
                 if (s, a) in self.Qsa:
