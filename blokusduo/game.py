@@ -91,13 +91,14 @@ class BlokusDuoBoard:
     One of these should be initialised everytime we start a game of BlokusDuo.
     """
 
-    def __init__(self, piece_manager: PieceManager):
+    def __init__(self, piece_manager: PieceManager, initial_actions: dict[int, list[Action]]):
         """
         Called when a game of BlokusDuo is initiated
         :param piece_manager (dict[int, Piece])
         """
         self.n = 14
         self.piece_manager = piece_manager
+        self.initial_actions = initial_actions
 
         # Canonically will have black start in top left and white in bottom right
         # Black encoded region will be on the left and White encoded region on the right of the board
@@ -143,7 +144,7 @@ class BlokusDuoBoard:
         :param player: (int) 1 for White and -1 for Black
         :return:
         """
-        # TODO: Maybe check for index out of bound exceptions? Should have been passed a valid action but you never know
+        # TODO: CHECK OUT OF BOUNDS, CHECK RULE VIOLATION, CHECK NOT PLACING ON EXISTING PIECE
         # Remember the origin is the bottom left corner of the board
         # We insert the piece with its top left corner in the x, y coordinate given
 
@@ -170,10 +171,15 @@ class BlokusDuoBoard:
         # TODO: WHEN WE INSERT A PIECE WE NEED TO UPDATE POSSIBLE CORNERS FOR WHITE/BLACK TO PLAY
         #       This includes both adding new corners for selection and removing some
         #       Don't forget that a move Black makes could change White's corners and vice versa
+        #       ALGORITHM:
+        #       Inserted piece with top left square at (x,y), iterate over a rectangle of size
+        #       length + 2, width + 2 -> being careful not to go over the edges of the board in any direction
+        #       As we iterate from left to right, from top to bottom we check if at least 1 corner piece has a +/- 1
+        #       and ALL side pieces do not have a +/-1.
         # raise NotImplementedError()
 
-    def valid_moves(self, player: int) -> NDArray:
-        # TODO: THIS IS HARD, need to be efficient!
+    def valid_moves(self, player: int) -> list[Action]:
+        # TODO: Need to think about the return form for this function, could be list of actions or NDArray (for net)
         #       ALGORITHM:
         #       If we have just started the game (aka cached corners == 0), output is valid_start_moves
         #       (injected by Game class on init)
@@ -183,6 +189,11 @@ class BlokusDuoBoard:
             _player = self._white_player
         elif player == -1:
             _player = self._black_player
+        else:
+            raise ValueError(f"Player should be 1 or -1, given {player}")
+
+        if len(_player.piece_ids_played) == 0:
+            return self.initial_actions[player]
 
     def game_ended(self) -> bool:
         """
@@ -276,8 +287,8 @@ class BlokusDuoGame(IGame):
     def _calculate_and_cache_initial_actions(self) -> dict[int, list[Action]]:
         # TODO: Figure out what data to store this as
         # TODO: Perhaps we should build the net pi policy masking here too
-        # Initialise a board just for this calculation
-        board = BlokusDuoBoard(self.piece_manager)
+        # Initialise a board just for this calculation, bit hacky to initialise board with no actions but whatever
+        board = BlokusDuoBoard(self.piece_manager, {})
         # Dict of player int (1 for White, -1 for Black) into list of all actions
         start_moves: dict[int, list[Action]] = {1: [], -1: []}
         for piece_id, orientation in self.piece_manager.all_piece_id_basis_orientations():
@@ -294,7 +305,7 @@ class BlokusDuoGame(IGame):
         """
         # TODO: Pass in the initial moves here.
         # Initialise a clean new BlokusDuo board.
-        self.board = BlokusDuoBoard(self.piece_manager)
+        self.board = BlokusDuoBoard(self.piece_manager, self.initial_actions)
         return self.board
 
     # TODO: Can I remove this?
