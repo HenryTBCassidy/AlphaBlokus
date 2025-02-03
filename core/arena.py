@@ -1,10 +1,9 @@
 import logging
 import time
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
-from dataclasses import dataclass
-
 from tqdm import tqdm
 
 from core.config import LOGGER_NAME
@@ -13,7 +12,7 @@ from core.interfaces import IGame
 log = logging.getLogger(LOGGER_NAME)
 
 
-@dataclass
+@dataclass(frozen=True)
 class ArenaDataLoggable:
     generation: int
     wins: int

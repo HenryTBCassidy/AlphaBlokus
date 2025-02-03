@@ -30,7 +30,7 @@ class CycleStage(StrEnum):
         return self._name_
 
 
-@dataclass
+@dataclass(frozen=True)
 class TimingsLoggable:
     generation: int
     cycle_stage: CycleStage

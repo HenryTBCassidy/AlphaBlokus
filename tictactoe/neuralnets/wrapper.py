@@ -14,8 +14,8 @@ from tqdm import tqdm
 
 from core.config import RunConfig, LOGGER_NAME
 from core.interfaces import INeuralNetWrapper
-from tictactoe.neuralnets.net import AlphaTicTacToe as nnet
 from tictactoe.game import TicTacToeGame as Game
+from tictactoe.neuralnets.net import AlphaTicTacToe as nnet
 from utils import AverageMeter
 
 """
@@ -29,7 +29,7 @@ Based on (copy-pasted from) the NNet by SourKream and Surag Nair.
 log = logging.getLogger(LOGGER_NAME)
 
 
-@dataclass
+@dataclass(frozen=True)
 class TrainingDataLoggable:
     generation: int
     epoch: int

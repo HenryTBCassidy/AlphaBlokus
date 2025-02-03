@@ -4,13 +4,13 @@ from pathlib import Path
 LOGGER_NAME: str = "Alpha"
 
 
-@dataclass
+@dataclass(frozen=True)
 class MCTSConfig:
     num_mcts_sims: int  # Number of games moves for MCTS to simulate.
     cpuct: int  # Something to do with how nodes are selected TODO: Understand
 
 
-@dataclass
+@dataclass(frozen=True)
 class NetConfig:
     learning_rate: float  # TODO: Put this on a schedule
     dropout: float
@@ -22,7 +22,7 @@ class NetConfig:
 
 
 # TODO: Add args for whether or not to log out data
-@dataclass
+@dataclass(frozen=True)
 class RunConfig:
     run_name: str  # Used to distinguish between data from different run_configurations
     num_generations: int  # Number of times the algorithm completes the self play -> train -> upgade net cycle

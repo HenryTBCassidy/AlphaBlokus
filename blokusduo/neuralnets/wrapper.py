@@ -20,7 +20,7 @@ from utils import AverageMeter
 log = logging.getLogger(LOGGER_NAME)
 
 
-@dataclass
+@dataclass(frozen=True)
 class TrainingDataLoggable:
     generation: int
     epoch: int

@@ -22,7 +22,7 @@ class Orientation(StrEnum):
     Flip270 = "Flip270"
 
 
-@dataclass
+@dataclass(frozen=True)
 class Piece:
     """
     A class containing information about one of the 21 Blokus Pieces.
