@@ -8,7 +8,7 @@ from typing import Optional, Generator
 import numpy as np
 from nptyping import NDArray
 
-from blokusduo.pieces import pieces_loader, Piece, Orientation, PieceManager
+from blokusduo.pieces import pieces_loader, Piece, Orientation, PieceManager, BidirectionalDict
 from core.interfaces import IGame
 
 
@@ -20,11 +20,12 @@ from core.interfaces import IGame
 
 def no_sides(i: int, j: int, side: int, board: NDArray) -> bool:
     """
-    Returns True if for an index i, j, and side +/- 1, the given index does not touch the side of a friendly piece.
-    :param i:
-    :param j:
-    :param side:
-    :param board:
+    Returns True for a point in the board grid with index i, j, and side +/- 1, if the point does not touch the side of
+     a friendly piece.
+    :param i: length index
+    :param j: width index
+    :param side: int +/- 1 of the player in consideration
+    :param board: numpy array of 1, 0, -1
     :return:
     """
     above = False
@@ -46,27 +47,41 @@ def no_sides(i: int, j: int, side: int, board: NDArray) -> bool:
 
 def at_least_one_corner(i: int, j: int, side: int, board: NDArray) -> bool:
     """
-    Returns true if for index i, j and side +/- 1, the given index has at least one friendly piece at any of the 4
-    corners.
-    :param i:
-    :param j:
-    :param side:
-    :param board:
+    Returns True for a point in the board grid with index i, j, and side +/- 1, if the point has at least one friendly
+    piece in a corner position.
+    :param i: length index
+    :param j: width index
+    :param side: int +/- 1 of the player in consideration
+    :param board: numpy array of 1, 0, -1
     :return:
     """
-    if (i - 1 > 0) & (j - 1 > 0):
+    if (i - 1 > 0) and (j - 1 > 0):
         if board[i - 1, j - 1] == side: return True
 
-    if (i - 1 > 0) & (j + 1 < 14):
+    if (i - 1 > 0) and (j + 1 < 14):
         if board[i - 1, j + 1] == side: return True
 
-    if (i + 1 < 14) & (j - 1 > 0):
+    if (i + 1 < 14) and (j - 1 > 0):
         if board[i + 1, j - 1] == side: return True
 
-    if (i + 1 > 0) & (j + 1 < 14):
+    if (i + 1 > 0) and (j + 1 < 14):
         if board[i + 1, j + 1] == side: return True
 
     return False
+
+
+def valid_placement(i: int, j: int, side: int, board: NDArray) -> bool:
+    """
+    Returns True for a point if it can validly be placed on a blokus board.
+    :param i: length index
+    :param j: width index
+    :param side: int +/- 1 of the player in consideration
+    :param board: numpy array of 1, 0, -1
+    :return:
+    """
+    if board[i, j] != 0:  # Square is occupied
+        return False
+    return at_least_one_corner(i, j, side, board) and no_sides(i, j, side, board)
 
 
 # TODO: Make this available to all games & change framework to use it? Using +/- 1 everywhere is a bit pants
@@ -102,8 +117,8 @@ class CoordinateIndexDecoder:
         return x, y
 
 
-# TODO: Generalise the project to use some inheritance of an Action later
-@dataclass
+# TODO: Generalise the project to use some inheritance of a more general Action later
+@dataclass(frozen=True)
 class Action:
     piece_id: int
     orientation: Orientation
@@ -112,7 +127,7 @@ class Action:
 
 
 class Player:
-    # TODO: Docstring
+    # TODO: Update Docstring
     """
     It is super inefficient to check the whole board every time you want to make a move (and also not human-like).
     We can only place pieces touching an existing corner, so if we keep track of where the corners are on the board, we
@@ -139,7 +154,34 @@ class Player:
 
         # Dictionary containing points in grid as keys, and piece-orientation ids that we have tried to place in the
         # grid that do not fit.
-        self.potential_placement_points: dict[tuple, list[int]] = {}
+
+        # TODO: We can skip considering if a piece fits in a corner if a 1 value in the piece array does not coincide
+        #       with the corner point.
+
+        #TODO: ALGORITHM:
+        #       - If no corners/game just started -> return cached data we are passed on init
+        #       - If corner present but empty, we run through all REMAINING piece orientations, calculate all possible insertion indicies -> put into the cache
+        #       - If corner present, return cached value and QUICKLY check values not altered by last placement
+        #       - We can always remove last piece id inserted
+        #       - Run quick check remaining insertions to see if there are all valid
+        #       - NB: We don't need to run the corner check on the cached actions because we know, by definition they must have at least one corner.
+        # Faster way of checking corners?
+        # Make dictionary bi directional/have two dictionaries. Populate one with action and other with locations of 1 and locations of sides after action
+        # When insert piece, search hashmap for 1 location
+        # If piece same player, search for intersections of side too
+        # If either of these conditions are violated, remove action
+        #TODO:
+        # LIVES ON PLAYER
+        # placement_point -> piece_id, orientation, l_idx, w_idx -> piece_id AKA have first dict bidirectional so we can quickly remove values of last insertion piece id
+        #                 -> piece_id -> action
+        #
+        # coordinates_of_sides -> list[action] } For each insertion 1, check if index in here and remove corresponding actions
+        # coordinates_of_1s -> list[action]    } When we insert a piece, we check this dict to see if
+        self.potential_placement_points: dict[Action, int] = BidirectionalDict()
+        # Both take a tuple of index -> placement_point -> action
+        # When piece added, check this to quickly get the corner and action affected to remove from placement points
+        self.coordinates_of_sides: dict[tuple, dict[tuple, Action]] = {}
+        self.coordinates_of_ones: dict[tuple, dict[tuple, Action]] = {}
 
         # TODO: Maybe it makes more sense to have the corners to place to be on each player?
 
@@ -151,25 +193,25 @@ class Player:
 
     ):
         # TODO: Not sure which order is more efficient yet but
-        #       1. Need to check surrounding rectangle to piece to see what new corners were added
+        #       1. Need to check surrounding rectangle around piece to see what new corners were added
         #          (bear in mind they could already be in the dictionary)
         #       2. Also check if the piece was laid on a potential placement point as obviously this removes it
         # Cap iteration range to make sure we don't go out of index bounds
-        # Iterating +/- 1 unit around where the piece was placed
+        # Iterating + 1 unit around where the piece was placed
         p_l, p_w = piece_orientation.shape
         length_range = (max(0, insertion_index[0] - 1), min(insertion_index[0] + p_l + 1, 13))
         width_range = (max(0, insertion_index[1] - 1), min(insertion_index[1] + p_w + 1, 13))
 
+        # Faster to check if key is in dict first then check if placement point is valid
+        # If in dict and not valid remove it, stops us checking if a corner is valid if we know about it
         for i in range(length_range[0], length_range[1]):
             for j in range(width_range[0], width_range[1]):
-                if board_array[i][j] == 0:  # Empty square
-                    if (no_sides(i, j, self.side.to_int(), board_array)
-                            and at_least_one_corner(i, j, self.side.to_int(), board_array)):
-                        if (i, j) not in self.potential_placement_points:
-                            self.potential_placement_points[(i, j)] = []
-                else:  # Square not empty, side irrelevant
-                    if (i, j) in self.potential_placement_points:
+                if (i, j) in self.potential_placement_points:  # Think this point is potentially placeable
+                    if not valid_placement(i, j, self.side.to_int(), board_array):
                         del self.potential_placement_points[(i, j)]
+                else:  # We have no record of this point as being potentially placeable
+                    if valid_placement(i, j, self.side.to_int(), board_array):
+                        self.potential_placement_points[(i, j)] = []
 
 
 class BlokusDuoBoard:
@@ -186,22 +228,20 @@ class BlokusDuoBoard:
     ):
         """
         Called when a game of BlokusDuo is initiated
-        :param piece_manager (dict[int, Piece])
+        :param piece_manager (PieceManager)
+        :param initial_actions: Calculated initial actions for White and Black
+        :param coordinate_index_decoder: Converts between coordinates and indices
         """
         self.n = 14
         self.piece_manager = piece_manager
         self.initial_actions = initial_actions
         self._coordinate_index_decoder = coordinate_index_decoder
 
-        # We can only place pieces touching an existing corner, keep track of where the corners are on the board.
-        # Also track which pieces we have already tried for a corner.
-        # TODO: Make Player be the cache for available moves
-
         self._white_player = Player(self.n, Side("White"), piece_manager.pieces)
         self._black_player = Player(self.n, Side("Black"), piece_manager.pieces)
         self._players = [self._white_player, self._black_player]
 
-        self._board_representation = np.zeros(self.n ** 2, dtype=int).reshape(self.n, self.n)
+        self.as_array = np.zeros(self.n ** 2, dtype=int).reshape(self.n, self.n)
 
     def _get_player(self, player_side: int) -> Player:
         """
@@ -227,8 +267,14 @@ class BlokusDuoBoard:
         """
         return np.concatenate(
             (self._black_player.pieces_played_encoded_region.reshape(self.n, 2),
-             self._board_representation, self._white_player.pieces_played_encoded_region.reshape(self.n, 2)), axis=1
+             self.as_array, self._white_player.pieces_played_encoded_region.reshape(self.n, 2)), axis=1
         )
+
+    def _piece_insertion_error_message(self, sided_piece_orientation: NDArray, x_coordinate: int, y_coordinate: int
+                                       ) -> str:
+        return (f"Board: \n {self.as_array}, \n "
+                f"Piece: \n {sided_piece_orientation}, \n"
+                f"At ({x_coordinate}, {y_coordinate})")
 
     def insert_piece(
             self,
@@ -236,14 +282,16 @@ class BlokusDuoBoard:
             player_side: int
     ) -> None:
         """
-        Take an action and player side and insert this piece into the board for said player.
+        Take an action and player side and insert this piece-orientation into the board for said player.
+        Checks to see if the piece fits on the board, that it is not being laid on an existing piece and that the piece
+        placement is valid within the placement rules of Blokus.
         Updates the Player classes to account for having made this piece insertion including updating cached information
-        about possible placement squares in future turns.
+        about possible placement squares for future turns.
         :param action: (Action) Holds piece_id, orientation, x and y coordinates for move (origin is bottom left square)
         :param player_side: (int) 1 for White and -1 for Black
         :return:
         """
-        # TODO: CHECK OUT OF BOUNDS, CHECK RULE VIOLATION, CHECK NOT PLACING ON EXISTING PIECE
+        # TODO: Faster to remove validation checks, leave them in as a safeguard for now
         # Remember the origin is the bottom left corner of the board
         # We insert the piece with its top left corner in the x, y coordinate given
         piece_orientation = self.piece_manager.get_piece_orientation_array(action.piece_id, action.orientation)
@@ -254,39 +302,44 @@ class BlokusDuoBoard:
         piece_length, piece_width = sided_piece_orientation.shape
         for i in range(piece_length):
             for j in range(piece_width):
-                self._board_representation[length_idx + i, width_idx + j] = sided_piece_orientation[i, j]
+                if length_idx + i > 13 or width_idx + j > 13:
+                    raise IndexError(f"Piece cannot be inserted at this index, it does not fit on the board! "
+                                     f"\n{self._piece_insertion_error_message(
+                                         sided_piece_orientation, action.x_coordinate, action.y_coordinate)}")
+                if self.as_array[length_idx + i, width_idx + j] != 0:
+                    raise RuntimeError(f"Trying to insert piece into board over existing piece! \n"
+                                       f"{self._piece_insertion_error_message(
+                                           sided_piece_orientation, action.x_coordinate, action.y_coordinate)}")
+
+                self.as_array[length_idx + i, width_idx + j] = sided_piece_orientation[i, j]
 
         player = self._get_player(player_side=player_side)
         player.pieces_played_encoded_region[action.piece_id - 1] = player_side
         player.piece_ids_played.append(action.piece_id)
         del player.pieces_remaining[action.piece_id]
 
-        # TODO: WHEN WE INSERT A PIECE WE NEED TO UPDATE POSSIBLE CORNERS FOR WHITE/BLACK TO PLAY
-        #       This includes both adding new corners for selection and removing some
-        #       Don't forget that a move Black makes could change White's corners and vice versa
-        #       ALGORITHM:
-        #       Inserted piece with top left square at (x,y), iterate over a rectangle of size
-        #       length + 2, width + 2 -> being careful not to go over the edges of the board in any direction
-        #       As we iterate from left to right, from top to bottom we check if at least 1 corner piece has a +/- 1
-        #       and ALL side pieces do not have a +/-1.
         for p in self._players:
-            # TODO: Update corners for move made
             p.update_potential_placement_points(insertion_index=(length_idx, width_idx),
                                                 piece_orientation=piece_orientation,
-                                                board_array=self._board_representation
+                                                board_array=self.as_array
                                                 )
 
-    def valid_moves(self, player: int) -> list[Action]:
+    def valid_moves(self, player_side: int) -> list[Action]:
         # TODO: Need to think about the return form for this function, could be list of actions or NDArray (for net)
         #       ALGORITHM:
         #       If we have just started the game (aka cached corners == 0), output is valid_start_moves
         #       (injected by Game class on init)
         #       Else after we make a move, we cache the (x,y) coordinates around the corners of a piece
         #       Maybe do this in a multi threaded way!?
-        _player = self._get_player(player_side=player)
+        player = self._get_player(player_side=player_side)
 
-        if len(_player.piece_ids_played) == 0:
-            return self.initial_actions[player]
+        # if len(player.potential_placement_points) == 0:
+        #     return self.initial_actions[player_side]
+        # else:
+        #     for point in player.potential_placement_points:
+        #         for piece_id, piece in player.pieces_remaining.items():
+        #             for orientation in piece.basis_orientations:
+        #                 if (piece_id, orientation) in player.p
 
     def game_ended(self) -> bool:
         """
