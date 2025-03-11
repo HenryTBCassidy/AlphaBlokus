@@ -152,36 +152,9 @@ class Player:
         # Could generalise this by calculating how big the array needs to be based on n and the number of pieces.
         self.pieces_played_encoded_region = np.zeros(2 * board_size, dtype=int)
 
-        # Dictionary containing points in grid as keys, and piece-orientation ids that we have tried to place in the
-        # grid that do not fit.
 
-        # TODO: We can skip considering if a piece fits in a corner if a 1 value in the piece array does not coincide
-        #       with the corner point.
-
-        #TODO: ALGORITHM:
-        #       - If no corners/game just started -> return cached data we are passed on init
-        #       - If corner present but empty, we run through all REMAINING piece orientations, calculate all possible insertion indicies -> put into the cache
-        #       - If corner present, return cached value and QUICKLY check values not altered by last placement
-        #       - We can always remove last piece id inserted
-        #       - Run quick check remaining insertions to see if there are all valid
-        #       - NB: We don't need to run the corner check on the cached actions because we know, by definition they must have at least one corner.
-        # Faster way of checking corners?
-        # Make dictionary bi directional/have two dictionaries. Populate one with action and other with locations of 1 and locations of sides after action
-        # When insert piece, search hashmap for 1 location
-        # If piece same player, search for intersections of side too
-        # If either of these conditions are violated, remove action
-        #TODO:
-        # LIVES ON PLAYER
-        # placement_point -> piece_id, orientation, l_idx, w_idx -> piece_id AKA have first dict bidirectional so we can quickly remove values of last insertion piece id
-        #                 -> piece_id -> action
-        #
-        # coordinates_of_sides -> list[action] } For each insertion 1, check if index in here and remove corresponding actions
-        # coordinates_of_1s -> list[action]    } When we insert a piece, we check this dict to see if
-        self.potential_placement_points: dict[Action, int] = BidirectionalDict()
-        # Both take a tuple of index -> placement_point -> action
-        # When piece added, check this to quickly get the corner and action affected to remove from placement points
-        self.coordinates_of_sides: dict[tuple, dict[tuple, Action]] = {}
-        self.coordinates_of_ones: dict[tuple, dict[tuple, Action]] = {}
+        # Dictionary of placemwnt point -> piece_id -> action
+        self.potential_placement_points: dict[tuple, dict[int, Action]] = dict()
 
         # TODO: Maybe it makes more sense to have the corners to place to be on each player?
 
@@ -206,12 +179,16 @@ class Player:
         # If in dict and not valid remove it, stops us checking if a corner is valid if we know about it
         for i in range(length_range[0], length_range[1]):
             for j in range(width_range[0], width_range[1]):
-                if (i, j) in self.potential_placement_points:  # Think this point is potentially placeable
+                if (i, j) in self.potential_placement_points:  # Already think this point is potentially placeable
                     if not valid_placement(i, j, self.side.to_int(), board_array):
                         del self.potential_placement_points[(i, j)]
                 else:  # We have no record of this point as being potentially placeable
                     if valid_placement(i, j, self.side.to_int(), board_array):
-                        self.potential_placement_points[(i, j)] = []
+                        self.potential_placement_points[(i, j)] = self.populate_moves_for_new_placement(board_array)
+
+    def populate_moves_for_new_placement(self, board_array: NDArray):
+        for piece in self.pieces_remaining.values():
+            for orientation in piece.basis_orientations:
 
 
 class BlokusDuoBoard:
