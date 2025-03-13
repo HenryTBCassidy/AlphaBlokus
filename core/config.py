@@ -1,62 +1,113 @@
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Final
 
-LOGGER_NAME: str = "Alpha"
+# Global constants
+LOGGER_NAME: Final[str] = "Alpha"
 
 
 @dataclass(frozen=True)
 class MCTSConfig:
-    num_mcts_sims: int  # Number of games moves for MCTS to simulate.
-    cpuct: int  # Something to do with how nodes are selected TODO: Understand
+    """
+    Configuration parameters for Monte Carlo Tree Search (MCTS).
+    
+    MCTS is used to select moves during self-play by building a search tree
+    and evaluating positions using the neural network. The search process is
+    controlled by these parameters.
+    """
+    num_mcts_sims: int  # Number of MCTS simulations per move
+    cpuct: float  # Exploration constant in the PUCT formula (typically between 1 and 4)
 
 
 @dataclass(frozen=True)
 class NetConfig:
-    learning_rate: float  # TODO: Put this on a schedule
-    dropout: float
-    epochs: int
-    batch_size: int
-    cuda: bool
-    num_channels: int
-    num_residual_blocks: int
+    """
+    Configuration parameters for the neural network.
+    
+    These parameters control both the architecture of the neural network
+    and its training process. The network uses a residual architecture
+    with convolutional layers for board state processing.
+    """
+    learning_rate: float  # Learning rate for the optimizer (TODO: Put this on a schedule)
+    dropout: float  # Dropout probability for regularisation (0 to 1)
+    epochs: int  # Number of training epochs per generation
+    batch_size: int  # Number of positions per training batch
+    cuda: bool  # Whether to use CUDA for GPU acceleration
+    num_channels: int  # Number of channels in convolutional layers (power of 2)
+    num_residual_blocks: int  # Number of residual blocks in the network
 
 
-# TODO: Add args for whether or not to log out data
 @dataclass(frozen=True)
 class RunConfig:
-    run_name: str  # Used to distinguish between data from different run_configurations
-    num_generations: int  # Number of times the algorithm completes the self play -> train -> upgade net cycle
-    num_eps: int  # Number of complete self-play games to simulate during each generation
-    temp_threshold: int  # TODO: Annotate
-    update_threshold: float  # New neural net will be accepted if this threshold or more of games are won.
-    max_queue_length: int  # Num board states remembered per generation (greater than num_moves bc of symmetry calc).
-    num_arena_matches: int  # Number of games to play during arena play to determine if new net will be accepted.
-    root_directory: Path  # Folder name of root where program run_configurations
-    load_model: bool  # TODO: Annotate
-    max_generations_lookback: int  # Maximum number of generations remembered during training i.e. buffer size
-    mcts_config: MCTSConfig  # Class holding parameters used in Monte Carlo Tree Search
-    net_config: NetConfig  # Class holding useful variables to parameterise neural net
+    """
+    Configuration parameters for a complete training run.
+    
+    This class holds all parameters needed to configure a training session,
+    including hyperparameters for:
+    - Self-play game generation
+    - Neural network training
+    - Model evaluation
+    - Data storage and logging
+    
+    The training process consists of repeated cycles of:
+    1. Self-play game generation using MCTS + current neural network
+    2. Training the neural network on the generated games
+    3. Evaluating the new network against the previous version
+    """
+    # Training process parameters
+    run_name: str  # Unique identifier for this training run
+    num_generations: int  # Number of complete self-play -> train -> evaluate cycles
+    num_eps: int  # Number of complete self-play games per generation
+    temp_threshold: int  # Move number after which temperature is set to ~0
+    update_threshold: float  # Win rate required for new network to be accepted (0 to 1)
+    max_queue_length: int  # Maximum number of game positions to keep in memory
+    num_arena_matches: int  # Number of evaluation games between old/new networks
+    max_generations_lookback: int  # Maximum number of past generations to train on
+    
+    # Model and file management
+    root_directory: Path  # Root directory for all output files
+    load_model: bool  # Whether to load a pre-existing model
+    
+    # Component configurations
+    mcts_config: MCTSConfig  # Monte Carlo Tree Search parameters
+    net_config: NetConfig  # Neural network parameters
 
     @property
-    def run_directory(self): return self.root_directory / self.run_name
+    def run_directory(self) -> Path:
+        """Base directory for all files related to this training run."""
+        return self.root_directory / self.run_name
 
     @property
-    def log_directory(self): return self.run_directory / "Logs"
+    def log_directory(self) -> Path:
+        """Directory for log files tracking training progress and errors."""
+        return self.run_directory / "Logs"
 
     @property
-    def timings_directory(self): return self.run_directory / "Timings"
+    def timings_directory(self) -> Path:
+        """Directory for timing data of various training components."""
+        return self.run_directory / "Timings"
 
     @property
-    def self_play_history_directory(self): return self.run_directory / "SelfPlayHistory"
+    def self_play_history_directory(self) -> Path:
+        """Directory for storing self-play game data used for training."""
+        return self.run_directory / "SelfPlayHistory"
 
     @property
-    def net_directory(self): return self.run_directory / "Nets"
+    def net_directory(self) -> Path:
+        """Directory for neural network checkpoints from each generation."""
+        return self.run_directory / "Nets"
 
     @property
-    def training_data_directory(self): return self.run_directory / "TrainingData"
+    def training_data_directory(self) -> Path:
+        """Directory for processed training data and metrics."""
+        return self.run_directory / "TrainingData"
 
     @property
-    def arena_data_directory(self): return self.run_directory / "ArenaData"
+    def arena_data_directory(self) -> Path:
+        """Directory for evaluation game results between network versions."""
+        return self.run_directory / "ArenaData"
 
     @property
-    def report_directory(self): return self.run_directory / "Reporting"
+    def report_directory(self) -> Path:
+        """Directory for generated training progress reports and visualisations."""
+        return self.run_directory / "Reporting"

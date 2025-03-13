@@ -1,143 +1,199 @@
 import logging
 import math
+from typing import Dict, List, Tuple, Final, TypeAlias
+from numpy.typing import NDArray
 
 import numpy as np
 
 from core.config import MCTSConfig, LOGGER_NAME
 from core.interfaces import IGame, INeuralNetWrapper
 
-EPS = 1e-8
+# Constants
+EPS: Final[float] = 1e-8  # Small constant to prevent division by zero
+
+# Type aliases for improved readability
+StateStr: TypeAlias = str  # String representation of a game state
+Action: TypeAlias = int  # Integer index into the action space
+StateAction: TypeAlias = Tuple[StateStr, Action]  # (state, action) pair
+PolicyVector: TypeAlias = NDArray[np.float64]  # Probability distribution over actions
+ValidMoves: TypeAlias = NDArray[np.bool_]  # Binary mask of legal moves
 
 log = logging.getLogger(LOGGER_NAME)
 
 
 class MCTS:
     """
-    This class handles the MCTS tree.
+    Monte Carlo Tree Search implementation for game playing.
+    
+    This class implements the MCTS algorithm with neural network guidance,
+    following the AlphaZero approach. The search is guided by:
+    1. Prior probabilities from a policy network
+    2. Value estimates from a value network
+    3. Visit counts for exploration/exploitation balance
+    
+    The search tree is implicitly stored through dictionaries mapping:
+    - States to their neural network policy predictions
+    - State-action pairs to their Q-values and visit counts
+    - States to their total visit counts
+    
+    The tree is built incrementally through repeated simulations, each consisting of:
+    1. Selection: Choose actions recursively using UCB formula
+    2. Expansion: Add a new leaf node to the tree
+    3. Evaluation: Use neural network to evaluate the leaf
+    4. Backpropagation: Update statistics for all visited nodes
     """
 
-    def __init__(self, game: IGame, nnet: INeuralNetWrapper, config: MCTSConfig):
+    def __init__(self, game: IGame, nnet: INeuralNetWrapper, config: MCTSConfig) -> None:
+        """
+        Initialize the MCTS with game rules and neural network.
+
+        Args:
+            game: Game implementation providing rules and mechanics
+            nnet: Neural network for policy and value predictions
+            config: Configuration parameters for MCTS
+        """
         self.game = game
         self.nnet = nnet
         self.config = config
-        self.Qsa = {}  # stores Q values for s,a (as defined in the paper)
-        self.Nsa = {}  # stores #times edge s,a was visited
-        self.Ns = {}  # stores #times board s was visited
-        self.Ps = {}  # stores initial policy (returned by neural net)
+        
+        # Tree statistics
+        self.Qsa: Dict[StateAction, float] = {}  # Q values for state-action pairs
+        self.Nsa: Dict[StateAction, int] = {}  # Visit counts for state-action pairs
+        self.Ns: Dict[StateStr, int] = {}  # Visit counts for states
+        self.Ps: Dict[StateStr, PolicyVector] = {}  # Initial policies for states
+        self.Es: Dict[StateStr, float] = {}  # Game-ended status for states
+        self.Vs: Dict[StateStr, ValidMoves] = {}  # Valid moves mask for states
 
-        self.Es = {}  # stores game.getGameEnded ended for board s
-        self.Vs = {}  # stores game.getValidMoves for board s
-
-    # TODO: Might have to change object passed in here to either board or a different type of board object
-    # TODO: The board is going to need some sort of checkpoint method to set itself back to the state it had before
-    #       It is passed into here because the search method modifies state
-    def get_action_prob(self, canonical_board, temp=1):
+    def get_action_prob(self, canonical_board: NDArray, temp: float = 1) -> List[float]:
         """
-        This function performs numMCTSSims simulations of MCTS starting from
-        canonicalBoard.
+        Get action probabilities for the current board state.
+
+        Performs multiple MCTS simulations and returns a probability distribution
+        over possible actions based on the visit counts of each action.
+
+        Args:
+            canonical_board: The game board in canonical form
+            temp: Temperature parameter controlling exploration:
+                 - temp=0: Choose the best action deterministically
+                 - temp=1: Choose proportionally to visit counts
+                 - temp>1: Increase exploration
+                 - 0<temp<1: Reduce exploration
 
         Returns:
-            probs: a policy vector where the probability of the ith action is
-                   proportional to Nsa[(s,a)]**(1./temp)
+            List[float]: Probability distribution over all possible actions.
+                        The probability of illegal moves will be zero.
         """
-        for i in range(self.config.num_mcts_sims):
+        # Perform simulations to build the search tree
+        for _ in range(self.config.num_mcts_sims):
             self.search(canonical_board)
 
+        # Extract visit counts for all actions
         s = self.game.string_representation(canonical_board)
-        counts = [self.Nsa[(s, a)] if (s, a) in self.Nsa else 0 for a in range(self.game.get_action_size())]
+        counts = [self.Nsa.get((s, a), 0) for a in range(self.game.get_action_size())]
 
+        # Handle temperature=0 case (deterministic best action)
         if temp == 0:
-            bestAs = np.array(np.argwhere(counts == np.max(counts))).flatten()
-            bestA = np.random.choice(bestAs)
+            best_actions = np.array(np.argwhere(counts == np.max(counts))).flatten()
+            best_action = np.random.choice(best_actions)
             probs = [0] * len(counts)
-            probs[bestA] = 1
+            probs[best_action] = 1
             return probs
 
+        # Apply temperature and normalise to get probabilities
         counts = [x ** (1. / temp) for x in counts]
         counts_sum = float(sum(counts))
-        probs = [x / counts_sum for x in counts]
-        return probs
+        return [x / counts_sum for x in counts]
 
-    # TODO: Change board object being passed in
-    def search(self, canonical_board):
+    def search(self, canonical_board: NDArray) -> float:
         """
-        This function performs one iteration of MCTS. It is recursively called
-        till a leaf node is found. The action chosen at each node is one that
-        has the maximum upper confidence bound as in the paper.
+        Perform one iteration of MCTS.
 
-        Once a leaf node is found, the neural network is called to return an
-        initial policy P and a value v for the state. This value is propagated
-        up the search path. In case the leaf node is a terminal state, the
-        outcome is propagated up the search path. The values of Ns, Nsa, Qsa are
-        updated.
+        This function implements the four phases of MCTS:
+        1. Selection: Choose actions recursively according to UCB formula
+        2. Expansion: Add a new leaf node to the tree
+        3. Evaluation: Use neural network to evaluate the leaf
+        4. Backpropagation: Update statistics for all visited nodes
 
-        NOTE: the return values are the negative of the value of the current
-        state. This is done since v is in [-1,1] and if v is the value of a
-        state for the current player, then its value is -v for the other player.
+        Args:
+            canonical_board: The game board in canonical form
 
         Returns:
-            v: the negative of the value of the current canonical_board
-        """
+            float: The negative of the evaluated position value (for opponent's perspective)
+                  Values are in the range [-1, 1] where:
+                  - 1 means the current player is winning
+                  - -1 means the current player is losing
+                  - 0 means the position is equal
 
+        Notes:
+            - The return value is negated because the value is from the opponent's perspective
+            - TODO: Consider optimising the action iteration for games with sparse legal moves
+        """
         s = self.game.string_representation(canonical_board)
 
+        # PHASE 1: Check if game has ended
         if s not in self.Es:
-            self.Es[s] = self.game.get_game_ended(canonical_board, 1) # TODO: Player always White
+            self.Es[s] = self.game.get_game_ended(canonical_board, 1)  # TODO: Player always White
         if self.Es[s] != 0:
-            # terminal node
             return -self.Es[s]
 
+        # PHASE 2: Leaf node - evaluate position with neural network
         if s not in self.Ps:
-            # leaf node
+            # Get policy and value predictions
             self.Ps[s], v = self.nnet.predict(canonical_board)
-            valids = self.game.valid_move_masking(canonical_board, 1) # TODO: Player always White
-            self.Ps[s] = self.Ps[s] * valids  # masking invalid moves # TODO: Just assign Ps[s} once
+            valids = self.game.valid_move_masking(canonical_board, 1)  # TODO: Player always White
+            
+            # Mask invalid moves and renormalise probabilities
+            self.Ps[s] = self.Ps[s] * valids
             sum_Ps_s = np.sum(self.Ps[s])
+            
             if sum_Ps_s > 0:
-                self.Ps[s] /= sum_Ps_s  # renormalize
+                self.Ps[s] /= sum_Ps_s
             else:
-                # if all valid moves were masked make all valid moves equally probable
-
-                # NB! All valid moves may be masked if either your NNet architecture is insufficient or you've get overfitting or something else.
-                # If you have got dozens or hundreds of these messages you should pay attention to your NNet and/or training process.
-                log.error("All valid moves were masked, doing a workaround.")
+                # All valid moves were masked - use uniform distribution over valid moves
+                # This can indicate issues with neural network architecture or training
+                log.error("All valid moves were masked, using uniform distribution.")
                 self.Ps[s] = self.Ps[s] + valids
                 self.Ps[s] /= np.sum(self.Ps[s])
 
+            # Initialize node statistics
             self.Vs[s] = valids
             self.Ns[s] = 0
             return -v
 
+        # PHASE 3: Choose action according to UCB formula
         valids = self.Vs[s]
         cur_best = -float('inf')
         best_act = -1
 
-        # pick the action with the highest upper confidence bound
-        # TODO: This is a terrible way of iterating for BlokusDuo for the vast majority of board states, the set of
-        #       legal moves is much lower than the theoretical set of all possible moves i.e the action_size
-        #       TLDR: Iterate over the valid moves
+        # Pick the action with the highest upper confidence bound
+        # TODO: This is inefficient for games with sparse legal moves (e.g. BlokusDuo)
+        #       Consider iterating only over valid moves instead
         for a in range(self.game.get_action_size()):
             if valids[a]:
                 if (s, a) in self.Qsa:
-                    u = self.Qsa[(s, a)] + self.config.cpuct * self.Ps[s][a] * math.sqrt(self.Ns[s]) / (
-                            1 + self.Nsa[(s, a)])
+                    u = (self.Qsa[(s, a)] + 
+                         self.config.cpuct * self.Ps[s][a] * 
+                         math.sqrt(self.Ns[s]) / (1 + self.Nsa[(s, a)]))
                 else:
-                    u = self.config.cpuct * self.Ps[s][a] * math.sqrt(self.Ns[s] + EPS)  # Q = 0 ?
+                    u = (self.config.cpuct * self.Ps[s][a] * 
+                         math.sqrt(self.Ns[s] + EPS))
 
                 if u > cur_best:
                     cur_best = u
                     best_act = a
 
+        # PHASE 4: Recursively evaluate chosen action
         a = best_act
         next_s, next_player = self.game.get_next_state(canonical_board, 1, a)
         next_s = self.game.get_canonical_form(next_s, next_player)
 
         v = self.search(next_s)
 
+        # Update node statistics
         if (s, a) in self.Qsa:
-            self.Qsa[(s, a)] = (self.Nsa[(s, a)] * self.Qsa[(s, a)] + v) / (self.Nsa[(s, a)] + 1)
+            self.Qsa[(s, a)] = ((self.Nsa[(s, a)] * self.Qsa[(s, a)] + v) / 
+                               (self.Nsa[(s, a)] + 1))
             self.Nsa[(s, a)] += 1
-
         else:
             self.Qsa[(s, a)] = v
             self.Nsa[(s, a)] = 1
