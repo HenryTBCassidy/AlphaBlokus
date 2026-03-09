@@ -10,29 +10,16 @@ AlphaBlokus implements three tightly coupled algorithms that form the AlphaZero 
 
 These are orchestrated by the **Coach**, which runs the full loop: self-play → training → arena → accept/reject.
 
+```mermaid
+graph LR
+    A["🎮 Self-Play<br/><i>MCTS + network</i>"] --> B["🧠 Training<br/><i>gradient descent</i>"]
+    B --> C{"⚔️ Arena<br/>win% ≥ 55%?"}
+    C -- "Yes" --> D["✅ Accept<br/><i>save as best</i>"]
+    C -- "No" --> E["❌ Reject<br/><i>revert to old</i>"]
+    D --> A
+    E --> A
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                     Coach.learn()                           │
-│                                                             │
-│   ┌──────────┐     ┌──────────┐     ┌──────────────────┐   │
-│   │Self-Play │────>│ Training │────>│Arena Evaluation   │   │
-│   │(MCTS +   │     │(gradient │     │(new net vs old    │   │
-│   │ network) │     │ descent) │     │ net, both w/MCTS) │   │
-│   └──────────┘     └──────────┘     └────────┬─────────┘   │
-│        ▲                                      │             │
-│        │           ┌──────────┐               │             │
-│        │           │  Accept  │◄──── win% ≥ threshold?     │
-│        │           │  new net │               │             │
-│        │           └────┬─────┘               │             │
-│        │                │                     │             │
-│        │           ┌────┴─────┐          ┌────┴─────┐      │
-│        └───────────│ Save as  │          │  Reject  │      │
-│                    │  "best"  │          │  revert  │      │
-│                    └──────────┘          └──────────┘      │
-│                                                             │
-│   Repeat for N generations                                  │
-└─────────────────────────────────────────────────────────────┘
-```
+> `Coach.learn()` repeats this loop for N generations. Each generation produces stronger self-play data, trains a candidate network, and only promotes it if it proves stronger than the incumbent.
 
 ---
 
