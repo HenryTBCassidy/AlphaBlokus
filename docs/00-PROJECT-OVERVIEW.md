@@ -35,6 +35,24 @@ Build the full AlphaZero pipeline on a solved game to verify correctness before 
 
 **Deliverables:** Working end-to-end AlphaZero that plays competitive tic-tac-toe. Validates MCTS, training loop, arena evaluation, and reporting.
 
+### Phase 1.5: Pre-Flight Fixes 📋 Not Started
+
+Targeted fixes to bugs and performance issues found during code review. Not a refactor — surgical fixes to prevent problems during Blokus training. Full issue list in [`docs/06-PREFLIGHT-FIXES.md`](06-PREFLIGHT-FIXES.md).
+
+| Task | Priority | Notes |
+|------|----------|-------|
+| MCTS sparse action iteration | Critical | Currently iterates all 17,837 actions per simulation — must use `np.where(valids)` |
+| Fix piece orientation ID gaps | Critical | Off-by-one skip in BidirectionalDict causes wrong action↔piece mapping |
+| Fix `string_representation` return type | Critical | Returns `bytes` not `str` — potential MCTS cache issues |
+| Fix policy loss function | Critical | Not proper cross-entropy — will cause slower/unstable convergence |
+| Replace hardcoded board sizes | Critical | Literal `14` and `13` scattered across game.py instead of `self.n` |
+| Save optimizer state in checkpoints | Important | Adam momentum lost between generations |
+| Clean up arena player indexing | Important | Confusing list-offset pattern → simple dict |
+| Verify neural net input tensor shape | Important | board_x/board_y naming may be swapped |
+| Run TTT training to verify | Gate | Confirm fixes don't break the working pipeline |
+
+**Estimated effort:** 2-3 hours. Gate: tic-tac-toe training must still produce a competitive agent after fixes.
+
 ### Phase 2: Blokus Duo Implementation 🔧 In Progress
 
 Implement Blokus Duo game logic and connect it to the existing framework.
@@ -88,10 +106,11 @@ All estimates assume Claude assistance. Solo estimates would be roughly 2-2.5× 
 | Phase | Hours (Claude-assisted) | Status |
 |-------|------------------------|--------|
 | Phase 1: Tic-Tac-Toe | ~30 | ✅ Complete |
+| Phase 1.5: Pre-flight fixes | 2-3 | 📋 Not started |
 | Phase 2: Blokus Duo game logic | 8-15 | 🔧 In progress (~60% done) |
 | Phase 3: Training & optimisation | 15-25 | 📋 Not started |
 | Phase 4: Benchmarking | 8-14 | 📋 Not started |
-| **Remaining** | **~30-55** | |
+| **Remaining** | **~33-58** | |
 
 **Where the real risk is:** Phase 2 is engineering — it's tedious but predictable. Phase 3 is where things can go sideways. Self-play RL training can fail to converge, get stuck in loops, or produce agents that exploit bugs in the game logic rather than learning real strategy. Debugging a training run that "isn't learning" is qualitatively harder than debugging a function that produces wrong output. Budget extra time for Phase 3 — the estimates above assume things go reasonably well.
 
@@ -152,7 +171,6 @@ This is a genuine research-level problem — the existing literature on multi-pl
 
 - **Parallel MCTS:** Batching neural network inference across multiple MCTS simulations could dramatically speed up self-play. Root parallelisation vs leaf parallelisation trade-offs need investigation
 - **MCTS node reuse:** Currently trees are rebuilt from scratch each game. Reusing subtrees between moves would save computation
-- **Action space iteration:** MCTS currently iterates ALL 17,837 actions to find the best move. Must optimise to only iterate valid moves
 - **Board representation alternatives:** Current 14x18 encoding may not be optimal. Could experiment with separate channels for each player's pieces, remaining pieces, valid placement points
 - **Connect 4 as debugging step:** If Blokus move generation proves too difficult, Connect 4 could serve as an intermediate complexity game
 - **Regularisation:** Current loss function has no explicit regularisation term. Weight decay or L2 penalty may improve generalisation

@@ -142,6 +142,7 @@ Detailed documentation lives in the [`docs/`](docs/) folder:
 | [03 — Evaluation Plan](docs/03-EVALUATION-PLAN.md) | Training diagnostics, Elo tracking, Pentobi benchmarking |
 | [04 — Competitive Landscape](docs/04-COMPETITIVE-LANDSCAPE.md) | Pentobi, existing Blokus RL projects, why neural Blokus is hard |
 | [05 — Handoff](docs/05-HANDOFF.md) | Context for contributors, current state, next steps, gotchas |
+| [06 — Pre-Flight Fixes](docs/06-PREFLIGHT-FIXES.md) | Bugs and performance issues to fix before Blokus training |
 
 ---
 
@@ -151,6 +152,7 @@ Detailed documentation lives in the [`docs/`](docs/) folder:
 - [x] Tic-Tac-Toe implementation and validation
 - [x] Blokus Duo board representation and piece system
 - [x] Blokus Duo neural network architecture
+- [ ] Pre-flight fixes (MCTS optimisation, loss function, piece ID mapping)
 - [ ] Blokus Duo move generation with caching
 - [ ] End-to-end Blokus Duo self-play training
 - [ ] Learning rate scheduling
