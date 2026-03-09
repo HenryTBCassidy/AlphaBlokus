@@ -93,12 +93,12 @@ This should be a standalone utility function usable by the CLI, the Pentobi adap
 
 | Component | Effort | Notes |
 |-----------|--------|-------|
-| Coordinate converter (AlphaBlokus ↔ Pentobi) | ~1 hour | Straightforward mapping |
-| Action → cell list (for outgoing moves) | ~2 hours | Apply piece shape at position, collect occupied cells |
-| Cell list → Action (for incoming moves) | ~4 hours | Pattern matching against 91 orientations. Needs care |
-| Action ↔ action index encoder/decoder | ~3 hours | Currently missing from codebase (noted in preflight fixes) |
-| Board text renderer | ~1 hour | Numpy array → formatted string |
-| **Total** | **~11 hours** | |
+| Coordinate converter (AlphaBlokus ↔ Pentobi) | ~20 min | Straightforward mapping |
+| Action → cell list (for outgoing moves) | ~30 min | Apply piece shape at position, collect occupied cells |
+| Cell list → Action (for incoming moves) | ~1 hour | Pattern matching against 91 orientations. Needs care |
+| Action ↔ action index encoder/decoder | ~45 min | Currently missing from codebase (noted in preflight fixes) |
+| Board text renderer | ~15 min | Numpy array → formatted string |
+| **Total** | **~2.5 hours** | Claude-assisted estimate |
 
 ---
 
@@ -244,13 +244,13 @@ Dependencies: CMake 3.19+, C++20 compiler (GCC 12+ or Clang 15+), libatomic. No 
 
 | Component | Effort | Notes |
 |-----------|--------|-------|
-| Subprocess wrapper (spawn, send, receive, close) | ~3 hours | GTP protocol parsing, buffering |
-| Game loop (single game, alternating turns) | ~3 hours | State sync between our game and Pentobi |
-| Benchmark runner (multi-level, both colors) | ~3 hours | Parallel games, result aggregation |
-| Metric computation (Pentobi Level, Score, Weighted) | ~2 hours | From evaluation plan |
-| Heatmap / report generation | ~3 hours | Plotly heatmap from benchmark results |
-| Testing against actual Pentobi | ~4 hours | Integration debugging, edge cases |
-| **Total** | **~18 hours** | |
+| Subprocess wrapper (spawn, send, receive, close) | ~30 min | GTP protocol parsing, buffering |
+| Game loop (single game, alternating turns) | ~45 min | State sync between our game and Pentobi |
+| Benchmark runner (multi-level, both colors) | ~30 min | Parallel games, result aggregation |
+| Metric computation (Pentobi Level, Score, Weighted) | ~20 min | From evaluation plan |
+| Heatmap / report generation | ~30 min | Plotly heatmap from benchmark results |
+| Testing against actual Pentobi | ~1.5 hours | Integration debugging, edge cases |
+| **Total** | **~4 hours** | Claude-assisted estimate |
 
 ---
 
@@ -323,13 +323,13 @@ This same interface is used by:
 
 | Component | Effort | Notes |
 |-----------|--------|-------|
-| Board renderer (grid, pieces, highlighting) | ~4 hours | Pygame drawing primitives |
-| Piece palette (selection, rotation, flip preview) | ~6 hours | Interaction design is the hard part |
-| Legal move computation + highlighting | ~3 hours | Reuse existing game logic |
-| Game loop (human + AI turns, threading) | ~4 hours | Background MCTS thread |
-| Info panel (scores, move history) | ~2 hours | Text rendering |
-| Polish (animations, sounds, start screen) | ~4 hours | Optional but nice |
-| **Total** | **~23 hours** | |
+| Board renderer (grid, pieces, highlighting) | ~45 min | Pygame drawing primitives |
+| Piece palette (selection, rotation, flip preview) | ~1.5 hours | Interaction design is the hard part |
+| Legal move computation + highlighting | ~30 min | Reuse existing game logic |
+| Game loop (human + AI turns, threading) | ~45 min | Background MCTS thread |
+| Info panel (scores, move history) | ~20 min | Text rendering |
+| Polish (animations, sounds, start screen) | ~1.5 hours | Optional but nice. Iterative with user feedback |
+| **Total** | **~5.5 hours** | Claude-assisted estimate |
 
 ---
 
@@ -338,19 +338,19 @@ This same interface is used by:
 These three components have clear dependencies:
 
 ```
-Phase A: Translation Layer (~11 hours)
+Phase A: Translation Layer (~2.5 hours)
   ├── Coordinate conversion
   ├── Action ↔ cell list conversion
   ├── Action ↔ action index encoding (preflight fix)
   └── Board text renderer
 
-Phase B: Pentobi Adapter (~18 hours, depends on A)
+Phase B: Pentobi Adapter (~4 hours, depends on A)
   ├── Build pentobi-gtp from source
   ├── GTP subprocess wrapper
   ├── Game loop + benchmark runner
   └── Metric computation + heatmap
 
-Phase C: Pygame UI (~23 hours, depends on A)
+Phase C: Pygame UI (~5.5 hours, depends on A)
   ├── Board renderer
   ├── Piece interaction
   ├── Game controller with AI threading
@@ -359,7 +359,7 @@ Phase C: Pygame UI (~23 hours, depends on A)
 
 Phases B and C are independent of each other — both depend only on Phase A. The translation layer is the foundation and should be built first.
 
-**Total effort: ~52 hours across all three phases.**
+**Total effort: ~12 hours across all three phases** (Claude-assisted). Your time is mostly reviewing output and testing integration with actual Pentobi.
 
 ---
 
