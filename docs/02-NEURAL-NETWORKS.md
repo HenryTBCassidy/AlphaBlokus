@@ -24,6 +24,37 @@ AlphaBlokus uses two neural network architectures: a simple **4-layer CNN** for 
 
 ---
 
+## Blokus in Context: AlphaZero's Original Games
+
+How does Blokus Duo stack up against the games AlphaZero was built for? This table compares the neural network architectures from the [AlphaZero paper](https://www.science.org/doi/10.1126/science.aar6404) (Chess and Go) against AlphaBlokus's planned configuration.
+
+| Property | Chess (AlphaZero) | Go (AlphaZero) | Blokus Duo (Ours) |
+|----------|-------------------|----------------|-------------------|
+| Board size | 8 × 8 | 19 × 19 | 14 × 14 |
+| Input encoding | 8 × 8 × 119 planes | 19 × 19 × 17 planes | 14 × 18 × 1 plane |
+| Input features | 8 time steps of piece positions, castling rights, en passant, move counts | 8 time steps of stone positions + colour to play | Current board state + remaining pieces per player |
+| Action space | 4,672 (8×8×73) | 362 (19×19 + pass) | 17,837 (14×14×91 + pass) |
+| Residual blocks | 20 | 20 | 1–8 (configurable) |
+| Channels per layer | 256 | 256 | 512 |
+| Parameters (approx.) | ~45M | ~24M | ~28M (4 blocks) |
+| Policy head output | 4,672 logits | 362 logits | 17,837 logits |
+| Value head output | Scalar ∈ [-1, 1] | Scalar ∈ [-1, 1] | Scalar ∈ [-1, 1] |
+| Training hardware | 5,000 TPUs | 5,000 TPUs | Consumer GPU |
+| Training time | 9 hours | 13 days | TBD |
+| MCTS sims/move | 800 | 800 | 200+ (configurable) |
+
+### What Stands Out
+
+**Blokus has the largest action space by far.** At 17,837 possible actions, Blokus Duo's action space is ~4× Chess and ~49× Go. This is because every combination of grid position (196) × piece-orientation (91) is a distinct action. The policy head's final FC layer (504 → 17,837 ≈ 9M params) is a direct consequence — it's the single most expensive layer in the network.
+
+**Go has a much deeper network for a smaller action space.** AlphaZero uses 20 residual blocks for both Chess and Go, versus our 1–8. The deeper architecture compensates for Go's enormous state space (19×19 board, ~10^170 legal positions) — the network needs more capacity to evaluate positions, even though the number of possible moves per turn is relatively small.
+
+**AlphaZero uses richer input encodings.** Chess encodes the last 8 board positions (119 planes per position), giving the network temporal context about how the game has evolved. Our Blokus encoding uses a single plane with piece tracking columns — simpler, but the network can't see move history. This is a deliberate trade-off: multi-plane history encoding would increase the input from 14×18×1 to something like 14×14×N, significantly increasing the first conv layer's parameter count.
+
+**Compute budget is the real gap.** AlphaZero trained Chess on 5,000 first-generation TPUs for 9 hours (~44,000 TPU-hours). We're targeting a single consumer GPU. This means fewer MCTS simulations per move (200 vs 800), fewer self-play games per generation, and longer wall-clock training times. The configurable ResNet depth (1–8 blocks vs AlphaZero's fixed 20) is a concession to this — we start shallow and scale up as needed.
+
+---
+
 ## Tic-Tac-Toe CNN (`AlphaTicTacToe`)
 
 ### Purpose
