@@ -338,7 +338,7 @@ The mapping is built by `PieceManager.populate_lookup()` in `blokusduo/pieces.py
 | Y | 20 | 8 | 79–86 |
 | Z | 21 | 4 | 87–90 |
 
-**Note:** The IDs above assume contiguous 0-indexed assignment. The current codebase uses 1-indexed IDs with a known off-by-one gap between pieces (see [Pre-Flight Fixes §2](06-PREFLIGHT-FIXES.md)). After the fix, the mapping will be exactly as shown above.
+**Note:** The IDs above assume contiguous 0-indexed assignment. The current codebase uses 1-indexed IDs with a known off-by-one gap between pieces (see [Architecture Review §7](04-ARCHITECTURE-REVIEW.md)). After the fix, the mapping will be exactly as shown above.
 
 ---
 

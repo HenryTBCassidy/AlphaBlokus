@@ -204,8 +204,9 @@ Multiplying the board by the current player's value means "my pieces" are always
 | `docs/00-PROJECT-OVERVIEW.md` | Mission, phases, decisions log | Understanding the big picture |
 | `docs/01-ALGORITHMS.md` | MCTS, self-play, caching strategies | Before working on MCTS optimisation |
 | `docs/02-NEURAL-NETWORKS.md` | ResNet architecture, loss functions | Before touching neural network code |
-| `docs/03-EVALUATION-PLAN.md` | Metrics, Pentobi benchmarking, success criteria | Before training or evaluation work |
-| `docs/04-COMPETITIVE-LANDSCAPE.md` | Existing Blokus AI projects | Understanding what's been tried |
+| `docs/03-COMPETITIVE-LANDSCAPE.md` | Existing Blokus AI projects | Understanding what's been tried |
+| `docs/04-ARCHITECTURE-REVIEW.md` | Code review, profiling plan, compute strategy | Before fixing bugs or optimising |
+| `docs/05-EVALUATION-PLAN.md` | Metrics, Pentobi benchmarking, success criteria | Before training or evaluation work |
 | `eval.ipynb` | Move generation design scratchpad | Before implementing `valid_moves()` |
 | `run_configurations/full_run.json` | Production training config | Before running training |
 | `blokusduo/pieces.json` | All 21 piece definitions | Before working on piece-related logic |

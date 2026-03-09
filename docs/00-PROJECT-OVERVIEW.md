@@ -35,23 +35,25 @@ Build the full AlphaZero pipeline on a solved game to verify correctness before 
 
 **Deliverables:** Working end-to-end AlphaZero that plays competitive tic-tac-toe. Validates MCTS, training loop, arena evaluation, and reporting.
 
-### Phase 1.5: Pre-Flight Fixes 📋 Not Started
+### Phase 1.5: Architecture Review & Fixes 📋 Not Started
 
-Targeted fixes to bugs and performance issues found during code review. Not a refactor — surgical fixes to prevent problems during Blokus training. Full issue list in [`docs/06-PREFLIGHT-FIXES.md`](06-PREFLIGHT-FIXES.md).
+Comprehensive code review and targeted fixes before Blokus training. Covers interface contracts, MCTS performance, board representation, training pipeline, naming, and missing infrastructure. Full review in [`docs/04-ARCHITECTURE-REVIEW.md`](04-ARCHITECTURE-REVIEW.md).
 
 | Task | Priority | Notes |
 |------|----------|-------|
+| Fix interface type mismatches | Critical | BlokusDuoGame methods don't conform to IGame protocol — will crash at runtime |
 | MCTS sparse action iteration | Critical | Currently iterates all 17,837 actions per simulation — must use `np.where(valids)` |
+| Build action encoding/decoding layer | Critical | No conversion between action indices (NN output) and Action dataclass (game logic) |
+| Fix boundary check off-by-one bugs | Critical | `no_sides()` doesn't check row 0 / column 0 neighbours |
 | Fix piece orientation ID gaps | Critical | Off-by-one skip in BidirectionalDict causes wrong action↔piece mapping |
-| Fix `string_representation` return type | Critical | Returns `bytes` not `str` — potential MCTS cache issues |
-| Fix policy loss function | Critical | Not proper cross-entropy — will cause slower/unstable convergence |
+| Fix NNetWrapper constructor mismatch | Critical | BlokusDuo wrapper signature doesn't match interface — Coach will crash |
 | Replace hardcoded board sizes | Critical | Literal `14` and `13` scattered across game.py instead of `self.n` |
-| Save optimizer state in checkpoints | Important | Adam momentum lost between generations |
-| Clean up arena player indexing | Important | Confusing list-offset pattern → simple dict |
-| Verify neural net input tensor shape | Important | board_x/board_y naming may be swapped |
+| Fix optimizer reset + checkpoint state | Important | Adam momentum lost between epochs and between generations |
+| Build profiling instrumentation | Important | MCTS timing, memory tracking, throughput metrics, HTML profiling report |
+| Add learning rate schedule | Important | Fixed 0.001 for all generations — need cosine annealing or step decay |
 | Run TTT training to verify | Gate | Confirm fixes don't break the working pipeline |
 
-**Estimated effort:** 2-3 hours. Gate: tic-tac-toe training must still produce a competitive agent after fixes.
+**Estimated effort:** Critical fixes ~3 hours, important fixes ~5.5 hours. Gate: tic-tac-toe training must still produce a competitive agent after fixes.
 
 ### Phase 2: Blokus Duo Implementation 🔧 In Progress
 

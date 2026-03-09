@@ -96,7 +96,7 @@ This should be a standalone utility function usable by the CLI, the Pentobi adap
 | Coordinate converter (AlphaBlokus ↔ Pentobi) | ~20 min | Straightforward mapping |
 | Action → cell list (for outgoing moves) | ~30 min | Apply piece shape at position, collect occupied cells |
 | Cell list → Action (for incoming moves) | ~1 hour | Pattern matching against 91 orientations. Needs care |
-| Action ↔ action index encoder/decoder | ~45 min | Currently missing from codebase (noted in preflight fixes) |
+| Action ↔ action index encoder/decoder | ~45 min | Currently missing from codebase (noted in architecture review §10) |
 | Board text renderer | ~15 min | Numpy array → formatted string |
 | **Total** | **~2.5 hours** | Claude-assisted estimate |
 
@@ -341,7 +341,7 @@ These three components have clear dependencies:
 Phase A: Translation Layer (~2.5 hours)
   ├── Coordinate conversion
   ├── Action ↔ cell list conversion
-  ├── Action ↔ action index encoding (preflight fix)
+  ├── Action ↔ action index encoding (architecture review fix)
   └── Board text renderer
 
 Phase B: Pentobi Adapter (~4 hours, depends on A)

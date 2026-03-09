@@ -139,12 +139,12 @@ Detailed documentation lives in the [`docs/`](docs/) folder:
 | [00 — Project Overview](docs/00-PROJECT-OVERVIEW.md) | Mission, phased approach, key decisions, effort estimates |
 | [01 — Algorithms](docs/01-ALGORITHMS.md) | MCTS implementation, self-play, arena evaluation, caching strategies |
 | [02 — Neural Networks](docs/02-NEURAL-NETWORKS.md) | ResNet and CNN architectures, board encoding, loss functions |
-| [03 — Evaluation Plan](docs/03-EVALUATION-PLAN.md) | Training diagnostics, Elo tracking, Pentobi benchmarking |
-| [04 — Competitive Landscape](docs/04-COMPETITIVE-LANDSCAPE.md) | Pentobi, existing Blokus RL projects, why neural Blokus is hard |
-| [05 — Handoff](docs/05-HANDOFF.md) | Context for contributors, current state, next steps, gotchas |
-| [06 — Pre-Flight Fixes](docs/06-PREFLIGHT-FIXES.md) | Bugs and performance issues to fix before Blokus training |
-| [07 — Appendix: Pieces](docs/07-APPENDIX-PIECES.md) | All 21 Blokus pieces, 91 orientations, symmetry analysis |
-| [08 — External Interfaces](docs/08-EXTERNAL-INTERFACES.md) | Pentobi GTP adapter, human-playable UI, translation layer |
+| [03 — Competitive Landscape](docs/03-COMPETITIVE-LANDSCAPE.md) | Pentobi, existing Blokus RL projects, why neural Blokus is hard |
+| [04 — Architecture Review](docs/04-ARCHITECTURE-REVIEW.md) | Comprehensive code review: interfaces, performance, profiling, compute strategy |
+| [05 — Evaluation Plan](docs/05-EVALUATION-PLAN.md) | Training diagnostics, Pentobi benchmarking, headline metrics |
+| [06 — External Interfaces](docs/06-EXTERNAL-INTERFACES.md) | Pentobi GTP adapter, human-playable UI, translation layer |
+| [07 — Handoff](docs/07-HANDOFF.md) | Context for contributors, current state, next steps, gotchas |
+| [08 — Appendix: Pieces](docs/08-APPENDIX-PIECES.md) | All 21 Blokus pieces, 91 orientations, symmetry analysis |
 
 ---
 
