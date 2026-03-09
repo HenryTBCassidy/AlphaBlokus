@@ -143,6 +143,7 @@ Detailed documentation lives in the [`docs/`](docs/) folder:
 | [04 — Competitive Landscape](docs/04-COMPETITIVE-LANDSCAPE.md) | Pentobi, existing Blokus RL projects, why neural Blokus is hard |
 | [05 — Handoff](docs/05-HANDOFF.md) | Context for contributors, current state, next steps, gotchas |
 | [06 — Pre-Flight Fixes](docs/06-PREFLIGHT-FIXES.md) | Bugs and performance issues to fix before Blokus training |
+| [07 — Appendix: Pieces](docs/07-APPENDIX-PIECES.md) | All 21 Blokus pieces, 91 orientations, symmetry analysis |
 
 ---
 
