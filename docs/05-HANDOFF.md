@@ -187,7 +187,7 @@ Multiplying the board by the current player's value means "my pieces" are always
 
 - **Don't rewrite the framework.** MCTS, Coach, Arena work correctly — they're validated on Tic-Tac-Toe. Focus on completing the Blokus game logic
 - **Don't over-engineer move generation.** Get it working correctly first, optimise second. A correct but slow `valid_moves()` is infinitely better than a fast but buggy one
-- **Don't add 4-player Blokus support.** Duo is a two-player zero-sum game that fits AlphaZero perfectly. 4-player would require fundamental changes (coalition dynamics, non-zero-sum)
+- **Don't add 4-player Blokus support until Duo beats Pentobi level 9.** It's a stretch goal, not a current priority. 4-player would require fundamental changes (coalition dynamics, non-zero-sum) — see `docs/00-PROJECT-OVERVIEW.md` for details
 - **Don't switch to Transformer/Mamba/ViT.** ResNet is proven for AlphaZero. Novel architectures are research risk we don't need
 - **Don't implement learning rate scheduling before the first successful training run.** Get the basics working, then refine
 - **Don't build a web UI.** The HTML reporting that already exists is sufficient for analysis
