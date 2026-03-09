@@ -10,16 +10,23 @@ AlphaBlokus implements three tightly coupled algorithms that form the AlphaZero 
 
 These are orchestrated by the **Coach**, which runs the full loop: self-play → training → arena → accept/reject.
 
-```mermaid
-graph LR
-    A["🎮 Self-Play<br/><i>MCTS + network</i>"] --> B["🧠 Training<br/><i>gradient descent</i>"]
-    B --> C{"⚔️ Arena<br/>win% ≥ 55%?"}
-    C -- "Yes" --> D["✅ Accept<br/><i>save as best</i>"]
-    C -- "No" --> E["❌ Reject<br/><i>revert to old</i>"]
-    D --> A
-    E --> A
 ```
-> `Coach.learn()` repeats this loop for N generations. Each generation produces stronger self-play data, trains a candidate network, and only promotes it if it proves stronger than the incumbent.
+Coach.learn() — one generation:
+
+  Self-Play ──────> Training ──────> Arena
+  (MCTS + net)      (SGD)            (new vs old, both w/ MCTS)
+                                          │
+                                     win% ≥ 55%?
+                                      /        \
+                                    Yes          No
+                                     │            │
+                                  Accept        Reject
+                                (save new)    (keep old)
+                                     \          /
+                                      ┗━━━━━━━┛
+                                          │
+                                    Next generation
+```
 
 ---
 
