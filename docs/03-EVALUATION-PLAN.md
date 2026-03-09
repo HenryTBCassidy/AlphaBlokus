@@ -2,17 +2,18 @@
 
 ## Overview
 
-Evaluation for AlphaBlokus operates at three levels:
+Evaluation for AlphaBlokus operates at two levels:
 
-1. **Training diagnostics** — Is the network actually learning? Loss curves, policy accuracy, value calibration
-2. **Generational strength tracking** — Is each new generation stronger? Elo estimation from arena results
-3. **External benchmarking** — Can we beat Pentobi? Systematic evaluation against the strongest open-source Blokus AI
+1. **Training diagnostics** — Is the network actually learning? Loss curves, policy accuracy, value calibration, internal BayesElo, arena results. Cheap signals computed every generation.
+2. **Pentobi benchmarking** — How strong is the network in absolute terms? Win rates against Pentobi's 9 difficulty levels, composite scores, and the headline "Pentobi Level" metric. Expensive but meaningful, run periodically.
 
-The AlphaZero paper (Silver et al., 2017) demonstrated that self-play training produces a monotonically increasing Elo curve. Replicating this curve is the primary signal that the system is working correctly.
+AlphaZero (Silver et al., 2017) used BayesElo from self-play arena results as a continuous training health monitor, but grounded its headline strength claims in external matches against Stockfish and Elmo. We follow the same philosophy: internal Elo tracks training progress, Pentobi results measure real strength.
 
 ---
 
 ## 1. Training Diagnostics
+
+These metrics are computed every generation and are cheap — they use data the training loop already produces. Their purpose is answering "is training working?" not "how strong is the model?"
 
 ### Loss Monitoring
 
@@ -54,29 +55,7 @@ The value head should be well-calibrated: when it predicts v=0.7, the current pl
 | Calibration curve | Binned predicted v vs actual win rate | Monotonically increasing, close to diagonal |
 | Mean absolute error | Average \|v_pred - v_actual\| | <0.5 |
 
-### Training Timing
-
-Each phase of the training loop should be timed to identify bottlenecks:
-
-| Phase | Metric | Expected Bottleneck |
-|-------|--------|-------------------|
-| Self-play (per game) | seconds/game | MCTS simulations × neural net inference |
-| Self-play (per generation) | minutes/generation | num_eps × seconds/game |
-| Neural net training | seconds/epoch | Forward/backward pass, data loading |
-| Arena evaluation | minutes/evaluation | num_arena_matches × seconds/game |
-| Total generation | minutes/generation | Sum of all phases |
-
-The existing framework saves timing data to `{run_directory}/Timings/`. Key optimisation targets:
-
-1. **MCTS simulation speed** — currently the bottleneck. Iterates all 17,837 actions per simulation
-2. **Neural net inference latency** — called once per MCTS simulation. Batching would amortise this
-3. **Self-play parallelism** — games are independent and could run in parallel (not yet implemented)
-
----
-
-## 2. Generational Strength Tracking
-
-### Arena Win Rates
+### Arena Results
 
 After each training generation, the new network plays the previous best in an arena:
 
@@ -99,9 +78,9 @@ Track per generation:
 - 100% win rate for new network → generations too far apart in strength, reduce training epochs
 - ~50% win rate → network not improving meaningfully per generation
 
-### Elo Rating System
+### Internal BayesElo
 
-Compute an Elo rating for each generation to produce the characteristic AlphaZero training curve:
+Compute a BayesElo rating for each generation as a cheap, continuous progress signal. AlphaZero used the same approach — BayesElo from self-play arena results — to produce the characteristic monotonically increasing training curve.
 
 ```
 After each arena match between generation i and generation j:
@@ -116,6 +95,8 @@ R_i_new = R_i + K × (S_i - E_i)            # Update rating
 | Initial Elo | 1000 | Arbitrary baseline for generation 0 |
 | K-factor | 32 | Standard for provisional ratings |
 | Draws | 0.5 | Standard Elo draw handling |
+
+**Important caveats:** Internal BayesElo is a *relative* measure with an arbitrary baseline. The numbers are not comparable to chess Elo, Pentobi Elo, or any external rating system. A BayesElo of 1800 in our system means nothing except "800 points stronger than generation 0." Its only purpose is tracking whether training is progressing — if the curve flattens for 10+ generations, something is wrong.
 
 **Expected trajectory:**
 - Generations 1-10: Rapid Elo gain (learning basic moves)
@@ -133,22 +114,29 @@ As the network improves, game characteristics should change:
 | Score differential | High variance | Medium | Lower (closer games) |
 | Pass frequency | High (can't find moves) | Medium | Low (efficient piece usage) |
 
-### Visualisation
+### Training Timing
 
-Generate an interactive HTML report (using Plotly) per training run:
+Each phase of the training loop should be timed to identify bottlenecks:
 
-1. **Elo curve** — Elo rating vs generation number. The money plot
-2. **Loss curves** — π_loss and v_loss vs generation, with per-epoch detail
-3. **Arena results** — Stacked bar chart of W/L/D per generation
-4. **Timing breakdown** — Stacked area chart of time spent in each phase
-5. **Game statistics** — Average game length, pieces placed, score differential over time
-6. **Policy entropy** — Average entropy of π over generations (should decrease)
+| Phase | Metric | Expected Bottleneck |
+|-------|--------|-------------------|
+| Self-play (per game) | seconds/game | MCTS simulations × neural net inference |
+| Self-play (per generation) | minutes/generation | num_eps × seconds/game |
+| Neural net training | seconds/epoch | Forward/backward pass, data loading |
+| Arena evaluation | minutes/evaluation | num_arena_matches × seconds/game |
+| Total generation | minutes/generation | Sum of all phases |
 
-The reporting infrastructure already exists in the framework (`{run_directory}/Reporting/`).
+The existing framework saves timing data to `{run_directory}/Timings/`. Key optimisation targets:
+
+1. **MCTS simulation speed** — currently the bottleneck. Iterates all 17,837 actions per simulation
+2. **Neural net inference latency** — called once per MCTS simulation. Batching would amortise this
+3. **Self-play parallelism** — games are independent and could run in parallel (not yet implemented)
 
 ---
 
-## 3. External Benchmarking (Pentobi)
+## 2. Pentobi Benchmarking
+
+This is the primary evaluation — the section that answers "how good is the model?" in absolute terms.
 
 ### Why Pentobi?
 
@@ -159,20 +147,21 @@ Pentobi is the strongest open-source Blokus AI:
 - Supports GTP (Go Text Protocol) for automated play
 - Available at: https://pentobi.sourceforge.io/
 
+There is no established competitive Blokus Duo rating system (unlike chess with its FIDE Elo). Pentobi's 9 difficulty levels are the best available external strength anchor for the game.
+
 ### Benchmark Protocol
 
 ```
 For each difficulty level d ∈ {1, 2, ..., 9}:
-    For each evaluation round:
-        Play 100 games:
-            50 as White (AlphaBlokus starts)
-            50 as Black (Pentobi starts)
+    Play 100 games:
+        50 as White (AlphaBlokus starts)
+        50 as Black (Pentobi starts)
 
-        Record:
-            - Win/loss/draw counts by side
-            - Score differentials
-            - Average game length
-            - Average pieces placed
+    Record:
+        - Win/loss/draw counts by side
+        - Score differentials
+        - Average game length
+        - Average pieces placed
 
     Report:
         - Overall win rate with 95% CI
@@ -180,21 +169,74 @@ For each difficulty level d ∈ {1, 2, ..., 9}:
         - Score distribution
 ```
 
+Run Pentobi benchmarks every 10-20 generations during training to track absolute strength improvement over time.
+
+### Headline Metrics
+
+Four metrics summarise Pentobi benchmark results. Together they give a complete picture at a glance.
+
+#### Pentobi Level (the headline number)
+
+**Highest Pentobi level beaten at >50% win rate over 100 games.**
+
+Integer from 0 to 9. When someone asks "how strong is your model?", you say "it beats Pentobi level 7." This is the Blokus equivalent of "AlphaZero reached superhuman Elo" — except grounded in an actual opponent rather than an arbitrary number.
+
+The >50% threshold is correct for benchmarking (the model wins more than it loses). This is distinct from the 55% acceptance threshold used during training, where a margin of safety avoids accepting noise. For borderline cases, see the statistical significance section below.
+
+#### Pentobi Score (equal-weight composite)
+
+**Total wins across all levels / total games across all levels.**
+
+Range: 0.0 to 1.0. This treats a win at level 1 with the same weight as a win at level 9. The key property: a *loss* at level 1 is implicitly terrible (because level 1 is easy), while a loss at level 9 is expected. The metric naturally captures this asymmetry without any weighting.
+
+```
+Example: 100 games per level, results = [100, 100, 100, 80, 60, 30, 10, 2, 0] wins
+
+Pentobi Score = (100+100+100+80+60+30+10+2+0) / 900 = 0.536
+```
+
+This number increases monotonically with improvement and requires no arbitrary weight choices.
+
+#### Pentobi Weighted Score (difficulty-weighted composite)
+
+**Σ(level × wins_at_level) / Σ(level × games_at_level)**
+
+Range: 0.0 to 1.0. Uses the level number (1-9) as a natural weight, emphasising performance against harder opponents. This differentiates two models that both have a Pentobi Score of 0.5 but where one dominates levels 1-4 while the other spreads wins across all levels.
+
+```
+Same example: wins = [100, 100, 100, 80, 60, 30, 10, 2, 0]
+
+Numerator   = 1(100) + 2(100) + 3(100) + 4(80) + 5(60) + 6(30) + 7(10) + 8(2) + 9(0) = 1486
+Denominator = 1(100) + 2(100) + 3(100) + 4(100) + 5(100) + 6(100) + 7(100) + 8(100) + 9(100) = 4500
+
+Pentobi Weighted Score = 1486 / 4500 = 0.330
+```
+
+#### Win-Rate Profile (per-level detail)
+
+**Win rate at each Pentobi level individually, as a 9-element vector.**
+
+```
+Example: [1.00, 1.00, 1.00, 0.80, 0.60, 0.30, 0.10, 0.02, 0.00]
+```
+
+This is the raw input to the other metrics and is valuable on its own — it tells you exactly where the model's strength frontier lies.
+
 ### Difficulty Ladder
 
-Approach Pentobi evaluation as a ladder — don't skip ahead:
+Approach Pentobi evaluation as a ladder. The target win rates below represent approximate milestones — the >50% threshold in "Pentobi Level" is the formal definition of "beaten."
 
-| Level | Pentobi Strength | Target Win Rate | Estimated Elo |
-|-------|-----------------|----------------|---------------|
-| 1 | Beginner | >90% | ~800 |
-| 2 | Easy | >85% | ~1000 |
-| 3 | Below Average | >75% | ~1200 |
-| 4 | Average | >65% | ~1400 |
-| 5 | Above Average | >60% | ~1600 |
-| 6 | Strong | >55% | ~1800 |
-| 7 | Very Strong | >50% | ~2000 |
-| 8 | Expert | >45% | ~2200 |
-| 9 | Maximum | Win majority of 100 | ~2400+ |
+| Level | Pentobi Strength | Milestone Win Rate |
+|-------|-----------------|-------------------|
+| 1 | Beginner | >90% |
+| 2 | Easy | >85% |
+| 3 | Below Average | >75% |
+| 4 | Average | >65% |
+| 5 | Above Average | >60% |
+| 6 | Strong | >55% |
+| 7 | Very Strong | >50% |
+| 8 | Expert | >50% |
+| 9 | Maximum | >50% |
 
 **The ultimate goal: beat Pentobi level 9 in a majority of 100 games.**
 
@@ -234,46 +276,45 @@ At p=0.60 (60% win rate), n=100:
 CI = 0.60 ± 0.096 = [0.504, 0.696]
 ```
 
-A 55% win rate over 100 games is **not** statistically significant at the 95% level (CI includes 50%). To be confident:
-- 60% win rate over 100 games → significant
+A 55% win rate over 100 games is **not** statistically significant at the 95% level (the CI includes 50%). To be confident:
+- 60% win rate over 100 games → significant (CI lower bound > 50%)
 - 55% win rate would need ~400 games for significance
 - Consider increasing to 200+ games for borderline results
 
-### Elo Estimation vs Pentobi
-
-Once we have win rates against multiple Pentobi levels, estimate our network's absolute Elo:
-
-```
-For each Pentobi level L with estimated Elo R_L and observed win rate p:
-    R_network = R_L - 400 × log10((1 - p) / p)
-
-Average across levels for final estimate.
-```
+For the "Pentobi Level" metric, if the win rate is between 50-60% over 100 games, run additional games to confirm. A clear >60% needs no further validation.
 
 ---
 
-## Evaluation Matrix
+## 3. Visualisation
 
-The full evaluation produces a matrix:
+Generate an interactive HTML report (using Plotly) per training run. The reporting infrastructure already exists in the framework (`{run_directory}/Reporting/`).
 
-```
-                    Generation
-                 1   5   10  20  50  100
-Metric          ┌───┬───┬───┬───┬───┬───┐
-Elo             │   │   │   │   │   │   │
-Policy loss     │   │   │   │   │   │   │
-Value loss      │   │   │   │   │   │   │
-Top-1 accuracy  │   │   │   │   │   │   │
-Game length     │   │   │   │   │   │   │
-Pentobi L1      │   │   │   │   │   │   │
-Pentobi L3      │   │   │   │   │   │   │
-Pentobi L5      │   │   │   │   │   │   │
-Pentobi L7      │   │   │   │   │   │   │
-Pentobi L9      │   │   │   │   │   │   │
-                └───┴───┴───┴───┴───┴───┘
-```
+### Pentobi Heatmap (the money plot)
 
-Evaluate against Pentobi periodically during training (e.g., every 10-20 generations) to track absolute strength improvement alongside the internal Elo curve.
+A heatmap showing win rates against Pentobi across training:
+- **X-axis:** Generation number (sampled every 10-20 generations)
+- **Y-axis:** Pentobi levels 1-9
+- **Cell colour:** Win rate (white = 0%, dark green = 100%)
+
+This is the single most information-dense visualisation. You immediately see the "frontier" of which levels the model can beat expanding rightward and upward over training time. Every cell is meaningful — "generation 40 beats level 5 at 72%."
+
+Annotate each cell with the win rate percentage for readability.
+
+### Pentobi Composite Scores (line chart)
+
+Overlay three lines on a single chart, all against generation number:
+- **Pentobi Level** (integer 0-9, stepped line, right y-axis)
+- **Pentobi Score** (0.0-1.0, solid line, left y-axis)
+- **Pentobi Weighted Score** (0.0-1.0, dashed line, left y-axis)
+
+### Training Diagnostics (secondary plots)
+
+1. **BayesElo curve** — Internal Elo vs generation number. A sanity check that training is progressing between Pentobi evaluations
+2. **Loss curves** — π_loss and v_loss vs generation, with per-epoch detail on hover
+3. **Arena results** — Stacked bar chart of W/L/D per generation
+4. **Timing breakdown** — Stacked area chart of time spent in each phase
+5. **Game statistics** — Average game length, pieces placed, score differential over time
+6. **Policy entropy** — Average entropy of π over generations (should decrease)
 
 ---
 
@@ -283,17 +324,17 @@ The original AlphaZero paper provides useful reference points for expected train
 
 | Observation | AlphaZero (Chess) | AlphaBlokus (Expected) |
 |-------------|-------------------|----------------------|
-| Elo at generation 0 | ~800 | ~500 (random play) |
-| Elo at generation 100 | ~2500 | Unknown |
 | Training games to converge | ~44M | Much fewer (simpler game) |
 | Loss convergence | ~200k training steps | Faster (smaller state space than Go/Chess) |
 | Policy accuracy plateau | ~55% top-1 | Higher expected (fewer "equally good" moves) |
+| Internal BayesElo trajectory | Monotonically increasing | Same expected |
 
 Key differences from AlphaZero's original setup:
 - **No parallel MCTS** — single-threaded self-play is much slower
 - **Smaller network** — AlphaZero Chess used 20 residual blocks, 256 channels. We start with 4 blocks, 512 channels
-- **Smaller action space than Go** (17,837 vs 362 for Chess vs 362 for Go) — but many actions are geometrically invalid, so effective branching factor may be comparable
+- **Larger action space** (17,837 vs 4,672 for Chess) — but many actions are geometrically invalid, so effective branching factor may be comparable
 - **No transposition tables** — current MCTS rebuilds from scratch each move
+- **Different external benchmark** — AlphaZero had Stockfish (with known FIDE Elo). We have Pentobi (no established rating system, but 9 calibrated difficulty levels)
 
 ---
 
@@ -306,13 +347,14 @@ Key differences from AlphaZero's original setup:
 - [ ] Arena accepts at least one new network in the first 10 generations
 
 ### Phase 3 (Training) — "It Learns"
-- [ ] Monotonically increasing Elo curve (with noise)
-- [ ] Beats Pentobi level 1 within 20 generations
-- [ ] Beats Pentobi level 5 within 50 generations
+- [ ] Monotonically increasing BayesElo curve (with noise)
+- [ ] Pentobi Level >= 1 within 20 generations
+- [ ] Pentobi Level >= 5 within 50 generations
 - [ ] Training throughput > 10 games/hour
 
 ### Phase 4 (Benchmarking) — "It's Strong"
-- [ ] Beats Pentobi level 7 in majority of 100 games
-- [ ] Beats Pentobi level 9 in majority of 100 games (stretch goal)
-- [ ] Clean Elo curve in final report
+- [ ] Pentobi Level >= 7
+- [ ] Pentobi Level = 9 (stretch goal)
+- [ ] Pentobi Score > 0.7
+- [ ] Clean Pentobi heatmap showing progressive frontier expansion
 - [ ] ECE < 0.05 for value predictions (calibration)
