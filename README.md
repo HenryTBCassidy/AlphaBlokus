@@ -130,6 +130,21 @@ python main.py --config run_configurations/test_run.json
 
 ---
 
+## Documentation
+
+Detailed documentation lives in the [`docs/`](docs/) folder:
+
+| Document | Description |
+|----------|-------------|
+| [00 — Project Overview](docs/00-PROJECT-OVERVIEW.md) | Mission, phased approach, key decisions, effort estimates |
+| [01 — Algorithms](docs/01-ALGORITHMS.md) | MCTS implementation, self-play, arena evaluation, caching strategies |
+| [02 — Neural Networks](docs/02-NEURAL-NETWORKS.md) | ResNet and CNN architectures, board encoding, loss functions |
+| [03 — Evaluation Plan](docs/03-EVALUATION-PLAN.md) | Training diagnostics, Elo tracking, Pentobi benchmarking |
+| [04 — Competitive Landscape](docs/04-COMPETITIVE-LANDSCAPE.md) | Pentobi, existing Blokus RL projects, why neural Blokus is hard |
+| [05 — Handoff](docs/05-HANDOFF.md) | Context for contributors, current state, next steps, gotchas |
+
+---
+
 ## Roadmap
 
 - [x] Core AlphaZero framework (MCTS, Coach, Arena)
