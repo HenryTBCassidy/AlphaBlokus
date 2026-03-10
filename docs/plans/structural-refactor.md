@@ -472,7 +472,7 @@ Items ordered to minimise merge pain. Each row = one commit.
 |---|------|---------|--------|----------|------|
 | S1 | Create `pyproject.toml` + uv setup | §1 | 30 min | High | ✅ |
 | S2 | Reorganise into `games/` directory | §2 | 45 min | High | ✅ |
-| S15 | Fix JSON config booleans | §4 | 10 min | Medium | |
+| S15 | Fix JSON config booleans | §4 | 10 min | Medium | ✅ |
 | S6 | Extract BaseNNetWrapper | §5 | 1 hour | High | |
 | S3 | Switch to loguru | §3 | 30 min | High | |
 | S7 | Clean up / delete utils.py | §5 | 15 min | Medium | |
