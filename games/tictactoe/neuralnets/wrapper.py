@@ -16,8 +16,8 @@ from tqdm import tqdm
 
 from core.config import RunConfig, LOGGER_NAME
 from core.interfaces import INeuralNetWrapper
-from tictactoe.game import TicTacToeGame as Game
-from tictactoe.neuralnets.net import AlphaTicTacToe as NNet
+from games.tictactoe.game import TicTacToeGame as Game
+from games.tictactoe.neuralnets.net import AlphaTicTacToe as NNet
 from utils import AverageMeter
 
 """

@@ -65,11 +65,9 @@ AlphaBlokus/
 │   ├── mcts.py
 │   └── metrics.py          ← NEW: MetricsCollector (see §3)
 ├── games/
-│   ├── __init__.py         ← re-exports shared types
-│   ├── shared/
-│   │   ├── __init__.py
-│   │   ├── base_wrapper.py ← NEW: shared NNetWrapper base (see §5)
-│   │   └── types.py        ← NEW: shared type aliases
+│   ├── __init__.py
+│   ├── base_wrapper.py     ← NEW: shared NNetWrapper base (see §5)
+│   ├── types.py            ← NEW: shared type aliases
 │   ├── blokusduo/
 │   │   ├── __init__.py
 │   │   ├── game.py
@@ -107,7 +105,7 @@ AlphaBlokus/
 ### Key changes
 
 1. **`games/` directory** — groups all game implementations under one folder. Cleaner on GitHub, makes the pattern obvious when adding future games (Connect4, Othello, etc.)
-2. **`games/shared/`** — shared interfaces, base classes, and types used across games. The extracted `BaseNNetWrapper` lives here.
+2. **`games/base_wrapper.py` + `games/types.py`** — shared base classes and type aliases used across games, at the `games/` root level rather than a separate subfolder.
 3. **`tests/`** — mirrors the source structure
 4. **`notebooks/`** — moves `eval.ipynb` out of the project root
 5. **`core/metrics.py`** — new metrics collection module (see §3)
@@ -257,12 +255,12 @@ This also solves the current two-stage pickle → parquet pipeline. Training dat
 - `save_checkpoint()` / `load_checkpoint()` (~10 lines each)
 - `TrainingDataLoggable` dataclass (identical in both files)
 
-**Fix:** Extract a `BaseNNetWrapper` in `games/shared/base_wrapper.py` that implements all shared methods. Game-specific wrappers only override what differs (network construction, board shape handling).
+**Fix:** Extract a `BaseNNetWrapper` in `games/base_wrapper.py` that implements all shared methods. Game-specific wrappers only override what differs (network construction, board shape handling).
 
 ### utils.py is a grab-bag
 
 `utils.py` contains three unrelated things:
-1. `AverageMeter` — training utility → move to `core/` or `games/shared/`
+1. `AverageMeter` — training utility → move to `core/` or `games/`
 2. `load_args()` — config loading → move to `core/config.py`
 3. `setup_logging()` — logging setup → delete (loguru replaces this)
 
@@ -529,14 +527,14 @@ The structural refactor should be done in this order to minimise merge pain:
 ## Checklist
 
 **Foundation:**
-- [ ] Create `pyproject.toml` with all dependencies
-- [ ] Set up uv + lockfile
-- [ ] Restructure into `games/` directory
-- [ ] Update all imports after restructure
+- [x] Create `pyproject.toml` with all dependencies
+- [x] Set up uv + lockfile
+- [x] Restructure into `games/` directory
+- [x] Update all imports after restructure
 - [ ] Fix JSON config boolean strings → native booleans
 
 **Deduplication + Logging:**
-- [ ] Extract `BaseNNetWrapper` to `games/shared/`
+- [ ] Extract `BaseNNetWrapper` to `games/`
 - [ ] Migrate both game wrappers to use base class
 - [ ] Replace stdlib logging with loguru
 - [ ] Remove `logging_config.json` and `coloredlogs` dependency
@@ -546,7 +544,7 @@ The structural refactor should be done in this order to minimise merge pain:
 - [ ] Rename MCTS dictionaries (or decide to keep math notation)
 - [ ] Standardise config parameter naming to `config`
 - [ ] Fix all other naming inconsistencies
-- [ ] Modernise imports (nptyping, typing, os.path)
+- [ ] Modernise imports (~~nptyping~~, typing, os.path)
 
 **Infrastructure:**
 - [ ] Build `MetricsCollector` class

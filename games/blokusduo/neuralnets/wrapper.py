@@ -13,7 +13,7 @@ import torch
 from torch import optim, Tensor
 from tqdm import tqdm
 
-from blokusduo.neuralnets.net import AlphaBlokusDuo as NNet
+from games.blokusduo.neuralnets.net import AlphaBlokusDuo as NNet
 from core.config import RunConfig, LOGGER_NAME
 from core.interfaces import INeuralNetWrapper
 from utils import AverageMeter

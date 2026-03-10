@@ -8,7 +8,7 @@ from typing import Optional, Generator, TypeAlias, Dict, List, Tuple, Union
 import numpy as np
 from numpy.typing import NDArray
 
-from blokusduo.pieces import pieces_loader, Piece, Orientation, PieceManager, BidirectionalDict
+from games.blokusduo.pieces import pieces_loader, Piece, Orientation, PieceManager, BidirectionalDict
 from core.interfaces import IGame
 
 # Type aliases for improved readability

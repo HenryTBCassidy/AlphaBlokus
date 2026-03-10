@@ -5,8 +5,8 @@ import coloredlogs
 
 from core.coach import Coach
 from core.config import LOGGER_NAME
-from blokusduo.neuralnets.wrapper import NNetWrapper
-from tictactoe.game import TicTacToeGame as Game
+from games.blokusduo.neuralnets.wrapper import NNetWrapper
+from games.tictactoe.game import TicTacToeGame as Game
 from utils import setup_logging, load_args
 from reporting import create_html_report
 
