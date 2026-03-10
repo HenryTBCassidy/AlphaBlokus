@@ -37,7 +37,7 @@ Build the full AlphaZero pipeline on a solved game to verify correctness before 
 
 ### Phase 1.5: Architecture Review & Fixes 📋 Not Started
 
-Comprehensive code review and targeted fixes before Blokus training. Covers interface contracts, MCTS performance, board representation, training pipeline, naming, and missing infrastructure. Full review in [`docs/01-ARCHITECTURE-REVIEW.md`](01-ARCHITECTURE-REVIEW.md).
+Comprehensive code review and targeted fixes before Blokus training. Structural refactoring in [`docs/01-STRUCTURAL-REFACTOR.md`](01-STRUCTURAL-REFACTOR.md), bug fixes and correctness issues in [`docs/02-BUG-FIXES.md`](02-BUG-FIXES.md).
 
 | Task | Priority | Notes |
 |------|----------|-------|
