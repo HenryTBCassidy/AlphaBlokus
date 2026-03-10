@@ -1,4 +1,3 @@
-import logging
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -6,12 +5,10 @@ from typing import Optional, Callable, Any, Tuple, List, Union, Protocol, TypeAl
 from numpy.typing import NDArray
 
 import pandas as pd
+from loguru import logger
 from tqdm import tqdm
 
-from core.config import LOGGER_NAME
 from core.interfaces import IGame
-
-log = logging.getLogger(LOGGER_NAME)
 
 
 # Type aliases for improved readability
@@ -129,8 +126,8 @@ class Arena:
             valids = self.game.valid_move_masking(canonical_board, 1)
 
             if valids[action] == 0:
-                log.error(f'Action {action} is not valid!')
-                log.debug(f'valids = {valids}')
+                logger.error(f'Action {action} is not valid!')
+                logger.debug(f'valids = {valids}')
                 assert valids[action] > 0, f"Player {cur_player} attempted invalid move {action}"
 
             # Notify opponent of the move if they implement the notification hook
@@ -238,4 +235,4 @@ class Arena:
         pd.DataFrame([arena_data.__dict__]).to_parquet(directory / f"arena_data_{generation}.parquet")
 
         end = time.perf_counter()
-        logging.info(f"Took {end - start} seconds to write arena data for generation # {generation}!")
+        logger.info(f"Took {end - start} seconds to write arena data for generation # {generation}!")

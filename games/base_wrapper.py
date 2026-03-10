@@ -1,4 +1,3 @@
-import logging
 import os
 import time
 from abc import ABC, abstractmethod
@@ -12,14 +11,13 @@ import numpy as np
 import pandas as pd
 import torch
 import torch.nn as nn
+from loguru import logger
 from torch import optim, Tensor
 from tqdm import tqdm
 
-from core.config import RunConfig, LOGGER_NAME
+from core.config import RunConfig
 from core.interfaces import IGame
 from utils import AverageMeter
-
-log = logging.getLogger(LOGGER_NAME)
 
 
 @dataclass(frozen=True)
@@ -149,11 +147,11 @@ class BaseNNetWrapper(ABC):
             Pickler(f).dump(cpu_log_data)
 
         end = time.perf_counter()
-        logging.info(f"Took {end - start} seconds to bring data back from GPU and write for generation # {generation}!")
+        logger.info(f"Took {end - start} seconds to bring data back from GPU and write for generation # {generation}!")
 
     def collect_training_data(self) -> None:
         """Collect and consolidate all training data into a single DataFrame."""
-        logging.info("Collecting pickled training data into one dataframe for whole run ...")
+        logger.info("Collecting pickled training data into one dataframe for whole run ...")
         start = time.perf_counter()
 
         def loader(filepath: Path) -> pd.DataFrame:
@@ -173,7 +171,7 @@ class BaseNNetWrapper(ABC):
         end = time.perf_counter()
 
         dataframe.to_parquet(f"{self.args.training_data_directory / 'data.parquet'}")
-        logging.info(f"Took {end - start} seconds to collect, convert and write data!")
+        logger.info(f"Took {end - start} seconds to collect, convert and write data!")
 
     def save_checkpoint(self, filename: str) -> None:
         """Save the neural network state to a checkpoint file."""
@@ -181,10 +179,10 @@ class BaseNNetWrapper(ABC):
         filepath = folder / filename
 
         if not folder.exists():
-            log.info(f"Checkpoint Directory does not exist! Making directory {folder}")
+            logger.info(f"Checkpoint Directory does not exist! Making directory {folder}")
             folder.mkdir(exist_ok=True, parents=True)
         else:
-            log.info("Checkpoint Directory exists!")
+            logger.info("Checkpoint Directory exists!")
 
         torch.save({
             'state_dict': self.nnet.state_dict(),
@@ -196,7 +194,7 @@ class BaseNNetWrapper(ABC):
         filepath = folder / filename
 
         if not filepath.exists():
-            log.error(f"No model in path {filepath}")
+            logger.error(f"No model in path {filepath}")
             raise FileNotFoundError(f"No model in path {filepath}")
 
         map_location = None if self.config.cuda else 'cpu'

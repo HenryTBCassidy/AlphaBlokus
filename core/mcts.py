@@ -1,11 +1,11 @@
-import logging
 import math
 from typing import Dict, List, Tuple, Final, TypeAlias
 from numpy.typing import NDArray
 
 import numpy as np
+from loguru import logger
 
-from core.config import MCTSConfig, LOGGER_NAME
+from core.config import MCTSConfig
 from core.interfaces import IGame, INeuralNetWrapper
 
 # Constants
@@ -17,8 +17,6 @@ Action: TypeAlias = int  # Integer index into the action space
 StateAction: TypeAlias = Tuple[StateStr, Action]  # (state, action) pair
 PolicyVector: TypeAlias = NDArray[np.float64]  # Probability distribution over actions
 ValidMoves: TypeAlias = NDArray[np.bool_]  # Binary mask of legal moves
-
-log = logging.getLogger(LOGGER_NAME)
 
 
 class MCTS:
@@ -151,7 +149,7 @@ class MCTS:
             else:
                 # All valid moves were masked - use uniform distribution over valid moves
                 # This can indicate issues with neural network architecture or training
-                log.error("All valid moves were masked, using uniform distribution.")
+                logger.error("All valid moves were masked, using uniform distribution.")
                 self.Ps[s] = self.Ps[s] + valids
                 self.Ps[s] /= np.sum(self.Ps[s])
 

@@ -1,4 +1,3 @@
-import logging
 import os
 import sys
 import time
@@ -12,10 +11,11 @@ from numpy.typing import NDArray
 
 import numpy as np
 import pandas as pd
+from loguru import logger
 from tqdm import tqdm
 
 from core.arena import Arena
-from core.config import RunConfig, LOGGER_NAME
+from core.config import RunConfig
 from core.mcts import MCTS
 from core.interfaces import INeuralNetWrapper, IGame
 
@@ -23,8 +23,6 @@ from core.interfaces import INeuralNetWrapper, IGame
 TrainingExample: TypeAlias = tuple[NDArray, int, NDArray, Optional[float]]  # (board, player, policy, value)
 ProcessedExample: TypeAlias = tuple[NDArray, NDArray, float]  # (board, policy, value)
 TrainingHistory: TypeAlias = List[Deque[ProcessedExample]]  # List of examples per generation
-
-log = logging.getLogger(LOGGER_NAME)
 
 
 class CycleStage(StrEnum):
@@ -164,14 +162,14 @@ class Coach:
             - Timing information is collected for performance analysis
         """
         for generation in range(1, self.run_config.num_generations + 1):
-            log.info(f'Starting Generation #{generation} ...')
+            logger.info(f'Starting Generation #{generation} ...')
             generation_start = time.perf_counter()
 
             # PHASE 1: Generate new training data through self-play
             if not self.skip_first_self_play or generation > 1:
                 iteration_examples = deque([], maxlen=self.run_config.max_queue_length)
 
-                log.info(f'Starting Self-Play For Generation #{generation} ...')
+                logger.info(f'Starting Self-Play For Generation #{generation} ...')
                 self_play_start = time.perf_counter()
                 
                 for _ in tqdm(range(self.run_config.num_eps), desc="Self Play"):
@@ -200,7 +198,7 @@ class Coach:
             pmcts = MCTS(self.game, self.pnet, self.run_config.mcts_config)
 
             # Train network on accumulated data
-            log.info(f'Starting Training For Generation #{generation} ...')
+            logger.info(f'Starting Training For Generation #{generation} ...')
             training_start = time.perf_counter()
             self.nnet.train(train_examples, generation)
             training_end = time.perf_counter()
@@ -214,7 +212,7 @@ class Coach:
             # PHASE 3: Evaluate new network
             nmcts = MCTS(self.game, self.nnet, self.run_config.mcts_config)
             
-            log.info(f'Evaluating Against Previous Version For Generation #{generation} ...')
+            logger.info(f'Evaluating Against Previous Version For Generation #{generation} ...')
             arena_start = time.perf_counter()
             
             arena = Arena(
@@ -237,13 +235,13 @@ class Coach:
             ))
 
             # Accept or reject new network
-            log.info(f'NEW/PREV WINS : {nwins}/{pwins}; DRAWS : {draws}')
+            logger.info(f'NEW/PREV WINS : {nwins}/{pwins}; DRAWS : {draws}')
             if self._should_accept_new_network(nwins, pwins):
-                log.info('ACCEPTING NEW MODEL')
+                logger.info('ACCEPTING NEW MODEL')
                 self.nnet.save_checkpoint(filename=f"accepted_{generation}.pth.tar")
                 self.nnet.save_checkpoint(filename='best.pth.tar')
             else:
-                log.info('REJECTING NEW MODEL')
+                logger.info('REJECTING NEW MODEL')
                 self.nnet.save_checkpoint(filename=f'rejected_{generation}.pth.tar')
                 self.nnet.load_checkpoint(filename='temp.pth.tar')
 
@@ -292,7 +290,7 @@ class Coach:
         """
         window_size = self._generation_window_size(generation)
         if len(self.train_examples_history) > window_size:
-            log.warning(
+            logger.warning(
                 f"Removing oldest training examples. "
                 f"History size: {len(self.train_examples_history)}"
             )
@@ -340,7 +338,7 @@ class Coach:
         )
 
         end = time.perf_counter()
-        logging.info(f"Took {end - start} seconds to write timing data!")
+        logger.info(f"Took {end - start} seconds to write timing data!")
 
     @staticmethod
     def get_self_play_filename(generation: int) -> str:
@@ -384,12 +382,12 @@ class Coach:
         examples_file = model_file + ".examples"
         
         if not os.path.isfile(examples_file):
-            log.warning(f'File "{examples_file}" with training examples not found!')
+            logger.warning(f'File "{examples_file}" with training examples not found!')
             response = input("Continue? [y|n]")
             if response != "y":
                 sys.exit()
         else:
-            log.info("Loading saved training examples...")
+            logger.info("Loading saved training examples...")
             with open(examples_file, "rb") as f:
                 self.train_examples_history = Unpickler(f).load()
-            log.info("Loading complete!")
+            logger.info("Loading complete!")

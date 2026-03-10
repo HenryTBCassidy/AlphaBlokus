@@ -1,16 +1,13 @@
-import logging
 import time
 
 import pandas as pd
 import plotly.express as px
+from loguru import logger
 from pandas import DataFrame
 from plotly import graph_objects as go
 from plotly.subplots import make_subplots
 
-from core.config import LOGGER_NAME
 from core.config import RunConfig
-
-log = logging.getLogger(LOGGER_NAME)
 
 
 def _make_loss_curves(df: DataFrame) -> tuple[go.Figure, go.Figure]:
@@ -89,7 +86,7 @@ def _make_performance_statistics_plot(timings_data: pd.DataFrame) -> go.Figure:
 
 
 def create_html_report(args: RunConfig):
-    log.info(f"Writing report...")
+    logger.info("Writing report...")
     start = time.perf_counter()
     loss_data = pd.read_parquet(args.training_data_directory / "data.parquet")
     arena_data = pd.read_parquet(args.arena_data_directory)
@@ -113,4 +110,4 @@ def create_html_report(args: RunConfig):
         f.write(fig4.to_html(full_html=False, include_plotlyjs='cdn'))
 
     end = time.perf_counter()
-    log.info(f"Wrote report in {end-start} Seconds!")
+    logger.info(f"Wrote report in {end - start} seconds!")

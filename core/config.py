@@ -1,9 +1,5 @@
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
-
-# Global constants
-LOGGER_NAME: Final[str] = "Alpha"
 
 
 @dataclass(frozen=True)

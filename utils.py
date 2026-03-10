@@ -1,10 +1,5 @@
-import atexit
 import json
-import logging
-import logging.config
-import logging.handlers
 from pathlib import Path
-from typing import Any, Dict
 
 from dataclass_wizard import fromdict
 
@@ -59,21 +54,3 @@ def load_args(filename: str) -> RunConfig:
     return fromdict(RunConfig, args_json)
 
 
-def setup_logging(log_dir: Path) -> None:
-    """
-    Set up logging configuration from a JSON file.
-
-    Args:
-        log_dir: Directory where log files will be stored
-    """
-    config_file = Path("logging_config.json")
-    with open(config_file) as f_in:
-        config: Dict[str, Any] = json.load(f_in)
-
-    log_dir.mkdir(exist_ok=True, parents=True)
-    config["handlers"]["file_log"]["filename"] = f"{log_dir / 'alpha.log'}"
-    logging.config.dictConfig(config)
-    queue_handler = logging.getHandlerByName("queue_handler")
-    if queue_handler is not None:
-        queue_handler.listener.start()
-        atexit.register(queue_handler.listener.stop)
