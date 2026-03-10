@@ -137,14 +137,15 @@ Detailed documentation lives in the [`docs/`](docs/) folder:
 | Document | Description |
 |----------|-------------|
 | [00 — Project Overview](docs/00-PROJECT-OVERVIEW.md) | Mission, phased approach, key decisions, effort estimates |
-| [01 — Architecture Review](docs/01-ARCHITECTURE-REVIEW.md) | Comprehensive code review: interfaces, performance, profiling, compute strategy |
-| [02 — Algorithms](docs/02-ALGORITHMS.md) | MCTS implementation, self-play, arena evaluation, caching strategies |
-| [03 — Neural Networks](docs/03-NEURAL-NETWORKS.md) | ResNet and CNN architectures, board encoding, loss functions |
-| [04 — Evaluation Plan](docs/04-EVALUATION-PLAN.md) | Training diagnostics, Pentobi benchmarking, headline metrics |
-| [05 — Competitive Landscape](docs/05-COMPETITIVE-LANDSCAPE.md) | Pentobi, existing Blokus RL projects, why neural Blokus is hard |
-| [06 — External Interfaces](docs/06-EXTERNAL-INTERFACES.md) | Pentobi GTP adapter, human-playable UI, translation layer |
-| [07 — Handoff](docs/07-HANDOFF.md) | Context for contributors, current state, next steps, gotchas |
-| [08 — Appendix: Pieces](docs/08-APPENDIX-PIECES.md) | All 21 Blokus pieces, 91 orientations, symmetry analysis |
+| [01 — Structural Refactor](docs/01-STRUCTURAL-REFACTOR.md) | Project structure, logging, package management, naming, testing strategy |
+| [02 — Bug Fixes](docs/02-BUG-FIXES.md) | Interface mismatches, MCTS performance, board bugs, training pipeline fixes |
+| [03 — Algorithms](docs/03-ALGORITHMS.md) | MCTS implementation, self-play, arena evaluation, caching strategies |
+| [04 — Neural Networks](docs/04-NEURAL-NETWORKS.md) | ResNet and CNN architectures, board encoding, loss functions |
+| [05 — Evaluation Plan](docs/05-EVALUATION-PLAN.md) | Training diagnostics, Pentobi benchmarking, headline metrics |
+| [06 — Competitive Landscape](docs/06-COMPETITIVE-LANDSCAPE.md) | Pentobi, existing Blokus RL projects, why neural Blokus is hard |
+| [07 — External Interfaces](docs/07-EXTERNAL-INTERFACES.md) | Pentobi GTP adapter, human-playable UI, translation layer |
+| [08 — Handoff](docs/08-HANDOFF.md) | Context for contributors, current state, next steps, gotchas |
+| [09 — Appendix: Pieces](docs/09-APPENDIX-PIECES.md) | All 21 Blokus pieces, 91 orientations, symmetry analysis |
 
 ---
 

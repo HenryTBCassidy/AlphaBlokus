@@ -5,3 +5,4 @@ iframe_figures/
 app.log
 running_args
 **/__pycache__/
+.DS_Store
