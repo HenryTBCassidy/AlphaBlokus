@@ -1,6 +1,6 @@
 # AlphaBlokus — Structural Refactor
 
-Everything in this doc is about **how the code is organised, not what it does**. The companion doc ([`02-BUG-FIXES.md`](02-BUG-FIXES.md)) covers correctness issues. The goal: clean up structure, naming, tooling, and infrastructure so that the codebase is consistent, testable, and easy to extend — then fix bugs on a solid foundation.
+Everything in this doc is about **how the code is organised, not what it does**. The companion doc ([`bug-fixes.md`](bug-fixes.md)) covers correctness issues. The goal: clean up structure, naming, tooling, and infrastructure so that the codebase is consistent, testable, and easy to extend — then fix bugs on a solid foundation.
 
 ---
 
@@ -451,7 +451,7 @@ Extend the existing Plotly HTML reporting to include:
 
 ## 11. Compute Infrastructure
 
-Unchanged from the original architecture review — see [`06-COMPETITIVE-LANDSCAPE.md`](06-COMPETITIVE-LANDSCAPE.md) for external context.
+Unchanged from the original architecture review — see [`04-COMPETITIVE-LANDSCAPE.md`](../reference/04-COMPETITIVE-LANDSCAPE.md) for external context.
 
 **Tiered approach:**
 - **Tier 1: Mac M4 Pro** — development, debugging, small test runs (MPS backend)
@@ -464,52 +464,24 @@ No action needed now — this informs Phase 3 decisions.
 
 ## Summary & Priority Matrix
 
-### Structural refactor items
+### Structural refactor items (execution order)
 
-| # | Item | Section | Effort | Priority |
-|---|------|---------|--------|----------|
-| S1 | Create `pyproject.toml` + uv setup | §1 | 30 min | High |
-| S2 | Reorganise into `games/` directory | §2 | 45 min | High |
-| S3 | Switch to loguru | §3 | 30 min | High |
-| S4 | Build MetricsCollector | §3 | 1.5 hours | High |
-| S5 | Add CLI to main.py, fix module-level side effects | §4 | 30 min | Medium |
-| S6 | Extract BaseNNetWrapper | §5 | 1 hour | High |
-| S7 | Clean up / delete utils.py | §5 | 15 min | Medium |
-| S8 | MCTS naming cleanup | §6 | 30 min | Medium |
-| S9 | Config naming standardisation | §6 | 20 min | Medium |
-| S10 | Other naming fixes | §6 | 30 min | Medium |
-| S11 | Import modernisation | §7 | 20 min | Medium |
-| S12 | Data storage → parquet everywhere | §8 | 1 hour | Medium |
-| S13 | Set up pytest + initial test suite | §9 | 3-4 hours | High |
-| S14 | Profiling instrumentation | §10 | 2.5 hours | Low |
-| S15 | Fix JSON config booleans | §4 | 10 min | Medium |
+Items ordered to minimise merge pain. Each row = one commit.
 
-### Recommended execution order
-
-The structural refactor should be done in this order to minimise merge pain:
-
-1. **Foundation** (do first, everything depends on this):
-   - S1: pyproject.toml + uv
-   - S2: games/ directory restructure
-   - S15: Fix JSON booleans
-
-2. **Deduplication + logging** (big wins, lots of files touched):
-   - S6: Extract BaseNNetWrapper
-   - S3: Switch to loguru
-   - S7: Delete utils.py
-
-3. **Naming pass** (touch every file once):
-   - S8 + S9 + S10: All naming changes in one sweep
-   - S11: Import modernisation (same sweep)
-
-4. **Infrastructure** (new code, fewer conflicts):
-   - S4: MetricsCollector
-   - S5: CLI + entry point
-   - S12: Data storage cleanup
-   - S13: Test suite
-
-5. **Nice-to-have** (do if time allows):
-   - S14: Profiling instrumentation
+| # | Item | Section | Effort | Priority | Done |
+|---|------|---------|--------|----------|------|
+| S1 | Create `pyproject.toml` + uv setup | §1 | 30 min | High | ✅ |
+| S2 | Reorganise into `games/` directory | §2 | 45 min | High | ✅ |
+| S15 | Fix JSON config booleans | §4 | 10 min | Medium | |
+| S6 | Extract BaseNNetWrapper | §5 | 1 hour | High | |
+| S3 | Switch to loguru | §3 | 30 min | High | |
+| S7 | Clean up / delete utils.py | §5 | 15 min | Medium | |
+| S8–S11 | Naming pass + import modernisation | §6–§7 | 1.5 hours | Medium | |
+| S4 | Build MetricsCollector | §3 | 1.5 hours | High | |
+| S5 | Add CLI to main.py, fix module-level side effects | §4 | 30 min | Medium | |
+| S12 | Data storage → parquet everywhere | §8 | 1 hour | Medium | |
+| S13 | Set up pytest + initial test suite | §9 | 3–4 hours | High | |
+| S14 | Profiling instrumentation (nice-to-have) | §10 | 2.5 hours | Low | |
 
 ### Estimated total effort
 
@@ -517,45 +489,7 @@ The structural refactor should be done in this order to minimise merge pain:
 |-------|-------|--------|
 | Foundation | S1, S2, S15 | ~1.5 hours |
 | Deduplication + logging | S3, S6, S7 | ~2 hours |
-| Naming pass | S8-S11 | ~1.5 hours |
+| Naming pass | S8–S11 | ~1.5 hours |
 | Infrastructure | S4, S5, S12, S13 | ~6 hours |
 | Nice-to-have | S14 | ~2.5 hours |
-| **Total (excl. nice-to-have)** | **14 items** | **~11 hours** |
-
----
-
-## Checklist
-
-**Foundation:**
-- [x] Create `pyproject.toml` with all dependencies
-- [x] Set up uv + lockfile
-- [x] Restructure into `games/` directory
-- [x] Update all imports after restructure
-- [ ] Fix JSON config boolean strings → native booleans
-
-**Deduplication + Logging:**
-- [ ] Extract `BaseNNetWrapper` to `games/`
-- [ ] Migrate both game wrappers to use base class
-- [ ] Replace stdlib logging with loguru
-- [ ] Remove `logging_config.json` and `coloredlogs` dependency
-- [ ] Remove/refactor `utils.py`
-
-**Naming:**
-- [ ] Rename MCTS dictionaries (or decide to keep math notation)
-- [ ] Standardise config parameter naming to `config`
-- [ ] Fix all other naming inconsistencies
-- [ ] Modernise imports (~~nptyping~~, typing, os.path)
-
-**Infrastructure:**
-- [ ] Build `MetricsCollector` class
-- [ ] Integrate MetricsCollector with Coach, MCTS, Arena, NNetWrapper
-- [ ] Add CLI argument parsing to main.py
-- [ ] Move config loading into `__main__` guard
-- [ ] Migrate all data storage to parquet
-- [ ] Set up pytest with `conftest.py`
-- [ ] Write initial test suite (placement, encoding, MCTS, TTT smoke)
-
-**Nice-to-have:**
-- [ ] Add profiling instrumentation
-- [ ] Build profiling HTML report
-- [ ] Add `__main__.py` for `python -m` support
+| **Total (excl. nice-to-have)** | **11 commits** | **~11 hours** |

@@ -1,6 +1,6 @@
 # AlphaBlokus — Bug Fixes & Correctness
 
-Everything in this doc is about **making things work correctly**. The companion doc ([`01-STRUCTURAL-REFACTOR.md`](01-STRUCTURAL-REFACTOR.md)) covers code organisation and infrastructure. Fix bugs here after the structural refactor is done — or before, if you prefer to verify the pipeline works before reorganising.
+Everything in this doc is about **making things work correctly**. The companion doc ([`structural-refactor.md`](structural-refactor.md)) covers code organisation and infrastructure. Fix bugs here after the structural refactor is done — or before, if you prefer to verify the pipeline works before reorganising.
 
 ---
 
@@ -318,86 +318,32 @@ Every game method creates a `Board()` wrapper. On a 3×3 board this is free, but
 
 ## Summary & Priority Matrix
 
-### Critical (fix before Blokus training)
+| # | Issue | Section | Priority | Effort | Done |
+|---|-------|---------|----------|--------|------|
+| B1 | MCTS full action iteration | §2 | Critical | 15 min | |
+| B2 | Interface type mismatches (BlokusDuoGame) | §1 | Critical | 1 hour | |
+| B3 | NNetWrapper constructor mismatch | §1 | Critical | 20 min | |
+| B4 | Boundary check off-by-one | §3 | Critical | 15 min | |
+| B5 | Piece orientation ID gaps | §4 | Critical | 30 min | |
+| B6 | Action encoding/decoding missing | §6 | Critical | 45 min | |
+| B7 | main.py game-network mismatch | §1 | Critical | 10 min | |
+| B8 | Hardcoded board sizes | §3 | Critical | 20 min | |
+| B9 | Mutable board state in BlokusDuoGame | §3 | Critical | 30 min | |
+| B10 | Optimizer reset per epoch | §5 | Important | 15 min | |
+| B11 | No optimizer state in checkpoints | §5 | Important | 20 min | |
+| B12 | No learning rate schedule | §5 | Important | 1 hour | |
+| B13 | Model loading broken | §6 | Important | 45 min | |
+| B14 | BidirectionalDict redesign | §4 | Important | 30 min | |
+| B15 | Magic number action_size | §4 | Important | 10 min | |
+| B16 | MCTS string hashing | §2 | Important | 30 min | |
+| B17 | Input tensor shape verification | §7 | Important | 30 min | |
+| B18 | Policy loss function | §5 | Nice-to-have | 15 min | |
+| B19 | Random sampling with replacement | §5 | Nice-to-have | 10 min | |
+| B20 | dtype conversion overhead | §5 | Nice-to-have | 10 min | |
+| B21 | MCTS tree reuse across games | §2 | Nice-to-have | 30 min | |
+| B22 | TTT deprecated tostring() | §7 | Nice-to-have | 5 min | |
+| B23 | TTT unnecessary board copies | §7 | Nice-to-have | 15 min | |
+| B24 | Input validation | §6 | Nice-to-have | 20 min | |
+| B25 | MCTS fallback policy | §3 | Nice-to-have | 5 min | |
 
-| # | Issue | Section | Effort |
-|---|-------|---------|--------|
-| B1 | MCTS full action iteration | §2 | 15 min |
-| B2 | Interface type mismatches (BlokusDuoGame) | §1 | 1 hour |
-| B3 | NNetWrapper constructor mismatch | §1 | 20 min |
-| B4 | Boundary check off-by-one | §3 | 15 min |
-| B5 | Piece orientation ID gaps | §4 | 30 min |
-| B6 | Action encoding/decoding missing | §6 | 45 min |
-| B7 | main.py game-network mismatch | §1 | 10 min |
-| B8 | Hardcoded board sizes | §3 | 20 min |
-| B9 | Mutable board state in BlokusDuoGame | §3 | 30 min |
-
-### Important (fix during Phase 2-3)
-
-| # | Issue | Section | Effort |
-|---|-------|---------|--------|
-| B10 | Optimizer reset per epoch | §5 | 15 min |
-| B11 | No optimizer state in checkpoints | §5 | 20 min |
-| B12 | No learning rate schedule | §5 | 1 hour |
-| B13 | Model loading broken | §6 | 45 min |
-| B14 | BidirectionalDict redesign | §4 | 30 min |
-| B15 | Magic number action_size | §4 | 10 min |
-| B16 | MCTS string hashing | §2 | 30 min |
-| B17 | Input tensor shape verification | §7 | 30 min |
-
-### Nice-to-have (cleanup when convenient)
-
-| # | Issue | Section | Effort |
-|---|-------|---------|--------|
-| B18 | Policy loss function | §5 | 15 min |
-| B19 | Random sampling with replacement | §5 | 10 min |
-| B20 | dtype conversion overhead | §5 | 10 min |
-| B21 | MCTS tree reuse across games | §2 | 30 min |
-| B22 | TTT deprecated tostring() | §7 | 5 min |
-| B23 | TTT unnecessary board copies | §7 | 15 min |
-| B24 | Input validation | §6 | 20 min |
-| B25 | MCTS fallback policy | §3 | 5 min |
-
-### Estimated total effort
-
-| Priority | Count | Effort |
-|----------|-------|--------|
-| Critical | 9 issues | ~3.5 hours |
-| Important | 8 issues | ~4 hours |
-| Nice-to-have | 8 issues | ~2 hours |
-| **All** | **25 issues** | **~9.5 hours** |
-
----
-
-## Checklist
-
-**Critical:**
-- [ ] Fix MCTS action iteration (sparse valid moves only)
-- [ ] Fix interface type mismatches in BlokusDuoGame
-- [ ] Fix NNetWrapper constructor mismatch
-- [ ] Fix boundary check off-by-one bugs
-- [ ] Fix piece orientation ID gaps
-- [ ] Build action encoding/decoding layer
-- [ ] Fix main.py game-network mismatch
-- [ ] Replace hardcoded board sizes
-- [ ] Fix mutable board state in BlokusDuoGame
-
-**Important:**
-- [ ] Fix optimizer reset per epoch
-- [ ] Save optimizer state in checkpoints
-- [ ] Add learning rate schedule
-- [ ] Fix model loading
-- [ ] Redesign BidirectionalDict
-- [ ] Remove magic number action_size
-- [ ] Optimise MCTS state hashing
-- [ ] Verify neural net input tensor shape
-
-**Nice-to-have:**
-- [ ] Fix policy loss function
-- [ ] Fix random sampling
-- [ ] Fix dtype conversion
-- [ ] Add MCTS tree reuse
-- [ ] Fix TTT deprecated tostring()
-- [ ] Fix TTT board copies
-- [ ] Add input validation
-- [ ] Fix MCTS fallback policy
+**Estimated total: ~9.5 hours** (Critical ~3.5h · Important ~4h · Nice-to-have ~2h)

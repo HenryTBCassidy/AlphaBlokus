@@ -81,25 +81,29 @@ AlphaBlokus/
 │   ├── arena.py                   # Network vs network evaluation
 │   ├── config.py                  # RunConfig, MCTSConfig, NetConfig
 │   └── interfaces.py              # IGame, INeuralNetWrapper protocols
-├── blokusduo/                     # Blokus Duo implementation
-│   ├── game.py                    # BlokusDuoGame, BlokusDuoBoard, Player, Action
-│   ├── pieces.py                  # Piece, PieceManager, BidirectionalDict
-│   ├── pieces.json                # 21 piece definitions with orientations
-│   └── neuralnets/
-│       ├── net.py                 # AlphaBlokusDuo ResNet
-│       └── wrapper.py            # Training, prediction, checkpointing
-├── tictactoe/                     # Tic-Tac-Toe (Phase 1 validation)
-│   ├── board.py                   # TicTacToeBoard
-│   ├── game.py                    # TicTacToeGame (complete IGame impl)
-│   └── neuralnets/
-│       ├── net.py                 # AlphaTicTacToe CNN
-│       └── wrapper.py            # Training, prediction, checkpointing
+├── games/                         # Game implementations
+│   ├── blokusduo/                 # Blokus Duo implementation
+│   │   ├── game.py                # BlokusDuoGame, BlokusDuoBoard, Player, Action
+│   │   ├── pieces.py              # Piece, PieceManager, BidirectionalDict
+│   │   ├── pieces.json            # 21 piece definitions with orientations
+│   │   └── neuralnets/
+│   │       ├── net.py             # AlphaBlokusDuo ResNet
+│   │       └── wrapper.py         # Training, prediction, checkpointing
+│   └── tictactoe/                 # Tic-Tac-Toe (Phase 1 validation)
+│       ├── board.py               # TicTacToeBoard
+│       ├── game.py                # TicTacToeGame (complete IGame impl)
+│       └── neuralnets/
+│           ├── net.py             # AlphaTicTacToe CNN
+│           └── wrapper.py         # Training, prediction, checkpointing
 ├── run_configurations/            # JSON configs for training runs
 │   ├── test_run.json              # Quick validation config
 │   └── full_run.json              # Full training config
-├── eval.ipynb                     # Development scratchpad
+├── notebooks/                     # Development scratchpads
+│   └── eval.ipynb                 # Move generation design notes
 ├── utils.py                       # AverageMeter and helpers
-├── docs/                          # Project documentation (you are here)
+├── docs/                          # Project documentation
+│   ├── reference/                 # How things work (stable)
+│   └── plans/                     # What to do (active checklists)
 ├── README.md                      # SEO-optimised project README
 └── PROJECT-STATE.md               # Detailed technical state summary
 ```
@@ -155,7 +159,7 @@ The `IGame` and `INeuralNetWrapper` protocols let us add new games without touch
 
 ### Why no parallel MCTS yet?
 
-Premature optimisation. Get the pipeline working correctly first, then optimise. The current bottleneck is implementing move generation, not MCTS speed. Parallelism is documented in `docs/03-ALGORITHMS.md` for when we're ready.
+Premature optimisation. Get the pipeline working correctly first, then optimise. The current bottleneck is implementing move generation, not MCTS speed. Parallelism is documented in `docs/reference/01-ALGORITHMS.md` for when we're ready.
 
 ### Why canonical form = player × board?
 
@@ -169,7 +173,7 @@ Multiplying the board by the current player's value means "my pieces" are always
 
 2. **The action space is huge.** 17,837 actions means the policy head's final FC layer alone is ~9M parameters. MCTS iterating over all actions (even illegal ones) is O(17,837) per simulation. Must optimise to only iterate valid moves.
 
-3. **`string_representation` uses `board.tobytes()`.** MCTS hashes board states using the raw numpy byte representation. This works but produces long keys. A Zobrist hash would be more efficient — see `docs/03-ALGORITHMS.md`.
+3. **`string_representation` uses `board.tobytes()`.** MCTS hashes board states using the raw numpy byte representation. This works but produces long keys. A Zobrist hash would be more efficient — see `docs/reference/01-ALGORITHMS.md`.
 
 4. **Piece-orientation IDs have gaps.** The `BidirectionalDict` assigns IDs sequentially but skips IDs when moving to the next piece (the populate_lookup loop increments `i` one extra time between pieces). Be careful when mapping between action indices and piece-orientation IDs.
 
@@ -187,7 +191,7 @@ Multiplying the board by the current player's value means "my pieces" are always
 
 - **Don't rewrite the framework.** MCTS, Coach, Arena work correctly — they're validated on Tic-Tac-Toe. Focus on completing the Blokus game logic
 - **Don't over-engineer move generation.** Get it working correctly first, optimise second. A correct but slow `valid_moves()` is infinitely better than a fast but buggy one
-- **Don't add 4-player Blokus support until Duo beats Pentobi level 9.** It's a stretch goal, not a current priority. 4-player would require fundamental changes (coalition dynamics, non-zero-sum) — see `docs/00-PROJECT-OVERVIEW.md` for details
+- **Don't add 4-player Blokus support until Duo beats Pentobi level 9.** It's a stretch goal, not a current priority. 4-player would require fundamental changes (coalition dynamics, non-zero-sum) — see `docs/reference/00-OVERVIEW.md` for details
 - **Don't switch to Transformer/Mamba/ViT.** ResNet is proven for AlphaZero. Novel architectures are research risk we don't need
 - **Don't implement learning rate scheduling before the first successful training run.** Get the basics working, then refine
 - **Don't build a web UI.** The HTML reporting that already exists is sufficient for analysis
@@ -201,13 +205,13 @@ Multiplying the board by the current player's value means "my pieces" are always
 | File | Purpose | When to Read |
 |------|---------|-------------|
 | `PROJECT-STATE.md` | Detailed technical state dump | First, alongside this doc |
-| `docs/00-PROJECT-OVERVIEW.md` | Mission, phases, decisions log | Understanding the big picture |
-| `docs/01-STRUCTURAL-REFACTOR.md` | Project structure, logging, package management, naming, testing strategy | Before refactoring code |
-| `docs/02-BUG-FIXES.md` | Interface mismatches, MCTS performance, board bugs, training pipeline fixes | Before fixing bugs or optimising |
-| `docs/03-ALGORITHMS.md` | MCTS, self-play, caching strategies | Before working on MCTS optimisation |
-| `docs/04-NEURAL-NETWORKS.md` | ResNet architecture, loss functions | Before touching neural network code |
-| `docs/05-EVALUATION-PLAN.md` | Metrics, Pentobi benchmarking, success criteria | Before training or evaluation work |
-| `docs/06-COMPETITIVE-LANDSCAPE.md` | Existing Blokus AI projects | Understanding what's been tried |
-| `eval.ipynb` | Move generation design scratchpad | Before implementing `valid_moves()` |
+| `docs/reference/00-OVERVIEW.md` | Mission, phases, decisions log | Understanding the big picture |
+| `docs/plans/structural-refactor.md` | Project structure, logging, package management, naming, testing strategy | Before refactoring code |
+| `docs/plans/bug-fixes.md` | Interface mismatches, MCTS performance, board bugs, training pipeline fixes | Before fixing bugs or optimising |
+| `docs/reference/01-ALGORITHMS.md` | MCTS, self-play, caching strategies | Before working on MCTS optimisation |
+| `docs/reference/02-NEURAL-NETWORKS.md` | ResNet architecture, loss functions | Before touching neural network code |
+| `docs/reference/03-EVALUATION.md` | Metrics, Pentobi benchmarking, success criteria | Before training or evaluation work |
+| `docs/reference/04-COMPETITIVE-LANDSCAPE.md` | Existing Blokus AI projects | Understanding what's been tried |
+| `notebooks/eval.ipynb` | Move generation design scratchpad | Before implementing `valid_moves()` |
 | `run_configurations/full_run.json` | Production training config | Before running training |
-| `blokusduo/pieces.json` | All 21 piece definitions | Before working on piece-related logic |
+| `games/blokusduo/pieces.json` | All 21 piece definitions | Before working on piece-related logic |
