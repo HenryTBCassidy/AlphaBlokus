@@ -1,0 +1,38 @@
+[project]
+name = "alphablokus"
+version = "0.1.0"
+description = "AlphaZero-style self-play reinforcement learning for Blokus Duo"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26.0",
+    "dataclass-wizard>=0.22.0",
+    "coloredlogs>=15.0",
+    "torch>=2.0.0",
+    "pandas>=2.0.0",
+    "tqdm>=4.60.0",
+    "plotly>=5.0.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0.0",
+    "ruff>=0.4.0",
+]
+
+[tool.ruff]
+target-version = "py311"
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",     # pycodestyle errors
+    "F",     # pyflakes
+    "I",     # isort
+    "UP",    # pyupgrade
+    "B",     # flake8-bugbear
+    "SIM",   # flake8-simplify
+    "TCH",   # flake8-type-checking
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -6,7 +6,7 @@ from typing import Dict, List, Tuple, Generator, Any, Union
 
 import numpy as np
 from dataclass_wizard import fromdict
-from nptyping import NDArray
+from numpy.typing import NDArray
 
 
 class Orientation(StrEnum):
