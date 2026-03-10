@@ -155,7 +155,7 @@ The `IGame` and `INeuralNetWrapper` protocols let us add new games without touch
 
 ### Why no parallel MCTS yet?
 
-Premature optimisation. Get the pipeline working correctly first, then optimise. The current bottleneck is implementing move generation, not MCTS speed. Parallelism is documented in `docs/01-ALGORITHMS.md` for when we're ready.
+Premature optimisation. Get the pipeline working correctly first, then optimise. The current bottleneck is implementing move generation, not MCTS speed. Parallelism is documented in `docs/02-ALGORITHMS.md` for when we're ready.
 
 ### Why canonical form = player × board?
 
@@ -169,7 +169,7 @@ Multiplying the board by the current player's value means "my pieces" are always
 
 2. **The action space is huge.** 17,837 actions means the policy head's final FC layer alone is ~9M parameters. MCTS iterating over all actions (even illegal ones) is O(17,837) per simulation. Must optimise to only iterate valid moves.
 
-3. **`string_representation` uses `board.tobytes()`.** MCTS hashes board states using the raw numpy byte representation. This works but produces long keys. A Zobrist hash would be more efficient — see `docs/01-ALGORITHMS.md`.
+3. **`string_representation` uses `board.tobytes()`.** MCTS hashes board states using the raw numpy byte representation. This works but produces long keys. A Zobrist hash would be more efficient — see `docs/02-ALGORITHMS.md`.
 
 4. **Piece-orientation IDs have gaps.** The `BidirectionalDict` assigns IDs sequentially but skips IDs when moving to the next piece (the populate_lookup loop increments `i` one extra time between pieces). Be careful when mapping between action indices and piece-orientation IDs.
 
@@ -202,11 +202,11 @@ Multiplying the board by the current player's value means "my pieces" are always
 |------|---------|-------------|
 | `PROJECT-STATE.md` | Detailed technical state dump | First, alongside this doc |
 | `docs/00-PROJECT-OVERVIEW.md` | Mission, phases, decisions log | Understanding the big picture |
-| `docs/01-ALGORITHMS.md` | MCTS, self-play, caching strategies | Before working on MCTS optimisation |
-| `docs/02-NEURAL-NETWORKS.md` | ResNet architecture, loss functions | Before touching neural network code |
-| `docs/03-COMPETITIVE-LANDSCAPE.md` | Existing Blokus AI projects | Understanding what's been tried |
-| `docs/04-ARCHITECTURE-REVIEW.md` | Code review, profiling plan, compute strategy | Before fixing bugs or optimising |
-| `docs/05-EVALUATION-PLAN.md` | Metrics, Pentobi benchmarking, success criteria | Before training or evaluation work |
+| `docs/01-ARCHITECTURE-REVIEW.md` | Code review, profiling plan, compute strategy | Before fixing bugs or optimising |
+| `docs/02-ALGORITHMS.md` | MCTS, self-play, caching strategies | Before working on MCTS optimisation |
+| `docs/03-NEURAL-NETWORKS.md` | ResNet architecture, loss functions | Before touching neural network code |
+| `docs/04-EVALUATION-PLAN.md` | Metrics, Pentobi benchmarking, success criteria | Before training or evaluation work |
+| `docs/05-COMPETITIVE-LANDSCAPE.md` | Existing Blokus AI projects | Understanding what's been tried |
 | `eval.ipynb` | Move generation design scratchpad | Before implementing `valid_moves()` |
 | `run_configurations/full_run.json` | Production training config | Before running training |
 | `blokusduo/pieces.json` | All 21 piece definitions | Before working on piece-related logic |

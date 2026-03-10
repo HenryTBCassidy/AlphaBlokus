@@ -137,11 +137,11 @@ Detailed documentation lives in the [`docs/`](docs/) folder:
 | Document | Description |
 |----------|-------------|
 | [00 — Project Overview](docs/00-PROJECT-OVERVIEW.md) | Mission, phased approach, key decisions, effort estimates |
-| [01 — Algorithms](docs/01-ALGORITHMS.md) | MCTS implementation, self-play, arena evaluation, caching strategies |
-| [02 — Neural Networks](docs/02-NEURAL-NETWORKS.md) | ResNet and CNN architectures, board encoding, loss functions |
-| [03 — Competitive Landscape](docs/03-COMPETITIVE-LANDSCAPE.md) | Pentobi, existing Blokus RL projects, why neural Blokus is hard |
-| [04 — Architecture Review](docs/04-ARCHITECTURE-REVIEW.md) | Comprehensive code review: interfaces, performance, profiling, compute strategy |
-| [05 — Evaluation Plan](docs/05-EVALUATION-PLAN.md) | Training diagnostics, Pentobi benchmarking, headline metrics |
+| [01 — Architecture Review](docs/01-ARCHITECTURE-REVIEW.md) | Comprehensive code review: interfaces, performance, profiling, compute strategy |
+| [02 — Algorithms](docs/02-ALGORITHMS.md) | MCTS implementation, self-play, arena evaluation, caching strategies |
+| [03 — Neural Networks](docs/03-NEURAL-NETWORKS.md) | ResNet and CNN architectures, board encoding, loss functions |
+| [04 — Evaluation Plan](docs/04-EVALUATION-PLAN.md) | Training diagnostics, Pentobi benchmarking, headline metrics |
+| [05 — Competitive Landscape](docs/05-COMPETITIVE-LANDSCAPE.md) | Pentobi, existing Blokus RL projects, why neural Blokus is hard |
 | [06 — External Interfaces](docs/06-EXTERNAL-INTERFACES.md) | Pentobi GTP adapter, human-playable UI, translation layer |
 | [07 — Handoff](docs/07-HANDOFF.md) | Context for contributors, current state, next steps, gotchas |
 | [08 — Appendix: Pieces](docs/08-APPENDIX-PIECES.md) | All 21 Blokus pieces, 91 orientations, symmetry analysis |
@@ -154,7 +154,7 @@ Detailed documentation lives in the [`docs/`](docs/) folder:
 - [x] Tic-Tac-Toe implementation and validation
 - [x] Blokus Duo board representation and piece system
 - [x] Blokus Duo neural network architecture
-- [ ] Pre-flight fixes (MCTS optimisation, loss function, piece ID mapping)
+- [ ] Architecture review fixes (MCTS optimisation, interface contracts, piece ID mapping)
 - [ ] Blokus Duo move generation with caching
 - [ ] End-to-end Blokus Duo self-play training
 - [ ] Learning rate scheduling
