@@ -1,5 +1,8 @@
+import json
 from dataclasses import dataclass
 from pathlib import Path
+
+from dataclass_wizard import fromdict
 
 
 @dataclass(frozen=True)
@@ -107,3 +110,20 @@ class RunConfig:
     def report_directory(self) -> Path:
         """Directory for generated training progress reports and visualisations."""
         return self.run_directory / "Reporting"
+
+
+def load_args(filename: str) -> RunConfig:
+    """
+    Load run configuration from a JSON file.
+
+    Args:
+        filename: Name of the JSON configuration file
+
+    Returns:
+        RunConfig: Configuration object for the run
+    """
+    root_dir = Path("run_configurations")
+    with open(root_dir / filename, "r") as f:
+        args_json = json.load(f)
+
+    return fromdict(RunConfig, args_json)

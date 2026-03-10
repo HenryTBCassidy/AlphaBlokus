@@ -17,7 +17,37 @@ from tqdm import tqdm
 
 from core.config import RunConfig
 from core.interfaces import IGame
-from utils import AverageMeter
+
+
+class AverageMeter:
+    """
+    Computes and stores the average and current value.
+    Originally from https://github.com/pytorch/examples/blob/master/imagenet/main.py
+    """
+
+    def __init__(self) -> None:
+        """Initialise the meter with zero values."""
+        self.val: float = 0
+        self.avg: float = 0
+        self.sum: float = 0
+        self.count: int = 0
+
+    def __repr__(self) -> str:
+        """Return string representation of the average value."""
+        return f'{self.avg:.2e}'
+
+    def update(self, val: float, n: int = 1) -> None:
+        """
+        Update the meter with a new value.
+
+        Args:
+            val: The new value to include in the average
+            n: The weight of the new value (default: 1)
+        """
+        self.val = val
+        self.sum += val * n
+        self.count += n
+        self.avg = self.sum / self.count
 
 
 @dataclass(frozen=True)

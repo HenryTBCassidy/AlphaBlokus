@@ -5,8 +5,8 @@ from loguru import logger
 from core.coach import Coach
 from games.blokusduo.neuralnets.wrapper import NNetWrapper
 from games.tictactoe.game import TicTacToeGame as Game
+from core.config import load_args
 from reporting import create_html_report
-from utils import load_args
 
 args = load_args("test_run.json")
 
