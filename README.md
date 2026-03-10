@@ -1,56 +1,182 @@
-# Alpha
+# AlphaBlokus
 
-A simple project to implement the AlphaZero algorithm on the popular board game [Blokus](https://www.officialgamerules.org/blokus).
+**An AlphaZero implementation for Blokus Duo — training a neural network through self-play to master the board game Blokus.**
 
-This project was inspired by the work of deepmind in the creation of the AlphaGo,
-AlphaGo Zero, Alpha Zero and MuZero algorithms (respetively below): 
+> Status: **In Progress** — Tic-Tac-Toe pipeline complete, Blokus Duo game logic under development
 
-- [Lessons learnt from AlphaGo](https://bit.ly/2uCqK2S)
+---
 
-- [AlphaGoZero](https://go.nature.com/385X3F3)
+## What is AlphaBlokus?
 
-- [AlphaZero](https://bit.ly/2wYuIns)
+AlphaBlokus applies DeepMind's [AlphaZero](https://www.science.org/doi/10.1126/science.aar6404) algorithm to **Blokus Duo**, a two-player territorial board game played on a 14x14 grid. The system learns to play Blokus entirely through self-play reinforcement learning — no human game data, no handcrafted heuristics.
 
-- [MuZero](https://bit.ly/2uLwl7i)
+The goal: **beat [Pentobi](https://pentobi.sourceforge.io/)** (the strongest open-source Blokus AI, which uses MCTS + RAVE heuristics) in a majority of 100 games.
 
-- [MuZero Neurips poster 2019](https://bit.ly/2VwRJbf)
+### How It Works
 
-- [MuZero pseudocode](https://arxiv.org/src/1911.08265v1/anc/pseudocode.py)
+1. **Self-play:** A neural network plays games against itself using Monte Carlo Tree Search (MCTS) to generate training data
+2. **Training:** The network learns to predict move probabilities and game outcomes from self-play positions
+3. **Evaluation:** New network versions are pitted against previous versions in an arena — only improvements are kept
+4. **Iteration:** Repeat for many generations until the network converges to strong play
 
-Additionally, this codebase is heavily inspired by:
-- [Alpha Zero General](https://github.com/suragnair/alpha-zero-general)
-- [AplhaZero](https://github.com/michaelnny/alpha_zero?tab=readme-ov-file)
+This is the same approach that achieved superhuman performance in Chess, Shogi, and Go — applied here to the combinatorially complex domain of Blokus.
 
-## Project Outline
+---
 
-I have discretised the steps of the project into manageable stages of (hopefully)
-achievable goals as follows:
+## Features
 
-### Tic-Tac-Toe
+- **Game-agnostic AlphaZero framework** — modular `IGame` and `INeuralNetWrapper` interfaces make it easy to add new games
+- **Complete Tic-Tac-Toe implementation** — validates the full training pipeline end-to-end (self-play, training, arena evaluation)
+- **ResNet architecture** — configurable depth and width with residual blocks, batch normalisation, and dual policy/value heads
+- **MCTS with PUCT** — Upper Confidence bounds applied to Trees for balanced exploration and exploitation
+- **HTML training reports** — interactive Plotly dashboards showing loss curves, arena win rates, and timing statistics
+- **Dynamic training window** — linearly growing lookback over self-play history to balance recency and diversity
+- **Temperature scheduling** — exploration early in games, exploitation in later moves
 
-Training an algorithm to play this simple game is a quick check the basics are working.
+---
 
-- [x] Can you get a framework to work for the simple game of Tic-Tac-Toe
-- [x] Enable logging for debugging in future runs
-- [x] Enable time logging 
-- [x] Figure out how to buffer training examples
-- [x] Experiment with ResNet architecture
-- [x] Draw with/be competitive with a perfect Tic-Tac-Toe bot
+## Architecture
 
-### Blokus Duo
+```
+AlphaBlokus/
+├── core/                       # Game-agnostic AlphaZero framework
+│   ├── mcts.py                 # Monte Carlo Tree Search with PUCT
+│   ├── coach.py                # Training orchestrator (self-play → train → arena)
+│   ├── arena.py                # Model evaluation with alternating start positions
+│   ├── config.py               # Configuration dataclasses
+│   └── interfaces.py           # IGame and INeuralNetWrapper protocols
+├── tictactoe/                  # Reference implementation (complete)
+│   ├── game.py                 # Tic-Tac-Toe game logic
+│   └── neuralnets/             # 4-layer CNN (Conv → FC → policy + value)
+├── blokusduo/                  # Target implementation (in progress)
+│   ├── game.py                 # Blokus Duo game logic with piece placement
+│   ├── pieces.py               # 21 pieces, 91 orientations, symmetry reduction
+│   ├── pieces.json             # Piece definitions with basis orientations
+│   └── neuralnets/             # ResNet (configurable blocks → policy + value)
+├── run_configurations/         # JSON configs for test and production runs
+├── reporting.py                # HTML report generation with Plotly
+└── main.py                     # Entry point
+```
 
-- [x] Design input and figure out representation for use with net
-- [ ] Figure out board representation and efficient algorithm for calculating available moves (using caching)
-- [ ] Optimise training time
-- [ ] Add a learning rate scheduler
+---
 
-Can use connect 4 as a debugging step if the above isn't working
+## Technical Details
 
-### Become the best blokus playing AI on the planet
-Play 100 games of blokus against the best Blokus AIs in the world and win > 50%
-of the games.
+### Neural Network
 
-- [Pentobi AI](https://pentobi.sourceforge.io/)
+| Component | Tic-Tac-Toe | Blokus Duo |
+|-----------|-------------|------------|
+| Architecture | 4-layer CNN | ResNet (configurable depth) |
+| Input | 3x3 board | 14x18 (board + piece encoding) |
+| Policy output | 10 actions | 17,837 actions |
+| Value output | Scalar ∈ [-1, 1] | Scalar ∈ [-1, 1] |
+| Residual blocks | None | 1–8 (configurable) |
 
-- [FGPA AI](https://bit.ly/2TtjRcv) 
+The Blokus action space of **17,837** comes from 14 × 14 grid positions × 91 piece-orientation combinations + 1 pass action. The 91 orientations represent the 21 Blokus pieces, each with 1–8 unique basis orientations after symmetry reduction (rotations and reflections).
 
+### MCTS
+
+- PUCT formula: `u = Q(s,a) + cpuct · P(s,a) · √N(s) / (1 + N(s,a))`
+- Configurable simulation count (2 for testing, 200+ for production)
+- Temperature-based move selection: `τ=1` for exploration, `τ→0` for exploitation
+
+### Training Loop
+
+```
+For each generation:
+  1. Self-play N games using MCTS + current network
+  2. Augment positions with symmetries
+  3. Train network on recent self-play history
+  4. Evaluate new network vs previous best in arena
+  5. Accept/reject based on win rate threshold
+```
+
+---
+
+## Blokus Duo Rules
+
+Blokus Duo is played on a 14x14 board where two players take turns placing polyomino pieces:
+
+- Each player has **21 pieces** (1 monomino through 5 pentominoes)
+- Pieces must touch at least one **corner** of a friendly piece
+- Pieces must **not** touch any **side** of a friendly piece
+- First move must cover the designated starting square
+- The game ends when neither player can place a piece
+- Score = squares placed (with bonuses for placing all pieces)
+
+---
+
+## Getting Started
+
+### Prerequisites
+
+- Python 3.12+
+- PyTorch
+- NumPy, Pandas, Plotly, tqdm
+
+### Installation
+
+```bash
+git clone https://github.com/HenryTBCassidy/AlphaBlokus.git
+cd AlphaBlokus
+pip install -r requirements.txt  # if available
+```
+
+### Running Tic-Tac-Toe Training
+
+```bash
+python main.py --config run_configurations/test_run.json
+```
+
+---
+
+## Documentation
+
+Detailed documentation lives in the [`docs/`](docs/) folder:
+
+| Document | Description |
+|----------|-------------|
+| [00 — Project Overview](docs/00-PROJECT-OVERVIEW.md) | Mission, phased approach, key decisions, effort estimates |
+| [01 — Architecture Review](docs/01-ARCHITECTURE-REVIEW.md) | Comprehensive code review: interfaces, performance, profiling, compute strategy |
+| [02 — Algorithms](docs/02-ALGORITHMS.md) | MCTS implementation, self-play, arena evaluation, caching strategies |
+| [03 — Neural Networks](docs/03-NEURAL-NETWORKS.md) | ResNet and CNN architectures, board encoding, loss functions |
+| [04 — Evaluation Plan](docs/04-EVALUATION-PLAN.md) | Training diagnostics, Pentobi benchmarking, headline metrics |
+| [05 — Competitive Landscape](docs/05-COMPETITIVE-LANDSCAPE.md) | Pentobi, existing Blokus RL projects, why neural Blokus is hard |
+| [06 — External Interfaces](docs/06-EXTERNAL-INTERFACES.md) | Pentobi GTP adapter, human-playable UI, translation layer |
+| [07 — Handoff](docs/07-HANDOFF.md) | Context for contributors, current state, next steps, gotchas |
+| [08 — Appendix: Pieces](docs/08-APPENDIX-PIECES.md) | All 21 Blokus pieces, 91 orientations, symmetry analysis |
+
+---
+
+## Roadmap
+
+- [x] Core AlphaZero framework (MCTS, Coach, Arena)
+- [x] Tic-Tac-Toe implementation and validation
+- [x] Blokus Duo board representation and piece system
+- [x] Blokus Duo neural network architecture
+- [ ] Architecture review fixes (MCTS optimisation, interface contracts, piece ID mapping)
+- [ ] Blokus Duo move generation with caching
+- [ ] End-to-end Blokus Duo self-play training
+- [ ] Learning rate scheduling
+- [ ] Parallel MCTS for faster self-play
+- [ ] Benchmark against Pentobi at increasing difficulty levels
+
+---
+
+## Inspiration and References
+
+This project builds on the ideas and code from:
+
+- Silver, D. et al. — [Mastering the game of Go with deep neural networks and tree search](https://www.nature.com/articles/nature16961) (AlphaGo, 2016)
+- Silver, D. et al. — [Mastering the game of Go without human knowledge](https://www.nature.com/articles/nature24270) (AlphaGo Zero, 2017)
+- Silver, D. et al. — [A general reinforcement learning algorithm that masters chess, shogi, and Go through self-play](https://www.science.org/doi/10.1126/science.aar6404) (AlphaZero, 2018)
+- Schrittwieser, J. et al. — [Mastering Atari, Go, Chess and Shogi by Planning with a Learned Model](https://www.nature.com/articles/s41586-020-03051-4) (MuZero, 2020)
+- [alpha-zero-general](https://github.com/suragnair/alpha-zero-general) by Surag Nair — Game-agnostic AlphaZero framework
+- [alpha_zero](https://github.com/michaelnny/alpha_zero) by Michael Nny — Clean AlphaZero implementation
+- [Pentobi](https://pentobi.sourceforge.io/) — Open-source Blokus AI and benchmark target
+
+---
+
+## License
+
+TBD
