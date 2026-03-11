@@ -6,28 +6,28 @@ Everything in this doc is about **how the code is organised, not what it does**.
 
 ## Checklist
 
-Items ordered to minimise merge pain. Each row ≈ one commit.
+Items ordered to minimise merge pain. Each row ~ one commit. Section numbers below match these IDs.
 
-| # | Item | Section | Effort | Priority | Done |
-|---|------|---------|--------|----------|------|
-| S1 | Create `pyproject.toml` + uv setup | §1 | 30 min | High | ✅ |
-| S2 | Reorganise into `games/` directory | §2 | 45 min | High | ✅ |
-| S15 | Fix JSON config booleans | §4 | 10 min | Medium | ✅ |
-| S6 | Extract BaseNNetWrapper | §5 | 1 hour | High | ✅ |
-| S3 | Switch to loguru | §3 | 30 min | High | ✅ |
-| S7 | Clean up / delete utils.py | §5 | 15 min | Medium | ✅ |
-| S8–S11 | Naming pass + import modernisation | §6–§7 | 1.5 hours | Medium | ✅ |
-| S4 | Build MetricsCollector | §3 | 1.5 hours | High | ✅ |
-| S5 | Add CLI to main.py, fix module-level side effects | §4 | 30 min | Medium | |
-| S12 | Data storage → parquet everywhere | §8 | 1 hour | Medium | |
-| S13 | Set up pytest + initial test suite | §9 | 3–4 hours | High | |
-| S14 | Profiling instrumentation (nice-to-have) | §10 | 2.5 hours | Low | |
+| # | Item | Effort | Priority | Done |
+|---|------|--------|----------|------|
+| S1 | Create `pyproject.toml` + uv setup | 30 min | High | ✅ |
+| S2 | Reorganise into `games/` directory | 45 min | High | ✅ |
+| S3 | Fix JSON config booleans | 10 min | Medium | ✅ |
+| S4 | Extract BaseNNetWrapper | 1 hour | High | ✅ |
+| S5 | Switch to loguru | 30 min | High | ✅ |
+| S6 | Clean up / delete utils.py | 15 min | Medium | ✅ |
+| S7 | Naming pass + import modernisation | 1.5 hours | Medium | ✅ |
+| S8 | Build MetricsCollector | 1.5 hours | High | ✅ |
+| S9 | Add CLI to main.py, fix module-level side effects | 30 min | Medium | |
+| S10 | Data storage → parquet everywhere | 1 hour | Medium | |
+| S11 | Set up pytest + initial test suite | 3–4 hours | High | |
+| S12 | Profiling instrumentation (nice-to-have) | 2.5 hours | Low | |
 
 **Estimated total (excl. nice-to-have): ~11 hours across 11 commits**
 
 ---
 
-## 1. Package Management — Move to uv
+## S1. Package Management — Move to uv
 
 ### Current state
 
@@ -52,14 +52,14 @@ The historical argument for conda was that ML packages (numpy, scipy) shipped wi
 | Create `pyproject.toml` with project metadata and dependencies | Include `[project.optional-dependencies]` for `dev` (pytest, ruff, etc.) and `gpu` (CUDA) |
 | Create `uv.lock` | Pin exact versions for reproducibility |
 | Add `.python-version` file | Pin Python 3.11+ |
-| Remove `nptyping` dependency | Replace with `numpy.typing` (see §7) |
+| Remove `nptyping` dependency | Replace with `numpy.typing` (see S7) |
 | Add `ruff` for linting/formatting | Fast, opinionated, replaces flake8+black+isort |
 
 **Estimated effort:** ~30 minutes
 
 ---
 
-## 2. Project Structure — Introduce `games/` Directory
+## S2. Project Structure — Introduce `games/` Directory
 
 ### Current layout
 
@@ -86,10 +86,10 @@ AlphaBlokus/
 │   ├── arena.py
 │   ├── coach.py
 │   ├── mcts.py
-│   └── metrics.py          ← NEW: MetricsCollector (see §3)
+│   └── metrics.py          ← NEW: MetricsCollector (see S8)
 ├── games/
 │   ├── __init__.py
-│   ├── base_wrapper.py     ← NEW: shared NNetWrapper base (see §5)
+│   ├── base_wrapper.py     ← NEW: shared NNetWrapper base (see S4)
 │   ├── types.py            ← NEW: shared type aliases
 │   ├── blokusduo/
 │   │   ├── __init__.py
@@ -111,7 +111,7 @@ AlphaBlokus/
 ├── run_configurations/
 │   ├── full_run.json
 │   └── test_run.json
-├── tests/                   ← NEW (see §9)
+├── tests/                   ← NEW (see S11)
 │   ├── conftest.py
 │   ├── test_core/
 │   ├── test_blokusduo/
@@ -119,10 +119,10 @@ AlphaBlokus/
 ├── notebooks/               ← move eval.ipynb here
 │   └── eval.ipynb
 ├── main.py
-├── utils.py                 ← stripped down (see §5)
+├── utils.py                 ← stripped down (see S6)
 ├── reporting.py
-├── pyproject.toml           ← NEW (see §1)
-└── STYLE-GUIDE.md           ← NEW (see companion style guide)
+├── pyproject.toml           ← NEW (see S1)
+└── STYLE-GUIDE.md
 ```
 
 ### Key changes
@@ -131,7 +131,7 @@ AlphaBlokus/
 2. **`games/base_wrapper.py` + `games/types.py`** — shared base classes and type aliases used across games, at the `games/` root level rather than a separate subfolder.
 3. **`tests/`** — mirrors the source structure
 4. **`notebooks/`** — moves `eval.ipynb` out of the project root
-5. **`core/metrics.py`** — new metrics collection module (see §3)
+5. **`core/metrics.py`** — new metrics collection module (see S8)
 
 ### What NOT to move
 
@@ -144,7 +144,43 @@ AlphaBlokus/
 
 ---
 
-## 3. Logging — Switch to Loguru + Build a Metrics Pipeline
+## S3. Fix JSON Config Booleans
+
+### Current state
+
+JSON config files store booleans as strings (`"False"` instead of `false`). `dataclass_wizard.fromdict()` handles native JSON booleans correctly, so these string values are fragile and unnecessary.
+
+### Fix
+
+Change `"False"` to `false` and `"True"` to `true` in all config files under `run_configurations/`.
+
+**Estimated effort:** ~10 minutes
+
+---
+
+## S4. Extract BaseNNetWrapper
+
+### Current state
+
+`blokusduo/neuralnets/wrapper.py` and `tictactoe/neuralnets/wrapper.py` are ~85% identical. Methods that are **copy-pasted verbatim** between the two:
+
+- `train()` (~50 lines)
+- `predict()` (~20 lines)
+- `loss_pi()` / `loss_v()` (~10 lines each)
+- `_log_data()` (~15 lines)
+- `collect_training_data()` (~20 lines)
+- `save_checkpoint()` / `load_checkpoint()` (~10 lines each)
+- `TrainingDataLoggable` dataclass (identical in both files)
+
+### Fix
+
+Extract a `BaseNNetWrapper` in `games/base_wrapper.py` that implements all shared methods. Game-specific wrappers only override what differs (network construction, board shape handling).
+
+**Estimated effort:** ~1 hour
+
+---
+
+## S5. Switch to Loguru
 
 ### Current state
 
@@ -153,7 +189,6 @@ AlphaBlokus/
 - `coloredlogs.install()` at module level in `main.py`
 - Inconsistent usage: some files call `logging.info()` (root logger) instead of `log.info()` (named logger)
 - Several `print()` calls that should be logging
-- No structured data logging — training metrics go through a `pickle → parquet` two-stage pipeline
 
 ### Recommendation: loguru for application logging
 
@@ -190,112 +225,30 @@ logger.add(
 )
 ```
 
-### Recommendation: MetricsCollector for training data
-
-For tracking metrics (loss curves, MCTS stats, arena results, etc.), don't use the logging system. Build a lightweight `MetricsCollector` that components write to during a run:
-
-```python
-@dataclass
-class MetricsCollector:
-    """Collects metrics from all components during a training run.
-
-    Components call collector.log_* methods during execution.
-    At generation boundaries, call flush() to write to parquet.
-    """
-
-    def log_training(self, generation: int, epoch: int,
-                     pi_loss: float, v_loss: float, lr: float) -> None: ...
-
-    def log_mcts(self, generation: int, game: int,
-                 sims_per_sec: float, tree_nodes: int,
-                 avg_branching: float) -> None: ...
-
-    def log_arena(self, generation: int,
-                  wins: int, losses: int, draws: int) -> None: ...
-
-    def flush(self, output_dir: Path) -> None:
-        """Write all collected metrics to parquet files."""
-```
-
-**Why this approach over alternatives:**
-
-| Approach | Pros | Cons |
-|----------|------|------|
-| **MetricsCollector (recommended)** | Simple, explicit, type-safe, easy to test | Components need a reference to the collector |
-| Event stream / pub-sub | Decoupled, flexible | Over-engineered for our scale |
-| Write-to-log-and-parse-later | Zero coupling | Fragile parsing, hard to query |
-| Each component writes own parquet | No shared state | Inconsistent schemas, no consolidation |
-
-Each component (`Coach`, `MCTS`, `Arena`, `NNetWrapper`) gets a reference to the collector and calls the appropriate `log_*` method. The collector batches everything in memory and flushes to parquet at generation boundaries. The reporting module reads the parquet files to generate dashboards.
-
-This also solves the current two-stage pickle → parquet pipeline. Training data goes straight to parquet via the collector.
-
-**Estimated effort:** ~2 hours (loguru migration ~30 min, MetricsCollector ~1.5 hours)
-
----
-
-## 4. Run Configuration & Entry Point
-
-### Current state
-
-- Config loaded from JSON via `load_args("test_run.json")` in `main.py` line 16
-- Filename is **hardcoded** — changing the config requires editing source code
-- `load_args()` runs at **module level** — importing `main` triggers config loading
-- JSON booleans are stored as strings (`"False"` instead of `false`) — fragile
-- No CLI argument parsing
-- No `__main__.py` — can't run as `python -m alphablokus`
-
-### Recommendations
-
-1. **Add CLI via argparse or click** — pass config file as an argument:
-   ```bash
-   python main.py --config run_configurations/full_run.json
-   ```
-
-2. **Fix JSON booleans** — change `"False"` to `false` and `"True"` to `true` in all config files. `dataclass_wizard.fromdict()` handles native JSON booleans correctly.
-
-3. **Move config loading into `if __name__ == "__main__"` block** — prevent module-level side effects.
-
-4. **Consider TOML for config** — since we're adopting `pyproject.toml` anyway, TOML is more natural for config files than JSON (supports comments, cleaner syntax). Not essential — JSON works fine.
-
-5. **Keep `dataclass_wizard.fromdict()` for deserialization** — it's a clean pattern. Frozen dataclasses for config are excellent and should be preserved.
-
 **Estimated effort:** ~30 minutes
 
 ---
 
-## 5. Code Deduplication
+## S6. Clean Up / Delete utils.py
 
-### Wrapper duplication (biggest win)
-
-`blokusduo/neuralnets/wrapper.py` and `tictactoe/neuralnets/wrapper.py` are ~85% identical. Methods that are **copy-pasted verbatim** between the two:
-
-- `train()` (~50 lines)
-- `predict()` (~20 lines)
-- `loss_pi()` / `loss_v()` (~10 lines each)
-- `_log_data()` (~15 lines)
-- `collect_training_data()` (~20 lines)
-- `save_checkpoint()` / `load_checkpoint()` (~10 lines each)
-- `TrainingDataLoggable` dataclass (identical in both files)
-
-**Fix:** Extract a `BaseNNetWrapper` in `games/base_wrapper.py` that implements all shared methods. Game-specific wrappers only override what differs (network construction, board shape handling).
-
-### utils.py is a grab-bag
+### Current state
 
 `utils.py` contains three unrelated things:
 1. `AverageMeter` — training utility → move to `core/` or `games/`
 2. `load_args()` — config loading → move to `core/config.py`
 3. `setup_logging()` — logging setup → delete (loguru replaces this)
 
-After this, `utils.py` can probably be deleted entirely.
+### Fix
 
-**Estimated effort:** ~1.5 hours
+Move the useful parts, delete the rest. After this, `utils.py` can probably be deleted entirely.
+
+**Estimated effort:** ~15 minutes
 
 ---
 
-## 6. Naming Conventions
+## S7. Naming Pass + Import Modernisation
 
-A comprehensive pass across the codebase to make naming consistent. This is the most diffuse change — touches almost every file.
+A comprehensive pass across the codebase to make naming consistent and modernise imports. This is the most diffuse change — touches almost every file.
 
 ### MCTS dictionary names
 
@@ -340,31 +293,96 @@ Currently three different names for the same concept:
 Current naming is already good (snake_case, descriptive). No changes needed except:
 - `neuralnets/` → consider `nn/` for brevity? Or keep — it's explicit.
 
-**Estimated effort:** ~1 hour
+### Import modernisation
+
+Three inconsistencies to clean up in the same pass:
+
+1. **`nptyping` → `numpy.typing`** — `blokusduo/pieces.py` uses `from nptyping import NDArray`. Every other file uses `from numpy.typing import NDArray`. They're different libraries. `nptyping` is poorly maintained. Standardise on `numpy.typing`.
+
+2. **`Tuple`/`List` → `tuple`/`list`** — Some files import `from typing import Tuple, List` but the code uses lowercase `tuple[...]` (Python 3.10+ syntax). Drop the typing imports, use builtins everywhere. Since we're targeting 3.11+ (StrEnum), this is safe.
+
+3. **`os.path` → `pathlib.Path`** — `core/coach.py` uses `os.path.join()` and `os.path.isfile()`. Both wrapper files use `os.listdir()`. Convert to `Path` methods for consistency with the rest of the codebase.
+
+**Estimated effort:** ~1.5 hours
 
 ---
 
-## 7. Import Modernisation
+## S8. Build MetricsCollector
 
-Three inconsistencies to clean up in a single pass:
+### Why not use the logging system?
 
-### 1. `nptyping` → `numpy.typing`
+Application logging (loguru) is for human-readable operational messages. Training metrics (loss curves, MCTS stats, arena results) are structured numerical data that gets queried and plotted. Different tools for different jobs.
 
-`blokusduo/pieces.py` uses `from nptyping import NDArray`. Every other file uses `from numpy.typing import NDArray`. They're different libraries. `nptyping` is poorly maintained. Standardise on `numpy.typing`.
+### Design
 
-### 2. `Tuple`/`List` → `tuple`/`list`
+```python
+@dataclass
+class MetricsCollector:
+    """Collects metrics from all components during a training run.
 
-Some files import `from typing import Tuple, List` but the code uses lowercase `tuple[...]` (Python 3.10+ syntax). Drop the typing imports, use builtins everywhere. Since we're targeting 3.11+ (StrEnum), this is safe.
+    Components call collector.log_* methods during execution.
+    At generation boundaries, call flush() to write to parquet.
+    """
 
-### 3. `os.path` → `pathlib.Path`
+    def log_training(self, generation: int, epoch: int,
+                     pi_loss: float, v_loss: float, lr: float) -> None: ...
 
-`core/coach.py` uses `os.path.join()` and `os.path.isfile()`. Both wrapper files use `os.listdir()`. Convert to `Path` methods for consistency with the rest of the codebase.
+    def log_mcts(self, generation: int, game: int,
+                 sims_per_sec: float, tree_nodes: int,
+                 avg_branching: float) -> None: ...
 
-**Estimated effort:** ~20 minutes
+    def log_arena(self, generation: int,
+                  wins: int, losses: int, draws: int) -> None: ...
+
+    def flush(self, output_dir: Path) -> None:
+        """Write all collected metrics to parquet files."""
+```
+
+### Why this approach over alternatives
+
+| Approach | Pros | Cons |
+|----------|------|------|
+| **MetricsCollector (recommended)** | Simple, explicit, type-safe, easy to test | Components need a reference to the collector |
+| Event stream / pub-sub | Decoupled, flexible | Over-engineered for our scale |
+| Write-to-log-and-parse-later | Zero coupling | Fragile parsing, hard to query |
+| Each component writes own parquet | No shared state | Inconsistent schemas, no consolidation |
+
+Each component (`Coach`, `MCTS`, `Arena`, `NNetWrapper`) gets a reference to the collector and calls the appropriate `log_*` method. The collector batches everything in memory and flushes to parquet at generation boundaries. The reporting module reads the parquet files to generate dashboards.
+
+This also solves the current two-stage pickle → parquet pipeline. Training data goes straight to parquet via the collector.
+
+**Estimated effort:** ~1.5 hours
 
 ---
 
-## 8. Data Storage Architecture
+## S9. CLI & Entry Point Cleanup
+
+### Current state
+
+- Config loaded from JSON via `load_args("test_run.json")` in `main.py` line 16
+- Filename is **hardcoded** — changing the config requires editing source code
+- `load_args()` runs at **module level** — importing `main` triggers config loading
+- No CLI argument parsing
+- No `__main__.py` — can't run as `python -m alphablokus`
+
+### Fix
+
+1. **Add CLI via argparse or click** — pass config file as an argument:
+   ```bash
+   python main.py --config run_configurations/full_run.json
+   ```
+
+2. **Move config loading into `if __name__ == "__main__"` block** — prevent module-level side effects.
+
+3. **Consider TOML for config** — since we're adopting `pyproject.toml` anyway, TOML is more natural for config files than JSON (supports comments, cleaner syntax). Not essential — JSON works fine.
+
+4. **Keep `dataclass_wizard.fromdict()` for deserialization** — it's a clean pattern. Frozen dataclasses for config are excellent and should be preserved.
+
+**Estimated effort:** ~30 minutes
+
+---
+
+## S10. Data Storage — Parquet Everywhere
 
 ### Current state
 
@@ -377,7 +395,7 @@ Some files import `from typing import Tuple, List` but the code uses lowercase `
 | Timing | Single Parquet | Appended across generations ✓ |
 | Reports | HTML + Plotly | Good ✓ |
 
-### Recommendation
+### Fix
 
 1. **Self-play history → Parquet directly** via the MetricsCollector. No more pickle.
 2. **Training metrics → Parquet directly** — the two-stage pipeline was unnecessary.
@@ -386,11 +404,11 @@ Some files import `from typing import Tuple, List` but the code uses lowercase `
 
 Don't migrate to HDF5 — parquet is simpler, columnar, and we already use it. Keep things consistent.
 
-**Estimated effort:** ~1 hour (mostly handled by the MetricsCollector work in §3)
+**Estimated effort:** ~1 hour (mostly handled by the MetricsCollector work in S8)
 
 ---
 
-## 9. Testing Strategy
+## S11. Testing
 
 ### Current state
 
@@ -442,9 +460,7 @@ tests/
 
 ---
 
-## 10. Profiling & Observability Infrastructure
-
-Moved from the original architecture review since it's infrastructure, not a bug fix.
+## S12. Profiling & Observability (Nice-to-have)
 
 ### Lightweight instrumentation (always on)
 
@@ -472,19 +488,13 @@ Extend the existing Plotly HTML reporting to include:
 
 ---
 
-## 11. Compute Infrastructure
+## Note: Compute Infrastructure
 
 Unchanged from the original architecture review — see [`04-COMPETITIVE-LANDSCAPE.md`](../reference/04-COMPETITIVE-LANDSCAPE.md) for external context.
 
 **Tiered approach:**
 - **Tier 1: Mac M4 Pro** — development, debugging, small test runs (MPS backend)
 - **Tier 2: RTX 3080 Ti PC** — full training runs (CUDA, most mature backend)
-- **Tier 3: AWS/cloud** — overflow if PC isn't enough (g5.xlarge spot ~£8-10/day)
+- **Tier 3: AWS/cloud** — overflow if PC isn't enough (g5.xlarge spot ~8-10/day)
 
-No action needed now — this informs Phase 3 decisions.
-
----
-
----
-
-*Checklist is at the top of this document.*
+No action item — this informs Phase 3 decisions.

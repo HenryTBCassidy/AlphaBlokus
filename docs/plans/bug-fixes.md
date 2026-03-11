@@ -6,33 +6,33 @@ Everything in this doc is about **making things work correctly**. The companion 
 
 ## Checklist
 
-| # | Issue | Section | Priority | Effort | Done |
-|---|-------|---------|----------|--------|------|
-| B1 | MCTS full action iteration | §2 | Critical | 15 min | |
-| B2 | Interface type mismatches (BlokusDuoGame) | §1 | Critical | 1 hour | |
-| B3 | NNetWrapper constructor mismatch | §1 | Critical | 20 min | |
-| B4 | Boundary check off-by-one | §3 | Critical | 15 min | |
-| B5 | Piece orientation ID gaps | §4 | Critical | 30 min | |
-| B6 | Action encoding/decoding missing | §6 | Critical | 45 min | |
-| B7 | main.py game-network mismatch | §1 | Critical | 10 min | |
-| B8 | Hardcoded board sizes | §3 | Critical | 20 min | |
-| B9 | Mutable board state in BlokusDuoGame | §3 | Critical | 30 min | |
-| B10 | Optimizer reset per epoch | §5 | Important | 15 min | |
-| B11 | No optimizer state in checkpoints | §5 | Important | 20 min | |
-| B12 | No learning rate schedule | §5 | Important | 1 hour | |
-| B13 | Model loading broken | §6 | Important | 45 min | |
-| B14 | BidirectionalDict redesign | §4 | Important | 30 min | |
-| B15 | Magic number action_size | §4 | Important | 10 min | |
-| B16 | MCTS string hashing | §2 | Important | 30 min | |
-| B17 | Input tensor shape verification | §7 | Important | 30 min | |
-| B18 | Policy loss function | §5 | Nice-to-have | 15 min | |
-| B19 | Random sampling with replacement | §5 | Nice-to-have | 10 min | |
-| B20 | dtype conversion overhead | §5 | Nice-to-have | 10 min | |
-| B21 | MCTS tree reuse across games | §2 | Nice-to-have | 30 min | |
-| B22 | TTT deprecated tostring() | §7 | Nice-to-have | 5 min | |
-| B23 | TTT unnecessary board copies | §7 | Nice-to-have | 15 min | |
-| B24 | Input validation | §6 | Nice-to-have | 20 min | |
-| B25 | MCTS fallback policy | §3 | Nice-to-have | 5 min | |
+| # | Issue | Topic | Priority | Effort | Done |
+|---|-------|-------|----------|--------|------|
+| B1 | MCTS full action iteration | [MCTS](#2-mcts-performance-bugs) | Critical | 15 min | |
+| B2 | Interface type mismatches (BlokusDuoGame) | [Interfaces](#1-interface-contract-violations) | Critical | 1 hour | |
+| B3 | NNetWrapper constructor mismatch | [Interfaces](#1-interface-contract-violations) | Critical | 20 min | |
+| B4 | Boundary check off-by-one | [Board Logic](#3-board--game-logic-bugs) | Critical | 15 min | |
+| B5 | Piece orientation ID gaps | [Pieces](#4-piece-system-bugs) | Critical | 30 min | |
+| B6 | Action encoding/decoding missing | [Missing Impls](#6-missing-implementations) | Critical | 45 min | |
+| B7 | main.py game-network mismatch | [Interfaces](#1-interface-contract-violations) | Critical | 10 min | |
+| B8 | Hardcoded board sizes | [Board Logic](#3-board--game-logic-bugs) | Critical | 20 min | |
+| B9 | Mutable board state in BlokusDuoGame | [Board Logic](#3-board--game-logic-bugs) | Critical | 30 min | |
+| B10 | Optimizer reset per epoch | [Training](#5-training-pipeline-bugs) | Important | 15 min | |
+| B11 | No optimizer state in checkpoints | [Training](#5-training-pipeline-bugs) | Important | 20 min | |
+| B12 | No learning rate schedule | [Training](#5-training-pipeline-bugs) | Important | 1 hour | |
+| B13 | Model loading broken | [Missing Impls](#6-missing-implementations) | Important | 45 min | |
+| B14 | BidirectionalDict redesign | [Pieces](#4-piece-system-bugs) | Important | 30 min | |
+| B15 | Magic number action_size | [Pieces](#4-piece-system-bugs) | Important | 10 min | |
+| B16 | MCTS string hashing | [MCTS](#2-mcts-performance-bugs) | Important | 30 min | |
+| B17 | Input tensor shape verification | [Minor](#7-minor-correctness-issues) | Important | 30 min | |
+| B18 | Policy loss function | [Training](#5-training-pipeline-bugs) | Nice-to-have | 15 min | |
+| B19 | Random sampling with replacement | [Training](#5-training-pipeline-bugs) | Nice-to-have | 10 min | |
+| B20 | dtype conversion overhead | [Training](#5-training-pipeline-bugs) | Nice-to-have | 10 min | |
+| B21 | MCTS tree reuse across games | [MCTS](#2-mcts-performance-bugs) | Nice-to-have | 30 min | |
+| B22 | TTT deprecated tostring() | [Minor](#7-minor-correctness-issues) | Nice-to-have | 5 min | |
+| B23 | TTT unnecessary board copies | [Minor](#7-minor-correctness-issues) | Nice-to-have | 15 min | |
+| B24 | Input validation | [Missing Impls](#6-missing-implementations) | Nice-to-have | 20 min | |
+| B25 | MCTS fallback policy | [Board Logic](#3-board--game-logic-bugs) | Nice-to-have | 5 min | |
 
 **Estimated total: ~9.5 hours** (Critical ~3.5h · Important ~4h · Nice-to-have ~2h)
 

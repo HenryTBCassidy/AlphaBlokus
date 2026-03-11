@@ -9,7 +9,7 @@ The rationale for choosing 44-channel per-piece planes (BlokusDuo) and
 On completion, Step 18 folds this into `docs/reference/02-NEURAL-NETWORKS.md`
 and deletes the old `09-BOARD-ENCODING-OPTIONS.md` working doc.
 
-**Prerequisite:** Structural refactor items S1–S13 (especially S13: pytest setup).
+**Prerequisite:** Structural refactor items S1–S11 (especially S11: pytest setup).
 
 ---
 
@@ -522,7 +522,7 @@ parameters.
 
 #### Step 17 — Encoder/decoder tests (`tests/`)
 
-Assumes the structural refactor's S13 (pytest setup) is already done.
+Assumes the structural refactor's S11 (pytest setup) is already done.
 
 **`tests/test_tictactoe/test_encoding.py`:**
 - Encode/decode roundtrip: encode a known board, decode it, verify identical
