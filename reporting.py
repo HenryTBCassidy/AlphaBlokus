@@ -88,7 +88,7 @@ def _make_performance_statistics_plot(timings_data: pd.DataFrame) -> go.Figure:
 def create_html_report(args: RunConfig):
     logger.info("Writing report...")
     start = time.perf_counter()
-    loss_data = pd.read_parquet(args.training_data_directory / "data.parquet")
+    loss_data = pd.read_parquet(args.training_data_directory)
     arena_data = pd.read_parquet(args.arena_data_directory)
     timings_data = pd.read_parquet(args.timings_directory)
 

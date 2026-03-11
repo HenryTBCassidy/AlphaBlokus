@@ -4,6 +4,8 @@ from enum import StrEnum
 from pathlib import Path
 
 import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 from loguru import logger
 
 from core.config import RunConfig
@@ -22,12 +24,18 @@ class MetricsCollector:
     """Collects metrics from all components during a training run.
 
     Components call log_* methods during execution. Call flush() at generation
-    boundaries to write accumulated data to parquet files.
+    boundaries to write the current generation's data to hive-partitioned
+    parquet files and clear the buffers.
 
-    Each flush writes ALL data accumulated so far (does not clear buffers),
-    so files always contain the complete run history. This provides crash
-    resilience — if a run fails, the most recent flush contains all data
-    from completed generations.
+    Directory structure after multiple generations::
+
+        TrainingData/generation=1/data.parquet
+        TrainingData/generation=2/data.parquet
+        ArenaData/generation=1/arena.parquet
+        ...
+
+    Reading back: ``pd.read_parquet(directory)`` automatically discovers all
+    partitions and reconstructs the ``generation`` column from directory names.
     """
 
     _training_records: list[dict] = field(default_factory=list, init=False, repr=False)
@@ -85,41 +93,66 @@ class MetricsCollector:
             "time_elapsed": time_elapsed,
         })
 
-    def flush(self, config: RunConfig) -> None:
-        """Write all accumulated metrics to parquet files.
+    def flush(self, config: RunConfig, generation: int) -> None:
+        """Write buffered metrics for the current generation and clear buffers.
 
-        Each call overwrites previous files with the complete run history.
-        Buffers are NOT cleared, enabling incremental flushes at generation
-        boundaries while always producing complete output files.
+        Each generation's data is written to a hive-partitioned directory
+        (e.g. ``TrainingData/generation=N/data.parquet``). The ``generation``
+        column is dropped from the parquet data since it's encoded in the
+        directory name and restored automatically on read.
 
-        Column names and directory layout match the existing reporting module
-        expectations so reports continue to work without changes.
+        Buffers are cleared after a successful write so memory stays bounded.
         """
         start = time.perf_counter()
         count = 0
 
         if self._training_records:
-            config.training_data_directory.mkdir(parents=True, exist_ok=True)
-            pd.DataFrame(self._training_records).assign(
+            df = pd.DataFrame(self._training_records).assign(
                 average_loss=lambda df: df.average_pi_loss + df.average_v_loss
             ).astype(
                 {"pi_loss": "float64", "v_loss": "float64", "total_loss": "float64"}
-            ).to_parquet(config.training_data_directory / "data.parquet", index=False)
+            )
+            _write_partition(df, config.training_data_directory, generation, "data.parquet")
             count += len(self._training_records)
+            self._training_records.clear()
 
         if self._arena_records:
-            config.arena_data_directory.mkdir(parents=True, exist_ok=True)
-            pd.DataFrame(self._arena_records).to_parquet(
-                config.arena_data_directory / "arena.parquet", index=False
+            _write_partition(
+                pd.DataFrame(self._arena_records),
+                config.arena_data_directory,
+                generation,
+                "arena.parquet",
             )
             count += len(self._arena_records)
+            self._arena_records.clear()
 
         if self._timing_records:
-            config.timings_directory.mkdir(parents=True, exist_ok=True)
-            pd.DataFrame(self._timing_records).to_parquet(
-                config.timings_directory / "timings.parquet", index=False
+            _write_partition(
+                pd.DataFrame(self._timing_records),
+                config.timings_directory,
+                generation,
+                "timings.parquet",
             )
             count += len(self._timing_records)
+            self._timing_records.clear()
 
         elapsed = time.perf_counter() - start
-        logger.info(f"Flushed {count} metric records in {elapsed:.2f}s")
+        logger.info(f"Flushed {count} metric records for generation {generation} in {elapsed:.2f}s")
+
+
+def _write_partition(
+    df: pd.DataFrame,
+    root_dir: Path,
+    generation: int,
+    filename: str,
+) -> None:
+    """Write a DataFrame to a hive-partitioned parquet directory.
+
+    Creates ``root_dir/generation=N/filename``. The ``generation`` column is
+    dropped from the data since it's encoded in the directory name and
+    restored automatically by ``pd.read_parquet(root_dir)``.
+    """
+    partition_dir = root_dir / f"generation={generation}"
+    partition_dir.mkdir(parents=True, exist_ok=True)
+    df_out = df.drop(columns=["generation"], errors="ignore")
+    pq.write_table(pa.Table.from_pandas(df_out), partition_dir / filename)

@@ -1,12 +1,12 @@
-import sys
 import time
 from collections import deque
-from pathlib import Path
-from pickle import Pickler, Unpickler
 from random import shuffle
 from typing import TypeAlias
 
 import numpy as np
+import pandas as pd
+import pyarrow as pa
+import pyarrow.parquet as pq
 from loguru import logger
 from numpy.typing import NDArray
 from tqdm import tqdm
@@ -195,7 +195,7 @@ class Coach:
             # Record total generation time and flush metrics
             generation_end = time.perf_counter()
             self.metrics.log_timing(generation, CycleStage.WHOLE_CYCLE, generation_end - generation_start)
-            self.metrics.flush(self.config)
+            self.metrics.flush(self.config, generation)
 
     def _generation_window_size(self, generation: int) -> int:
         """
@@ -269,52 +269,101 @@ class Coach:
         return win_rate >= self.config.update_threshold
 
     @staticmethod
-    def get_self_play_filename(generation: int) -> str:
-        """
-        Generate filename for saving self-play data.
-
-        Args:
-            generation: Training iteration number
-
-        Returns:
-            str: Filename for self-play data
-        """
-        return f"self_play_history_{generation}.pickle"
+    def _self_play_filename(generation: int) -> str:
+        """Generate filename for a single generation's self-play data."""
+        return f"self_play_{generation}.parquet"
 
     def save_self_play_history(self, generation: int) -> None:
         """
-        Save self-play training data to a pickle file.
+        Save the current generation's self-play data to a parquet file.
+
+        Each generation is saved as a separate file containing flattened
+        board and policy arrays as bytes columns, with shape metadata
+        stored in the parquet file metadata for reconstruction.
 
         Args:
             generation: Training iteration number
         """
         folder = self.config.self_play_history_directory
+        folder.mkdir(exist_ok=True, parents=True)
+
+        if not self.train_examples_history:
+            return
+
+        # Save only the latest generation's examples
+        latest = self.train_examples_history[-1]
+        if not latest:
+            return
+
+        boards, policies, values = zip(*latest)
+
+        df = pd.DataFrame({
+            "board": [b.tobytes() for b in boards],
+            "policy": [p.tobytes() for p in policies],
+            "value": list(values),
+        })
+
+        # Store array shapes in parquet metadata so we can reconstruct
+        sample_board = boards[0]
+        sample_policy = policies[0]
+        metadata = {
+            "board_shape": ",".join(str(d) for d in sample_board.shape),
+            "board_dtype": str(sample_board.dtype),
+            "policy_size": str(sample_policy.shape[0]),
+            "policy_dtype": str(sample_policy.dtype),
+        }
+
+        table = pa.Table.from_pandas(df)
+        merged_metadata = {**(table.schema.metadata or {}), **{k.encode(): v.encode() for k, v in metadata.items()}}
+        table = table.replace_schema_metadata(merged_metadata)
+
+        filepath = folder / self._self_play_filename(generation)
+        pq.write_table(table, filepath)
+        logger.info(f"Saved {len(df)} self-play examples to {filepath.name}")
+
+    def load_self_play_history(self, up_to_generation: int) -> None:
+        """
+        Load self-play examples from parquet files for recent generations.
+
+        Loads files for the most recent generations within the current
+        training window size.
+
+        Args:
+            up_to_generation: Load generations up to and including this one.
+        """
+        folder = self.config.self_play_history_directory
         if not folder.exists():
-            folder.mkdir(exist_ok=True, parents=True)
-            
-        filename = folder / self.get_self_play_filename(generation)
-        with open(filename, "wb+") as f:
-            Pickler(f).dump(self.train_examples_history)
+            logger.warning(f"Self-play history directory not found: {folder}")
+            return
 
-    # TODO: Rename to load_self_play_history and fix
-    def load_train_examples(self) -> None:
-        """
-        Load previously saved training examples.
+        window = self._generation_window_size(up_to_generation)
+        start_gen = max(0, up_to_generation - window)
 
-        TODO: This method is currently broken and needs to be fixed.
-        It should be renamed to load_self_play_history for consistency.
-        """
-        # TODO: Fix this it's broken
-        model_file = Path(self.config.load_folder_file[0]) / self.config.load_folder_file[1]
-        examples_file = Path(str(model_file) + ".examples")
+        self.train_examples_history = []
+        for gen in range(start_gen, up_to_generation + 1):
+            filepath = folder / self._self_play_filename(gen)
+            if not filepath.exists():
+                continue
 
-        if not examples_file.is_file():
-            logger.warning(f'File "{examples_file}" with training examples not found!')
-            response = input("Continue? [y|n]")
-            if response != "y":
-                sys.exit()
-        else:
-            logger.info("Loading saved training examples...")
-            with open(examples_file, "rb") as f:
-                self.train_examples_history = Unpickler(f).load()
-            logger.info("Loading complete!")
+            table = pq.read_table(filepath)
+            metadata = {k.decode(): v.decode() for k, v in table.schema.metadata.items()}
+
+            board_shape = tuple(int(d) for d in metadata["board_shape"].split(","))
+            board_dtype = np.dtype(metadata["board_dtype"])
+            policy_size = int(metadata["policy_size"])
+            policy_dtype = np.dtype(metadata["policy_dtype"])
+
+            df = table.to_pandas()
+            examples: deque[ProcessedExample] = deque()
+            for _, row in df.iterrows():
+                board = np.frombuffer(row["board"], dtype=board_dtype).reshape(board_shape).copy()
+                policy = np.frombuffer(row["policy"], dtype=policy_dtype).reshape(policy_size).copy()
+                examples.append((board, policy, float(row["value"])))
+
+            self.train_examples_history.append(examples)
+            logger.info(f"Loaded {len(examples)} examples from {filepath.name}")
+
+        logger.info(
+            f"Loaded {sum(len(e) for e in self.train_examples_history)} total examples "
+            f"from {len(self.train_examples_history)} generations"
+        )

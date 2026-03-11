@@ -19,7 +19,7 @@ Items ordered to minimise merge pain. Each row ~ one commit. Section numbers bel
 | S7 | Naming pass + import modernisation | 1.5 hours | Medium | ✅ |
 | S8 | Build MetricsCollector | 1.5 hours | High | ✅ |
 | S9 | Add CLI to main.py, fix module-level side effects | 30 min | Medium | ✅ |
-| S10 | Data storage → parquet everywhere | 1 hour | Medium | |
+| S10 | Data storage → parquet everywhere | 1 hour | Medium | ✅ |
 | S11 | Set up pytest + initial test suite | 3–4 hours | High | |
 | S12 | Profiling instrumentation (nice-to-have) | 2.5 hours | Low | |
 
