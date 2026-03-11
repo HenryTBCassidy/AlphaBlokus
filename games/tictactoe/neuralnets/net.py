@@ -8,7 +8,7 @@ from core.config import NetConfig
 class AlphaTicTacToe(nn.Module):
     def __init__(self, game, config: NetConfig):
         super().__init__()
-        self.board_x, self.board_y = game.get_board_size()
+        self.board_rows, self.board_cols = game.get_board_size()
         self.action_size = game.get_action_size()
         self.config = config
 
@@ -22,7 +22,7 @@ class AlphaTicTacToe(nn.Module):
         self.bn3 = nn.BatchNorm2d(config.num_channels)
         self.bn4 = nn.BatchNorm2d(config.num_channels)
 
-        self.fc1 = nn.Linear(config.num_channels * (self.board_x - 4) * (self.board_y - 4), 1024)
+        self.fc1 = nn.Linear(config.num_channels * (self.board_rows - 4) * (self.board_cols - 4), 1024)
         self.fc_bn1 = nn.BatchNorm1d(1024)
 
         self.fc2 = nn.Linear(1024, 512)
@@ -35,17 +35,17 @@ class AlphaTicTacToe(nn.Module):
     def forward(self, x):
         """
         This is where the net assembly happens
-        :param x: Inputs:                                              batch_size * board_x * board_y
+        :param x: Inputs:                                              batch_size * board_rows * board_cols
         :return: Policy vector pi, probability of next move to take:   batch_size * action_size
         :return: Value vector v of expected result of players:         batch_size * num_players
         """
-        x = x.view(-1, 1, self.board_x, self.board_y)  # batch_size * 1 * board_x * board_y
-        x = F.relu(self.bn1(self.conv1(x)))  # batch_size * num_channels * board_x * board_y
-        x = F.relu(self.bn2(self.conv2(x)))  # batch_size * num_channels * board_x * board_y
-        x = F.relu(self.bn3(self.conv3(x)))  # batch_size * num_channels * (board_x-2) * (board_y-2)
-        x = F.relu(self.bn4(self.conv4(x)))  # batch_size * num_channels * (board_x-4) * (board_y-4)
+        x = x.view(-1, 1, self.board_rows, self.board_cols)  # batch_size * 1 * board_rows * board_cols
+        x = F.relu(self.bn1(self.conv1(x)))  # batch_size * num_channels * board_rows * board_cols
+        x = F.relu(self.bn2(self.conv2(x)))  # batch_size * num_channels * board_rows * board_cols
+        x = F.relu(self.bn3(self.conv3(x)))  # batch_size * num_channels * (board_rows-2) * (board_cols-2)
+        x = F.relu(self.bn4(self.conv4(x)))  # batch_size * num_channels * (board_rows-4) * (board_cols-4)
 
-        x = x.view(-1, self.config.num_channels * (self.board_x - 4) * (self.board_y - 4))
+        x = x.view(-1, self.config.num_channels * (self.board_rows - 4) * (self.board_cols - 4))
 
         x = F.dropout(F.relu(self.fc_bn1(self.fc1(x))), p=self.config.dropout,  # batch_size * 1024
                       training=self.training)

@@ -1,9 +1,9 @@
 import math
-from typing import Dict, List, Tuple, Final, TypeAlias
-from numpy.typing import NDArray
+from typing import Final, TypeAlias
 
 import numpy as np
 from loguru import logger
+from numpy.typing import NDArray
 
 from core.config import MCTSConfig
 from core.interfaces import IGame, INeuralNetWrapper
@@ -14,7 +14,7 @@ EPS: Final[float] = 1e-8  # Small constant to prevent division by zero
 # Type aliases for improved readability
 StateStr: TypeAlias = str  # String representation of a game state
 Action: TypeAlias = int  # Integer index into the action space
-StateAction: TypeAlias = Tuple[StateStr, Action]  # (state, action) pair
+StateAction: TypeAlias = tuple[StateStr, Action]  # (state, action) pair
 PolicyVector: TypeAlias = NDArray[np.float64]  # Probability distribution over actions
 ValidMoves: TypeAlias = NDArray[np.bool_]  # Binary mask of legal moves
 
@@ -22,18 +22,18 @@ ValidMoves: TypeAlias = NDArray[np.bool_]  # Binary mask of legal moves
 class MCTS:
     """
     Monte Carlo Tree Search implementation for game playing.
-    
+
     This class implements the MCTS algorithm with neural network guidance,
     following the AlphaZero approach. The search is guided by:
     1. Prior probabilities from a policy network
     2. Value estimates from a value network
     3. Visit counts for exploration/exploitation balance
-    
+
     The search tree is implicitly stored through dictionaries mapping:
     - States to their neural network policy predictions
     - State-action pairs to their Q-values and visit counts
     - States to their total visit counts
-    
+
     The tree is built incrementally through repeated simulations, each consisting of:
     1. Selection: Choose actions recursively using UCB formula
     2. Expansion: Add a new leaf node to the tree
@@ -53,16 +53,16 @@ class MCTS:
         self.game = game
         self.nnet = nnet
         self.config = config
-        
-        # Tree statistics
-        self.Qsa: Dict[StateAction, float] = {}  # Q values for state-action pairs
-        self.Nsa: Dict[StateAction, int] = {}  # Visit counts for state-action pairs
-        self.Ns: Dict[StateStr, int] = {}  # Visit counts for states
-        self.Ps: Dict[StateStr, PolicyVector] = {}  # Initial policies for states
-        self.Es: Dict[StateStr, float] = {}  # Game-ended status for states
-        self.Vs: Dict[StateStr, ValidMoves] = {}  # Valid moves mask for states
 
-    def get_action_prob(self, canonical_board: NDArray, temp: float = 1) -> List[float]:
+        # Tree statistics
+        self.q_values: dict[StateAction, float] = {}  # Q values for state-action pairs
+        self.visit_counts: dict[StateAction, int] = {}  # Visit counts for state-action pairs
+        self.state_visits: dict[StateStr, int] = {}  # Visit counts for states
+        self.policy_priors: dict[StateStr, PolicyVector] = {}  # Initial policies for states
+        self.game_ended_cache: dict[StateStr, float] = {}  # Game-ended status for states
+        self.valid_moves_cache: dict[StateStr, ValidMoves] = {}  # Valid moves mask for states
+
+    def get_action_prob(self, canonical_board: NDArray, temp: float = 1) -> list[float]:
         """
         Get action probabilities for the current board state.
 
@@ -78,7 +78,7 @@ class MCTS:
                  - 0<temp<1: Reduce exploration
 
         Returns:
-            List[float]: Probability distribution over all possible actions.
+            list[float]: Probability distribution over all possible actions.
                         The probability of illegal moves will be zero.
         """
         # Perform simulations to build the search tree
@@ -87,7 +87,7 @@ class MCTS:
 
         # Extract visit counts for all actions
         s = self.game.string_representation(canonical_board)
-        counts = [self.Nsa.get((s, a), 0) for a in range(self.game.get_action_size())]
+        counts = [self.visit_counts.get((s, a), 0) for a in range(self.game.get_action_size())]
 
         # Handle temperature=0 case (deterministic best action)
         if temp == 0:
@@ -129,37 +129,37 @@ class MCTS:
         s = self.game.string_representation(canonical_board)
 
         # PHASE 1: Check if game has ended
-        if s not in self.Es:
-            self.Es[s] = self.game.get_game_ended(canonical_board, 1)  # TODO: Player always White
-        if self.Es[s] != 0:
-            return -self.Es[s]
+        if s not in self.game_ended_cache:
+            self.game_ended_cache[s] = self.game.get_game_ended(canonical_board, 1)  # TODO: Player always White
+        if self.game_ended_cache[s] != 0:
+            return -self.game_ended_cache[s]
 
         # PHASE 2: Leaf node - evaluate position with neural network
-        if s not in self.Ps:
+        if s not in self.policy_priors:
             # Get policy and value predictions
-            self.Ps[s], v = self.nnet.predict(canonical_board)
+            self.policy_priors[s], v = self.nnet.predict(canonical_board)
             valids = self.game.valid_move_masking(canonical_board, 1)  # TODO: Player always White
-            
+
             # Mask invalid moves and renormalise probabilities
-            self.Ps[s] = self.Ps[s] * valids
-            sum_Ps_s = np.sum(self.Ps[s])
-            
-            if sum_Ps_s > 0:
-                self.Ps[s] /= sum_Ps_s
+            self.policy_priors[s] = self.policy_priors[s] * valids
+            sum_priors = np.sum(self.policy_priors[s])
+
+            if sum_priors > 0:
+                self.policy_priors[s] /= sum_priors
             else:
                 # All valid moves were masked - use uniform distribution over valid moves
                 # This can indicate issues with neural network architecture or training
                 logger.error("All valid moves were masked, using uniform distribution.")
-                self.Ps[s] = self.Ps[s] + valids
-                self.Ps[s] /= np.sum(self.Ps[s])
+                self.policy_priors[s] = self.policy_priors[s] + valids
+                self.policy_priors[s] /= np.sum(self.policy_priors[s])
 
             # Initialize node statistics
-            self.Vs[s] = valids
-            self.Ns[s] = 0
+            self.valid_moves_cache[s] = valids
+            self.state_visits[s] = 0
             return -v
 
         # PHASE 3: Choose action according to UCB formula
-        valids = self.Vs[s]
+        valids = self.valid_moves_cache[s]
         cur_best = -float('inf')
         best_act = -1
 
@@ -168,13 +168,13 @@ class MCTS:
         #       Consider iterating only over valid moves instead
         for a in range(self.game.get_action_size()):
             if valids[a]:
-                if (s, a) in self.Qsa:
-                    u = (self.Qsa[(s, a)] + 
-                         self.config.cpuct * self.Ps[s][a] * 
-                         math.sqrt(self.Ns[s]) / (1 + self.Nsa[(s, a)]))
+                if (s, a) in self.q_values:
+                    u = (self.q_values[(s, a)] +
+                         self.config.cpuct * self.policy_priors[s][a] *
+                         math.sqrt(self.state_visits[s]) / (1 + self.visit_counts[(s, a)]))
                 else:
-                    u = (self.config.cpuct * self.Ps[s][a] * 
-                         math.sqrt(self.Ns[s] + EPS))
+                    u = (self.config.cpuct * self.policy_priors[s][a] *
+                         math.sqrt(self.state_visits[s] + EPS))
 
                 if u > cur_best:
                     cur_best = u
@@ -188,13 +188,13 @@ class MCTS:
         v = self.search(next_s)
 
         # Update node statistics
-        if (s, a) in self.Qsa:
-            self.Qsa[(s, a)] = ((self.Nsa[(s, a)] * self.Qsa[(s, a)] + v) / 
-                               (self.Nsa[(s, a)] + 1))
-            self.Nsa[(s, a)] += 1
+        if (s, a) in self.q_values:
+            self.q_values[(s, a)] = ((self.visit_counts[(s, a)] * self.q_values[(s, a)] + v) /
+                                    (self.visit_counts[(s, a)] + 1))
+            self.visit_counts[(s, a)] += 1
         else:
-            self.Qsa[(s, a)] = v
-            self.Nsa[(s, a)] = 1
+            self.q_values[(s, a)] = v
+            self.visit_counts[(s, a)] = 1
 
-        self.Ns[s] += 1
+        self.state_visits[s] += 1
         return -v

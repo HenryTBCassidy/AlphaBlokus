@@ -45,7 +45,6 @@ def main():
     logger.info('Starting the learning process')
 
     c.learn()
-    nnet.collect_training_data()
     create_html_report(args)
     end = time.perf_counter()
     logger.info(f"Total time elapsed: {end - start}")

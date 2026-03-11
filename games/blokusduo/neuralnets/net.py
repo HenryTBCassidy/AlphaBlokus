@@ -9,8 +9,9 @@ from core.config import NetConfig
 
 def calc_conv2d_output(y_x, kernel_size=3, stride=1, pad=1, dilation=1):
     """
-    Helper for calculating the dimensions of the layers after applying a convolution
-    takes a tuple of (y, x) and returns a tuple of (y, x)
+    Calculate output dimensions after a 2D convolution.
+
+    Takes and returns a (rows, cols) tuple.
     """
 
     if not isinstance(kernel_size, tuple):
@@ -21,7 +22,7 @@ def calc_conv2d_output(y_x, kernel_size=3, stride=1, pad=1, dilation=1):
 
 
 class ResNetBlock(nn.Module):
-    """Basic redisual block."""
+    """Basic residual block."""
 
     def __init__(
             self,
@@ -67,18 +68,22 @@ class AlphaBlokusDuo(nn.Module):
     def __init__(self, config: NetConfig):
         super().__init__()
         """
-        There are 14 x 14 squares on the board and 21 pieces. The net's board representation needs to encode both where
-        and which pieces have been played. We extend the board columns by 4 to have dimensions 14 x 18.
-        batch_size * board_y * (board_x + 4) = batch_size * 14 * 18
+        The physical Blokus Duo board is a 14×14 square grid. The neural net's input representation
+        extends this to 14×18 by concatenating piece-tracking columns on each side:
+
+            [Black pieces (14×2)] [Board state (14×14)] [White pieces (14×2)]
+
+        The 2-column regions on each side encode which of the 21 pieces that player has played,
+        since knowing remaining pieces is critical for evaluating board positions.
+
+        Net input shape: batch_size × 1 × 14 × 18  (i.e. board_rows × (physical_board_cols + 4))
         """
-        self.board_y, self.board_x = 14, 18
-        # Stack of 14 * 14 planes for each of the 91 pieces planes
-        # Piece planes are obtained by treating each unique rotation or flip of a piece as an entirely new plane/piece
-        # Add one for a do nothing move
+        self.board_rows, self.board_cols = 14, 18
+        # Actions: place any of 91 piece-orientations on any of the 14×14 physical board squares, plus pass
         self.action_size = (14 * 14 * 91) + 1  # TODO: Get this from the game object (maybe)
         self.config = config
 
-        conv_out_y_x = calc_conv2d_output((self.board_y, self.board_x), 3, 1, 1)
+        conv_out_y_x = calc_conv2d_output((self.board_rows, self.board_cols), 3, 1, 1)
         conv_out = conv_out_y_x[0] * conv_out_y_x[1]
 
         self.conv_block = nn.Sequential(
@@ -129,20 +134,22 @@ class AlphaBlokusDuo(nn.Module):
 
     def forward(self, x):
         """
-        This is where the net assembly happens
-        :param x:
-            Inputs: There are 14 x 14 squares on the board and 21 pieces. The net's board representation needs to encode
-                    where pieces have been played and which pieces have been played. We extend the board columns by 2 in
-                    each direction to have dimensions 14 x 18.
-                    batch_size * board_y * (board_x + 4) = batch_size * 14 * 18
+        Forward pass through the network.
 
-        :return: Policy tensor pi, probability of next move to take:   batch_size * 17837
-        :return: Value vector v of expected result of player:          batch_size * 1
+        Args:
+            x: Flattened net representation of the board.
+               Shape: batch_size × 252  (14 rows × 18 cols, flattened)
+               This is the 14×14 physical board with 2 piece-encoding columns
+               concatenated on each side (see __init__ docstring for layout).
+
+        Returns:
+            pi: Log-softmax policy over all actions.   Shape: batch_size × 17837
+            v:  Value estimate for the current player.  Shape: batch_size × 1
         """
 
-        x = x.view(-1, 1, self.board_x, self.board_y)  # batch_size * 1 * board_x * board_y
-        conv_block_out = self.conv_block(x)  # batch_size * num_channels * board_x_conv * board_y_conv
-        features = self.residual_blocks(conv_block_out)  # batch_size * num_channels * board_x_conv * board_y_conv
+        x = x.view(-1, 1, self.board_rows, self.board_cols)  # batch_size * 1 * board_rows * board_cols
+        conv_block_out = self.conv_block(x)  # batch_size * num_channels * board_rows_conv * board_cols_conv
+        features = self.residual_blocks(conv_block_out)  # batch_size * num_channels * board_rows_conv * board_cols_conv
 
         # Predict raw logits distributions wrt policy
         pi_logits = self.policy_head(features)  # batch_size * 17837 (which is 14 x 14 x 91 + 1)

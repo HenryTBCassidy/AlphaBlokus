@@ -2,7 +2,8 @@ import json
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Dict, List, Tuple, Generator, Any, Union
+from collections.abc import Generator
+from typing import Any
 
 import numpy as np
 from dataclass_wizard import fromdict
@@ -44,8 +45,8 @@ class Piece:
     """
     name: str
     id: int
-    basis_orientations: List[Orientation]
-    fill_values: List[List[int]]  # Will be converted to np.ndarray, current type due to dataclass_wizard limitation
+    basis_orientations: list[Orientation]
+    fill_values: list[list[int]]  # Will be converted to np.ndarray, current type due to dataclass_wizard limitation
 
     @property
     def identity(self) -> NDArray:
@@ -127,14 +128,14 @@ class PieceManager:
     piece-orientation pairs and their numeric identifiers.
     """
 
-    def __init__(self, pieces: List[Piece]) -> None:
+    def __init__(self, pieces: list[Piece]) -> None:
         """
         Initialise the piece manager.
 
         Args:
             pieces: List of all available Blokus pieces
         """
-        self.pieces: Dict[int, Piece] = {p.id: p for p in pieces}
+        self.pieces: dict[int, Piece] = {p.id: p for p in pieces}
         self._piece_orientation_lookup: BidirectionalDict = self.populate_lookup(pieces)
 
     def get_piece_orientation_array(self, piece_id: int, orientation: Orientation) -> NDArray:
@@ -163,7 +164,7 @@ class PieceManager:
             case Orientation.Flip270: return piece.flip270
             case _: raise ValueError(f"Invalid orientation: {orientation}")
 
-    def all_piece_id_basis_orientations(self) -> Generator[Tuple[int, Orientation], None, None]:
+    def all_piece_id_basis_orientations(self) -> Generator[tuple[int, Orientation], None, None]:
         """
         Generate all valid piece-orientation combinations.
 
@@ -176,7 +177,7 @@ class PieceManager:
             for orientation in piece.basis_orientations:
                 yield piece_id, orientation
 
-    def get_piece_orientation(self, piece_orientation_id: int) -> Tuple[int, Orientation]:
+    def get_piece_orientation(self, piece_orientation_id: int) -> tuple[int, Orientation]:
         """
         Convert a piece-orientation ID to its corresponding piece ID and orientation.
 
@@ -190,7 +191,7 @@ class PieceManager:
         """
         return self._piece_orientation_lookup[piece_orientation_id]
 
-    def get_piece_orientation_id(self, piece_orientation: Tuple[int, Orientation]) -> int:
+    def get_piece_orientation_id(self, piece_orientation: tuple[int, Orientation]) -> int:
         """
         Convert a piece ID and orientation to their combined piece-orientation ID.
 
@@ -208,7 +209,7 @@ class PieceManager:
         return len(self._piece_orientation_lookup)
 
     @staticmethod
-    def populate_lookup(pieces: List[Piece]) -> BidirectionalDict:
+    def populate_lookup(pieces: list[Piece]) -> BidirectionalDict:
         """
         Create a bidirectional mapping between piece-orientation pairs and their IDs.
 

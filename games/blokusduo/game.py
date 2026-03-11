@@ -3,7 +3,8 @@ from copy import deepcopy
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from typing import Optional, Generator, TypeAlias, Dict, List, Tuple, Union
+from collections.abc import Generator
+from typing import TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
@@ -14,10 +15,10 @@ from core.interfaces import IGame
 # Type aliases for improved readability
 BoardArray: TypeAlias = NDArray[np.int64]  # Game board as numpy array
 PlayerSide: TypeAlias = int  # 1 for White, -1 for Black
-Coordinate: TypeAlias = Tuple[int, int]  # (x, y) coordinate pair
-Index: TypeAlias = Tuple[int, int]  # (length_idx, width_idx) pair
-ActionDict: TypeAlias = Dict[int, List['Action']]  # Maps player side to list of valid actions
-PlacementDict: TypeAlias = Dict[Coordinate, Dict[int, 'Action']]  # Maps coordinates to piece actions
+Coordinate: TypeAlias = tuple[int, int]  # (x, y) coordinate pair
+Index: TypeAlias = tuple[int, int]  # (length_idx, width_idx) pair
+ActionDict: TypeAlias = dict[int, list['Action']]  # Maps player side to list of valid actions
+PlacementDict: TypeAlias = dict[Coordinate, dict[int, 'Action']]  # Maps coordinates to piece actions
 
 
 def no_sides(i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:
@@ -229,7 +230,7 @@ class Player:
     - Updating the cache incrementally when pieces are placed
     """
 
-    def __init__(self, board_size: int, side: Side, pieces: Dict[int, Piece]) -> None:
+    def __init__(self, board_size: int, side: Side, pieces: dict[int, Piece]) -> None:
         """
         Initialize a new player.
 
@@ -284,7 +285,7 @@ class Player:
                     if valid_placement(i, j, self.side.to_int(), board_array):
                         self.potential_placement_points[(i, j)] = self.populate_moves_for_new_placement(board_array)
 
-    def populate_moves_for_new_placement(self, board_array: BoardArray) -> Dict[int, Action]:
+    def populate_moves_for_new_placement(self, board_array: BoardArray) -> dict[int, Action]:
         """
         Generate all valid moves for a new placement point.
 
@@ -294,7 +295,7 @@ class Player:
         Returns:
             Dict[int, Action]: Dictionary mapping piece IDs to valid actions
         """
-        moves: Dict[int, Action] = {}
+        moves: dict[int, Action] = {}
         for piece_id, piece in self.pieces_remaining.items():
             for orientation in piece.basis_orientations:
                 # TODO: Implement move generation logic
@@ -450,7 +451,7 @@ class BlokusDuoBoard:
                 board_array=self.as_array
             )
 
-    def valid_moves(self, player_side: PlayerSide) -> List[Action]:
+    def valid_moves(self, player_side: PlayerSide) -> list[Action]:
         """
         Get all valid moves for the current player.
 
@@ -569,7 +570,7 @@ class BlokusDuoGame(IGame):
         self.board_size = 14  # Board size
         self.num_planes = 91  # Number of distinct Piece-BasisOrientation combinations
         self.piece_manager: PieceManager = pieces_loader(pieces_config_path)
-        self.board: Optional[BlokusDuoBoard] = None
+        self.board: BlokusDuoBoard | None = None
 
         # Canonically will have black start in top left and white in bottom right
         # Black encoded region will be on the left and White encoded region on the right of the board
@@ -630,12 +631,12 @@ class BlokusDuoGame(IGame):
         self.board = BlokusDuoBoard(self.piece_manager, self.initial_actions, self._coordinate_index_decoder)
         return self.board
 
-    def get_board_size(self) -> Tuple[int, int]:
+    def get_board_size(self) -> tuple[int, int]:
         """
         Get the dimensions of the game board.
 
         Returns:
-            Tuple[int, int]: (width, height) of the board
+            Tuple[int, int]: (rows, cols) of the board
         """
         return self.board_size, self.board_size
 
@@ -657,7 +658,7 @@ class BlokusDuoGame(IGame):
         canonical_board: BoardArray,
         player: PlayerSide,
         action: Action
-    ) -> Tuple[BoardArray, PlayerSide]:
+    ) -> tuple[BoardArray, PlayerSide]:
         """
         Apply an action to the current board state.
 
@@ -733,7 +734,7 @@ class BlokusDuoGame(IGame):
         net_representation = board.net_representation
         return player * net_representation
 
-    def get_symmetries(self, board: BoardArray, pi: BoardArray) -> List[Tuple[BoardArray, BoardArray]]:
+    def get_symmetries(self, board: BoardArray, pi: BoardArray) -> list[tuple[BoardArray, BoardArray]]:
         """
         Generate all symmetric forms of the current board state and policy vector.
 

@@ -476,8 +476,8 @@ Items ordered to minimise merge pain. Each row = one commit.
 | S6 | Extract BaseNNetWrapper | §5 | 1 hour | High | ✅ |
 | S3 | Switch to loguru | §3 | 30 min | High | ✅ |
 | S7 | Clean up / delete utils.py | §5 | 15 min | Medium | ✅ |
-| S8–S11 | Naming pass + import modernisation | §6–§7 | 1.5 hours | Medium | |
-| S4 | Build MetricsCollector | §3 | 1.5 hours | High | |
+| S8–S11 | Naming pass + import modernisation | §6–§7 | 1.5 hours | Medium | ✅ |
+| S4 | Build MetricsCollector | §3 | 1.5 hours | High | ✅ |
 | S5 | Add CLI to main.py, fix module-level side effects | §4 | 30 min | Medium | |
 | S12 | Data storage → parquet everywhere | §8 | 1 hour | Medium | |
 | S13 | Set up pytest + initial test suite | §9 | 3–4 hours | High | |
