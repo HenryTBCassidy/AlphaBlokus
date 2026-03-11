@@ -112,18 +112,18 @@ class RunConfig:
         return self.run_directory / "Reporting"
 
 
-def load_args(filename: str) -> RunConfig:
+def load_args(config_path: str | Path) -> RunConfig:
     """
     Load run configuration from a JSON file.
 
     Args:
-        filename: Name of the JSON configuration file
+        config_path: Path to the JSON configuration file.
 
     Returns:
         RunConfig: Configuration object for the run
     """
-    root_dir = Path("run_configurations")
-    with open(root_dir / filename, "r") as f:
+    config_path = Path(config_path)
+    with open(config_path, "r") as f:
         args_json = json.load(f)
 
     return fromdict(RunConfig, args_json)

@@ -1,3 +1,4 @@
+import argparse
 import time
 
 from loguru import logger
@@ -8,10 +9,18 @@ from games.tictactoe.game import TicTacToeGame as Game
 from core.config import load_args
 from reporting import create_html_report
 
-args = load_args("test_run.json")
-
 
 def main():
+    parser = argparse.ArgumentParser(description="AlphaBlokus training pipeline")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="run_configurations/test_run.json",
+        help="Path to the JSON run configuration file (default: run_configurations/test_run.json)",
+    )
+    cli_args = parser.parse_args()
+    args = load_args(cli_args.config)
+
     args.run_directory.mkdir(parents=True, exist_ok=True)
 
     # Add rotating file sink alongside default stderr
