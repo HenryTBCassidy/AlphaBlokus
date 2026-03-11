@@ -4,6 +4,29 @@ Everything in this doc is about **how the code is organised, not what it does**.
 
 ---
 
+## Checklist
+
+Items ordered to minimise merge pain. Each row ≈ one commit.
+
+| # | Item | Section | Effort | Priority | Done |
+|---|------|---------|--------|----------|------|
+| S1 | Create `pyproject.toml` + uv setup | §1 | 30 min | High | ✅ |
+| S2 | Reorganise into `games/` directory | §2 | 45 min | High | ✅ |
+| S15 | Fix JSON config booleans | §4 | 10 min | Medium | ✅ |
+| S6 | Extract BaseNNetWrapper | §5 | 1 hour | High | ✅ |
+| S3 | Switch to loguru | §3 | 30 min | High | ✅ |
+| S7 | Clean up / delete utils.py | §5 | 15 min | Medium | ✅ |
+| S8–S11 | Naming pass + import modernisation | §6–§7 | 1.5 hours | Medium | ✅ |
+| S4 | Build MetricsCollector | §3 | 1.5 hours | High | ✅ |
+| S5 | Add CLI to main.py, fix module-level side effects | §4 | 30 min | Medium | |
+| S12 | Data storage → parquet everywhere | §8 | 1 hour | Medium | |
+| S13 | Set up pytest + initial test suite | §9 | 3–4 hours | High | |
+| S14 | Profiling instrumentation (nice-to-have) | §10 | 2.5 hours | Low | |
+
+**Estimated total (excl. nice-to-have): ~11 hours across 11 commits**
+
+---
+
 ## 1. Package Management — Move to uv
 
 ### Current state
@@ -462,34 +485,6 @@ No action needed now — this informs Phase 3 decisions.
 
 ---
 
-## Summary & Priority Matrix
+---
 
-### Structural refactor items (execution order)
-
-Items ordered to minimise merge pain. Each row = one commit.
-
-| # | Item | Section | Effort | Priority | Done |
-|---|------|---------|--------|----------|------|
-| S1 | Create `pyproject.toml` + uv setup | §1 | 30 min | High | ✅ |
-| S2 | Reorganise into `games/` directory | §2 | 45 min | High | ✅ |
-| S15 | Fix JSON config booleans | §4 | 10 min | Medium | ✅ |
-| S6 | Extract BaseNNetWrapper | §5 | 1 hour | High | ✅ |
-| S3 | Switch to loguru | §3 | 30 min | High | ✅ |
-| S7 | Clean up / delete utils.py | §5 | 15 min | Medium | ✅ |
-| S8–S11 | Naming pass + import modernisation | §6–§7 | 1.5 hours | Medium | ✅ |
-| S4 | Build MetricsCollector | §3 | 1.5 hours | High | ✅ |
-| S5 | Add CLI to main.py, fix module-level side effects | §4 | 30 min | Medium | |
-| S12 | Data storage → parquet everywhere | §8 | 1 hour | Medium | |
-| S13 | Set up pytest + initial test suite | §9 | 3–4 hours | High | |
-| S14 | Profiling instrumentation (nice-to-have) | §10 | 2.5 hours | Low | |
-
-### Estimated total effort
-
-| Phase | Items | Effort |
-|-------|-------|--------|
-| Foundation | S1, S2, S15 | ~1.5 hours |
-| Deduplication + logging | S3, S6, S7 | ~2 hours |
-| Naming pass | S8–S11 | ~1.5 hours |
-| Infrastructure | S4, S5, S12, S13 | ~6 hours |
-| Nice-to-have | S14 | ~2.5 hours |
-| **Total (excl. nice-to-have)** | **11 commits** | **~11 hours** |
+*Checklist is at the top of this document.*
