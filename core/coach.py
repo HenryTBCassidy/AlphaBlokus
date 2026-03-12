@@ -1,12 +1,15 @@
 import time
 from collections import deque
+from dataclasses import dataclass
 from random import shuffle
 from typing import TypeAlias
 
 import numpy as np
 import pandas as pd
+import psutil
 import pyarrow as pa
 import pyarrow.parquet as pq
+import torch
 from loguru import logger
 from numpy.typing import NDArray
 from tqdm import tqdm
@@ -21,6 +24,38 @@ from core.interfaces import INeuralNetWrapper, IGame
 TrainingExample: TypeAlias = tuple[NDArray, int, NDArray, float | None]  # (board, player, policy, value)
 ProcessedExample: TypeAlias = tuple[NDArray, NDArray, float]  # (board, policy, value)
 TrainingHistory: TypeAlias = list[deque[ProcessedExample]]  # List of examples per generation
+
+
+@dataclass(frozen=True)
+class MemorySnapshot:
+    """Point-in-time memory usage of the current process.
+
+    All values are in bytes. ``gpu_bytes`` is ``None`` when no GPU is
+    available or the backend doesn't expose an allocation counter.
+    """
+
+    process_rss_bytes: int
+    gpu_bytes: float | None
+
+
+def _get_memory_snapshot() -> MemorySnapshot:
+    """Take a cross-platform snapshot of the current process's memory usage.
+
+    Uses ``psutil`` for process RSS (works identically on macOS, Linux,
+    and Windows — always returns bytes).
+
+    For GPU memory, checks CUDA first, then MPS (Apple Silicon).
+    Returns ``None`` for ``gpu_bytes`` if no GPU is available.
+    """
+    rss = psutil.Process().memory_info().rss
+
+    gpu_mem: float | None = None
+    if torch.cuda.is_available():
+        gpu_mem = float(torch.cuda.memory_allocated())
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        gpu_mem = float(torch.mps.current_allocated_memory())
+
+    return MemorySnapshot(process_rss_bytes=rss, gpu_bytes=gpu_mem)
 
 
 class Coach:
@@ -135,12 +170,32 @@ class Coach:
                 logger.info(f'Starting Self-Play For Generation #{generation} ...')
                 self_play_start = time.perf_counter()
 
-                for _ in tqdm(range(self.config.num_eps), desc="Self Play"):
+                for episode_idx in tqdm(range(self.config.num_eps), desc="Self Play"):
                     self.mcts = MCTS(self.game, self.nnet, self.config.mcts_config)
                     iteration_examples.extend(self.execute_episode())
 
+                    # Log per-episode MCTS profiling data
+                    stats = self.mcts.get_episode_stats()
+                    self.metrics.log_self_play_profiling(
+                        generation=generation,
+                        episode=episode_idx,
+                        num_moves=stats.num_moves,
+                        total_sims=stats.total_sims,
+                        total_search_time_s=stats.total_search_time_s,
+                        total_inference_time_s=stats.total_inference_time_s,
+                        num_leaf_expansions=stats.num_leaf_expansions,
+                        tree_size=stats.tree_size,
+                    )
+
                 self_play_end = time.perf_counter()
                 self.metrics.log_timing(generation, CycleStage.SELF_PLAY, self_play_end - self_play_start)
+
+                # Memory snapshot after self-play phase
+                snapshot = _get_memory_snapshot()
+                self.metrics.log_resource_usage(
+                    generation, CycleStage.SELF_PLAY,
+                    snapshot.process_rss_bytes, snapshot.gpu_bytes,
+                )
 
                 self.train_examples_history.append(iteration_examples)
 
@@ -163,6 +218,13 @@ class Coach:
             training_end = time.perf_counter()
             self.metrics.log_timing(generation, CycleStage.TRAINING, training_end - training_start)
 
+            # Memory snapshot after training phase
+            snapshot = _get_memory_snapshot()
+            self.metrics.log_resource_usage(
+                generation, CycleStage.TRAINING,
+                snapshot.process_rss_bytes, snapshot.gpu_bytes,
+            )
+
             # PHASE 3: Evaluate new network
             nmcts = MCTS(self.game, self.nnet, self.config.mcts_config)
             
@@ -180,6 +242,13 @@ class Coach:
             arena_end = time.perf_counter()
             self.metrics.log_arena(generation, wins=nwins, losses=pwins, draws=draws)
             self.metrics.log_timing(generation, CycleStage.ARENA, arena_end - arena_start)
+
+            # Memory snapshot after arena phase
+            snapshot = _get_memory_snapshot()
+            self.metrics.log_resource_usage(
+                generation, CycleStage.ARENA,
+                snapshot.process_rss_bytes, snapshot.gpu_bytes,
+            )
 
             # Accept or reject new network
             logger.info(f'NEW/PREV WINS : {nwins}/{pwins}; DRAWS : {draws}')

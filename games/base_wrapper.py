@@ -1,3 +1,4 @@
+import time
 from abc import ABC, abstractmethod
 
 import numpy as np
@@ -76,7 +77,8 @@ class BaseNNetWrapper(ABC):
         optimizer = optim.Adam(self.nnet.parameters())
 
         for epoch in range(self.net_config.epochs):
-            print('EPOCH ::: ' + str(epoch + 1))
+            logger.info(f"Epoch {epoch + 1}/{self.net_config.epochs}")
+            epoch_start = time.perf_counter()
             self.nnet.train()
             pi_losses = AverageMeter()
             v_losses = AverageMeter()
@@ -120,6 +122,15 @@ class BaseNNetWrapper(ABC):
                 optimizer.zero_grad()
                 total_loss.backward()
                 optimizer.step()
+
+            epoch_time = time.perf_counter() - epoch_start
+            if metrics:
+                metrics.log_training_throughput(
+                    generation=generation,
+                    epoch=epoch,
+                    num_examples=len(examples),
+                    epoch_time_s=epoch_time,
+                )
 
     def predict(self, board: np.ndarray) -> tuple[np.ndarray, float]:
         """Make a prediction for a given board state."""

@@ -151,3 +151,155 @@ def test_flush_noop_when_empty(collector: MetricsCollector, test_config: RunConf
     assert not test_config.training_data_directory.exists()
     assert not test_config.arena_data_directory.exists()
     assert not test_config.timings_directory.exists()
+
+
+# --- Self-Play Profiling ---
+
+
+def test_log_self_play_profiling_appends(collector: MetricsCollector):
+    """log_self_play_profiling should accumulate records."""
+    collector.log_self_play_profiling(
+        generation=1, episode=0, num_moves=10, total_sims=200,
+        total_search_time_s=1.5, total_inference_time_s=0.8,
+        num_leaf_expansions=50, tree_size=40,
+    )
+    assert len(collector._self_play_profiling_records) == 1
+
+    collector.log_self_play_profiling(
+        generation=1, episode=1, num_moves=12, total_sims=240,
+        total_search_time_s=1.8, total_inference_time_s=0.9,
+        num_leaf_expansions=60, tree_size=55,
+    )
+    assert len(collector._self_play_profiling_records) == 2
+
+
+def test_flush_writes_self_play_profiling_parquet(
+    collector: MetricsCollector, test_config: RunConfig,
+):
+    """flush should create profiling.parquet under SelfPlayProfiling/generation=1/."""
+    collector.log_self_play_profiling(
+        generation=1, episode=0, num_moves=10, total_sims=200,
+        total_search_time_s=1.5, total_inference_time_s=0.8,
+        num_leaf_expansions=50, tree_size=40,
+    )
+    collector.flush(test_config, generation=1)
+
+    parquet_path = test_config.self_play_profiling_directory / "generation=1" / "profiling.parquet"
+    assert parquet_path.exists()
+
+
+def test_self_play_profiling_has_derived_columns(
+    collector: MetricsCollector, test_config: RunConfig,
+):
+    """Flushed profiling data should include sims_per_second and inference_fraction."""
+    collector.log_self_play_profiling(
+        generation=1, episode=0, num_moves=10, total_sims=200,
+        total_search_time_s=2.0, total_inference_time_s=0.8,
+        num_leaf_expansions=50, tree_size=40,
+    )
+    collector.flush(test_config, generation=1)
+
+    df = pd.read_parquet(test_config.self_play_profiling_directory)
+    assert "sims_per_second" in df.columns
+    assert "inference_fraction" in df.columns
+    assert pytest.approx(df["sims_per_second"].iloc[0], abs=1e-6) == 100.0  # 200 / 2.0
+    assert pytest.approx(df["inference_fraction"].iloc[0], abs=1e-6) == 0.4  # 0.8 / 2.0
+
+
+# --- Resource Usage ---
+
+
+def test_log_resource_usage_appends(collector: MetricsCollector):
+    """log_resource_usage should accumulate records."""
+    collector.log_resource_usage(
+        generation=1, cycle_stage=CycleStage.SELF_PLAY,
+        process_rss_bytes=1_000_000, gpu_memory_bytes=500_000.0,
+    )
+    assert len(collector._resource_usage_records) == 1
+
+
+def test_flush_writes_resource_usage_parquet(
+    collector: MetricsCollector, test_config: RunConfig,
+):
+    """flush should create resources.parquet under ResourceUsage/generation=1/."""
+    collector.log_resource_usage(
+        generation=1, cycle_stage=CycleStage.TRAINING,
+        process_rss_bytes=2_000_000, gpu_memory_bytes=None,
+    )
+    collector.flush(test_config, generation=1)
+
+    parquet_path = test_config.resource_usage_directory / "generation=1" / "resources.parquet"
+    assert parquet_path.exists()
+
+
+# --- Training Throughput ---
+
+
+def test_log_training_throughput_appends(collector: MetricsCollector):
+    """log_training_throughput should accumulate records."""
+    collector.log_training_throughput(
+        generation=1, epoch=0, num_examples=1000, epoch_time_s=5.0,
+    )
+    assert len(collector._training_throughput_records) == 1
+
+
+def test_flush_writes_training_throughput_parquet(
+    collector: MetricsCollector, test_config: RunConfig,
+):
+    """flush should create throughput.parquet under TrainingThroughput/generation=1/."""
+    collector.log_training_throughput(
+        generation=1, epoch=0, num_examples=1000, epoch_time_s=5.0,
+    )
+    collector.flush(test_config, generation=1)
+
+    parquet_path = test_config.training_throughput_directory / "generation=1" / "throughput.parquet"
+    assert parquet_path.exists()
+
+
+def test_training_throughput_has_derived_columns(
+    collector: MetricsCollector, test_config: RunConfig,
+):
+    """Flushed throughput data should include samples_per_second."""
+    collector.log_training_throughput(
+        generation=1, epoch=0, num_examples=1000, epoch_time_s=2.0,
+    )
+    collector.flush(test_config, generation=1)
+
+    df = pd.read_parquet(test_config.training_throughput_directory)
+    assert "samples_per_second" in df.columns
+    assert pytest.approx(df["samples_per_second"].iloc[0], abs=1e-6) == 500.0  # 1000 / 2.0
+
+
+# --- Flush clears all six buffers ---
+
+
+def test_flush_clears_all_six_buffers(collector: MetricsCollector, test_config: RunConfig):
+    """After flush, all six record lists should be empty."""
+    collector.log_training(
+        generation=1, epoch=0, batch_number=0,
+        pi_loss=0.5, v_loss=0.3, total_loss=0.8,
+        avg_pi_loss=0.5, avg_v_loss=0.3,
+    )
+    collector.log_arena(generation=1, wins=3, losses=1, draws=0)
+    collector.log_timing(generation=1, cycle_stage=CycleStage.ARENA, time_elapsed=8.0)
+    collector.log_self_play_profiling(
+        generation=1, episode=0, num_moves=10, total_sims=200,
+        total_search_time_s=1.5, total_inference_time_s=0.8,
+        num_leaf_expansions=50, tree_size=40,
+    )
+    collector.log_resource_usage(
+        generation=1, cycle_stage=CycleStage.SELF_PLAY,
+        process_rss_bytes=1_000_000,
+    )
+    collector.log_training_throughput(
+        generation=1, epoch=0, num_examples=1000, epoch_time_s=5.0,
+    )
+
+    collector.flush(test_config, generation=1)
+
+    assert len(collector._training_records) == 0
+    assert len(collector._arena_records) == 0
+    assert len(collector._timing_records) == 0
+    assert len(collector._self_play_profiling_records) == 0
+    assert len(collector._resource_usage_records) == 0
+    assert len(collector._training_throughput_records) == 0

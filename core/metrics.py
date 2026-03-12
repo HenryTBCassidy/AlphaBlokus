@@ -41,6 +41,9 @@ class MetricsCollector:
     _training_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _arena_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _timing_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _self_play_profiling_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _resource_usage_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _training_throughput_records: list[dict] = field(default_factory=list, init=False, repr=False)
 
     def log_training(
         self,
@@ -93,6 +96,67 @@ class MetricsCollector:
             "time_elapsed": time_elapsed,
         })
 
+    def log_self_play_profiling(
+        self,
+        generation: int,
+        episode: int,
+        num_moves: int,
+        total_sims: int,
+        total_search_time_s: float,
+        total_inference_time_s: float,
+        num_leaf_expansions: int,
+        tree_size: int,
+    ) -> None:
+        """Record MCTS profiling data for a single self-play episode."""
+        sims_per_second = total_sims / total_search_time_s if total_search_time_s > 0 else 0.0
+        inference_fraction = (
+            total_inference_time_s / total_search_time_s if total_search_time_s > 0 else 0.0
+        )
+        self._self_play_profiling_records.append({
+            "generation": generation,
+            "episode": episode,
+            "num_moves": num_moves,
+            "total_sims": total_sims,
+            "total_search_time_s": total_search_time_s,
+            "total_inference_time_s": total_inference_time_s,
+            "num_leaf_expansions": num_leaf_expansions,
+            "tree_size": tree_size,
+            "sims_per_second": sims_per_second,
+            "inference_fraction": inference_fraction,
+        })
+
+    def log_resource_usage(
+        self,
+        generation: int,
+        cycle_stage: CycleStage,
+        process_rss_bytes: int,
+        gpu_memory_bytes: float | None = None,
+    ) -> None:
+        """Record a memory usage snapshot at a point in the training cycle."""
+        self._resource_usage_records.append({
+            "generation": generation,
+            "cycle_stage": cycle_stage,
+            "process_rss_bytes": process_rss_bytes,
+            "gpu_memory_bytes": gpu_memory_bytes,
+        })
+
+    def log_training_throughput(
+        self,
+        generation: int,
+        epoch: int,
+        num_examples: int,
+        epoch_time_s: float,
+    ) -> None:
+        """Record training throughput for a single epoch."""
+        samples_per_second = num_examples / epoch_time_s if epoch_time_s > 0 else 0.0
+        self._training_throughput_records.append({
+            "generation": generation,
+            "epoch": epoch,
+            "num_examples": num_examples,
+            "epoch_time_s": epoch_time_s,
+            "samples_per_second": samples_per_second,
+        })
+
     def flush(self, config: RunConfig, generation: int) -> None:
         """Write buffered metrics for the current generation and clear buffers.
 
@@ -135,6 +199,36 @@ class MetricsCollector:
             )
             count += len(self._timing_records)
             self._timing_records.clear()
+
+        if self._self_play_profiling_records:
+            _write_partition(
+                pd.DataFrame(self._self_play_profiling_records),
+                config.self_play_profiling_directory,
+                generation,
+                "profiling.parquet",
+            )
+            count += len(self._self_play_profiling_records)
+            self._self_play_profiling_records.clear()
+
+        if self._resource_usage_records:
+            _write_partition(
+                pd.DataFrame(self._resource_usage_records),
+                config.resource_usage_directory,
+                generation,
+                "resources.parquet",
+            )
+            count += len(self._resource_usage_records)
+            self._resource_usage_records.clear()
+
+        if self._training_throughput_records:
+            _write_partition(
+                pd.DataFrame(self._training_throughput_records),
+                config.training_throughput_directory,
+                generation,
+                "throughput.parquet",
+            )
+            count += len(self._training_throughput_records)
+            self._training_throughput_records.clear()
 
         elapsed = time.perf_counter() - start
         logger.info(f"Flushed {count} metric records for generation {generation} in {elapsed:.2f}s")

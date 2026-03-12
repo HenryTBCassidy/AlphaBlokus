@@ -111,6 +111,21 @@ class RunConfig:
         """Directory for generated training progress reports and visualisations."""
         return self.run_directory / "Reporting"
 
+    @property
+    def self_play_profiling_directory(self) -> Path:
+        """Directory for per-episode MCTS profiling data (sims, timing, tree size)."""
+        return self.run_directory / "SelfPlayProfiling"
+
+    @property
+    def resource_usage_directory(self) -> Path:
+        """Directory for process and GPU memory usage snapshots."""
+        return self.run_directory / "ResourceUsage"
+
+    @property
+    def training_throughput_directory(self) -> Path:
+        """Directory for per-epoch training throughput metrics."""
+        return self.run_directory / "TrainingThroughput"
+
 
 def load_args(config_path: str | Path) -> RunConfig:
     """
