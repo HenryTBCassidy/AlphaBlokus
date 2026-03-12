@@ -1,30 +1,26 @@
 import numpy as np
+from numpy.typing import NDArray
 
 from core.interfaces import IGame
-from .board import Board
+from games.tictactoe.board import Board
 
 
 class TicTacToeGame(IGame):
-    def __init__(self, n=3):
+    def __init__(self, n: int = 3) -> None:
         super().__init__()
         self.n = n
 
-    def initialise_board(self):
-        # return initial board (numpy board)
+    def initialise_board(self) -> NDArray:
         b = Board(self.n)
         return np.array(b.pieces)
 
-    def get_board_size(self):
-        # (a,b) tuple
+    def get_board_size(self) -> tuple[int, int]:
         return self.n, self.n
 
-    def get_action_size(self):
-        # return number of actions
+    def get_action_size(self) -> int:
         return self.n * self.n + 1
 
-    def get_next_state(self, board, player, action):
-        # if player takes action on board, return next (board,player)
-        # action must be a valid move
+    def get_next_state(self, board: NDArray, player: int, action: int) -> tuple[NDArray, int]:
         if action == self.n * self.n:
             return board, -player
         b = Board(self.n)
@@ -33,8 +29,7 @@ class TicTacToeGame(IGame):
         b.execute_move(move, player)
         return b.pieces, -player
 
-    def valid_move_masking(self, board, player):
-        # return a fixed size binary vector
+    def valid_move_masking(self, board: NDArray, player: int) -> NDArray:
         valids = [0] * self.get_action_size()
         b = Board(self.n)
         b.pieces = np.copy(board)
@@ -46,9 +41,7 @@ class TicTacToeGame(IGame):
             valids[self.n * x + y] = 1
         return np.array(valids)
 
-    def get_game_ended(self, board, player):
-        # return 0 if not ended, 1 if player 1 won, -1 if player 1 lost
-        # player = 1
+    def get_game_ended(self, board: NDArray, player: int) -> float:
         b = Board(self.n)
         b.pieces = np.copy(board)
 
@@ -58,36 +51,32 @@ class TicTacToeGame(IGame):
             return -1
         if b.has_legal_moves():
             return 0
-        # draw has a very little value
+        # Draw has a very small value
         return 1e-4
 
-    def get_canonical_form(self, board, player):
-        # return state if player==1, else return -state if player==-1
+    def get_canonical_form(self, board: NDArray, player: int) -> NDArray:
         return player * board
 
-    def get_symmetries(self, board, pi):
-        # mirror, rotational
-        assert (len(pi) == self.n ** 2 + 1)  # 1 for pass
+    def get_symmetries(self, board: NDArray, pi: NDArray) -> list[tuple[NDArray, list]]:
+        assert len(pi) == self.n ** 2 + 1  # 1 for pass
         pi_board = np.reshape(pi[:-1], (self.n, self.n))
-        l = []
+        symmetries = []
 
         for i in range(1, 5):
-            for j in [True, False]:
-                newB = np.rot90(board, i)
-                newPi = np.rot90(pi_board, i)
-                if j:
-                    newB = np.fliplr(newB)
-                    newPi = np.fliplr(newPi)
-                l += [(newB, list(newPi.ravel()) + [pi[-1]])]
-        return l
+            for is_flipped in [True, False]:
+                new_board = np.rot90(board, i)
+                new_pi = np.rot90(pi_board, i)
+                if is_flipped:
+                    new_board = np.fliplr(new_board)
+                    new_pi = np.fliplr(new_pi)
+                symmetries.append((new_board, list(new_pi.ravel()) + [pi[-1]]))
+        return symmetries
 
-    def string_representation(self, board):
-        # 8x8 numpy array (canonical board)
-        # TODO: Maybe change this if it's an np array is to string is depreciated
-        return board.tostring()
+    def state_key(self, board: NDArray) -> bytes:
+        return board.tobytes()
 
     @staticmethod
-    def display(board):
+    def display(board: NDArray) -> None:
         n = board.shape[0]
 
         print("   ", end="")
@@ -99,9 +88,9 @@ class TicTacToeGame(IGame):
             print("-", end="-")
         print("--")
         for y in range(n):
-            print(y, "|", end="")  # print the row #
+            print(y, "|", end="")
             for x in range(n):
-                piece = board[y][x]  # get the piece to print
+                piece = board[y][x]
                 if piece == -1:
                     print("X ", end="")
                 elif piece == 1:

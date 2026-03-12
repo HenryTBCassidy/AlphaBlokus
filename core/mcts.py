@@ -12,9 +12,9 @@ from core.interfaces import IGame, INeuralNetWrapper
 EPS: Final[float] = 1e-8  # Small constant to prevent division by zero
 
 # Type aliases for improved readability
-StateStr: TypeAlias = str  # String representation of a game state
+StateKey: TypeAlias = bytes  # Hashable key uniquely identifying a game state
 Action: TypeAlias = int  # Integer index into the action space
-StateAction: TypeAlias = tuple[StateStr, Action]  # (state, action) pair
+StateAction: TypeAlias = tuple[StateKey, Action]  # (state, action) pair
 PolicyVector: TypeAlias = NDArray[np.float64]  # Probability distribution over actions
 ValidMoves: TypeAlias = NDArray[np.bool_]  # Binary mask of legal moves
 
@@ -57,10 +57,10 @@ class MCTS:
         # Tree statistics
         self.q_values: dict[StateAction, float] = {}  # Q values for state-action pairs
         self.visit_counts: dict[StateAction, int] = {}  # Visit counts for state-action pairs
-        self.state_visits: dict[StateStr, int] = {}  # Visit counts for states
-        self.policy_priors: dict[StateStr, PolicyVector] = {}  # Initial policies for states
-        self.game_ended_cache: dict[StateStr, float] = {}  # Game-ended status for states
-        self.valid_moves_cache: dict[StateStr, ValidMoves] = {}  # Valid moves mask for states
+        self.state_visits: dict[StateKey, int] = {}  # Visit counts for states
+        self.policy_priors: dict[StateKey, PolicyVector] = {}  # Initial policies for states
+        self.game_ended_cache: dict[StateKey, float] = {}  # Game-ended status for states
+        self.valid_moves_cache: dict[StateKey, ValidMoves] = {}  # Valid moves mask for states
 
     def get_action_prob(self, canonical_board: NDArray, temp: float = 1) -> list[float]:
         """
@@ -86,7 +86,7 @@ class MCTS:
             self.search(canonical_board)
 
         # Extract visit counts for all actions
-        s = self.game.string_representation(canonical_board)
+        s = self.game.state_key(canonical_board)
         counts = [self.visit_counts.get((s, a), 0) for a in range(self.game.get_action_size())]
 
         # Handle temperature=0 case (deterministic best action)
@@ -126,7 +126,7 @@ class MCTS:
             - The return value is negated because the value is from the opponent's perspective
             - TODO: Consider optimising the action iteration for games with sparse legal moves
         """
-        s = self.game.string_representation(canonical_board)
+        s = self.game.state_key(canonical_board)
 
         # PHASE 1: Check if game has ended
         if s not in self.game_ended_cache:

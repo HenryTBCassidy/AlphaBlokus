@@ -29,7 +29,7 @@ Everything in this doc is about **making things work correctly**. The companion 
 | B19 | Random sampling with replacement | [Training](#5-training-pipeline-bugs) | Nice-to-have | 10 min | |
 | B20 | dtype conversion overhead | [Training](#5-training-pipeline-bugs) | Nice-to-have | 10 min | |
 | B21 | MCTS tree reuse across games | [MCTS](#2-mcts-performance-bugs) | Nice-to-have | 30 min | |
-| B22 | TTT deprecated tostring() | [Minor](#7-minor-correctness-issues) | Nice-to-have | 5 min | |
+| B22 | TTT deprecated tostring() | [Minor](#7-minor-correctness-issues) | Nice-to-have | 5 min | ✅ |
 | B23 | TTT unnecessary board copies | [Minor](#7-minor-correctness-issues) | Nice-to-have | 15 min | |
 | B24 | Input validation | [Missing Impls](#6-missing-implementations) | Nice-to-have | 20 min | |
 | B25 | MCTS fallback policy | [Board Logic](#3-board--game-logic-bugs) | Nice-to-have | 5 min | |

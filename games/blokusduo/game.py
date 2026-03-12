@@ -753,16 +753,15 @@ class BlokusDuoGame(IGame):
         """
         raise NotImplementedError()
 
-    def string_representation(self, board: BoardArray) -> str:
-        """
-        Convert the board state to a string representation.
+    def state_key(self, board: BoardArray) -> bytes:
+        """Return a hashable key that uniquely identifies the board state.
 
-        This is used by MCTS for hashing board states.
+        Used by MCTS as a dictionary key for state lookups.
 
         Args:
             board: Current board state
 
         Returns:
-            str: String representation of the board state
+            bytes: Raw byte representation of the board array
         """
         return board.tobytes()

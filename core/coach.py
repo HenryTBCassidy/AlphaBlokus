@@ -297,6 +297,9 @@ class Coach:
 
         boards, policies, values = zip(*latest)
 
+        # Ensure policies are numpy arrays (get_symmetries may return lists)
+        policies = [np.array(p, dtype=np.float64) if not isinstance(p, np.ndarray) else p for p in policies]
+
         df = pd.DataFrame({
             "board": [b.tobytes() for b in boards],
             "policy": [p.tobytes() for p in policies],

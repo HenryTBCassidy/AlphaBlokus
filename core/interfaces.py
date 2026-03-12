@@ -136,18 +136,18 @@ class IGame(Protocol):
         """
         raise NotImplementedError
 
-    def string_representation(self, board: NDArray) -> str:
+    def state_key(self, board: NDArray) -> bytes:
         """
-        Convert the board state to a string representation.
+        Return a hashable key that uniquely identifies the board state.
 
-        This method is primarily used for hashing board states in MCTS.
-        The string representation should uniquely identify the board state.
+        Used by MCTS as a dictionary key for state lookups.
+        The default implementation serialises the numpy array to raw bytes.
 
         Args:
             board: Current board state as a numpy array
 
         Returns:
-            str: A unique string representation of the board state
+            bytes: A unique hashable key for the board state
         """
         raise NotImplementedError
 

@@ -9,6 +9,7 @@ dependencies = [
     "loguru>=0.7.0",
     "torch>=2.0.0",
     "pandas>=2.0.0",
+    "pyarrow>=14.0.0",
     "tqdm>=4.60.0",
     "plotly>=5.0.0",
 ]
@@ -36,3 +37,6 @@ select = [
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+]
