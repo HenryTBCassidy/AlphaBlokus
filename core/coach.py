@@ -5,10 +5,7 @@ from random import shuffle
 from typing import TypeAlias
 
 import numpy as np
-import pandas as pd
 import psutil
-import pyarrow as pa
-import pyarrow.parquet as pq
 import torch
 from loguru import logger
 from numpy.typing import NDArray
@@ -16,13 +13,17 @@ from tqdm import tqdm
 
 from core.arena import Arena
 from core.config import RunConfig
-from core.mcts import MCTS
-from core.metrics import CycleStage, MetricsCollector
 from core.interfaces import INeuralNetWrapper, IGame
+from core.mcts import MCTS
+from core.storage import (
+    CycleStage,
+    MetricsCollector,
+    ProcessedExample,
+    SelfPlayStore,
+)
 
 # Type aliases for improved readability
 TrainingExample: TypeAlias = tuple[NDArray, int, NDArray, float | None]  # (board, player, policy, value)
-ProcessedExample: TypeAlias = tuple[NDArray, NDArray, float]  # (board, policy, value)
 TrainingHistory: TypeAlias = list[deque[ProcessedExample]]  # List of examples per generation
 
 
@@ -91,6 +92,7 @@ class Coach:
         self.train_examples_history: TrainingHistory = []
         self.skip_first_self_play = False  # Can be set by load_train_examples()
         self.metrics = MetricsCollector()
+        self._self_play_store = SelfPlayStore(config.self_play_history_directory)
 
     def execute_episode(self) -> list[ProcessedExample]:
         """
@@ -337,105 +339,24 @@ class Coach:
         win_rate = float(new_wins) / total_games
         return win_rate >= self.config.update_threshold
 
-    @staticmethod
-    def _self_play_filename(generation: int) -> str:
-        """Generate filename for a single generation's self-play data."""
-        return f"self_play_{generation}.parquet"
-
     def save_self_play_history(self, generation: int) -> None:
+        """Save the current generation's self-play data to a parquet file.
+
+        Delegates to :meth:`SelfPlayStore.save`.
         """
-        Save the current generation's self-play data to a parquet file.
-
-        Each generation is saved as a separate file containing flattened
-        board and policy arrays as bytes columns, with shape metadata
-        stored in the parquet file metadata for reconstruction.
-
-        Args:
-            generation: Training iteration number
-        """
-        folder = self.config.self_play_history_directory
-        folder.mkdir(exist_ok=True, parents=True)
-
         if not self.train_examples_history:
             return
-
-        # Save only the latest generation's examples
         latest = self.train_examples_history[-1]
         if not latest:
             return
-
-        boards, policies, values = zip(*latest)
-
-        # Ensure policies are numpy arrays (get_symmetries may return lists)
-        policies = [np.array(p, dtype=np.float64) if not isinstance(p, np.ndarray) else p for p in policies]
-
-        df = pd.DataFrame({
-            "board": [b.tobytes() for b in boards],
-            "policy": [p.tobytes() for p in policies],
-            "value": list(values),
-        })
-
-        # Store array shapes in parquet metadata so we can reconstruct
-        sample_board = boards[0]
-        sample_policy = policies[0]
-        metadata = {
-            "board_shape": ",".join(str(d) for d in sample_board.shape),
-            "board_dtype": str(sample_board.dtype),
-            "policy_size": str(sample_policy.shape[0]),
-            "policy_dtype": str(sample_policy.dtype),
-        }
-
-        table = pa.Table.from_pandas(df)
-        merged_metadata = {**(table.schema.metadata or {}), **{k.encode(): v.encode() for k, v in metadata.items()}}
-        table = table.replace_schema_metadata(merged_metadata)
-
-        filepath = folder / self._self_play_filename(generation)
-        pq.write_table(table, filepath)
-        logger.info(f"Saved {len(df)} self-play examples to {filepath.name}")
+        self._self_play_store.save(latest, generation)
 
     def load_self_play_history(self, up_to_generation: int) -> None:
+        """Load self-play examples from parquet files for recent generations.
+
+        Delegates to :meth:`SelfPlayStore.load_window`.
         """
-        Load self-play examples from parquet files for recent generations.
-
-        Loads files for the most recent generations within the current
-        training window size.
-
-        Args:
-            up_to_generation: Load generations up to and including this one.
-        """
-        folder = self.config.self_play_history_directory
-        if not folder.exists():
-            logger.warning(f"Self-play history directory not found: {folder}")
-            return
-
         window = self._generation_window_size(up_to_generation)
-        start_gen = max(0, up_to_generation - window)
-
-        self.train_examples_history = []
-        for gen in range(start_gen, up_to_generation + 1):
-            filepath = folder / self._self_play_filename(gen)
-            if not filepath.exists():
-                continue
-
-            table = pq.read_table(filepath)
-            metadata = {k.decode(): v.decode() for k, v in table.schema.metadata.items()}
-
-            board_shape = tuple(int(d) for d in metadata["board_shape"].split(","))
-            board_dtype = np.dtype(metadata["board_dtype"])
-            policy_size = int(metadata["policy_size"])
-            policy_dtype = np.dtype(metadata["policy_dtype"])
-
-            df = table.to_pandas()
-            examples: deque[ProcessedExample] = deque()
-            for _, row in df.iterrows():
-                board = np.frombuffer(row["board"], dtype=board_dtype).reshape(board_shape).copy()
-                policy = np.frombuffer(row["policy"], dtype=policy_dtype).reshape(policy_size).copy()
-                examples.append((board, policy, float(row["value"])))
-
-            self.train_examples_history.append(examples)
-            logger.info(f"Loaded {len(examples)} examples from {filepath.name}")
-
-        logger.info(
-            f"Loaded {sum(len(e) for e in self.train_examples_history)} total examples "
-            f"from {len(self.train_examples_history)} generations"
+        self.train_examples_history = self._self_play_store.load_window(
+            up_to_generation, window,
         )

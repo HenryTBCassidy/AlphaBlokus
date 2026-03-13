@@ -4,7 +4,7 @@ import pandas as pd
 import pytest
 
 from core.config import RunConfig
-from core.metrics import CycleStage, MetricsCollector
+from core.storage import CycleStage, MetricsCollector
 
 
 @pytest.fixture

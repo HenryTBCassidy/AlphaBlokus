@@ -10,7 +10,7 @@ from tqdm import tqdm
 
 from core.config import RunConfig
 from core.interfaces import IGame
-from core.metrics import MetricsCollector
+from core.storage import MetricsCollector
 
 
 class AverageMeter:

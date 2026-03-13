@@ -57,10 +57,10 @@ class TicTacToeGame(IGame):
     def get_canonical_form(self, board: NDArray, player: int) -> NDArray:
         return player * board
 
-    def get_symmetries(self, board: NDArray, pi: NDArray) -> list[tuple[NDArray, list]]:
+    def get_symmetries(self, board: NDArray, pi: NDArray) -> list[tuple[NDArray, NDArray]]:
         assert len(pi) == self.n ** 2 + 1  # 1 for pass
         pi_board = np.reshape(pi[:-1], (self.n, self.n))
-        symmetries = []
+        symmetries: list[tuple[NDArray, NDArray]] = []
 
         for i in range(1, 5):
             for is_flipped in [True, False]:
@@ -69,7 +69,8 @@ class TicTacToeGame(IGame):
                 if is_flipped:
                     new_board = np.fliplr(new_board)
                     new_pi = np.fliplr(new_pi)
-                symmetries.append((new_board, list(new_pi.ravel()) + [pi[-1]]))
+                new_pi_flat = np.append(new_pi.ravel(), pi[-1])
+                symmetries.append((new_board, new_pi_flat))
         return symmetries
 
     def state_key(self, board: NDArray) -> bytes:

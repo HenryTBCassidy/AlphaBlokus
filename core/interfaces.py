@@ -4,7 +4,7 @@ import numpy as np
 from numpy.typing import NDArray
 
 from core.config import RunConfig
-from core.metrics import MetricsCollector
+from core.storage import MetricsCollector
 
 # Type aliases for commonly used types
 TrainingExample: TypeAlias = tuple[NDArray, NDArray, float]  # (board_state, policy_vector, value)

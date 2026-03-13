@@ -2,7 +2,7 @@
 
 Living document. Append as we discover new conventions. All code in this repo should follow these rules. Claude should reference this before reviewing or writing code.
 
-Last updated: 2026-03-10
+Last updated: 2026-03-13
 
 ---
 
@@ -206,17 +206,20 @@ from core.interfaces import IGame
 
 A file should have one main class plus any helpers that only that class uses. If a helper is used by multiple classes, it gets its own file.
 
+**Exception:** multiple classes in one file is fine when they share a single cohesive concern (e.g. `core/storage.py` has `MetricsCollector` and `SelfPlayStore` — both are parquet I/O and neither is large enough to warrant its own module).
+
 ### Module layout
 
-Within a file, order things as:
+Within a file, order things **public-first** ("newspaper" pattern — headlines at the top, details below):
 
 1. Module docstring
 2. Imports
 3. Constants
 4. Type aliases
-5. Helper functions / small classes
-6. Main class
-7. Module-level code (rare — avoid)
+5. Public classes (public methods first, then private methods within each class)
+6. Module-level code (rare — avoid)
+
+Private helpers belong inside the class that uses them (as `@staticmethod` or regular methods), not floating at module level. This keeps them co-located with their only caller and avoids orphaned functions.
 
 ### Early returns
 
