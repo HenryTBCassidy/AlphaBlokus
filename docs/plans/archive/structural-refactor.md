@@ -1,6 +1,6 @@
 # AlphaBlokus — Structural Refactor
 
-Everything in this doc is about **how the code is organised, not what it does**. The companion doc ([`bug-fixes.md`](bug-fixes.md)) covers correctness issues. The goal: clean up structure, naming, tooling, and infrastructure so that the codebase is consistent, testable, and easy to extend — then fix bugs on a solid foundation.
+Everything in this doc is about **how the code is organised, not what it does**. The companion doc ([`bug-fixes.md`](../bug-fixes.md)) covers correctness issues. The goal: clean up structure, naming, tooling, and infrastructure so that the codebase is consistent, testable, and easy to extend — then fix bugs on a solid foundation.
 
 ---
 
@@ -21,9 +21,11 @@ Items ordered to minimise merge pain. Each row ~ one commit. Section numbers bel
 | S9 | Add CLI to main.py, fix module-level side effects | 30 min | Medium | ✅ |
 | S10 | Data storage → parquet everywhere | 1 hour | Medium | ✅ |
 | S11 | Set up pytest + initial test suite | 3–4 hours | High | ✅ |
-| S12 | Profiling instrumentation (nice-to-have) | 2.5 hours | Low | |
+| S12 | Profiling instrumentation (nice-to-have) | 2.5 hours | Low | Deferred |
 
 **Estimated total (excl. nice-to-have): ~11 hours across 11 commits**
+
+> **S12 deferred:** Profiling instrumentation was scoped as a nice-to-have from the start and deprioritised in favour of the bug-fixes and multi-channel encoding plans. Can be picked up as a standalone task later.
 
 ---
 

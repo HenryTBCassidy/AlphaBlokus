@@ -1,6 +1,6 @@
 # AlphaBlokus — Bug Fixes & Correctness
 
-Everything in this doc is about **making things work correctly**. The companion doc ([`structural-refactor.md`](structural-refactor.md)) covers code organisation and infrastructure. Fix bugs here after the structural refactor is done — or before, if you prefer to verify the pipeline works before reorganising.
+Everything in this doc is about **making things work correctly**. The companion doc ([`structural-refactor.md`](archive/structural-refactor.md)) covers code organisation and infrastructure. Fix bugs here after the structural refactor is done — or before, if you prefer to verify the pipeline works before reorganising.
 
 ---
 

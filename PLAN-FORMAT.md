@@ -2,7 +2,7 @@
 
 How we write implementation plans in `docs/plans/`. Companion to the [Style Guide](STYLE-GUIDE.md), which covers code conventions.
 
-Last updated: 2026-03-11
+Last updated: 2026-03-13
 
 ---
 
@@ -91,13 +91,17 @@ Don't pad sections with filler. If a fix is "change `> 0` to `>= 0` in 4 places,
 
 - **Prefix IDs by plan:** `S1–S12` for structural refactor, `B1–B25` for bug fixes, plain `Step 1–18` for encoding plan. Pick a prefix and stick with it.
 - **File names:** lowercase, hyphenated: `structural-refactor.md`, `bug-fixes.md`, `multi-channel-board-encoding.md`.
-- **Location:** always in `docs/plans/`.
+- **Location:** active plans in `docs/plans/`, completed plans in `docs/plans/archive/`.
 
 ## Lifecycle
 
-1. **Draft:** Write the plan, get agreement on scope.
-2. **Execute:** Work through the checklist, marking items done.
-3. **Archive:** When all items are done, the plan stays in `docs/plans/` as a historical record. Don't delete completed plans — they explain why the code looks the way it does.
+1. **Draft:** Write the plan in `docs/plans/`, get agreement on scope.
+2. **Execute:** Work through the checklist, marking items done. If an item is intentionally skipped or deferred, mark it `Deferred` in the Done column and add a quoted note below the checklist explaining why.
+3. **Archive:** When the plan is complete (all items done or explicitly deferred), move it to `docs/plans/archive/`. Fix any relative links between plans so cross-references still work after the move. Don't delete completed plans — they explain why the code looks the way it does.
+
+### What "complete" means
+
+A plan is complete when every checklist item is either ✅ or marked `Deferred` with a reason. Nice-to-have items that were always out of scope for the current branch are fine to defer — just say so.
 
 ## Anti-patterns
 
