@@ -7,7 +7,7 @@
   "max_queue_length": 10000,
   "num_arena_matches": 100,
   "root_directory": "./temp/",
-  "load_model": "False",
+  "load_model": false,
   "max_generations_lookback": 25,
   "mcts_config": {
     "num_mcts_sims": 200,
@@ -18,7 +18,7 @@
     "dropout": 0.3,
     "epochs": 5,
     "batch_size": 32,
-    "cuda": "True",
+    "cuda": true,
     "num_channels": 512,
     "num_residual_blocks": 8
   }

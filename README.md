@@ -45,14 +45,19 @@ AlphaBlokus/
 │   ├── arena.py                # Model evaluation with alternating start positions
 │   ├── config.py               # Configuration dataclasses
 │   └── interfaces.py           # IGame and INeuralNetWrapper protocols
-├── tictactoe/                  # Reference implementation (complete)
-│   ├── game.py                 # Tic-Tac-Toe game logic
-│   └── neuralnets/             # 4-layer CNN (Conv → FC → policy + value)
-├── blokusduo/                  # Target implementation (in progress)
-│   ├── game.py                 # Blokus Duo game logic with piece placement
-│   ├── pieces.py               # 21 pieces, 91 orientations, symmetry reduction
-│   ├── pieces.json             # Piece definitions with basis orientations
-│   └── neuralnets/             # ResNet (configurable blocks → policy + value)
+├── games/
+│   ├── tictactoe/              # Reference implementation (complete)
+│   │   ├── game.py             # Tic-Tac-Toe game logic
+│   │   └── neuralnets/         # 4-layer CNN (Conv → FC → policy + value)
+│   └── blokusduo/              # Target implementation (in progress)
+│       ├── game.py             # Blokus Duo game logic with piece placement
+│       ├── pieces.py           # 21 pieces, 91 orientations, symmetry reduction
+│       ├── pieces.json         # Piece definitions with basis orientations
+│       └── neuralnets/         # ResNet (configurable blocks → policy + value)
+├── docs/
+│   ├── reference/              # Stable docs — how things work
+│   └── plans/                  # Active checklists — what to do
+├── notebooks/                  # Jupyter notebooks (eval.ipynb)
 ├── run_configurations/         # JSON configs for test and production runs
 ├── reporting.py                # HTML report generation with Plotly
 └── main.py                     # Entry point
@@ -119,7 +124,7 @@ Blokus Duo is played on a 14x14 board where two players take turns placing polyo
 ```bash
 git clone https://github.com/HenryTBCassidy/AlphaBlokus.git
 cd AlphaBlokus
-pip install -r requirements.txt  # if available
+uv sync
 ```
 
 ### Running Tic-Tac-Toe Training
@@ -132,20 +137,27 @@ python main.py --config run_configurations/test_run.json
 
 ## Documentation
 
-Detailed documentation lives in the [`docs/`](docs/) folder:
+Detailed documentation lives in the [`docs/`](docs/) folder, split into **reference** (how things work) and **plans** (what to do).
+
+### Reference (`docs/reference/`)
 
 | Document | Description |
 |----------|-------------|
-| [00 — Project Overview](docs/00-PROJECT-OVERVIEW.md) | Mission, phased approach, key decisions, effort estimates |
-| [01 — Structural Refactor](docs/01-STRUCTURAL-REFACTOR.md) | Project structure, logging, package management, naming, testing strategy |
-| [02 — Bug Fixes](docs/02-BUG-FIXES.md) | Interface mismatches, MCTS performance, board bugs, training pipeline fixes |
-| [03 — Algorithms](docs/03-ALGORITHMS.md) | MCTS implementation, self-play, arena evaluation, caching strategies |
-| [04 — Neural Networks](docs/04-NEURAL-NETWORKS.md) | ResNet and CNN architectures, board encoding, loss functions |
-| [05 — Evaluation Plan](docs/05-EVALUATION-PLAN.md) | Training diagnostics, Pentobi benchmarking, headline metrics |
-| [06 — Competitive Landscape](docs/06-COMPETITIVE-LANDSCAPE.md) | Pentobi, existing Blokus RL projects, why neural Blokus is hard |
-| [07 — External Interfaces](docs/07-EXTERNAL-INTERFACES.md) | Pentobi GTP adapter, human-playable UI, translation layer |
-| [08 — Handoff](docs/08-HANDOFF.md) | Context for contributors, current state, next steps, gotchas |
-| [09 — Appendix: Pieces](docs/09-APPENDIX-PIECES.md) | All 21 Blokus pieces, 91 orientations, symmetry analysis |
+| [00 — Overview](docs/reference/00-OVERVIEW.md) | Mission, phased approach, key decisions, effort estimates |
+| [01 — Algorithms](docs/reference/01-ALGORITHMS.md) | MCTS implementation, self-play, arena evaluation, caching strategies |
+| [02 — Neural Networks](docs/reference/02-NEURAL-NETWORKS.md) | ResNet and CNN architectures, board encoding, loss functions |
+| [03 — Evaluation](docs/reference/03-EVALUATION.md) | Training diagnostics, Pentobi benchmarking, headline metrics |
+| [04 — Competitive Landscape](docs/reference/04-COMPETITIVE-LANDSCAPE.md) | Pentobi, existing Blokus RL projects, why neural Blokus is hard |
+| [05 — Interfaces](docs/reference/05-INTERFACES.md) | Pentobi GTP adapter, human-playable UI, translation layer |
+| [06 — Appendix](docs/reference/06-APPENDIX.md) | All 21 Blokus pieces, 91 orientations, symmetry analysis |
+| [07 — Handoff](docs/reference/07-HANDOFF.md) | Context for contributors, current state, next steps, gotchas |
+
+### Plans (`docs/plans/`)
+
+| Document | Description |
+|----------|-------------|
+| [Structural Refactor](docs/plans/structural-refactor.md) | Project structure, logging, package management, naming, testing strategy |
+| [Bug Fixes](docs/plans/bug-fixes.md) | Interface mismatches, MCTS performance, board bugs, training pipeline fixes |
 
 ---
 

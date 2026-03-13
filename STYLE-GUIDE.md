@@ -2,7 +2,7 @@
 
 Living document. Append as we discover new conventions. All code in this repo should follow these rules. Claude should reference this before reviewing or writing code.
 
-Last updated: 2026-03-10
+Last updated: 2026-03-13
 
 ---
 
@@ -165,7 +165,7 @@ def valid_placement(board: NDArray, piece: Piece, row: int, col: int) -> bool:
 - Don't state the obvious. `i += 1  # increment i` is noise.
 - **Do** explain *why*, not *what*: `# Multiply by player to get canonical form (my pieces = +1, opponent = -1)`
 - **Do** flag non-obvious correctness constraints: `# Must check >= 0, not > 0 (row 0 is a valid neighbour)`
-- Use `# TODO:` for known work items. Include a ticket/doc reference when possible: `# TODO: see 02-BUG-FIXES.md §4`
+- Use `# TODO:` for known work items. Include a ticket/doc reference when possible: `# TODO: see docs/plans/bug-fixes.md §4`
 
 ---
 
@@ -206,17 +206,20 @@ from core.interfaces import IGame
 
 A file should have one main class plus any helpers that only that class uses. If a helper is used by multiple classes, it gets its own file.
 
+**Exception:** multiple classes in one file is fine when they share a single cohesive concern (e.g. `core/storage.py` has `MetricsCollector` and `SelfPlayStore` — both are parquet I/O and neither is large enough to warrant its own module).
+
 ### Module layout
 
-Within a file, order things as:
+Within a file, order things **public-first** ("newspaper" pattern — headlines at the top, details below):
 
 1. Module docstring
 2. Imports
 3. Constants
 4. Type aliases
-5. Helper functions / small classes
-6. Main class
-7. Module-level code (rare — avoid)
+5. Public classes (public methods first, then private methods within each class)
+6. Module-level code (rare — avoid)
+
+Private helpers belong inside the class that uses them (as `@staticmethod` or regular methods), not floating at module level. This keeps them co-located with their only caller and avoids orphaned functions.
 
 ### Early returns
 
@@ -337,7 +340,7 @@ per simulation, giving orders-of-magnitude speedup for Blokus.
 
 - **One concern per PR.** Don't mix refactoring with bug fixes.
 - **PR title** matches the commit subject if single-commit, or summarises if multi-commit.
-- **Link to doc section** in PR description: "Implements `01-STRUCTURAL-REFACTOR.md` §2 (project structure)"
+- **Link to doc section** in PR description: "Implements `docs/plans/structural-refactor.md` §2 (project structure)"
 
 ---
 

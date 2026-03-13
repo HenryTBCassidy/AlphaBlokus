@@ -1,57 +1,62 @@
-import logging
+import argparse
 import time
 
-import coloredlogs
+from loguru import logger
 
 from core.coach import Coach
-from core.config import LOGGER_NAME
-from blokusduo.neuralnets.wrapper import NNetWrapper
-from tictactoe.game import TicTacToeGame as Game
-from utils import setup_logging, load_args
+from games.blokusduo.neuralnets.wrapper import NNetWrapper
+from games.tictactoe.game import TicTacToeGame as Game
+from core.config import load_args
 from reporting import create_html_report
-
-log = logging.getLogger(LOGGER_NAME)
-coloredlogs.install(level='INFO')
-
-args = load_args("test_run.json")
 
 
 def main():
+    parser = argparse.ArgumentParser(description="AlphaBlokus training pipeline")
+    parser.add_argument(
+        "--config",
+        type=str,
+        default="run_configurations/test_run.json",
+        help="Path to the JSON run configuration file (default: run_configurations/test_run.json)",
+    )
+    cli_args = parser.parse_args()
+    args = load_args(cli_args.config)
+
     args.run_directory.mkdir(parents=True, exist_ok=True)
 
-    setup_logging(args.log_directory)
+    # Add rotating file sink alongside default stderr
+    log_dir = args.log_directory
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logger.add(log_dir / "alpha.log", rotation="10 MB", retention=3)
+
     start = time.perf_counter()
 
-    log.info('Loading %s...', Game.__name__)
+    logger.info(f'Loading {Game.__name__}...')
     g = Game(3)
 
-    log.info('Loading %s...', NNetWrapper.__name__)
+    logger.info(f'Loading {NNetWrapper.__name__}...')
     nnet = NNetWrapper(args)
 
     # TODO: Fix this
     if args.load_model:
-        # log.info('Loading checkpoint "%s/%s"...', args.load_folder_file[0], args.load_folder_file[1])
         raise NotImplementedError("You do not have a way of loading models currently!")
-        # nnet.load_checkpoint(args.load_folder_file[0], args.load_folder_file[1])
     else:
-        log.warning('Not loading a checkpoint!')
+        logger.warning('Not loading a checkpoint!')
 
-    log.info('Loading the Coach...')
+    logger.info('Loading the Coach...')
     c = Coach(g, nnet, args)
 
     # TODO: Fix this
     if args.load_model:
         raise NotImplementedError("You do not have a way of loading models currently!")
-        log.info("Loading 'trainExamples' from file...")
+        logger.info("Loading 'trainExamples' from file...")
         c.load_train_examples()
 
-    log.info('Starting the learning process ')
+    logger.info('Starting the learning process')
 
     c.learn()
-    nnet.collect_training_data()
     create_html_report(args)
     end = time.perf_counter()
-    log.info(f"Total time elapsed: {end - start}")
+    logger.info(f"Total time elapsed: {end - start}")
 
 
 if __name__ == "__main__":

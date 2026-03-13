@@ -1,23 +1,24 @@
-from typing import Tuple, List, Union, Protocol, TYPE_CHECKING, TypeAlias
+from typing import Protocol, TypeAlias
+
 import numpy as np
 from numpy.typing import NDArray
 
-if TYPE_CHECKING:
-    from core.config import RunConfig
+from core.config import RunConfig
+from core.storage import MetricsCollector
 
 # Type aliases for commonly used types
-TrainingExample: TypeAlias = Tuple[NDArray, NDArray, float]  # (board_state, policy_vector, value)
-PolicyValue: TypeAlias = Tuple[NDArray, float]  # (policy_vector, value_prediction)
+TrainingExample: TypeAlias = tuple[NDArray, NDArray, float]  # (board_state, policy_vector, value)
+PolicyValue: TypeAlias = tuple[NDArray, float]  # (policy_vector, value_prediction)
 
 class IGame(Protocol):
     """
     Base interface for implementing two-player, adversarial, turn-based games.
-    
+
     This class defines the contract that game implementations must follow.
     Player identifiers are standardised as:
         - Player 1: 1
         - Player 2: -1
-        
+
     All board states are represented as numpy arrays with appropriate dimensions
     for the specific game being implemented.
     """
@@ -34,12 +35,12 @@ class IGame(Protocol):
         """
         raise NotImplementedError
 
-    def get_board_size(self) -> Tuple[int, int]:
+    def get_board_size(self) -> tuple[int, int]:
         """
         Get the dimensions of the game board.
 
         Returns:
-            Tuple[int, int]: A tuple of (width, height) representing board dimensions
+            tuple[int, int]: A tuple of (rows, cols) representing board dimensions
         """
         raise NotImplementedError
 
@@ -52,7 +53,7 @@ class IGame(Protocol):
         """
         raise NotImplementedError
 
-    def get_next_state(self, board: NDArray, player: int, action: int) -> Tuple[NDArray, int]:
+    def get_next_state(self, board: NDArray, player: int, action: int) -> tuple[NDArray, int]:
         """
         Apply an action to the current board state and return the resulting state.
 
@@ -117,7 +118,7 @@ class IGame(Protocol):
         """
         raise NotImplementedError
 
-    def get_symmetries(self, board: NDArray, pi: NDArray) -> List[Tuple[NDArray, NDArray]]:
+    def get_symmetries(self, board: NDArray, pi: NDArray) -> list[tuple[NDArray, NDArray]]:
         """
         Generate all symmetric forms of the current board state and policy vector.
 
@@ -130,23 +131,23 @@ class IGame(Protocol):
             pi: Policy vector of size self.get_action_size()
 
         Returns:
-            List[Tuple[NDArray, NDArray]]: List of (board, pi) tuples where each tuple
+            list[tuple[NDArray, NDArray]]: List of (board, pi) tuples where each tuple
                                          represents a symmetrical form of the input
         """
         raise NotImplementedError
 
-    def string_representation(self, board: NDArray) -> str:
+    def state_key(self, board: NDArray) -> bytes:
         """
-        Convert the board state to a string representation.
+        Return a hashable key that uniquely identifies the board state.
 
-        This method is primarily used for hashing board states in MCTS.
-        The string representation should uniquely identify the board state.
+        Used by MCTS as a dictionary key for state lookups.
+        The default implementation serialises the numpy array to raw bytes.
 
         Args:
             board: Current board state as a numpy array
 
         Returns:
-            str: A unique string representation of the board state
+            bytes: A unique hashable key for the board state
         """
         raise NotImplementedError
 
@@ -154,29 +155,34 @@ class IGame(Protocol):
 class INeuralNetWrapper(Protocol):
     """
     Base interface for neural network wrappers used in game-playing models.
-    
+
     This interface defines the contract for neural networks that can be used
     with the game-playing framework. It handles:
     - Training on self-play game data
     - Making predictions for game states
     - Model persistence (saving/loading checkpoints)
-    
+
     The neural network is expected to output both:
     - A policy vector (probabilities for each possible move)
     - A value prediction (estimated game outcome from current position)
     """
 
-    def __init__(self, game: IGame, args: 'RunConfig') -> None:
+    def __init__(self, game: IGame, config: 'RunConfig') -> None:
         """
         Initialise the neural network wrapper.
 
         Args:
             game: Game instance that this network will learn to play
-            args: Configuration parameters for the network and training process
+            config: Configuration parameters for the network and training process
         """
         pass
 
-    def train(self, examples: List[TrainingExample], generation: int) -> None:
+    def train(
+        self,
+        examples: list[TrainingExample],
+        generation: int,
+        metrics: MetricsCollector | None = None,
+    ) -> None:
         """
         Train the neural network on a batch of examples from self-play games.
 
@@ -186,6 +192,7 @@ class INeuralNetWrapper(Protocol):
                      - policy_vector (NDArray): Target move probabilities
                      - value (float): Game outcome from this position (-1 to 1)
             generation: Current iteration in the self-play training cycle
+            metrics: Optional metrics collector for recording training loss data
         """
         raise NotImplementedError
 

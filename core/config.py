@@ -1,9 +1,8 @@
+import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Final
 
-# Global constants
-LOGGER_NAME: Final[str] = "Alpha"
+from dataclass_wizard import fromdict
 
 
 @dataclass(frozen=True)
@@ -111,3 +110,35 @@ class RunConfig:
     def report_directory(self) -> Path:
         """Directory for generated training progress reports and visualisations."""
         return self.run_directory / "Reporting"
+
+    @property
+    def self_play_profiling_directory(self) -> Path:
+        """Directory for per-episode MCTS profiling data (sims, timing, tree size)."""
+        return self.run_directory / "SelfPlayProfiling"
+
+    @property
+    def resource_usage_directory(self) -> Path:
+        """Directory for process and GPU memory usage snapshots."""
+        return self.run_directory / "ResourceUsage"
+
+    @property
+    def training_throughput_directory(self) -> Path:
+        """Directory for per-epoch training throughput metrics."""
+        return self.run_directory / "TrainingThroughput"
+
+
+def load_args(config_path: str | Path) -> RunConfig:
+    """
+    Load run configuration from a JSON file.
+
+    Args:
+        config_path: Path to the JSON configuration file.
+
+    Returns:
+        RunConfig: Configuration object for the run
+    """
+    config_path = Path(config_path)
+    with open(config_path, "r") as f:
+        args_json = json.load(f)
+
+    return fromdict(RunConfig, args_json)

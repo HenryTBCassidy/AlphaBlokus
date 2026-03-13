@@ -1,65 +1,62 @@
-import logging
-import os
-import sys
 import time
 from collections import deque
 from dataclasses import dataclass
-from enum import StrEnum
-from pickle import Pickler, Unpickler
 from random import shuffle
-from typing import List, Deque, Optional, TypeAlias
-from numpy.typing import NDArray
+from typing import TypeAlias
 
 import numpy as np
-import pandas as pd
+import psutil
+import torch
+from loguru import logger
+from numpy.typing import NDArray
 from tqdm import tqdm
 
 from core.arena import Arena
-from core.config import RunConfig, LOGGER_NAME
-from core.mcts import MCTS
+from core.config import RunConfig
 from core.interfaces import INeuralNetWrapper, IGame
+from core.mcts import MCTS
+from core.storage import (
+    CycleStage,
+    MetricsCollector,
+    ProcessedExample,
+    SelfPlayStore,
+)
 
 # Type aliases for improved readability
-TrainingExample: TypeAlias = tuple[NDArray, int, NDArray, Optional[float]]  # (board, player, policy, value)
-ProcessedExample: TypeAlias = tuple[NDArray, NDArray, float]  # (board, policy, value)
-TrainingHistory: TypeAlias = List[Deque[ProcessedExample]]  # List of examples per generation
-
-log = logging.getLogger(LOGGER_NAME)
-
-
-class CycleStage(StrEnum):
-    """
-    Enumeration of stages in the training cycle.
-    
-    Each generation consists of:
-    - SelfPlay: Generate new games using current network
-    - Training: Update network weights using game data
-    - Arena: Evaluate new network against previous version
-    - WholeCycle: Complete generation (all above stages)
-    """
-    SelfPlay = "SelfPlay"
-    Training = "Training"
-    Arena = "Arena"
-    WholeCycle = "WholeCycle"
-
-    def __repr__(self) -> str:
-        """Return the enum member's name for string representation."""
-        return self._name_
+TrainingExample: TypeAlias = tuple[NDArray, int, NDArray, float | None]  # (board, player, policy, value)
+TrainingHistory: TypeAlias = list[deque[ProcessedExample]]  # List of examples per generation
 
 
 @dataclass(frozen=True)
-class TimingsLoggable:
+class MemorySnapshot:
+    """Point-in-time memory usage of the current process.
+
+    All values are in bytes. ``gpu_bytes`` is ``None`` when no GPU is
+    available or the backend doesn't expose an allocation counter.
     """
-    Data class for tracking execution time of training stages.
-    
-    Attributes:
-        generation: Training iteration number
-        cycle_stage: Which stage of training is being timed
-        time_elapsed: Duration of the stage in seconds
+
+    process_rss_bytes: int
+    gpu_bytes: float | None
+
+
+def _get_memory_snapshot() -> MemorySnapshot:
+    """Take a cross-platform snapshot of the current process's memory usage.
+
+    Uses ``psutil`` for process RSS (works identically on macOS, Linux,
+    and Windows — always returns bytes).
+
+    For GPU memory, checks CUDA first, then MPS (Apple Silicon).
+    Returns ``None`` for ``gpu_bytes`` if no GPU is available.
     """
-    generation: int
-    cycle_stage: CycleStage
-    time_elapsed: float
+    rss = psutil.Process().memory_info().rss
+
+    gpu_mem: float | None = None
+    if torch.cuda.is_available():
+        gpu_mem = float(torch.cuda.memory_allocated())
+    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
+        gpu_mem = float(torch.mps.current_allocated_memory())
+
+    return MemorySnapshot(process_rss_bytes=rss, gpu_bytes=gpu_mem)
 
 
 class Coach:
@@ -76,27 +73,28 @@ class Coach:
     but only if the new version proves stronger than the previous one.
     """
 
-    def __init__(self, game: IGame, nnet: INeuralNetWrapper, run_config: RunConfig) -> None:
+    def __init__(self, game: IGame, nnet: INeuralNetWrapper, config: RunConfig) -> None:
         """
         Initialize the training coordinator.
 
         Args:
             game: Game implementation providing rules and mechanics
             nnet: Neural network for policy and value predictions
-            run_config: Configuration parameters for the training process
+            config: Configuration parameters for the training process
         """
         self.game = game
         self.nnet = nnet
-        self.pnet = self.nnet.__class__(self.game, run_config)  # Previous best network
-        self.run_config = run_config
-        self.mcts = MCTS(self.game, self.nnet, self.run_config.mcts_config)
-        
+        self.pnet = self.nnet.__class__(self.game, config)  # Previous best network
+        self.config = config
+        self.mcts = MCTS(self.game, self.nnet, self.config.mcts_config)
+
         # Training state
         self.train_examples_history: TrainingHistory = []
         self.skip_first_self_play = False  # Can be set by load_train_examples()
-        self.timings: List[TimingsLoggable] = []
+        self.metrics = MetricsCollector()
+        self._self_play_store = SelfPlayStore(config.self_play_history_directory)
 
-    def execute_episode(self) -> List[ProcessedExample]:
+    def execute_episode(self) -> list[ProcessedExample]:
         """
         Execute one complete self-play game to generate training data.
 
@@ -117,7 +115,7 @@ class Coach:
             List[ProcessedExample]: Training examples of the form (board, policy, value)
                                   where value is +1 for winning positions, -1 for losing
         """
-        train_examples: List[TrainingExample] = []
+        train_examples: list[TrainingExample] = []
         board = self.game.initialise_board()
         current_player = 1
         move_count = 0
@@ -125,7 +123,7 @@ class Coach:
         while True:
             move_count += 1
             canonical_board = self.game.get_canonical_form(board, current_player)
-            temperature = int(move_count < self.run_config.temp_threshold)
+            temperature = int(move_count < self.config.temp_threshold)
 
             # Get improved policy from MCTS
             pi = self.mcts.get_action_prob(canonical_board, temp=temperature)
@@ -163,28 +161,44 @@ class Coach:
             - Game data is saved after each generation
             - Timing information is collected for performance analysis
         """
-        for generation in range(1, self.run_config.num_generations + 1):
-            log.info(f'Starting Generation #{generation} ...')
+        for generation in range(1, self.config.num_generations + 1):
+            logger.info(f'Starting Generation #{generation} ...')
             generation_start = time.perf_counter()
 
             # PHASE 1: Generate new training data through self-play
             if not self.skip_first_self_play or generation > 1:
-                iteration_examples = deque([], maxlen=self.run_config.max_queue_length)
+                iteration_examples = deque([], maxlen=self.config.max_queue_length)
 
-                log.info(f'Starting Self-Play For Generation #{generation} ...')
+                logger.info(f'Starting Self-Play For Generation #{generation} ...')
                 self_play_start = time.perf_counter()
-                
-                for _ in tqdm(range(self.run_config.num_eps), desc="Self Play"):
-                    self.mcts = MCTS(self.game, self.nnet, self.run_config.mcts_config)
+
+                for episode_idx in tqdm(range(self.config.num_eps), desc="Self Play"):
+                    self.mcts = MCTS(self.game, self.nnet, self.config.mcts_config)
                     iteration_examples.extend(self.execute_episode())
-                
+
+                    # Log per-episode MCTS profiling data
+                    stats = self.mcts.get_episode_stats()
+                    self.metrics.log_self_play_profiling(
+                        generation=generation,
+                        episode=episode_idx,
+                        num_moves=stats.num_moves,
+                        total_sims=stats.total_sims,
+                        total_search_time_s=stats.total_search_time_s,
+                        total_inference_time_s=stats.total_inference_time_s,
+                        num_leaf_expansions=stats.num_leaf_expansions,
+                        tree_size=stats.tree_size,
+                    )
+
                 self_play_end = time.perf_counter()
-                self.timings.append(TimingsLoggable(
-                    generation=generation,
-                    cycle_stage=CycleStage.SelfPlay,
-                    time_elapsed=self_play_end - self_play_start
-                ))
-                
+                self.metrics.log_timing(generation, CycleStage.SELF_PLAY, self_play_end - self_play_start)
+
+                # Memory snapshot after self-play phase
+                snapshot = _get_memory_snapshot()
+                self.metrics.log_resource_usage(
+                    generation, CycleStage.SELF_PLAY,
+                    snapshot.process_rss_bytes, snapshot.gpu_bytes,
+                )
+
                 self.train_examples_history.append(iteration_examples)
 
             # Save generated data and manage training window
@@ -197,65 +211,62 @@ class Coach:
             # Preserve current best network
             self.nnet.save_checkpoint(filename='temp.pth.tar')
             self.pnet.load_checkpoint(filename='temp.pth.tar')
-            pmcts = MCTS(self.game, self.pnet, self.run_config.mcts_config)
+            pmcts = MCTS(self.game, self.pnet, self.config.mcts_config)
 
             # Train network on accumulated data
-            log.info(f'Starting Training For Generation #{generation} ...')
+            logger.info(f'Starting Training For Generation #{generation} ...')
             training_start = time.perf_counter()
-            self.nnet.train(train_examples, generation)
+            self.nnet.train(train_examples, generation, metrics=self.metrics)
             training_end = time.perf_counter()
-            
-            self.timings.append(TimingsLoggable(
-                generation=generation,
-                cycle_stage=CycleStage.Training,
-                time_elapsed=training_end - training_start
-            ))
+            self.metrics.log_timing(generation, CycleStage.TRAINING, training_end - training_start)
+
+            # Memory snapshot after training phase
+            snapshot = _get_memory_snapshot()
+            self.metrics.log_resource_usage(
+                generation, CycleStage.TRAINING,
+                snapshot.process_rss_bytes, snapshot.gpu_bytes,
+            )
 
             # PHASE 3: Evaluate new network
-            nmcts = MCTS(self.game, self.nnet, self.run_config.mcts_config)
+            nmcts = MCTS(self.game, self.nnet, self.config.mcts_config)
             
-            log.info(f'Evaluating Against Previous Version For Generation #{generation} ...')
+            logger.info(f'Evaluating Against Previous Version For Generation #{generation} ...')
             arena_start = time.perf_counter()
-            
+
             arena = Arena(
                 lambda x: np.argmax(pmcts.get_action_prob(x, temp=0)),
                 lambda x: np.argmax(nmcts.get_action_prob(x, temp=0)),
                 self.game
             )
 
-            pwins, nwins, draws = arena.play_games(
-                self.run_config.num_arena_matches,
-                generation=generation,
-                directory=self.run_config.arena_data_directory
-            )
+            pwins, nwins, draws = arena.play_games(self.config.num_arena_matches)
 
             arena_end = time.perf_counter()
-            self.timings.append(TimingsLoggable(
-                generation=generation,
-                cycle_stage=CycleStage.Arena,
-                time_elapsed=arena_end - arena_start
-            ))
+            self.metrics.log_arena(generation, wins=nwins, losses=pwins, draws=draws)
+            self.metrics.log_timing(generation, CycleStage.ARENA, arena_end - arena_start)
+
+            # Memory snapshot after arena phase
+            snapshot = _get_memory_snapshot()
+            self.metrics.log_resource_usage(
+                generation, CycleStage.ARENA,
+                snapshot.process_rss_bytes, snapshot.gpu_bytes,
+            )
 
             # Accept or reject new network
-            log.info(f'NEW/PREV WINS : {nwins}/{pwins}; DRAWS : {draws}')
+            logger.info(f'NEW/PREV WINS : {nwins}/{pwins}; DRAWS : {draws}')
             if self._should_accept_new_network(nwins, pwins):
-                log.info('ACCEPTING NEW MODEL')
+                logger.info('ACCEPTING NEW MODEL')
                 self.nnet.save_checkpoint(filename=f"accepted_{generation}.pth.tar")
                 self.nnet.save_checkpoint(filename='best.pth.tar')
             else:
-                log.info('REJECTING NEW MODEL')
+                logger.info('REJECTING NEW MODEL')
                 self.nnet.save_checkpoint(filename=f'rejected_{generation}.pth.tar')
                 self.nnet.load_checkpoint(filename='temp.pth.tar')
 
-            # Record total generation time
+            # Record total generation time and flush metrics
             generation_end = time.perf_counter()
-            self.timings.append(TimingsLoggable(
-                generation=generation,
-                cycle_stage=CycleStage.WholeCycle,
-                time_elapsed=generation_end - generation_start
-            ))
-
-        self._write_timings()
+            self.metrics.log_timing(generation, CycleStage.WHOLE_CYCLE, generation_end - generation_start)
+            self.metrics.flush(self.config, generation)
 
     def _generation_window_size(self, generation: int) -> int:
         """
@@ -275,7 +286,7 @@ class Coach:
         if generation <= 5:
             return 5
             
-        max_val = self.run_config.max_generations_lookback
+        max_val = self.config.max_generations_lookback
         if 2 * max_val > generation:
             # Linear growth: y = mx + b
             # Points: (0,5) and (2*max_val, max_val)
@@ -292,13 +303,13 @@ class Coach:
         """
         window_size = self._generation_window_size(generation)
         if len(self.train_examples_history) > window_size:
-            log.warning(
+            logger.warning(
                 f"Removing oldest training examples. "
                 f"History size: {len(self.train_examples_history)}"
             )
             self.train_examples_history.pop(0)
 
-    def _prepare_training_data(self) -> List[ProcessedExample]:
+    def _prepare_training_data(self) -> list[ProcessedExample]:
         """
         Combine and shuffle training examples from all retained generations.
 
@@ -326,70 +337,26 @@ class Coach:
         if total_games == 0:
             return False
         win_rate = float(new_wins) / total_games
-        return win_rate >= self.run_config.update_threshold
-
-    def _write_timings(self) -> None:
-        """
-        Save timing data for all training stages to a parquet file.
-        """
-        start = time.perf_counter()
-        self.run_config.timings_directory.mkdir(parents=True, exist_ok=True)
-
-        pd.DataFrame([t.__dict__ for t in self.timings]).to_parquet(
-            self.run_config.timings_directory / "timings.parquet"
-        )
-
-        end = time.perf_counter()
-        logging.info(f"Took {end - start} seconds to write timing data!")
-
-    @staticmethod
-    def get_self_play_filename(generation: int) -> str:
-        """
-        Generate filename for saving self-play data.
-
-        Args:
-            generation: Training iteration number
-
-        Returns:
-            str: Filename for self-play data
-        """
-        return f"self_play_history_{generation}.pickle"
+        return win_rate >= self.config.update_threshold
 
     def save_self_play_history(self, generation: int) -> None:
-        """
-        Save self-play training data to a pickle file.
+        """Save the current generation's self-play data to a parquet file.
 
-        Args:
-            generation: Training iteration number
+        Delegates to :meth:`SelfPlayStore.save`.
         """
-        folder = self.run_config.self_play_history_directory
-        if not folder.exists():
-            folder.mkdir(exist_ok=True, parents=True)
-            
-        filename = folder / self.get_self_play_filename(generation)
-        with open(filename, "wb+") as f:
-            Pickler(f).dump(self.train_examples_history)
+        if not self.train_examples_history:
+            return
+        latest = self.train_examples_history[-1]
+        if not latest:
+            return
+        self._self_play_store.save(latest, generation)
 
-    # TODO: Rename to load_self_play_history and fix
-    def load_train_examples(self) -> None:
-        """
-        Load previously saved training examples.
+    def load_self_play_history(self, up_to_generation: int) -> None:
+        """Load self-play examples from parquet files for recent generations.
 
-        TODO: This method is currently broken and needs to be fixed.
-        It should be renamed to load_self_play_history for consistency.
+        Delegates to :meth:`SelfPlayStore.load_window`.
         """
-        # TODO: Fix this it's broken
-        model_file = os.path.join(self.run_config.load_folder_file[0],
-                                self.run_config.load_folder_file[1])
-        examples_file = model_file + ".examples"
-        
-        if not os.path.isfile(examples_file):
-            log.warning(f'File "{examples_file}" with training examples not found!')
-            response = input("Continue? [y|n]")
-            if response != "y":
-                sys.exit()
-        else:
-            log.info("Loading saved training examples...")
-            with open(examples_file, "rb") as f:
-                self.train_examples_history = Unpickler(f).load()
-            log.info("Loading complete!")
+        window = self._generation_window_size(up_to_generation)
+        self.train_examples_history = self._self_play_store.load_window(
+            up_to_generation, window,
+        )
