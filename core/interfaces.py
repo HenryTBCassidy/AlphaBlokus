@@ -152,6 +152,47 @@ class IGame(Protocol):
         raise NotImplementedError
 
 
+class IBoardEncoder(Protocol):
+    """Converts between game-state boards and multi-channel net representations.
+
+    Each game provides an encoder that builds the tensor the neural net expects.
+    The encoder handles canonical form (whose perspective the channels represent)
+    so ``get_canonical_form()`` delegates to ``encode()``.
+    """
+
+    def encode(self, board: NDArray, current_player: int) -> NDArray:
+        """Convert game state → multi-channel net input ``(C, H, W)``.
+
+        Args:
+            board: Game-state board (raw ±1 array or board object).
+            current_player: Whose turn it is (1 or -1).
+
+        Returns:
+            NDArray of shape ``(C, H, W)`` ready for the neural net.
+        """
+        ...
+
+    def decode(self, encoded_board: NDArray) -> NDArray:
+        """Convert multi-channel net input → raw game-state board.
+
+        Inverse of :meth:`encode`. Needed by stateless games (TicTacToe) where
+        MCTS passes canonical boards back into game methods that expect
+        raw ±1 boards. Stateful games (BlokusDuo) can raise
+        ``NotImplementedError``.
+        """
+        ...
+
+    @property
+    def num_channels(self) -> int:
+        """Number of channels in the encoded representation."""
+        ...
+
+    @property
+    def encoded_shape(self) -> tuple[int, int, int]:
+        """Full ``(C, H, W)`` shape of the encoded representation."""
+        ...
+
+
 class INeuralNetWrapper(Protocol):
     """
     Base interface for neural network wrappers used in game-playing models.
