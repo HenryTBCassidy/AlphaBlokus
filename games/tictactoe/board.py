@@ -60,19 +60,16 @@ class Board(IBoard):
         """Number of channels in as_multi_channel output."""
         return 2
 
-    def copy(self) -> Board:
-        """Return a deep copy of this board."""
-        b = Board(self.n)
-        b.pieces = [row[:] for row in self.pieces]
-        return b
+    @property
+    def state_key(self) -> bytes:
+        """Hashable key that uniquely identifies this board state."""
+        return self.as_2d.tobytes()
 
     def canonical(self, player: int) -> Board:
         """Return the board in canonical form (player 1 perspective)."""
         if player == 1:
             return self
-        b = Board(self.n)
-        b.pieces = (self.as_2d * player).tolist()
-        return b
+        return Board._from_pieces(self.n, (self.as_2d * player).tolist())
 
     # ── Indexer ───────────────────────────────────────────────────────
 
@@ -140,12 +137,25 @@ class Board(IBoard):
 
         return False
 
-    def execute_move(self, move: tuple[int, int], color: int) -> None:
-        """Perform the given move on the board;
-        color gives the color of the piece to play (1=white,-1=black)
-        """
-        (x, y) = move
+    def with_move(self, move: tuple[int, int], color: int) -> Board:
+        """Return a new board with the given move applied.
 
-        # Add the piece to the empty square.
-        assert self[x][y] == 0
-        self[x][y] = color
+        Args:
+            move: (x, y) position to place the piece.
+            color: 1 for white, -1 for black.
+        """
+        new_pieces = [row[:] for row in self.pieces]
+        x, y = move
+        assert new_pieces[x][y] == 0
+        new_pieces[x][y] = color
+        return Board._from_pieces(self.n, new_pieces)
+
+    # ── Private constructors ───────────────────────────────────────
+
+    @classmethod
+    def _from_pieces(cls, n: int, pieces: list[list[int]]) -> Board:
+        """Construct a board from existing piece data (no mutation)."""
+        board = object.__new__(cls)
+        board.n = n
+        board.pieces = pieces
+        return board

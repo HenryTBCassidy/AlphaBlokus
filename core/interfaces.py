@@ -50,8 +50,12 @@ class IBoard(Protocol):
         """Number of channels in the ``as_multi_channel`` output."""
         ...
 
-    def copy(self) -> IBoard:
-        """Return a deep copy of this board."""
+    @property
+    def state_key(self) -> bytes:
+        """Hashable key that uniquely identifies this board state.
+
+        Used by MCTS as a dictionary key for state lookups.
+        """
         ...
 
     def canonical(self, player: int) -> IBoard:

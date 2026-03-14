@@ -25,7 +25,7 @@ This is the same approach that achieved superhuman performance in Chess, Shogi, 
 
 ## Features
 
-- **Game-agnostic AlphaZero framework** — modular `IGame` and `INeuralNetWrapper` interfaces make it easy to add new games
+- **Game-agnostic AlphaZero framework** — modular `IGame`, `IBoard`, and `INeuralNetWrapper` interfaces make it easy to add new games
 - **Complete Tic-Tac-Toe implementation** — validates the full training pipeline end-to-end (self-play, training, arena evaluation)
 - **ResNet architecture** — configurable depth and width with residual blocks, batch normalisation, and dual policy/value heads
 - **MCTS with PUCT** — Upper Confidence bounds applied to Trees for balanced exploration and exploitation
@@ -46,11 +46,14 @@ AlphaBlokus/
 │   ├── config.py               # Configuration dataclasses
 │   └── interfaces.py           # IGame and INeuralNetWrapper protocols
 ├── games/
+│   ├── base_wrapper.py         # Shared neural net wrapper (train, predict, checkpoint)
 │   ├── tictactoe/              # Reference implementation (complete)
-│   │   ├── game.py             # Tic-Tac-Toe game logic
+│   │   ├── board.py            # Immutable board (IBoard) — 2-channel encoding
+│   │   ├── game.py             # Tic-Tac-Toe game logic (IGame)
 │   │   └── neuralnets/         # 4-layer CNN (Conv → FC → policy + value)
 │   └── blokusduo/              # Target implementation (in progress)
-│       ├── game.py             # Blokus Duo game logic with piece placement
+│       ├── board.py            # Immutable board (IBoard) — 44-channel encoding
+│       ├── game.py             # Blokus Duo game logic (IGame)
 │       ├── pieces.py           # 21 pieces, 91 orientations, symmetry reduction
 │       ├── pieces.json         # Piece definitions with basis orientations
 │       └── neuralnets/         # ResNet (configurable blocks → policy + value)
@@ -72,7 +75,7 @@ AlphaBlokus/
 | Component | Tic-Tac-Toe | Blokus Duo |
 |-----------|-------------|------------|
 | Architecture | 4-layer CNN | ResNet (configurable depth) |
-| Input | 3x3 board | 14x18 (board + piece encoding) |
+| Input | 2 x 3 x 3 (2-channel) | 44 x 14 x 14 (per-piece spatial planes) |
 | Policy output | 10 actions | 17,837 actions |
 | Value output | Scalar ∈ [-1, 1] | Scalar ∈ [-1, 1] |
 | Residual blocks | None | 1–8 (configurable) |
@@ -156,7 +159,8 @@ Detailed documentation lives in the [`docs/`](docs/) folder, split into **refere
 
 | Document | Description |
 |----------|-------------|
-| [Structural Refactor](docs/plans/structural-refactor.md) | Project structure, logging, package management, naming, testing strategy |
+| [Multi-Channel Board Encoding](docs/plans/multi-channel-board-encoding.md) | IBoard protocol, immutable boards, 44-channel BlokusDuo / 2-channel TicTacToe |
+| [Structural Refactor](docs/plans/archive/structural-refactor.md) | Project structure, logging, package management, naming, testing strategy |
 | [Bug Fixes](docs/plans/bug-fixes.md) | Interface mismatches, MCTS performance, board bugs, training pipeline fixes |
 
 ---
@@ -167,6 +171,7 @@ Detailed documentation lives in the [`docs/`](docs/) folder, split into **refere
 - [x] Tic-Tac-Toe implementation and validation
 - [x] Blokus Duo board representation and piece system
 - [x] Blokus Duo neural network architecture
+- [x] IBoard protocol with immutable boards and multi-channel neural net encoding
 - [ ] Architecture review fixes (MCTS optimisation, interface contracts, piece ID mapping)
 - [ ] Blokus Duo move generation with caching
 - [ ] End-to-end Blokus Duo self-play training

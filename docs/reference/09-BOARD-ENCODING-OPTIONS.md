@@ -1,5 +1,7 @@
 # Board Encoding Options for the Neural Network
 
+**Status: Option 3 (44-channel per-piece planes) has been implemented.** This document is retained as historical design context. See `02-NEURAL-NETWORKS.md` for the current architecture.
+
 ## Context
 
 The neural net needs two categories of information:
@@ -75,7 +77,7 @@ inventory fully determines the game state. No history needed.
 
 ---
 
-## Option 1: Column-Padded Single Tensor (current approach)
+## Option 1: Column-Padded Single Tensor (previous approach, now replaced)
 
 ```
 [Black pieces (14×2)] [Board (14×14)] [White pieces (14×2)]
@@ -234,15 +236,7 @@ are all-zero. This seems wasteful, but it's fine:
 - Most of the information in the aggregate planes (42–43) could be learned
   from the per-piece planes, so there's some redundancy.
 
-**Net changes required:**
-1. `in_channels`: 1 → 44
-2. `board_rows, board_cols`: 14, 18 → 14, 14
-3. Board representation: `game.py` builds a `(44, 14, 14)` tensor. Each piece
-   placement writes 1s into that piece's dedicated plane. The aggregate planes
-   are the union.
-4. No separate inventory input needed — it's implicit in the planes.
-5. `insert_piece` needs to track piece ID per square (e.g. a `(14, 14)` array
-   of piece IDs alongside the existing ±1 board).
+**Net changes required:** All done. `in_channels` is 44, board dimensions are 14x14, `BlokusDuoBoard.as_multi_channel()` builds the `(44, 14, 14)` tensor, and piece IDs are tracked per square via `_piece_placement_board`.
 
 ---
 

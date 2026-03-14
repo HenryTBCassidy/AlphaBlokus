@@ -33,7 +33,7 @@ AlphaBlokus trains a neural network through self-play reinforcement learning to 
 | Tic-Tac-Toe game logic | ✅ Done | Board, legal moves, win detection, 8 symmetries |
 | Tic-Tac-Toe CNN | ✅ Done | 4-layer CNN, verified competitive with perfect play |
 | Full training pipeline | ✅ Done | Self-play → training → arena → HTML reporting |
-| Blokus board representation | ✅ Done | 14×14 board, 14×18 net input with piece tracking |
+| Blokus board representation | ✅ Done | 14×14 board, 44×14×14 net input with per-piece spatial planes |
 | Piece system | ✅ Done | 21 pieces, 91 basis orientations, PieceManager, BidirectionalDict |
 | Placement validation | ✅ Done | Corner-touching, side-avoiding, bounds checking |
 | Initial move caching | ✅ Done | All valid first moves pre-computed for both players |
@@ -60,7 +60,7 @@ AlphaBlokus trains a neural network through self-play reinforcement learning to 
 
 ### Immediate Next Steps
 
-1. **Implement `valid_moves()`** — This is the critical path. The placement point cache infrastructure exists but `populate_moves_for_new_placement()` has TODO stubs. The algorithm needs to: for each remaining piece, for each basis orientation, check if it can be legally placed at each cached placement point
+1. **Implement `valid_moves()`** — This is the critical path. The placement point cache infrastructure exists but the move generation algorithm has TODO stubs. The algorithm needs to: for each remaining piece, for each basis orientation, check if it can be legally placed at each cached placement point
 2. **Implement `game_ended()`** — Game ends when both players have no legal moves (both `valid_moves()` return empty) OR a player has placed all pieces
 3. **Implement `valid_move_masking()`** — Convert `valid_moves()` output (list of Actions) into a binary mask over the 17,837-dimensional action space
 4. **Implement `get_symmetries()`** — Blokus Duo board has 4 symmetries: identity, 180° rotation, vertical flip + 90° rotation, vertical flip + 270° rotation. Must transform both board AND policy vector
@@ -83,7 +83,8 @@ AlphaBlokus/
 │   └── interfaces.py              # IGame, INeuralNetWrapper protocols
 ├── games/                         # Game implementations
 │   ├── blokusduo/                 # Blokus Duo implementation
-│   │   ├── game.py                # BlokusDuoGame, BlokusDuoBoard, Player, Action
+│   │   ├── board.py               # BlokusDuoBoard (implements IBoard), Action
+│   │   ├── game.py                # BlokusDuoGame
 │   │   ├── pieces.py              # Piece, PieceManager, BidirectionalDict
 │   │   ├── pieces.json            # 21 piece definitions with orientations
 │   │   └── neuralnets/
@@ -113,7 +114,7 @@ AlphaBlokus/
 | Property | Value |
 |----------|-------|
 | Board size | 14 × 14 |
-| Net input size | 14 × 18 (board + piece tracking) |
+| Net input size | 44 × 14 × 14 (per-piece spatial planes) |
 | Pieces per player | 21 |
 | Total piece-orientation combos | 91 (symmetry-reduced from 168) |
 | Action space | 14 × 14 × 91 + 1 = 17,837 |
@@ -145,9 +146,9 @@ for generation in range(num_generations):
 
 Residual connections prevent gradient degradation in deeper networks. Blokus needs more capacity than Tic-Tac-Toe's 4-layer CNN. The AlphaZero paper uses ResNet — we follow the proven recipe. Configurable depth (1-8 blocks) lets us experiment without code changes.
 
-### Why 14×18 board encoding (not 14×14)?
+### Why 44×14×14 board encoding?
 
-The network needs to know which pieces each player has already played. The simplest approach: append a 14×2 encoded region per player to the board array. When piece #k is played, slot k in the region is set to the player's value. Cost: 4 extra columns. Benefit: the network can reason about remaining pieces.
+The network needs both spatial state (where pieces are) and piece inventory (which pieces remain). The 44-channel encoding follows the AlphaZero convention of one binary plane per piece type per player: 21 planes per player showing exactly where each piece sits on the board, plus 2 aggregate planes (union of all current/opponent pieces). Piece inventory is implicit -- an all-zero plane means that piece hasn't been played. Conv filters see which specific piece occupies each position, enabling piece-shape-aware spatial reasoning. See `docs/reference/09-BOARD-ENCODING-OPTIONS.md` for the full design rationale and alternatives considered.
 
 ### Why 91 piece-orientations (not 168)?
 
@@ -161,9 +162,9 @@ The `IGame` and `INeuralNetWrapper` protocols let us add new games without touch
 
 Premature optimisation. Get the pipeline working correctly first, then optimise. The current bottleneck is implementing move generation, not MCTS speed. Parallelism is documented in `docs/reference/01-ALGORITHMS.md` for when we're ready.
 
-### Why canonical form = player × board?
+### Why canonical form = channel reordering?
 
-Multiplying the board by the current player's value means "my pieces" are always +1 and "opponent's pieces" are always -1. The network sees the same representation regardless of which colour it's playing. Simple, effective, standard in two-player zero-sum games.
+The canonical form is handled by `board.as_multi_channel(current_player)`, which places the current player's 21 piece planes in channels 0-20 and the opponent's in channels 21-41. The network always sees "my pieces" in the first channel group and "opponent's pieces" in the second, regardless of which colour it's playing. This replaces the old approach of multiplying a single-channel board by the player value (±1).
 
 ---
 
@@ -173,7 +174,7 @@ Multiplying the board by the current player's value means "my pieces" are always
 
 2. **The action space is huge.** 17,837 actions means the policy head's final FC layer alone is ~9M parameters. MCTS iterating over all actions (even illegal ones) is O(17,837) per simulation. Must optimise to only iterate valid moves.
 
-3. **`string_representation` uses `board.tobytes()`.** MCTS hashes board states using the raw numpy byte representation. This works but produces long keys. A Zobrist hash would be more efficient — see `docs/reference/01-ALGORITHMS.md`.
+3. **`state_key` uses `_piece_placement_board.tobytes()`.** MCTS hashes board states using the `state_key` property on `IBoard`. For BlokusDuo this uses the piece placement board's raw numpy byte representation. This works but produces long keys. A Zobrist hash would be more efficient -- see `docs/reference/01-ALGORITHMS.md`.
 
 4. **Piece-orientation IDs have gaps.** The `BidirectionalDict` assigns IDs sequentially but skips IDs when moving to the next piece (the populate_lookup loop increments `i` one extra time between pieces). Be careful when mapping between action indices and piece-orientation IDs.
 

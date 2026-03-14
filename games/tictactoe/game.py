@@ -22,9 +22,7 @@ class TicTacToeGame(IGame):
     def get_next_state(self, board: Board, player: int, action: int) -> tuple[Board, int]:
         if action == self.n * self.n:
             return board, -player
-        b = board.copy()
-        b.execute_move((action // self.n, action % self.n), player)
-        return b, -player
+        return board.with_move((action // self.n, action % self.n), player), -player
 
     def valid_move_masking(self, board: Board, player: int) -> NDArray:
         valids = [0] * self.get_action_size()
@@ -62,14 +60,13 @@ class TicTacToeGame(IGame):
                 if is_flipped:
                     new_array = np.fliplr(new_array)
                     new_pi = np.fliplr(new_pi)
-                new_board = Board(self.n)
-                new_board.pieces = new_array.tolist()
+                new_board = Board._from_pieces(self.n, new_array.tolist())
                 new_pi_flat = np.append(new_pi.ravel(), pi[-1])
                 symmetries.append((new_board, new_pi_flat))
         return symmetries
 
     def state_key(self, board: Board) -> bytes:
-        return board.as_2d.tobytes()
+        return board.state_key
 
     @staticmethod
     def display(board: Board) -> None:

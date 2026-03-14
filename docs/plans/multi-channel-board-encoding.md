@@ -1,5 +1,7 @@
 # Multi-Channel Board Encoding
 
+**Status: Complete.** All steps including Step 18 (documentation updates) are done.
+
 Migrate both games from single-channel board representations to multi-channel
 per-player (and per-piece for BlokusDuo) spatial planes. This follows the
 AlphaZero convention and gives conv filters richer information at every position.
@@ -33,14 +35,14 @@ and deletes the old `09-BOARD-ENCODING-OPTIONS.md` working doc.
 | **R4** | **Delete `TicTacToeEncoder`, remove `IBoardEncoder`** | `encoding.py`, `core/interfaces.py` | R3 | ✅ |
 | **R5** | **Update TicTacToe tests** | `tests/` | R3 | ✅ |
 | **R6** | **Validate TicTacToe end-to-end** | — | R4, R5 | ✅ |
-| 11 | Add `piece_placement_board` to Player | `games/blokusduo/board.py` | — | |
-| 12 | Record piece IDs in `insert_piece` | `games/blokusduo/board.py` | 11 | |
-| 13 | Extract BlokusDuoBoard to own file, implement IBoard | `games/blokusduo/board.py` | R1, 12 | |
-| 14 | Wire IBoard into BlokusDuoGame | `games/blokusduo/game.py` | 13 | |
-| 15 | Update BlokusDuo net (1→44 input channels) | `games/blokusduo/neuralnets/net.py` | 14 | |
-| 16 | Cleanup old representation code | `games/blokusduo/game.py` | 14 | |
-| 17 | Tests for both games | `tests/` | R6, 16 | |
-| 18 | Update `02-NEURAL-NETWORKS.md`, delete `09-BOARD-ENCODING-OPTIONS.md` | `docs/reference/` | 17 | |
+| 11 | Add `piece_placement_board` to Player | `games/blokusduo/board.py` | — | ✅ |
+| 12 | Record piece IDs in `insert_piece` | `games/blokusduo/board.py` | 11 | ✅ |
+| 13 | Extract BlokusDuoBoard to own file, implement IBoard | `games/blokusduo/board.py` | R1, 12 | ✅ |
+| 14 | Wire IBoard into BlokusDuoGame | `games/blokusduo/game.py` | 13 | ✅ |
+| 15 | Update BlokusDuo net (1→44 input channels) | `games/blokusduo/neuralnets/net.py` | 14 | ✅ |
+| 16 | Cleanup old representation code | `games/blokusduo/game.py` | 14 | ✅ |
+| 17 | Tests for both games | `tests/` | R6, 16 | ✅ |
+| 18 | Update `02-NEURAL-NETWORKS.md`, delete `09-BOARD-ENCODING-OPTIONS.md` | `docs/reference/` | 17 | ✅ |
 
 Steps 1–10 were originally the encoder/decoder pattern. Steps 2 and 7 still
 apply (infra changes). Steps R1–R6 replace the encoder pattern with the IBoard

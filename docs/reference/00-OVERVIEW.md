@@ -126,7 +126,7 @@ All estimates assume Claude assistance. Solo estimates would be roughly 2-2.5× 
 | Target game | Blokus Duo (not 4-player) | Two-player variant simplifies to zero-sum game, compatible with AlphaZero's framework |
 | Framework design | Game-agnostic protocols | `IGame` and `INeuralNetWrapper` interfaces make adding new games easy without touching core MCTS/Coach/Arena |
 | Blokus network | ResNet (not plain CNN) | Residual connections help with deeper networks needed for Blokus complexity. Configurable depth (1-8 blocks) allows experimentation |
-| Board encoding | 14x18 (board + piece tracking) | 14x14 game board plus 2-column encoded regions per player tracking which pieces have been played. Gives the network information about remaining pieces |
+| Board encoding | 44×14×14 (per-piece spatial planes) | 21 binary planes per player (one per piece, 1s where that piece sits on the board) + 2 aggregate planes. Follows AlphaZero convention. Piece inventory is implicit: an all-zero plane means the piece hasn't been played |
 | Action space | 14×14×91 + 1 = 17,837 | Grid positions × piece-orientation combos + pass. Large but finite — same approach as AlphaZero for Chess/Go |
 | Piece orientations | Symmetry-reduced basis | Each piece stores only unique orientations (1-8) after removing rotational/reflective duplicates. Reduces 21×8=168 to 91 |
 | Coordinate system | Board coords (bottom-left origin) + array indices (top-left) | Board coords match standard Blokus notation. CoordinateIndexDecoder handles conversion |
@@ -173,7 +173,7 @@ This is a genuine research-level problem — the existing literature on multi-pl
 
 - **Parallel MCTS:** Batching neural network inference across multiple MCTS simulations could dramatically speed up self-play. Root parallelisation vs leaf parallelisation trade-offs need investigation
 - **MCTS node reuse:** Currently trees are rebuilt from scratch each game. Reusing subtrees between moves would save computation
-- **Board representation alternatives:** Current 14x18 encoding may not be optimal. Could experiment with separate channels for each player's pieces, remaining pieces, valid placement points
+- **Board representation alternatives:** ~~Current 14x18 encoding may not be optimal. Could experiment with separate channels for each player's pieces, remaining pieces, valid placement points~~ Done — migrated to 44-channel per-piece spatial planes (see `09-BOARD-ENCODING-OPTIONS.md` for design rationale)
 - **Connect 4 as debugging step:** If Blokus move generation proves too difficult, Connect 4 could serve as an intermediate complexity game
 - **Regularisation:** Current loss function has no explicit regularisation term. Weight decay or L2 penalty may improve generalisation
 - **cpuct tuning:** The PUCT exploration constant is fixed at 1.0. May need to be tuned for Blokus's larger action space

@@ -235,3 +235,22 @@ def test_as_multi_channel_player_perspective(ttt_game: TicTacToeGame):
     # Channels should be swapped
     np.testing.assert_array_equal(rep_p1[0], rep_pn1[1])
     np.testing.assert_array_equal(rep_p1[1], rep_pn1[0])
+
+
+def test_with_move_immutable(ttt_game: TicTacToeGame):
+    """with_move should not affect the original board."""
+    board = ttt_game.initialise_board()
+    new_board = board.with_move((0, 0), 1)
+
+    # Original unchanged
+    assert board[0][0] == 0
+    # New board has the move
+    assert new_board[0][0] == 1
+    assert new_board is not board
+
+
+def test_state_key_on_board(ttt_game: TicTacToeGame):
+    """board.state_key should match game.state_key(board)."""
+    board = ttt_game.initialise_board()
+    board, _ = ttt_game.get_next_state(board, 1, 4)
+    assert board.state_key == ttt_game.state_key(board)

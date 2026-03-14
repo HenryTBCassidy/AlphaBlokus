@@ -1,6 +1,6 @@
 # AlphaBlokus - Project State
 
-> Last updated: 2026-03-09
+> Last updated: 2026-03-14
 > Author: Henry Cassidy (GitHub: HenryTBCassidy)
 
 ## What Is This Project?
@@ -24,6 +24,10 @@ The project uses a phased approach: first implement and validate on **Tic-Tac-To
 
 ### What Works Right Now
 - Full tic-tac-toe training pipeline end-to-end (self-play -> training -> arena -> reporting)
+- IBoard protocol with immutable boards for both games
+- 44-channel per-piece spatial encoding for BlokusDuo neural net input (`board.as_multi_channel`)
+- 2-channel player-split encoding for TicTacToe neural net input
+- State key on board objects (196-byte signed placement board for Blokus, flat board bytes for TicTacToe)
 - Blokus board representation, piece insertion, placement validation, coordinate conversion
 - Initial move caching (all valid first moves for both players are pre-computed)
 - Placement point cache updating (tracks valid placement corners after each piece insertion)
@@ -35,7 +39,7 @@ The project uses a phased approach: first implement and validate on **Tic-Tac-To
 2. **`BlokusDuoGame.valid_move_masking()`** raises `NotImplementedError` - can't mask net output
 3. **`BlokusDuoGame.get_symmetries()`** raises `NotImplementedError` - no data augmentation
 4. **`BlokusDuoBoard.game_ended()`** raises `NotImplementedError`
-5. **`Player.populate_moves_for_new_placement()`** has a TODO stub - key piece of move generation
+5. **Move generation from placement cache** — `BlokusDuoBoard._update_placement_points()` maintains the cache, but move generation from it is still TODO
 6. **Model loading** in `main.py` raises `NotImplementedError`
 7. **`main.py` uses TicTacToeGame** but imports `blokusduo.neuralnets.wrapper.NNetWrapper` - mismatch
 
@@ -58,14 +62,17 @@ AlphaBlokus/
 │   ├── mcts.py                # MCTS with PUCT formula
 │   ├── coach.py               # Training orchestrator (self-play -> train -> arena)
 │   └── arena.py               # Agent evaluation (alternating start positions)
+├── games/
+│   └── base_wrapper.py        # Base neural net wrapper shared across games
 ├── tictactoe/                 # Reference implementation (COMPLETE)
-│   ├── board.py               # Board logic (legal moves, win detection)
+│   ├── board.py               # Board class with IBoard protocol (legal moves, win detection)
 │   ├── game.py                # IGame implementation
 │   └── neuralnets/
 │       ├── net.py             # 4-layer CNN (Conv -> FC -> policy + value heads)
 │       └── wrapper.py         # Training, prediction, checkpointing
 └── blokusduo/                 # Target implementation (IN PROGRESS)
-    ├── game.py                # IGame implementation (partially complete)
+    ├── board.py               # BlokusDuoBoard (IBoard), Action, CoordinateIndexDecoder
+    ├── game.py                # IGame implementation
     ├── pieces.py              # Piece definitions, PieceManager, BidirectionalDict
     ├── pieces.json            # 21 pieces with 91 total basis orientations
     └── neuralnets/
@@ -126,9 +133,8 @@ AlphaBlokus/
 - Tree is rebuilt from scratch each self-play game (no reuse between games)
 
 ### Blokus Board Representation
-- **Game board:** 14x14 numpy array (1=White, -1=Black, 0=empty)
-- **Net input:** 14x18 array = [Black pieces encoded (14x2)] + [Board (14x14)] + [White pieces encoded (14x2)]
-- The 2-column encoded regions track which of the 21 pieces each player has played (plus padding for the 28-cell region)
+- **Game board:** `_piece_placement_board` — int8 14x14 array where +piece_id = White, -piece_id = Black, 0 = empty. `as_2d` property derives the +1/-1/0 view via `np.sign()`.
+- **Net input:** 44x14x14 float32 tensor (44 channels: 21 per-piece planes per player + 2 aggregate occupancy planes), built by `board.as_multi_channel(player)`
 - **Action space:** 14 x 14 x 91 + 1 = 17,837 (grid positions x piece-orientation combos + pass)
 - **91 piece-orientation combos:** 21 pieces, each with 1-8 basis orientations (accounting for rotational/reflective symmetry), totalling 91 unique placements
 
@@ -148,16 +154,16 @@ AlphaBlokus/
 ### Neural Network Architectures
 
 **Tic-Tac-Toe (`tictactoe/neuralnets/net.py`):**
-- 4 Conv2d layers (3x3 kernel) -> Flatten -> FC(1024) -> FC(512) -> split to policy head + value head
+- 2 input channels (player-split encoding) -> 4 Conv2d layers (3x3 kernel) -> Flatten -> FC(1024) -> FC(512) -> split to policy head + value head
 - No residual connections
 - Dropout regularisation
 
 **Blokus Duo (`blokusduo/neuralnets/net.py`):**
-- Input: 1 x 18 x 14 (reshaped from 14x18 board representation)
-- Initial Conv2d(1 -> num_channels, 3x3, padding=1) + BatchNorm + ReLU
+- Input: 44 x 14 x 14 (44-channel per-piece spatial planes)
+- Initial Conv2d(44 -> num_filters, 3x3, padding=1, bias=False) + BatchNorm + ReLU
 - N configurable `ResNetBlock`s (each = Conv+BN+ReLU -> Conv+BN -> residual add -> ReLU)
-- **Policy head:** Conv2d(channels -> 2, 1x1) + BN + ReLU -> Flatten -> Linear(2*conv_out -> 17837)
-- **Value head:** Conv2d(channels -> 1, 1x1) + BN + ReLU -> Flatten -> Linear(conv_out -> channels) -> ReLU -> Linear(channels -> 1) -> Tanh
+- **Policy head:** Conv2d(channels -> 2, 1x1) + BN + ReLU -> Flatten -> Linear(2×196 -> 17837)
+- **Value head:** Conv2d(channels -> 1, 1x1) + BN + ReLU -> Flatten -> Linear(196 -> num_filters) -> ReLU -> Linear(num_filters -> 1) -> Tanh
 - Output: log_softmax policy vector (17,837 dims) + value scalar (-1 to 1)
 
 ### Loss Functions
@@ -182,7 +188,7 @@ AlphaBlokus/
 | num_arena_matches | 2 | 100 |
 | batch_size | 10 | 32 |
 | epochs | 1 | 5 |
-| num_channels | 512 | 512 |
+| num_filters | 512 | 512 |
 | num_residual_blocks | 1 | 8 |
 | max_generations_lookback | 1 | 25 |
 | cpuct | 1 | 1 |
@@ -205,13 +211,12 @@ AlphaBlokus/
 
 To get the Blokus training loop running, these must be implemented **in order**:
 
-1. **`Player.populate_moves_for_new_placement()`** - Generate all valid piece placements from a corner point
-2. **`BlokusDuoBoard.valid_moves()`** - Aggregate valid moves from all placement points
-3. **`BlokusDuoBoard.game_ended()`** - Check if neither player has legal moves
-4. **`BlokusDuoGame.valid_move_masking()`** - Convert valid move list to binary action-space mask
-5. **`BlokusDuoGame.get_symmetries()`** - Generate symmetric board+policy pairs for data augmentation
-6. **Fix `main.py`** - Switch from TicTacToeGame to BlokusDuoGame
-7. **Fix model loading** - Implement checkpoint resume functionality
+1. **`BlokusDuoBoard.valid_moves()`** - Aggregate valid moves from all placement points (placement cache maintained by `_update_placement_points()`, but move generation from it is still TODO)
+2. **`BlokusDuoBoard.game_ended()`** - Check if neither player has legal moves
+3. **`BlokusDuoGame.valid_move_masking()`** - Convert valid move list to binary action-space mask
+4. **`BlokusDuoGame.get_symmetries()`** - Generate symmetric board+policy pairs for data augmentation
+5. **Fix `main.py`** - Switch from TicTacToeGame to BlokusDuoGame
+6. **Fix model loading** - Implement checkpoint resume functionality
 
 ## Competitive Landscape
 
@@ -227,7 +232,7 @@ As of 2026-03, **nobody has completed a strong AlphaZero-style Blokus agent**:
 Key items that remain relevant:
 - Learning rate scheduler (warm-up then decay)
 - Parallel MCTS for faster self-play
-- Board representation conversion (14x14 game -> 14x18 net)
+- ~~Board representation conversion~~ (done — `board.as_multi_channel` builds 44-channel tensor)
 - Move masking for net output
 - ResNet option for tic-tac-toe (benchmarking)
 - Regularisation term on loss function

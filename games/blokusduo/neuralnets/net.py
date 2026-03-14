@@ -66,19 +66,21 @@ class ResNetBlock(nn.Module):
 
 class AlphaBlokusDuo(nn.Module):
     def __init__(self, config: NetConfig):
+        """Initialise the Blokus Duo ResNet.
+
+        The neural net receives a 44-channel representation produced by
+        ``BlokusDuoBoard.as_multi_channel()``:
+
+            Channels  0-20:  Current player's 21 per-piece binary planes
+            Channels 21-41:  Opponent's 21 per-piece binary planes
+            Channel  42:     Aggregate current player occupancy
+            Channel  43:     Aggregate opponent occupancy
+
+        Net input shape: batch_size x 44 x 14 x 14
+        """
         super().__init__()
-        """
-        The physical Blokus Duo board is a 14×14 square grid. The neural net's input representation
-        extends this to 14×18 by concatenating piece-tracking columns on each side:
-
-            [Black pieces (14×2)] [Board state (14×14)] [White pieces (14×2)]
-
-        The 2-column regions on each side encode which of the 21 pieces that player has played,
-        since knowing remaining pieces is critical for evaluating board positions.
-
-        Net input shape: batch_size × 1 × 14 × 18  (i.e. board_rows × (physical_board_cols + 4))
-        """
-        self.board_rows, self.board_cols = 14, 18
+        self.board_rows, self.board_cols = 14, 14
+        self.num_input_channels = 44
         # Actions: place any of 91 piece-orientations on any of the 14×14 physical board squares, plus pass
         self.action_size = (14 * 14 * 91) + 1  # TODO: Get this from the game object (maybe)
         self.config = config
@@ -88,7 +90,7 @@ class AlphaBlokusDuo(nn.Module):
 
         self.conv_block = nn.Sequential(
             nn.Conv2d(
-                in_channels=1, out_channels=config.num_filters, kernel_size=3, stride=1, padding=1, bias=False
+                in_channels=self.num_input_channels, out_channels=config.num_filters, kernel_size=3, stride=1, padding=1, bias=False
             ),
             nn.BatchNorm2d(num_features=config.num_filters),
             nn.ReLU()
@@ -137,17 +139,15 @@ class AlphaBlokusDuo(nn.Module):
         Forward pass through the network.
 
         Args:
-            x: Flattened net representation of the board.
-               Shape: batch_size × 252  (14 rows × 18 cols, flattened)
-               This is the 14×14 physical board with 2 piece-encoding columns
-               concatenated on each side (see __init__ docstring for layout).
+            x: Multi-channel board representation.
+               Shape: batch_size x 44 x 14 x 14
 
         Returns:
-            pi: Log-softmax policy over all actions.   Shape: batch_size × 17837
-            v:  Value estimate for the current player.  Shape: batch_size × 1
+            pi: Log-softmax policy over all actions.   Shape: batch_size x 17837
+            v:  Value estimate for the current player.  Shape: batch_size x 1
         """
 
-        x = x.view(-1, 1, self.board_rows, self.board_cols)  # batch_size * 1 * board_rows * board_cols
+        x = x.view(-1, self.num_input_channels, self.board_rows, self.board_cols)
         conv_block_out = self.conv_block(x)  # batch_size * num_channels * board_rows_conv * board_cols_conv
         features = self.residual_blocks(conv_block_out)  # batch_size * num_channels * board_rows_conv * board_cols_conv
 

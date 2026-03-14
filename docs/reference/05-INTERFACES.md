@@ -15,7 +15,7 @@ AlphaBlokus represents state as follows (see `blokusduo/game.py`):
 | Aspect | Format |
 |--------|--------|
 | Board | `np.ndarray` shape (14, 14), dtype int64. 1=White, -1=Black, 0=empty |
-| NN input | `np.ndarray` shape (14, 18). Board + piece-tracking columns |
+| NN input | `np.ndarray` shape (44, 14, 14) float32. 44-channel per-piece spatial planes via `board.as_multi_channel()` |
 | Action | `Action(piece_id, orientation, x_coordinate, y_coordinate)` |
 | Coordinates | Board coords: origin bottom-left, x right, y up (0-indexed) |
 | Array indices | Origin top-left, row down, col right. Conversion: `row = 13 - y`, `col = x` |
