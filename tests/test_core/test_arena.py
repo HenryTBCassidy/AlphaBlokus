@@ -2,17 +2,19 @@ import numpy as np
 import pytest
 
 from core.arena import Arena
+from core.interfaces import IBoard
 from games.tictactoe.game import TicTacToeGame
 
 
-def _random_player(board: np.ndarray) -> int:
+def _random_player(board: IBoard) -> int:
     """A simple random player that picks a random valid action."""
     # For TicTacToe: 9 cells + 1 pass action = 10
-    # Valid cells are where board == 0 (using canonical form, player is always 1)
+    flat = board.as_2d
     valid = np.zeros(10, dtype=int)
+    empty = (flat == 0)
     for i in range(3):
         for j in range(3):
-            if board[i][j] == 0:
+            if empty[i][j]:
                 valid[i * 3 + j] = 1
     # If no moves available, pass
     if np.sum(valid[:9]) == 0:
@@ -54,11 +56,11 @@ def test_play_games_swaps_players(ttt_game: TicTacToeGame):
     """After half the games, players should be swapped."""
     call_log: list[int] = []
 
-    def p1(board: np.ndarray) -> int:
+    def p1(board: IBoard) -> int:
         call_log.append(1)
         return _random_player(board)
 
-    def p2(board: np.ndarray) -> int:
+    def p2(board: IBoard) -> int:
         call_log.append(2)
         return _random_player(board)
 

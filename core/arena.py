@@ -1,15 +1,14 @@
 from typing import Callable, TypeAlias
 
 from loguru import logger
-from numpy.typing import NDArray
 from tqdm import tqdm
 
-from core.interfaces import IGame
+from core.interfaces import IBoard, IGame
 
 
 # Type aliases for improved readability
-Player: TypeAlias = Callable[[NDArray], int]  # Function that takes a board state and returns an action
-DisplayFn: TypeAlias = Callable[[NDArray], None]  # Function to display the game board
+Player: TypeAlias = Callable[[IBoard], int]  # Function that takes a board state and returns an action
+DisplayFn: TypeAlias = Callable[[IBoard], None]  # Function to display the game board
 GameResult: TypeAlias = int | float  # Game outcome (-1, 0, 1, or small float for draws)
 
 

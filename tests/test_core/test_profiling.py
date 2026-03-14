@@ -21,7 +21,8 @@ def test_mcts_episode_stats_populated(
 ):
     """After get_action_prob(), all profiling stats should be non-zero."""
     board = ttt_game.initialise_board()
-    mcts_instance.get_action_prob(board, temp=1)
+    canonical = ttt_game.get_canonical_form(board, 1)
+    mcts_instance.get_action_prob(canonical, temp=1)
 
     stats = mcts_instance.get_episode_stats()
     assert stats.num_moves == 1
@@ -37,7 +38,8 @@ def test_mcts_episode_stats_accumulates(
 ):
     """Two get_action_prob() calls should produce num_moves == 2."""
     board = ttt_game.initialise_board()
-    mcts_instance.get_action_prob(board, temp=1)
+    canonical = ttt_game.get_canonical_form(board, 1)
+    mcts_instance.get_action_prob(canonical, temp=1)
 
     # Play a move and get probs from the next state
     board, next_player = ttt_game.get_next_state(board, 1, 4)
@@ -54,7 +56,8 @@ def test_mcts_episode_stats_frozen(
 ):
     """MCTSEpisodeStats should be immutable (frozen dataclass)."""
     board = ttt_game.initialise_board()
-    mcts_instance.get_action_prob(board, temp=1)
+    canonical = ttt_game.get_canonical_form(board, 1)
+    mcts_instance.get_action_prob(canonical, temp=1)
 
     stats = mcts_instance.get_episode_stats()
     with pytest.raises(AttributeError):
@@ -66,7 +69,8 @@ def test_mcts_inference_time_less_than_search(
 ):
     """Inference time should be a fraction of total search time."""
     board = ttt_game.initialise_board()
-    mcts_instance.get_action_prob(board, temp=1)
+    canonical = ttt_game.get_canonical_form(board, 1)
+    mcts_instance.get_action_prob(canonical, temp=1)
 
     stats = mcts_instance.get_episode_stats()
     assert stats.total_inference_time_s < stats.total_search_time_s
@@ -77,7 +81,8 @@ def test_mcts_tree_size_matches_state_visits(
 ):
     """tree_size should equal the number of unique states in state_visits."""
     board = ttt_game.initialise_board()
-    mcts_instance.get_action_prob(board, temp=1)
+    canonical = ttt_game.get_canonical_form(board, 1)
+    mcts_instance.get_action_prob(canonical, temp=1)
 
     stats = mcts_instance.get_episode_stats()
     assert stats.tree_size == len(mcts_instance.state_visits)

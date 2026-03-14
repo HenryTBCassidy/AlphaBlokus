@@ -52,5 +52,5 @@ def test_net_config_fields():
     assert config.net_config.dropout == 0.3
     assert config.net_config.epochs == 1
     assert config.net_config.batch_size == 10
-    assert config.net_config.num_channels == 512
+    assert config.net_config.num_filters == 512
     assert config.net_config.num_residual_blocks == 1

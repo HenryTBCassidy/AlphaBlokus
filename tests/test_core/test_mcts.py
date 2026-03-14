@@ -42,7 +42,8 @@ def test_action_probs_sum_to_one(
 ):
     """Probability vector from get_action_prob should sum to ~1.0."""
     board = ttt_game.initialise_board()
-    probs = mcts_instance.get_action_prob(board, temp=1)
+    canonical = ttt_game.get_canonical_form(board, 1)
+    probs = mcts_instance.get_action_prob(canonical, temp=1)
     assert pytest.approx(sum(probs), abs=1e-6) == 1.0
 
 
@@ -51,7 +52,8 @@ def test_action_probs_deterministic_temp0(
 ):
     """temp=0 should return a one-hot vector (exactly one action selected)."""
     board = ttt_game.initialise_board()
-    probs = mcts_instance.get_action_prob(board, temp=0)
+    canonical = ttt_game.get_canonical_form(board, 1)
+    probs = mcts_instance.get_action_prob(canonical, temp=0)
     assert sum(1 for p in probs if p > 0) == 1
     assert pytest.approx(sum(probs), abs=1e-6) == 1.0
 
@@ -61,7 +63,8 @@ def test_search_returns_value(
 ):
     """search() should return a numeric value in [-1, 1]."""
     board = ttt_game.initialise_board()
-    value = mcts_instance.search(board)
+    canonical = ttt_game.get_canonical_form(board, 1)
+    value = mcts_instance.search(canonical)
     # Value may be a numpy scalar or 1-element array from the NN
     v = np.asarray(value).item()
     assert -1 <= v <= 1
@@ -72,9 +75,10 @@ def test_mcts_tree_grows(
 ):
     """After simulations, state_visits dict should be non-empty."""
     board = ttt_game.initialise_board()
+    canonical = ttt_game.get_canonical_form(board, 1)
     # Run several simulations
     for _ in range(mcts_instance.config.num_mcts_sims):
-        mcts_instance.search(board)
+        mcts_instance.search(canonical)
 
     assert len(mcts_instance.state_visits) > 0
     assert len(mcts_instance.policy_priors) > 0

@@ -32,7 +32,7 @@ class NetConfig:
     epochs: int  # Number of training epochs per generation
     batch_size: int  # Number of positions per training batch
     cuda: bool  # Whether to use CUDA for GPU acceleration
-    num_channels: int  # Number of channels in convolutional layers (power of 2)
+    num_filters: int  # Number of convolutional filters per layer (power of 2)
     num_residual_blocks: int  # Number of residual blocks in the network
 
 

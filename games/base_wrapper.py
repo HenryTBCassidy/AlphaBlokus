@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import time
 from abc import ABC, abstractmethod
 
@@ -9,7 +11,7 @@ from torch import optim, Tensor
 from tqdm import tqdm
 
 from core.config import RunConfig
-from core.interfaces import IGame
+from core.interfaces import IBoard, IGame, INeuralNetWrapper
 from core.storage import MetricsCollector
 
 
@@ -44,7 +46,7 @@ class AverageMeter:
         self.avg = self.sum / self.count
 
 
-class BaseNNetWrapper(ABC):
+class BaseNNetWrapper(INeuralNetWrapper, ABC):
     """
     Base neural network wrapper implementing all shared training, prediction,
     and persistence logic. Game-specific wrappers only need to implement
@@ -132,15 +134,20 @@ class BaseNNetWrapper(ABC):
                     epoch_time_s=epoch_time,
                 )
 
-    def predict(self, board: np.ndarray) -> tuple[np.ndarray, float]:
-        """Make a prediction for a given board state."""
-        board = torch.FloatTensor(board.astype(np.float64))
+    def predict(self, board: IBoard) -> tuple[np.ndarray, float]:
+        """Make a prediction for a given board state.
+
+        Args:
+            board: Board object (canonical, i.e. player 1 perspective).
+        """
+        tensor = board.as_multi_channel(1)
+        tensor = torch.FloatTensor(tensor.astype(np.float64))
         if self.net_config.cuda:
-            board = board.contiguous().cuda()
-        board = board.view(1, self.board_rows, self.board_cols)
+            tensor = tensor.contiguous().cuda()
+        tensor = tensor.unsqueeze(0)  # (C, H, W) → (1, C, H, W)
         self.nnet.eval()
         with torch.no_grad():
-            pi, v = self.nnet(board)
+            pi, v = self.nnet(tensor)
 
         return torch.exp(pi).data.cpu().numpy()[0], v.data.cpu().numpy()[0]
 

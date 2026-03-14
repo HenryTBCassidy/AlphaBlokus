@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from typing import Protocol, TypeAlias
 
 import numpy as np
@@ -10,213 +12,167 @@ from core.storage import MetricsCollector
 TrainingExample: TypeAlias = tuple[NDArray, NDArray, float]  # (board_state, policy_vector, value)
 PolicyValue: TypeAlias = tuple[NDArray, float]  # (policy_vector, value_prediction)
 
-class IGame(Protocol):
-    """
-    Base interface for implementing two-player, adversarial, turn-based games.
 
-    This class defines the contract that game implementations must follow.
-    Player identifiers are standardised as:
-        - Player 1: 1
-        - Player 2: -1
+class IBoard(Protocol):
+    """Base interface for game board objects.
 
-    All board states are represented as numpy arrays with appropriate dimensions
-    for the specific game being implemented.
-    """
+    Each game provides a board class that holds the full game state and can
+    produce both a flat game-state array (for game logic) and a multi-channel
+    tensor (for neural net input). The board is the single source of truth —
+    there is no separate encoder/decoder.
 
-    def __init__(self) -> None:
-        pass
-
-    def initialise_board(self) -> NDArray:
-        """
-        Create and return the initial game board state.
-
-        Returns:
-            NDArray: A representation of the board (typically the input format for the neural network)
-        """
-        raise NotImplementedError
-
-    def get_board_size(self) -> tuple[int, int]:
-        """
-        Get the dimensions of the game board.
-
-        Returns:
-            tuple[int, int]: A tuple of (rows, cols) representing board dimensions
-        """
-        raise NotImplementedError
-
-    def get_action_size(self) -> int:
-        """
-        Get the total number of possible actions in the game.
-
-        Returns:
-            int: Number of all possible actions (moves) available in the game
-        """
-        raise NotImplementedError
-
-    def get_next_state(self, board: NDArray, player: int, action: int) -> tuple[NDArray, int]:
-        """
-        Apply an action to the current board state and return the resulting state.
-
-        Args:
-            board: Current board state as a numpy array
-            player: Current player (1 or -1)
-            action: Action to be applied (index into the action space)
-
-        Returns:
-            Tuple containing:
-                - NDArray: Next board state after applying the action
-                - int: Next player to play (-player)
-        """
-        raise NotImplementedError
-
-    def valid_move_masking(self, board: NDArray, player: int) -> NDArray:
-        """
-        Generate a mask of valid moves for the current board state.
-
-        Args:
-            board: Current board state as a numpy array
-            player: Current player (1 or -1)
-
-        Returns:
-            NDArray: Binary vector of length self.get_action_size(), where:
-                    1 indicates a valid move
-                    0 indicates an invalid move
-        """
-        raise NotImplementedError
-
-    def get_game_ended(self, board: NDArray, player: int) -> float:
-        """
-        Check if the game has ended and return the result.
-
-        Args:
-            board: Current board state as a numpy array
-            player: Current player (1 or -1)
-
-        Returns:
-            float: Game result where:
-                  0.0 = game continues
-                  1.0 = player won
-                  -1.0 = player lost
-                  small non-zero value = draw (e.g. 1e-4)
-        """
-        raise NotImplementedError
-
-    def get_canonical_form(self, board: NDArray, player: int) -> NDArray:
-        """
-        Convert the board to its canonical form, which should be independent of player perspective.
-
-        The canonical form should provide a standardised view of the board state,
-        regardless of which player is currently playing. For example, in chess,
-        the canonical form might always be from white's perspective.
-
-        Args:
-            board: Current board state as a numpy array
-            player: Current player (1 or -1)
-
-        Returns:
-            NDArray: Board in canonical form
-        """
-        raise NotImplementedError
-
-    def get_symmetries(self, board: NDArray, pi: NDArray) -> list[tuple[NDArray, NDArray]]:
-        """
-        Generate all symmetric forms of the current board state and policy vector.
-
-        This method should return all valid symmetrical representations of the current
-        game state, along with appropriately transformed policy vectors. This is used
-        to augment training data.
-
-        Args:
-            board: Current board state as a numpy array
-            pi: Policy vector of size self.get_action_size()
-
-        Returns:
-            list[tuple[NDArray, NDArray]]: List of (board, pi) tuples where each tuple
-                                         represents a symmetrical form of the input
-        """
-        raise NotImplementedError
-
-    def state_key(self, board: NDArray) -> bytes:
-        """
-        Return a hashable key that uniquely identifies the board state.
-
-        Used by MCTS as a dictionary key for state lookups.
-        The default implementation serialises the numpy array to raw bytes.
-
-        Args:
-            board: Current board state as a numpy array
-
-        Returns:
-            bytes: A unique hashable key for the board state
-        """
-        raise NotImplementedError
-
-
-class IBoardEncoder(Protocol):
-    """Converts between game-state boards and multi-channel net representations.
-
-    Each game provides an encoder that builds the tensor the neural net expects.
-    The encoder handles canonical form (whose perspective the channels represent)
-    so ``get_canonical_form()`` delegates to ``encode()``.
+    Board objects flow through MCTS, Coach, and Arena. The expensive
+    multi-channel tensor is only built when the neural net needs it
+    (via ``as_multi_channel``).
     """
 
-    def encode(self, board: NDArray, current_player: int) -> NDArray:
-        """Convert game state → multi-channel net input ``(C, H, W)``.
+    @property
+    def as_2d(self) -> NDArray:
+        """Flat H×W game state board (±1/0). Used by game logic."""
+        ...
+
+    def as_multi_channel(self, current_player: int) -> NDArray:
+        """Build multi-channel tensor for neural net input.
+
+        The tensor is in canonical form: the current player's data is always
+        in the first channel group, the opponent's in the second.
 
         Args:
-            board: Game-state board (raw ±1 array or board object).
             current_player: Whose turn it is (1 or -1).
 
         Returns:
-            NDArray of shape ``(C, H, W)`` ready for the neural net.
-        """
-        ...
-
-    def decode(self, encoded_board: NDArray) -> NDArray:
-        """Convert multi-channel net input → raw game-state board.
-
-        Inverse of :meth:`encode`. Needed by stateless games (TicTacToe) where
-        MCTS passes canonical boards back into game methods that expect
-        raw ±1 boards. Stateful games (BlokusDuo) can raise
-        ``NotImplementedError``.
+            NDArray of shape ``(C, H, W)`` with float32 dtype.
         """
         ...
 
     @property
     def num_channels(self) -> int:
-        """Number of channels in the encoded representation."""
+        """Number of channels in the ``as_multi_channel`` output."""
         ...
 
-    @property
-    def encoded_shape(self) -> tuple[int, int, int]:
-        """Full ``(C, H, W)`` shape of the encoded representation."""
+    def copy(self) -> IBoard:
+        """Return a deep copy of this board."""
+        ...
+
+    def canonical(self, player: int) -> IBoard:
+        """Return the board in canonical form (player 1 perspective).
+
+        When player is 1, returns self (or a copy — implementation decides).
+        When player is -1, flips pieces so the current player's stones are +1.
+
+        Args:
+            player: Current player (1 or -1).
+        """
+        ...
+
+
+class IGame(Protocol):
+    """Interface for two-player, adversarial, turn-based games.
+
+    Player identifiers are standardised as:
+        - Player 1: 1
+        - Player 2: -1
+
+    All board states are represented as IBoard objects.
+    """
+
+    def initialise_board(self) -> IBoard:
+        """Create and return the initial game board state."""
+        ...
+
+    def get_board_size(self) -> tuple[int, int]:
+        """Get the dimensions of the game board.
+
+        Returns:
+            A tuple of (rows, cols) representing board dimensions.
+        """
+        ...
+
+    def get_action_size(self) -> int:
+        """Get the total number of possible actions in the game."""
+        ...
+
+    def get_next_state(self, board: IBoard, player: int, action: int) -> tuple[IBoard, int]:
+        """Apply an action to the current board state and return the resulting state.
+
+        Args:
+            board: Current board state.
+            player: Current player (1 or -1).
+            action: Action to be applied (index into the action space).
+
+        Returns:
+            Tuple of (next board state, next player).
+        """
+        ...
+
+    def valid_move_masking(self, board: IBoard, player: int) -> NDArray:
+        """Generate a binary mask of valid moves for the current board state.
+
+        Args:
+            board: Current board state.
+            player: Current player (1 or -1).
+
+        Returns:
+            Binary vector of length ``get_action_size()``.
+        """
+        ...
+
+    def get_game_ended(self, board: IBoard, player: int) -> float:
+        """Check if the game has ended and return the result.
+
+        Args:
+            board: Current board state.
+            player: Current player (1 or -1).
+
+        Returns:
+            0.0 = game continues, 1.0 = player won, -1.0 = player lost,
+            small non-zero value = draw (e.g. 1e-4).
+        """
+        ...
+
+    def get_canonical_form(self, board: IBoard, player: int) -> IBoard:
+        """Convert the board to canonical form (player 1 perspective).
+
+        Args:
+            board: Current board state.
+            player: Current player (1 or -1).
+
+        Returns:
+            Board in canonical form.
+        """
+        ...
+
+    def get_symmetries(self, board: IBoard, pi: NDArray) -> list[tuple[IBoard, NDArray]]:
+        """Generate all symmetric forms of the board state and policy vector.
+
+        Used to augment training data.
+
+        Args:
+            board: Current board state.
+            pi: Policy vector of size ``get_action_size()``.
+
+        Returns:
+            List of (board, pi) tuples representing symmetrical forms.
+        """
+        ...
+
+    def state_key(self, board: IBoard) -> bytes:
+        """Return a hashable key that uniquely identifies the board state.
+
+        Used by MCTS as a dictionary key for state lookups.
+        """
         ...
 
 
 class INeuralNetWrapper(Protocol):
+    """Interface for neural network wrappers used in game-playing models.
+
+    Handles training on self-play data, making predictions for game states,
+    and model persistence (saving/loading checkpoints).
+
+    The neural network outputs both a policy vector (probabilities for each
+    possible move) and a value prediction (estimated game outcome).
     """
-    Base interface for neural network wrappers used in game-playing models.
-
-    This interface defines the contract for neural networks that can be used
-    with the game-playing framework. It handles:
-    - Training on self-play game data
-    - Making predictions for game states
-    - Model persistence (saving/loading checkpoints)
-
-    The neural network is expected to output both:
-    - A policy vector (probabilities for each possible move)
-    - A value prediction (estimated game outcome from current position)
-    """
-
-    def __init__(self, game: IGame, config: 'RunConfig') -> None:
-        """
-        Initialise the neural network wrapper.
-
-        Args:
-            game: Game instance that this network will learn to play
-            config: Configuration parameters for the network and training process
-        """
-        pass
 
     def train(
         self,
@@ -224,68 +180,34 @@ class INeuralNetWrapper(Protocol):
         generation: int,
         metrics: MetricsCollector | None = None,
     ) -> None:
-        """
-        Train the neural network on a batch of examples from self-play games.
+        """Train the neural network on a batch of examples from self-play games.
 
         Args:
-            examples: List of training examples, each containing:
-                     - board_state (NDArray): The game state in canonical form
-                     - policy_vector (NDArray): Target move probabilities
-                     - value (float): Game outcome from this position (-1 to 1)
-            generation: Current iteration in the self-play training cycle
-            metrics: Optional metrics collector for recording training loss data
+            examples: List of (board_state, policy_vector, value) tuples.
+            generation: Current iteration in the self-play training cycle.
+            metrics: Optional metrics collector for recording training loss data.
         """
-        raise NotImplementedError
+        ...
 
-    def predict(self, board: NDArray) -> PolicyValue:
-        """
-        Make a prediction for a given board state.
-
-        The network outputs both a policy vector (move probabilities) and
-        a value prediction (estimated game outcome) for the input state.
+    def predict(self, board: IBoard) -> PolicyValue:
+        """Make a prediction for a given board state.
 
         Args:
-            board: The game board in its canonical form
+            board: Board object in canonical form (player 1 perspective).
 
         Returns:
-            Tuple containing:
-                - NDArray: Policy vector (probabilities for each possible move)
-                - float: Value prediction (-1 to 1) for the current board state
+            Tuple of (policy vector, value prediction).
         """
-        raise NotImplementedError
+        ...
 
     def save_checkpoint(self, filename: str) -> None:
-        """
-        Save the current model state to a checkpoint file.
-
-        This should save all necessary information to restore the model later,
-        including:
-        - Network architecture
-        - Model weights
-        - Training state (if needed)
-        - Optimizer state (if needed)
-
-        Args:
-            filename: Path to save the checkpoint file
-        """
-        raise NotImplementedError
+        """Save the current model state to a checkpoint file."""
+        ...
 
     def load_checkpoint(self, filename: str) -> None:
-        """
-        Load a model state from a checkpoint file.
-
-        This should restore the model to exactly the same state it was in
-        when saved, including:
-        - Network architecture
-        - Model weights
-        - Training state (if saved)
-        - Optimizer state (if saved)
-
-        Args:
-            filename: Path to the checkpoint file to load
+        """Load a model state from a checkpoint file.
 
         Raises:
-            FileNotFoundError: If the checkpoint file doesn't exist
-            ValueError: If the checkpoint file is invalid or incompatible
+            FileNotFoundError: If the checkpoint file doesn't exist.
         """
-        raise NotImplementedError
+        ...

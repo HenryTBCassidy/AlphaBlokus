@@ -88,22 +88,22 @@ class AlphaBlokusDuo(nn.Module):
 
         self.conv_block = nn.Sequential(
             nn.Conv2d(
-                in_channels=1, out_channels=config.num_channels, kernel_size=3, stride=1, padding=1, bias=False
+                in_channels=1, out_channels=config.num_filters, kernel_size=3, stride=1, padding=1, bias=False
             ),
-            nn.BatchNorm2d(num_features=config.num_channels),
+            nn.BatchNorm2d(num_features=config.num_filters),
             nn.ReLU()
         )
 
         # Residual blocks
         residual_blocks = []
         for _ in range(config.num_residual_blocks):
-            residual_blocks.append(ResNetBlock(config.num_channels))
+            residual_blocks.append(ResNetBlock(config.num_filters))
 
         self.residual_blocks = nn.Sequential(*residual_blocks)
 
         self.value_head = nn.Sequential(
             nn.Conv2d(
-                in_channels=config.num_channels,
+                in_channels=config.num_filters,
                 out_channels=1,
                 kernel_size=1,
                 stride=1,
@@ -112,15 +112,15 @@ class AlphaBlokusDuo(nn.Module):
             nn.BatchNorm2d(num_features=1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.Linear(1 * conv_out, config.num_channels),
+            nn.Linear(1 * conv_out, config.num_filters),
             nn.ReLU(),
-            nn.Linear(config.num_channels, 1),
+            nn.Linear(config.num_filters, 1),
             nn.Tanh(),
         )
 
         self.policy_head = nn.Sequential(
             nn.Conv2d(
-                in_channels=config.num_channels,
+                in_channels=config.num_filters,
                 out_channels=2,
                 kernel_size=1,
                 stride=1,

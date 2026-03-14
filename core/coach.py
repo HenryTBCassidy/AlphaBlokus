@@ -13,7 +13,7 @@ from tqdm import tqdm
 
 from core.arena import Arena
 from core.config import RunConfig
-from core.interfaces import INeuralNetWrapper, IGame
+from core.interfaces import IBoard, INeuralNetWrapper, IGame
 from core.mcts import MCTS
 from core.storage import (
     CycleStage,
@@ -23,7 +23,7 @@ from core.storage import (
 )
 
 # Type aliases for improved readability
-TrainingExample: TypeAlias = tuple[NDArray, int, NDArray, float | None]  # (board, player, policy, value)
+TrainingExample: TypeAlias = tuple[IBoard, int, NDArray, float | None]  # (board, player, policy, value)
 TrainingHistory: TypeAlias = list[deque[ProcessedExample]]  # List of examples per generation
 
 
@@ -140,9 +140,12 @@ class Coach:
             # Check if game has ended
             game_result = self.game.get_game_ended(board, current_player)
             if game_result != 0:
-                # Assign values to all positions based on final outcome
-                return [(x[0], x[2], game_result * ((-1) ** (x[1] != current_player)))
-                        for x in train_examples]
+                # Assign values to all positions based on final outcome.
+                # Convert canonical board objects → NDArrays for training.
+                return [
+                    (x[0].as_multi_channel(1), x[2], game_result * ((-1) ** (x[1] != current_player)))
+                    for x in train_examples
+                ]
 
     def learn(self) -> None:
         """

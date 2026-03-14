@@ -28,7 +28,7 @@ def net_config() -> NetConfig:
         epochs=1,
         batch_size=4,
         cuda=False,
-        num_channels=32,
+        num_filters=32,
         num_residual_blocks=1,
     )
 
