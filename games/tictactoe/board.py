@@ -74,66 +74,7 @@ class Board(IBoard):
     def __getitem__(self, index: int) -> list[int]:
         return self.pieces[index]
 
-    # ── Game logic ────────────────────────────────────────────────────
-
-    def get_legal_moves(self, color: int) -> list[tuple[int, int]]:
-        """Returns all the legal moves for the given color.
-        (1 for white, -1 for black)
-        @param color not used and came from previous version.
-        """
-        moves = set()  # stores the legal moves.
-
-        # Get all the empty squares (color==0)
-        for y in range(self.N):
-            for x in range(self.N):
-                if self[x][y] == 0:
-                    new_move = (x, y)
-                    moves.add(new_move)
-        return list(moves)
-
-    def has_legal_moves(self) -> bool:
-        for y in range(self.N):
-            for x in range(self.N):
-                if self[x][y] == 0:
-                    return True
-        return False
-
-    def is_win(self, color: int) -> bool:
-        """Check whether the given player has collected a triplet in any direction;
-        @param color (1=white,-1=black)
-        """
-        win = self.N
-        # check y-strips
-        for y in range(self.N):
-            count = 0
-            for x in range(self.N):
-                if self[x][y] == color:
-                    count += 1
-            if count == win:
-                return True
-        # check x-strips
-        for x in range(self.N):
-            count = 0
-            for y in range(self.N):
-                if self[x][y] == color:
-                    count += 1
-            if count == win:
-                return True
-        # check two diagonal strips
-        count = 0
-        for d in range(self.N):
-            if self[d][d] == color:
-                count += 1
-        if count == win:
-            return True
-        count = 0
-        for d in range(self.N):
-            if self[d][self.N - d - 1] == color:
-                count += 1
-        if count == win:
-            return True
-
-        return False
+    # ── Mutation ─────────────────────────────────────────────────────
 
     def with_move(self, move: tuple[int, int], color: int) -> Board:
         """Return a new board with the given move applied.

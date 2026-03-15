@@ -1,6 +1,7 @@
 from collections.abc import Generator
 from pathlib import Path
 
+import numpy as np
 from numpy.typing import NDArray
 
 from games.blokusduo.board import (
@@ -42,9 +43,9 @@ class BlokusDuoGame(IGame):
             pieces_config_path: Path to the configuration file defining game pieces
         """
         super().__init__()
-        self.board_size = 14  # Board size
-        self.num_planes = 91  # Number of distinct Piece-BasisOrientation combinations
         self.piece_manager: PieceManager = pieces_loader(pieces_config_path)
+        self.board_size: int = BlokusDuoBoard.N
+        self.num_planes: int = self.piece_manager.num_entries
         # Canonically will have black start in top left and white in bottom right
         self.white_start = (9, 9)
         self.black_start = (4, 4)
@@ -169,26 +170,63 @@ class BlokusDuoGame(IGame):
         """
         Check if the game has ended and return the result.
 
+        The game ends when neither player has any legal moves. The winner is
+        determined by score (sum of placed piece squares, with bonuses for
+        placing all pieces / finishing with the monomino).
+
         Args:
             board: Current board state
             player: Current player (1 for White, -1 for Black)
 
         Returns:
-            float: Game result where:
-                  0.0 = game continues
-                  1.0 = player won
-                  -1.0 = player lost
-                  1e-4 = draw
-
-        Raises:
-            RuntimeError: If called before a game has started
+            float: 0.0 = game continues, 1.0 = player won,
+                   -1.0 = player lost, 1e-4 = draw
         """
-        if board is None:
-            raise RuntimeError("Trying to figure if we have ended a game before one was started!")
-        if board.game_ended():
-            return board.game_result(player)
-        else:
+        # Game continues if either player has remaining moves
+        # TODO: valid_moves is a stub — this will work once move generation is implemented
+        white_has_moves = len(self.valid_moves(board, 1)) > 0
+        black_has_moves = len(self.valid_moves(board, -1)) > 0
+        if white_has_moves or black_has_moves:
             return 0
+
+        white_score = self._calculate_score(board, 1)
+        black_score = self._calculate_score(board, -1)
+
+        if white_score == black_score:
+            return 1e-4
+
+        white_win = white_score > black_score
+        if white_win == (player == 1):
+            return 1
+        return -1
+
+    def valid_moves(self, board: BlokusDuoBoard, player: PlayerSide) -> list[Action]:
+        """Generate all legal moves for a player.
+
+        TODO: Implement the full move generation algorithm. Currently returns [].
+        """
+        return []
+
+    def _calculate_score(self, board: BlokusDuoBoard, player: PlayerSide) -> int:
+        """Calculate the score for a player.
+
+        Scoring rules:
+        1. +15 points for placing all pieces
+        2. +5 bonus for placing the monomino (piece 1) last
+        3. Negative points for remaining pieces (sum of squares in each piece)
+        """
+        remaining = board.remaining_piece_ids(player)
+        last_played = board.last_piece_played(player)
+
+        if len(remaining) == 0:
+            score = 15
+            if last_played == 1:  # Monomino
+                score += 5
+        else:
+            score = -int(np.sum([
+                self.piece_manager.pieces[pid].identity.sum() for pid in remaining
+            ]))
+        return score
 
     def get_canonical_form(self, board: BlokusDuoBoard, player: PlayerSide) -> BlokusDuoBoard:
         """

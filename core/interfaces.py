@@ -14,16 +14,18 @@ PolicyValue: TypeAlias = tuple[NDArray, float]  # (policy_vector, value_predicti
 
 
 class IBoard(Protocol):
-    """Base interface for game board objects.
+    """Immutable snapshot of a game state.
 
-    Each game provides a board class that holds the full game state and can
-    produce both a flat game-state array (for game logic) and a multi-channel
-    tensor (for neural net input). The board is the single source of truth —
-    there is no separate encoder/decoder.
+    A board knows its own geometry (dimensions, channels) and contents
+    (which pieces are where), but not the rules of the game. It provides:
 
-    Board objects flow through MCTS, Coach, and Arena. The expensive
-    multi-channel tensor is only built when the neural net needs it
-    (via ``as_multi_channel``).
+    - State encoding for neural net input (``as_multi_channel``)
+    - A flat game-state view (``as_2d``)
+    - A hashable identity (``state_key``)
+    - Canonical form for MCTS (``canonical``)
+    - Per-player state accessors (remaining pieces, placement caches, etc.)
+
+    Game rules (legal moves, win detection, scoring) live on IGame, not here.
     """
 
     @property
@@ -71,13 +73,18 @@ class IBoard(Protocol):
 
 
 class IGame(Protocol):
-    """Interface for two-player, adversarial, turn-based games.
+    """Rules engine and action space for a two-player, adversarial, turn-based game.
 
-    Player identifiers are standardised as:
-        - Player 1: 1
-        - Player 2: -1
+    The game knows:
+    - How to create a board (``initialise_board``)
+    - Board dimensions and action space size
+    - What moves are legal (``valid_move_masking``)
+    - How to apply moves (``get_next_state``)
+    - Whether the game is over and who won (``get_game_ended``)
+    - Symmetries for data augmentation (``get_symmetries``)
 
-    All board states are represented as IBoard objects.
+    The game does NOT hold mutable state — it operates on IBoard snapshots
+    passed as arguments. Player identifiers: 1 (player 1), -1 (player 2).
     """
 
     def initialise_board(self) -> IBoard:

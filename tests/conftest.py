@@ -42,6 +42,7 @@ def test_config(tmp_path: Path, mcts_config: MCTSConfig, net_config: NetConfig) 
     Function-scoped because tmp_path is per-test.
     """
     return RunConfig(
+        game="tictactoe",
         run_name="test_run",
         num_generations=1,
         num_eps=2,

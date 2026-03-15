@@ -293,49 +293,6 @@ class BlokusDuoBoard(IBoard):
 
     # -- Game state queries (public) --------------------------------------------
 
-    def valid_moves(self, player_side: PlayerSide) -> list[Action]:
-        """Get all valid moves for the current player."""
-        # TODO: Implement move generation logic
-        return []
-
-    def game_ended(self) -> bool:
-        """Check if the game has ended.
-
-        The game ends when:
-        1. A player has no pieces remaining, or
-        2. Neither player has any legal moves
-        """
-        raise NotImplementedError()
-
-    def game_result(self, player: PlayerSide) -> float:
-        """Get the game result from a player's perspective.
-
-        Returns:
-            1.0 = player won, -1.0 = player lost, 1e-4 = draw.
-        """
-        if not self.game_ended():
-            raise RuntimeError("Trying to calculate the result of a game that hasn't ended!")
-
-        white_score = self._calculate_score(
-            self._white_piece_ids_remaining,
-            self._white_last_piece_played,
-            self._piece_manager,
-        )
-        black_score = self._calculate_score(
-            self._black_piece_ids_remaining,
-            self._black_last_piece_played,
-            self._piece_manager,
-        )
-
-        if white_score == black_score:
-            return 1e-4
-
-        white_win = white_score > black_score
-        if white_win == (player == 1):
-            return 1
-        else:
-            return -1
-
     # -- Private helpers --------------------------------------------------------
 
     @classmethod
@@ -367,15 +324,15 @@ class BlokusDuoBoard(IBoard):
         board._coordinate_index_decoder = coordinate_index_decoder
         return board
 
-    def _remaining_ids(self, player_side: PlayerSide) -> frozenset[int]:
+    def remaining_piece_ids(self, player_side: PlayerSide) -> frozenset[int]:
         """Get remaining piece IDs for the given player."""
         return self._white_piece_ids_remaining if player_side == 1 else self._black_piece_ids_remaining
 
-    def _last_piece_played(self, player_side: PlayerSide) -> int | None:
+    def last_piece_played(self, player_side: PlayerSide) -> int | None:
         """Get the last piece ID played by the given player."""
         return self._white_last_piece_played if player_side == 1 else self._black_last_piece_played
 
-    def _placement_points(self, player_side: PlayerSide) -> PlacementDict:
+    def placement_points(self, player_side: PlayerSide) -> PlacementDict:
         """Get the placement points cache for the given player."""
         return self._white_placement_points if player_side == 1 else self._black_placement_points
 
@@ -453,25 +410,3 @@ class BlokusDuoBoard(IBoard):
                 f"Piece: \n {piece_orientation}, \n"
                 f"At ({x_coordinate}, {y_coordinate})")
 
-    @staticmethod
-    def _calculate_score(
-        remaining: frozenset[int],
-        last_played: int | None,
-        piece_manager: PieceManager,
-    ) -> int:
-        """Calculate the score for a player.
-
-        Scoring rules:
-        1. +15 points for placing all pieces
-        2. +5 bonus points for placing the smallest piece last
-        3. Negative points for remaining pieces (sum of squares)
-        """
-        if len(remaining) == 0:
-            score = 15
-            if last_played == 1:  # Smallest piece
-                score += 5
-        else:
-            score = -int(np.sum([
-                piece_manager.pieces[pid].identity.sum() for pid in remaining
-            ]))
-        return score

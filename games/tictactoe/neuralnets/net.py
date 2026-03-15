@@ -6,13 +6,16 @@ from core.config import NetConfig
 
 
 class AlphaTicTacToe(nn.Module):
-    def __init__(self, game, config: NetConfig):
+    def __init__(self, board_rows: int, board_cols: int, action_size: int,
+                 num_input_channels: int, config: NetConfig):
         super().__init__()
-        self.board_rows, self.board_cols = game.get_board_size()
-        self.action_size = game.get_action_size()
+        self.board_rows = board_rows
+        self.board_cols = board_cols
+        self.action_size = action_size
+        self.num_input_channels = num_input_channels
         self.config = config
 
-        self.conv1 = nn.Conv2d(2, config.num_filters, 3, stride=1, padding=1)
+        self.conv1 = nn.Conv2d(num_input_channels, config.num_filters, 3, stride=1, padding=1)
         self.conv2 = nn.Conv2d(config.num_filters, config.num_filters, 3, stride=1, padding=1)
         self.conv3 = nn.Conv2d(config.num_filters, config.num_filters, 3, stride=1, padding=1)
         self.conv4 = nn.Conv2d(config.num_filters, config.num_filters, 3, stride=1)
@@ -39,7 +42,7 @@ class AlphaTicTacToe(nn.Module):
         :return: Policy vector pi, probability of next move to take:   batch_size * action_size
         :return: Value vector v of expected result of players:         batch_size * num_players
         """
-        x = x.view(-1, 2, self.board_rows, self.board_cols)  # batch_size * 2 * board_rows * board_cols
+        x = x.view(-1, self.num_input_channels, self.board_rows, self.board_cols)
         x = F.relu(self.bn1(self.conv1(x)))  # batch_size * num_filters * board_rows * board_cols
         x = F.relu(self.bn2(self.conv2(x)))  # batch_size * num_filters * board_rows * board_cols
         x = F.relu(self.bn3(self.conv3(x)))  # batch_size * num_filters * (board_rows-2) * (board_cols-2)

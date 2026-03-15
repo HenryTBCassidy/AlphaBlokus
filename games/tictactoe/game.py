@@ -6,10 +6,10 @@ from games.tictactoe.board import Board
 
 
 class TicTacToeGame(IGame):
-    N: int = 3  # Board size
 
     def __init__(self) -> None:
         super().__init__()
+        self.N: int = Board.N
 
     def initialise_board(self) -> Board:
         return Board()
@@ -27,7 +27,7 @@ class TicTacToeGame(IGame):
 
     def valid_move_masking(self, board: Board, player: int) -> NDArray:
         valids = [0] * self.get_action_size()
-        legal_moves = board.get_legal_moves(player)
+        legal_moves = self._get_legal_moves(board)
         if len(legal_moves) == 0:
             valids[-1] = 1
             return np.array(valids)
@@ -36,14 +36,69 @@ class TicTacToeGame(IGame):
         return np.array(valids)
 
     def get_game_ended(self, board: Board, player: int) -> float:
-        if board.is_win(player):
+        if self._is_win(board, player):
             return 1
-        if board.is_win(-player):
+        if self._is_win(board, -player):
             return -1
-        if board.has_legal_moves():
+        if self._has_legal_moves(board):
             return 0
-        # Draw has a very small value
         return 1e-4
+
+    @staticmethod
+    def _get_legal_moves(board: Board) -> list[tuple[int, int]]:
+        """Return all empty squares as (x, y) tuples."""
+        n = Board.N
+        moves = []
+        for y in range(n):
+            for x in range(n):
+                if board[x][y] == 0:
+                    moves.append((x, y))
+        return moves
+
+    @staticmethod
+    def _has_legal_moves(board: Board) -> bool:
+        """Check if any empty square exists."""
+        n = Board.N
+        for y in range(n):
+            for x in range(n):
+                if board[x][y] == 0:
+                    return True
+        return False
+
+    @staticmethod
+    def _is_win(board: Board, color: int) -> bool:
+        """Check whether the given player has N in a row/column/diagonal."""
+        n = Board.N
+        # check y-strips
+        for y in range(n):
+            count = 0
+            for x in range(n):
+                if board[x][y] == color:
+                    count += 1
+            if count == n:
+                return True
+        # check x-strips
+        for x in range(n):
+            count = 0
+            for y in range(n):
+                if board[x][y] == color:
+                    count += 1
+            if count == n:
+                return True
+        # check two diagonal strips
+        count = 0
+        for d in range(n):
+            if board[d][d] == color:
+                count += 1
+        if count == n:
+            return True
+        count = 0
+        for d in range(n):
+            if board[d][n - d - 1] == color:
+                count += 1
+        if count == n:
+            return True
+        return False
 
     def get_canonical_form(self, board: Board, player: int) -> Board:
         return board.canonical(player)
