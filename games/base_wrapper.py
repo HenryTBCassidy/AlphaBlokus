@@ -64,6 +64,8 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         if self.net_config.cuda:
             self.nnet.cuda()
 
+        self.optimizer = optim.Adam(self.nnet.parameters(), lr=self.net_config.learning_rate)
+
     @abstractmethod
     def _create_network(self) -> nn.Module:
         """Create and return the game-specific neural network."""
@@ -76,7 +78,6 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         metrics: MetricsCollector | None = None,
     ) -> None:
         """Train the neural network using provided examples."""
-        optimizer = optim.Adam(self.nnet.parameters())
 
         for epoch in range(self.net_config.epochs):
             logger.info(f"Epoch {epoch + 1}/{self.net_config.epochs}")
@@ -121,9 +122,9 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                         avg_v_loss=v_losses.avg,
                     )
 
-                optimizer.zero_grad()
+                self.optimizer.zero_grad()
                 total_loss.backward()
-                optimizer.step()
+                self.optimizer.step()
 
             epoch_time = time.perf_counter() - epoch_start
             if metrics:
@@ -174,6 +175,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
 
         torch.save({
             'state_dict': self.nnet.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
         }, filepath)
 
     def load_checkpoint(self, filename: str) -> None:
@@ -188,3 +190,5 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         map_location = None if self.net_config.cuda else 'cpu'
         checkpoint = torch.load(filepath, map_location=map_location)
         self.nnet.load_state_dict(checkpoint['state_dict'])
+        if 'optimizer_state_dict' in checkpoint:
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
