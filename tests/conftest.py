@@ -12,7 +12,7 @@ from games.tictactoe.game import TicTacToeGame
 @pytest.fixture(scope="session")
 def ttt_game() -> TicTacToeGame:
     """A reusable TicTacToe game instance."""
-    return TicTacToeGame(3)
+    return TicTacToeGame()
 
 
 @pytest.fixture(scope="session")

@@ -6,8 +6,11 @@ from abc import ABC, abstractmethod
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from loguru import logger
 from torch import optim, Tensor
+from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler
+from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 from core.config import RunConfig
@@ -65,6 +68,18 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             self.nnet.cuda()
 
         self.optimizer = optim.Adam(self.nnet.parameters(), lr=self.net_config.learning_rate)
+        self.scheduler: LRScheduler | None = self._create_scheduler()
+
+    def _create_scheduler(self) -> LRScheduler | None:
+        """Create LR scheduler based on config. Returns None if no schedule configured."""
+        match self.net_config.lr_scheduler:
+            case "cosine":
+                total_epochs = self.config.num_generations * self.net_config.epochs
+                return CosineAnnealingLR(self.optimizer, T_max=total_epochs)
+            case None:
+                return None
+            case unknown:
+                raise ValueError(f"Unknown lr_scheduler: {unknown!r}")
 
     @abstractmethod
     def _create_network(self) -> nn.Module:
@@ -78,6 +93,28 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         metrics: MetricsCollector | None = None,
     ) -> None:
         """Train the neural network using provided examples."""
+        if not examples:
+            logger.warning("No training examples provided, skipping training.")
+            return
+
+        boards_np, pis_np, vs_np = zip(*examples)
+
+        # Validate training data at the interface boundary
+        sample_board = boards_np[0]
+        sample_pi = pis_np[0]
+        sample_v = vs_np[0]
+        expected_board_shape = (sample_board.shape[0], self.board_rows, self.board_cols)
+        assert sample_board.shape == expected_board_shape, (
+            f"Board shape {sample_board.shape} != expected {expected_board_shape}")
+        assert abs(sample_pi.sum() - 1.0) < 0.01, (
+            f"Policy vector sums to {sample_pi.sum()}, expected ~1.0")
+        assert -1.0 <= sample_v <= 1.0, (
+            f"Value {sample_v} outside [-1, 1]")
+        dataset = TensorDataset(
+            torch.tensor(np.array(boards_np), dtype=torch.float32),
+            torch.tensor(np.array(pis_np), dtype=torch.float32),
+            torch.tensor(np.array(vs_np), dtype=torch.float32),
+        )
 
         for epoch in range(self.net_config.epochs):
             logger.info(f"Epoch {epoch + 1}/{self.net_config.epochs}")
@@ -86,20 +123,13 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             pi_losses = AverageMeter()
             v_losses = AverageMeter()
 
-            batch_count = int(len(examples) / self.net_config.batch_size)
-
-            t = tqdm(range(batch_count), desc='Training Net')
-            for batch_number, _ in enumerate(t):
-                sample_ids = np.random.randint(len(examples), size=self.net_config.batch_size)
-                boards, pis, vs = list(zip(*[examples[i] for i in sample_ids]))
-                boards = torch.FloatTensor(np.array(boards).astype(np.float64))
-                target_pis = torch.FloatTensor(np.array(pis))
-                target_vs = torch.FloatTensor(np.array(vs).astype(np.float64))
-
+            loader = DataLoader(dataset, batch_size=self.net_config.batch_size, shuffle=True)
+            t = tqdm(loader, desc='Training Net')
+            for batch_number, (boards, target_pis, target_vs) in enumerate(t):
                 if self.net_config.cuda:
-                    boards, target_pis, target_vs = (boards.contiguous().cuda(),
-                                                   target_pis.contiguous().cuda(),
-                                                   target_vs.contiguous().cuda())
+                    boards, target_pis, target_vs = (boards.cuda(),
+                                                   target_pis.cuda(),
+                                                   target_vs.cuda())
 
                 out_pi, out_v = self.nnet(boards)
                 l_pi = self.loss_pi(target_pis, out_pi)
@@ -126,6 +156,9 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 total_loss.backward()
                 self.optimizer.step()
 
+            if self.scheduler is not None:
+                self.scheduler.step()
+
             epoch_time = time.perf_counter() - epoch_start
             if metrics:
                 metrics.log_training_throughput(
@@ -141,8 +174,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         Args:
             board: Board object (canonical, i.e. player 1 perspective).
         """
-        tensor = board.as_multi_channel(1)
-        tensor = torch.FloatTensor(tensor.astype(np.float64))
+        tensor = torch.tensor(board.as_multi_channel(1), dtype=torch.float32)
         if self.net_config.cuda:
             tensor = tensor.contiguous().cuda()
         tensor = tensor.unsqueeze(0)  # (C, H, W) → (1, C, H, W)
@@ -154,8 +186,8 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
 
     @staticmethod
     def loss_pi(targets: Tensor, outputs: Tensor) -> Tensor:
-        """Calculate the policy loss."""
-        return -torch.sum(targets * outputs) / targets.size()[0]
+        """Calculate the policy loss (KL divergence)."""
+        return F.kl_div(outputs, targets, reduction='batchmean')
 
     @staticmethod
     def loss_v(targets: Tensor, outputs: Tensor) -> Tensor:
@@ -173,10 +205,13 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         else:
             logger.info("Checkpoint Directory exists!")
 
-        torch.save({
+        checkpoint = {
             'state_dict': self.nnet.state_dict(),
             'optimizer_state_dict': self.optimizer.state_dict(),
-        }, filepath)
+        }
+        if self.scheduler is not None:
+            checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
+        torch.save(checkpoint, filepath)
 
     def load_checkpoint(self, filename: str) -> None:
         """Load a neural network state from a checkpoint file."""
@@ -192,3 +227,5 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         self.nnet.load_state_dict(checkpoint['state_dict'])
         if 'optimizer_state_dict' in checkpoint:
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        if self.scheduler is not None and 'scheduler_state_dict' in checkpoint:
+            self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])

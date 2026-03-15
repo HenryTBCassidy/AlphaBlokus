@@ -6,23 +6,24 @@ from games.tictactoe.board import Board
 
 
 class TicTacToeGame(IGame):
-    def __init__(self, n: int = 3) -> None:
+    N: int = 3  # Board size
+
+    def __init__(self) -> None:
         super().__init__()
-        self.n = n
 
     def initialise_board(self) -> Board:
-        return Board(self.n)
+        return Board()
 
     def get_board_size(self) -> tuple[int, int]:
-        return self.n, self.n
+        return self.N, self.N
 
     def get_action_size(self) -> int:
-        return self.n * self.n + 1
+        return self.N * self.N + 1
 
     def get_next_state(self, board: Board, player: int, action: int) -> tuple[Board, int]:
-        if action == self.n * self.n:
+        if action == self.N * self.N:
             return board, -player
-        return board.with_move((action // self.n, action % self.n), player), -player
+        return board.with_move((action // self.N, action % self.N), player), -player
 
     def valid_move_masking(self, board: Board, player: int) -> NDArray:
         valids = [0] * self.get_action_size()
@@ -31,7 +32,7 @@ class TicTacToeGame(IGame):
             valids[-1] = 1
             return np.array(valids)
         for x, y in legal_moves:
-            valids[self.n * x + y] = 1
+            valids[self.N * x + y] = 1
         return np.array(valids)
 
     def get_game_ended(self, board: Board, player: int) -> float:
@@ -48,8 +49,8 @@ class TicTacToeGame(IGame):
         return board.canonical(player)
 
     def get_symmetries(self, board: Board, pi: NDArray) -> list[tuple[Board, NDArray]]:
-        assert len(pi) == self.n ** 2 + 1  # 1 for pass
-        pi_board = np.reshape(pi[:-1], (self.n, self.n))
+        assert len(pi) == self.N ** 2 + 1  # 1 for pass
+        pi_board = np.reshape(pi[:-1], (self.N, self.N))
         board_array = board.as_2d
         symmetries: list[tuple[Board, NDArray]] = []
 
@@ -60,7 +61,7 @@ class TicTacToeGame(IGame):
                 if is_flipped:
                     new_array = np.fliplr(new_array)
                     new_pi = np.fliplr(new_pi)
-                new_board = Board._from_pieces(self.n, new_array.tolist())
+                new_board = Board._from_pieces(new_array.tolist())
                 new_pi_flat = np.append(new_pi.ravel(), pi[-1])
                 symmetries.append((new_board, new_pi_flat))
         return symmetries
@@ -70,7 +71,7 @@ class TicTacToeGame(IGame):
 
     @staticmethod
     def display(board: Board) -> None:
-        n = board.n
+        n = board.N
 
         print("   ", end="")
         for y in range(n):

@@ -18,10 +18,10 @@ Prerequisites: None. This is the first plan on the `fix/bug-fixes` branch.
 | S6 | MCTS: explicit uniform fallback policy | B25 | 5 min | ✅ |
 | S7 | Pass `action_size` from game to neural net | B15 | 10 min | ✅ |
 | S8 | Optimizer lifecycle: create once, save/load state | B10, B11 | 30 min | ✅ |
-| S9 | Add learning rate schedule | B12 | 1 hour | |
-| S10 | Fix main.py: imports, wiring, model loading | B7, B13 | 45 min | |
-| S11 | Training code: DataLoader, loss function, dtypes | B18, B19, B20 | 30 min | |
-| S12 | Input validation at interface boundaries | B24 | 20 min | |
+| S9 | Add learning rate schedule | B12 | 1 hour | ✅ |
+| S10 | Fix main.py: imports, wiring, model loading | B7, B13 | 45 min | ✅ |
+| S11 | Training code: DataLoader, loss function, dtypes | B18, B19, B20 | 30 min | ✅ |
+| S12 | Input validation at interface boundaries | B24 | 20 min | ✅ |
 
 **Estimated remaining: ~5 hours**
 

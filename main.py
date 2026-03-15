@@ -4,9 +4,9 @@ import time
 from loguru import logger
 
 from core.coach import Coach
-from games.blokusduo.neuralnets.wrapper import NNetWrapper
-from games.tictactoe.game import TicTacToeGame as Game
 from core.config import load_args
+from games.tictactoe.game import TicTacToeGame
+from games.tictactoe.neuralnets.wrapper import NNetWrapper
 from reporting import create_html_report
 
 
@@ -30,26 +30,24 @@ def main():
 
     start = time.perf_counter()
 
-    logger.info(f'Loading {Game.__name__}...')
-    g = Game(3)
+    logger.info(f'Loading {TicTacToeGame.__name__}...')
+    g = TicTacToeGame()
 
     logger.info(f'Loading {NNetWrapper.__name__}...')
-    nnet = NNetWrapper(args)
+    nnet = NNetWrapper(g, args)
 
-    # TODO: Fix this
     if args.load_model:
-        raise NotImplementedError("You do not have a way of loading models currently!")
+        logger.info("Loading checkpoint from best.pth.tar...")
+        nnet.load_checkpoint('best.pth.tar')
     else:
         logger.warning('Not loading a checkpoint!')
 
     logger.info('Loading the Coach...')
     c = Coach(g, nnet, args)
 
-    # TODO: Fix this
     if args.load_model:
-        raise NotImplementedError("You do not have a way of loading models currently!")
-        logger.info("Loading 'trainExamples' from file...")
-        c.load_train_examples()
+        logger.info("Loading self-play history...")
+        c.load_self_play_history(up_to_generation=0)
 
     logger.info('Starting the learning process')
 
