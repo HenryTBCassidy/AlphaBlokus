@@ -38,8 +38,17 @@ def main():
         default="run_configurations/test_run.json",
         help="Path to the JSON run configuration file (default: run_configurations/test_run.json)",
     )
+    parser.add_argument(
+        "--report-only",
+        action="store_true",
+        help="Regenerate the HTML report from existing data without training",
+    )
     cli_args = parser.parse_args()
     args = load_args(cli_args.config)
+
+    if cli_args.report_only:
+        create_html_report(args)
+        return
 
     args.run_directory.mkdir(parents=True, exist_ok=True)
 
