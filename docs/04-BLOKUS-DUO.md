@@ -1,54 +1,84 @@
-# AlphaBlokus — Appendix: Blokus Duo Pieces & Orientations
+# Blokus Duo — Rules & Piece Reference
 
-All 21 Blokus Duo pieces and their 91 unique orientations after symmetry reduction. Each player gets one copy of every piece.
+## Overview
 
----
+Blokus Duo (also sold as "Blokus Travel") is a two-player abstract strategy game
+played on a **14×14** square grid. Each player has a set of **21 polyomino pieces**
+and attempts to place as many of them on the board as possible.
 
-## Summary
+## Pieces
 
-| # | Piece | Squares | Symmetry | Orientations | Reason |
-|---|-------|---------|----------|-------------|--------|
-| 1 | 1-Piece | 1 | D4 (full square) | 1 | All rotations and reflections identical |
-| 2 | 2-Piece | 2 | D2 | 2 | 180° rotation + both reflections are equivalent |
-| 3 | 3L-Piece | 3 | Diagonal reflection | 4 | Flip = rotation, so only 4 rotations needed |
-| 4 | 3-Piece | 3 | D2 | 2 | Same symmetry as the 2-Piece |
-| 5 | 4-Piece | 4 | D2 | 2 | Straight bar, horizontal or vertical |
-| 6 | 4L-Piece | 4 | None | 8 | No symmetry — all 8 transforms are distinct |
-| 7 | 4Z-Piece | 4 | C2 (180° rotation) | 4 | 180° rotation maps to self, but reflection gives new shape |
-| 8 | Square | 4 | D4 (full square) | 1 | 2×2 square, all orientations identical |
-| 9 | 4T-Piece | 4 | Vertical reflection | 4 | Flip = identity, so only 4 rotations needed |
-| 10 | F | 5 | None | 8 | No symmetry |
-| 11 | I | 5 | D2 | 2 | Straight bar |
-| 12 | L | 5 | None | 8 | No symmetry |
-| 13 | N | 5 | None | 8 | No symmetry |
-| 14 | P | 5 | None | 8 | No symmetry |
-| 15 | T | 5 | Vertical reflection | 4 | Flip = identity |
-| 16 | U | 5 | Vertical reflection | 4 | Flip = identity |
-| 17 | V | 5 | Anti-diagonal reflection | 4 | Diagonal flip = identity |
-| 18 | W | 5 | Anti-diagonal reflection | 4 | Diagonal flip = identity |
-| 19 | X | 5 | D4 (full square) | 1 | Plus sign, all orientations identical |
-| 20 | Y | 5 | None | 8 | No symmetry |
-| 21 | Z | 5 | C2 (180° rotation) | 4 | 180° rotation maps to self |
+Each player's set of 21 pieces covers every distinct free polyomino from size 1–5:
 
-**Totals:** 21 pieces, 89 squares, 91 unique orientations
+| Size | Count | Total squares | Names in codebase |
+|------|-------|---------------|--------------------|
+| 1 (monomino) | 1 | 1 | 1-Piece |
+| 2 (domino) | 1 | 2 | 2-Piece |
+| 3 (triomino) | 2 | 6 | 3-Piece, 3L-Piece |
+| 4 (tetromino) | 5 | 20 | 4-Piece, 4L-Piece, 4Z-Piece, Square-Piece, 4T-Piece |
+| 5 (pentomino) | 12 | 60 | F, I, L, N, P, T, U, V, W, X, Y, Z |
+| **Total** | **21** | **89** | |
 
----
+Each piece can be rotated and flipped, but many orientations are equivalent.
+The distinct piece-orientation combinations (basis orientations) total **91**.
 
-## How Symmetry Reduction Works
+## Setup
 
-Each piece can be physically rotated (0°, 90°, 180°, 270°) and flipped (mirror reflection), giving up to 8 possible orientations. If a piece has some symmetry, some of these 8 are duplicates:
+- The board is a 14×14 grid.
+- Two starting squares are marked near the centre of the board (not in the corners
+  like standard 4-player Blokus).
+- In our implementation: White starts at **(9, 9)** and Black starts at **(4, 4)**
+  using (x, y) coordinates with origin at bottom-left.
 
-```
-Number of unique orientations = 8 ÷ |symmetry group|
+## Placement Rules
 
-No symmetry        → 8 ÷ 1 = 8 orientations
-One reflection axis → 8 ÷ 2 = 4 orientations
-180° rotation only  → 8 ÷ 2 = 4 orientations
-D2 (bar symmetry)   → 8 ÷ 4 = 2 orientations
-D4 (square symmetry)→ 8 ÷ 8 = 1 orientation
-```
+1. **First move**: each player's first piece must cover their designated starting square.
+2. **Corner rule**: every subsequent piece must touch at least one corner of the
+   player's own previously placed pieces.
+3. **No edge adjacency**: a piece may **not** share an edge with any of the same
+   player's pieces (diagonal/corner contact only).
+4. **Opponent pieces**: a piece may share edges with the opponent's pieces — the
+   corner-only constraint applies only to your own colour.
+5. **No overlap**: pieces cannot be placed on occupied squares.
+6. **No moving**: once placed, pieces cannot be moved.
 
-The 91 orientations are the **basis orientations** — the minimal set of distinct transforms needed to represent every possible way a piece can be placed on the board.
+## Turn Structure
+
+Players alternate turns. On each turn a player either:
+- Places one piece (following the rules above), or
+- Passes if no legal placement exists.
+
+## Game End
+
+The game ends when **both** players are unable to place any more pieces
+(either all pieces placed or no legal moves remain).
+
+## Scoring
+
+| Condition | Points |
+|-----------|--------|
+| Each unplayed square remaining | −1 |
+| All 21 pieces placed | +15 |
+| All 21 pieces placed **and** the last piece was the monomino | +5 bonus |
+
+The player with the higher score wins. Equal scores are a draw.
+
+## Key Strategic Concepts
+
+- **Corner expansion**: since new pieces must touch your own corners, building
+  outward from corners is essential for maintaining placement options.
+- **Blocking**: sharing edges with opponent pieces is legal and a key defensive
+  tactic — placing pieces adjacent to your opponent limits their corner access.
+- **Piece ordering**: larger pieces are harder to place as the board fills up,
+  so playing them early is generally preferred. Saving the monomino for last
+  earns the +5 bonus.
+- **Territory**: controlling open space on the board matters — being cut off
+  from open regions means unplayable pieces.
+
+## Sources
+
+- [Mattel Official Rules (PDF)](https://service.mattel.com/instruction_sheets/BJV44-Eng.pdf)
+- [UltraBoardGames — Blokus Duo](https://www.ultraboardgames.com/blokus/blokus-duo.php)
 
 ---
 
@@ -302,6 +332,24 @@ Identity:  ##.     Rot90:   ..#     Flip:    .##     Flip90:  #..
 
 ---
 
+## Symmetry Reduction
+
+Each piece can be physically rotated (0°, 90°, 180°, 270°) and flipped (mirror reflection), giving up to 8 possible orientations. If a piece has some symmetry, some of these 8 are duplicates:
+
+```
+Number of unique orientations = 8 ÷ |symmetry group|
+
+No symmetry        → 8 ÷ 1 = 8 orientations
+One reflection axis → 8 ÷ 2 = 4 orientations
+180° rotation only  → 8 ÷ 2 = 4 orientations
+D2 (bar symmetry)   → 8 ÷ 4 = 2 orientations
+D4 (square symmetry)→ 8 ÷ 8 = 1 orientation
+```
+
+The 91 orientations are the **basis orientations** — the minimal set of distinct transforms needed to represent every possible way a piece can be placed on the board.
+
+---
+
 ## Orientation ID Mapping
 
 In the codebase, each of the 91 piece-orientations is assigned a contiguous integer ID for action encoding. The action space is:
@@ -338,7 +386,7 @@ The mapping is built by `PieceManager.populate_lookup()` in `blokusduo/pieces.py
 | Y | 20 | 8 | 79–86 |
 | Z | 21 | 4 | 87–90 |
 
-**Note:** The IDs above assume contiguous 0-indexed assignment. The current codebase uses 1-indexed IDs with a known off-by-one gap between pieces (see [Bug Fixes §4](../plans/bug-fixes.md)). After the fix, the mapping will be exactly as shown above.
+**Note:** The IDs above assume contiguous 0-indexed assignment. The current codebase uses 1-indexed IDs with a known off-by-one gap between pieces (see [Bug Fixes §4](plans/bug-fixes.md)). After the fix, the mapping will be exactly as shown above.
 
 ---
 

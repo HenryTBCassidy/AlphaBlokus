@@ -84,7 +84,7 @@ Shape and dtype information is stored in the parquet file's schema metadata (not
 
 | Key | Example Value | Description |
 |-----|---------------|-------------|
-| `board_shape` | `"14,18"` (Blokus) / `"3,3"` (TicTacToe) | Comma-separated dimensions |
+| `board_shape` | `"44,14,14"` (Blokus) / `"2,3,3"` (TicTacToe) | Comma-separated dimensions |
 | `board_dtype` | `"float64"` | Numpy dtype string |
 | `policy_size` | `"17837"` (Blokus) / `"10"` (TicTacToe) | Length of the policy vector |
 | `policy_dtype` | `"float64"` | Numpy dtype string |
@@ -95,7 +95,7 @@ Shape and dtype information is stored in the parquet file's schema metadata (not
 - Data includes symmetry-augmented positions (rotations/reflections added by `IGame.get_symmetries()`).
 - Old generations are pruned from memory by a sliding window (`Coach._generation_window_size()`), but parquet files on disk are never deleted.
 - Cannot be read with a plain `pd.read_parquet()` — use `SelfPlayStore.load()` or `SelfPlayStore.load_window()` from `core.storage`.
-- The current Blokus board is `14×18` (the 14×14 board with 2-column piece-inventory strips on each side). This may change to `44×14×14` when multi-channel encoding is implemented (see `09-BOARD-ENCODING-OPTIONS.md`).
+- The Blokus board encoding is `44×14×14` (44-channel per-piece spatial planes). TicTacToe uses `2×3×3` (2-channel player split). Both are built by `board.as_multi_channel(player)`.
 
 ---
 

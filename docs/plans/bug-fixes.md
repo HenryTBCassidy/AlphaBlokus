@@ -11,12 +11,12 @@ Everything in this doc is about **making things work correctly**. The companion 
 | B1 | MCTS full action iteration | [MCTS](#2-mcts-performance-bugs) | Critical | 15 min | |
 | B2 | Interface type mismatches (BlokusDuoGame) | [Interfaces](#1-interface-contract-violations) | Critical | 1 hour | |
 | B3 | NNetWrapper constructor mismatch | [Interfaces](#1-interface-contract-violations) | Critical | 20 min | |
-| B4 | Boundary check off-by-one | [Board Logic](#3-board--game-logic-bugs) | Critical | 15 min | |
+| B4 | Boundary check off-by-one | [Board Logic](#3-board--game-logic-bugs) | Critical | 15 min | ✅ |
 | B5 | Piece orientation ID gaps | [Pieces](#4-piece-system-bugs) | Critical | 30 min | |
 | B6 | Action encoding/decoding missing | [Missing Impls](#6-missing-implementations) | Critical | 45 min | |
 | B7 | main.py game-network mismatch | [Interfaces](#1-interface-contract-violations) | Critical | 10 min | |
 | B8 | Hardcoded board sizes | [Board Logic](#3-board--game-logic-bugs) | Critical | 20 min | |
-| B9 | Mutable board state in BlokusDuoGame | [Board Logic](#3-board--game-logic-bugs) | Critical | 30 min | |
+| B9 | Mutable board state in BlokusDuoGame | [Board Logic](#3-board--game-logic-bugs) | Critical | 30 min | ✅ |
 | B10 | Optimizer reset per epoch | [Training](#5-training-pipeline-bugs) | Important | 15 min | |
 | B11 | No optimizer state in checkpoints | [Training](#5-training-pipeline-bugs) | Important | 20 min | |
 | B12 | No learning rate schedule | [Training](#5-training-pipeline-bugs) | Important | 1 hour | |
@@ -112,7 +112,7 @@ for a in valid_actions:
 
 **File:** `core/mcts.py` line 131
 
-`game.string_representation(board)` does `board.tobytes()` — 2,016 bytes per lookup for a 14×18 int64 array. Thousands of lookups per simulation = significant cache pressure.
+MCTS uses `game.state_key(board)` which delegates to `board.state_key` — now 196 bytes (int8 14×14 placement board). This is much better than the old 2,016-byte int64 keys, but still produces byte-string dictionary keys. Thousands of lookups per simulation = some cache pressure.
 
 **Fix options (pick one):**
 - `hash(board.tobytes())` — fastest, slight collision risk (fine for transposition table)
@@ -346,7 +346,7 @@ Every game method creates a `Board()` wrapper. On a 3×3 board this is free, but
 
 **File:** `blokusduo/neuralnets/net.py` line 143
 
-`x.view(-1, 1, self.board_x, self.board_y)` where `board_x=14` (height) and `board_y=18` (width). `x` usually means width. Verify the actual array layout matches what conv layers expect.
+This was originally about `x.view(-1, 1, self.board_x, self.board_y)` with `board_y=18`. Now resolved — the net uses 44×14×14 input via `board.as_multi_channel()`. The initial conv layer is `Conv2d(44, num_filters, 3, padding=1)` with no manual reshape needed. Verify that training data serialisation stores the multi-channel tensor, not the old flat board.
 
 ---
 

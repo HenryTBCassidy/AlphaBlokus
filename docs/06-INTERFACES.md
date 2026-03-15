@@ -14,7 +14,7 @@ AlphaBlokus represents state as follows (see `blokusduo/game.py`):
 
 | Aspect | Format |
 |--------|--------|
-| Board | `np.ndarray` shape (14, 14), dtype int64. 1=White, -1=Black, 0=empty |
+| Board | `BlokusDuoBoard` with `_piece_placement_board` shape (14, 14), dtype int8. +piece_id=White, -piece_id=Black, 0=empty. `as_2d` gives +1/-1/0 view |
 | NN input | `np.ndarray` shape (44, 14, 14) float32. 44-channel per-piece spatial planes via `board.as_multi_channel()` |
 | Action | `Action(piece_id, orientation, x_coordinate, y_coordinate)` |
 | Coordinates | Board coords: origin bottom-left, x right, y up (0-indexed) |

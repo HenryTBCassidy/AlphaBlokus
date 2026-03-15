@@ -492,7 +492,7 @@ Extend the existing Plotly HTML reporting to include:
 
 ## Note: Compute Infrastructure
 
-Unchanged from the original architecture review — see [`04-COMPETITIVE-LANDSCAPE.md`](../reference/04-COMPETITIVE-LANDSCAPE.md) for external context.
+Unchanged from the original architecture review — see [`01-BACKGROUND.md`](../../01-BACKGROUND.md) for external context.
 
 **Tiered approach:**
 - **Tier 1: Mac M4 Pro** — development, debugging, small test runs (MPS backend)

@@ -259,6 +259,8 @@ swaps all per-player state (remaining pieces, placement caches). After
 canonicalisation, `as_multi_channel(1)` always shows the current player's
 pieces in channels 0-20.
 
+**Design rationale:** Four encoding options were evaluated: column-padded single tensor (1×14×18), late fusion (2×14×14 + inventory vector), per-piece spatial planes (44×14×14), and FiLM conditioning. The per-piece approach was chosen because it follows the AlphaZero convention (one plane per piece type per player), gives conv filters access to piece identity and spatial position simultaneously, and implicitly encodes piece inventory without a separate input. The sparsity of per-piece planes (each piece covers 1-5 of 196 squares) is comparable to AlphaZero Chess (where per-piece planes are 1.6-3.1% dense) and is well-supported by the "Representation Matters" paper (2024) which found richer representations improve performance even when sparse. See `docs/plans/archive/board-encoding-options.md` for the full analysis of all four options.
+
 ### Action Space Encoding
 
 The policy head outputs a probability distribution over 17,837 possible actions:

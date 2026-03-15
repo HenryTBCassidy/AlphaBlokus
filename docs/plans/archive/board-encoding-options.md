@@ -1,6 +1,6 @@
 # Board Encoding Options for the Neural Network
 
-**Status: Option 3 (44-channel per-piece planes) has been implemented.** This document is retained as historical design context. See `02-NEURAL-NETWORKS.md` for the current architecture.
+**Status: Option 3 (44-channel per-piece planes) has been implemented.** This document is retained as historical design context. See [`03-NEURAL-NETWORKS.md`](../../03-NEURAL-NETWORKS.md) for the current architecture.
 
 ## Context
 
