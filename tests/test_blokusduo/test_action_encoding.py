@@ -1,4 +1,4 @@
-from games.blokusduo.pieces import BidirectionalDict, PieceManager
+from games.blokusduo.pieces import OrientationCodec, PieceManager
 
 
 def test_encode_decode_roundtrip(piece_manager: PieceManager):
@@ -22,25 +22,31 @@ def test_all_ids_unique(piece_manager: PieceManager):
             seen_ids.add(encoded_id)
 
 
-def test_bidirectional_dict():
-    """BidirectionalDict should maintain forward and reverse mappings."""
-    bd = BidirectionalDict()
-    bd["a"] = 1
-    bd["b"] = 2
+def test_orientation_ids_contiguous(piece_manager: PieceManager):
+    """IDs should be 0-based and contiguous with no gaps."""
+    all_ids: list[int] = []
+    for piece_id, piece in piece_manager.pieces.items():
+        for orientation in piece.basis_orientations:
+            all_ids.append(piece_manager.get_piece_orientation_id((piece_id, orientation)))
 
-    # Forward lookup
-    assert bd["a"] == 1
-    assert bd["b"] == 2
-
-    # Reverse lookup
-    assert bd[1] == "a"
-    assert bd[2] == "b"
+    all_ids.sort()
+    assert all_ids == list(range(91))
 
 
-def test_bidirectional_dict_delete():
-    """Deleting a key should remove both mappings."""
-    bd = BidirectionalDict()
-    bd["a"] = 1
-    del bd["a"]
-    assert "a" not in bd
-    assert 1 not in bd
+def test_orientation_codec_len(piece_manager: PieceManager):
+    """OrientationCodec len should equal the number of piece-orientation pairs."""
+    assert piece_manager.num_entries == 91
+
+
+def test_orientation_codec_contains(piece_manager: PieceManager):
+    """OrientationCodec should support membership testing for both IDs and pairs."""
+    codec = piece_manager._orientation_codec
+    for piece_id, piece in piece_manager.pieces.items():
+        for orientation in piece.basis_orientations:
+            pair = (piece_id, orientation)
+            orientation_id = piece_manager.get_piece_orientation_id(pair)
+            assert orientation_id in codec
+            assert pair in codec
+
+    assert -1 not in codec
+    assert 91 not in codec
