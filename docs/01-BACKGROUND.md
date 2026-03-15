@@ -1,6 +1,27 @@
-# AlphaBlokus — Competitive Landscape
+# AlphaBlokus — Background & Motivation
 
-## Overview
+## Mission
+
+Train a neural network through self-play reinforcement learning to master **Blokus Duo**, using DeepMind's AlphaZero algorithm. The trained agent should beat **Pentobi** (the strongest open-source Blokus AI) in a majority of 100 games.
+
+**One network, zero human knowledge, superhuman Blokus.**
+
+---
+
+## Why Blokus?
+
+Blokus Duo is an interesting target for AlphaZero because:
+
+1. **Combinatorial complexity:** The action space (17,837 possible moves) dwarfs Chess (~30 legal moves per position) and approaches Go-level branching factor in the early game
+2. **Spatial reasoning:** Piece placement requires geometric intuition — rotations, reflections, corner-touching constraints
+3. **Nobody has done it:** As of 2026, no strong AlphaZero-style Blokus agent exists. The few attempts either abandoned neural networks (too slow) or have zero published results
+4. **Clear benchmark:** Pentobi provides a well-established opponent with configurable difficulty levels (1-9)
+
+---
+
+## Competitive Landscape
+
+### Overview
 
 Blokus AI is a small but active space. The dominant approach is hand-crafted MCTS (Pentobi), with a handful of reinforcement learning attempts that have either abandoned neural networks or produced no published results. As of 2026, **no strong AlphaZero-style Blokus agent exists with published training curves or benchmark results.**
 
@@ -8,9 +29,9 @@ This is the gap AlphaBlokus aims to fill.
 
 ---
 
-## The Benchmark: Pentobi
+### The Benchmark: Pentobi
 
-### What It Is
+#### What It Is
 
 Pentobi is the strongest open-source Blokus AI, maintained by Markus Enzenberger since 2011.
 
@@ -22,7 +43,7 @@ Pentobi is the strongest open-source Blokus AI, maintained by Markus Enzenberger
 - **Supports all Blokus variants** — Duo, Classic (4-player), Trigon, Junior, Nexos, Callisto
 - **Written in C++** — fast move generation and simulation
 
-### Why It's Strong
+#### Why It's Strong
 
 Pentobi's strength comes from three pillars:
 
@@ -30,7 +51,7 @@ Pentobi's strength comes from three pillars:
 2. **RAVE heuristic:** Rapid Action Value Estimation lets MCTS share value estimates across moves that appear in different parts of the tree. A move that works well in one line of play biases the search toward trying it in others. This is particularly effective for Blokus where piece placement patterns transfer across positions
 3. **Opening book:** Pre-computed strong openings avoid wasting search time in the early game where the branching factor is enormous
 
-### Why It's Beatable
+#### Why It's Beatable
 
 Pentobi has fundamental limitations that a neural approach can exploit:
 
@@ -44,9 +65,9 @@ Pentobi has fundamental limitations that a neural approach can exploit:
 
 ---
 
-## Existing Blokus RL Projects
+### Existing Blokus RL Projects
 
-### KubiakJakub01/Blokus-RL
+#### KubiakJakub01/Blokus-RL
 
 - **Repository:** [github.com/KubiakJakub01/Blokus-RL](https://github.com/KubiakJakub01/Blokus-RL)
 - **Approach:** PPO and AlphaZero implementations for Blokus using OpenAI Gym interface
@@ -62,7 +83,7 @@ Pentobi has fundamental limitations that a neural approach can exploit:
 - Game-agnostic framework validated on Tic-Tac-Toe first
 - Comprehensive evaluation plan with Pentobi benchmarking
 
-### DerekGloudemans/Blokus-Reinforcement-Learning
+#### DerekGloudemans/Blokus-Reinforcement-Learning
 
 - **Repository:** [github.com/DerekGloudemans/Blokus-Reinforcement-Learning](https://github.com/DerekGloudemans/Blokus-Reinforcement-Learning)
 - **Approach:** Game interface with heuristics, search strategies, and learning agents
@@ -77,7 +98,7 @@ Pentobi has fundamental limitations that a neural approach can exploit:
 - Actually implements the neural network + MCTS pipeline
 - ResNet architecture designed for the Blokus action space
 
-### roger-creus/blokus-ai
+#### roger-creus/blokus-ai
 
 - **Repository:** [github.com/roger-creus/blokus-ai](https://github.com/roger-creus/blokus-ai)
 - **Approach:** Blokus as a Gymnasium environment for RL agent training
@@ -89,9 +110,9 @@ Pentobi has fundamental limitations that a neural approach can exploit:
 
 **What AlphaBlokus does differently:**
 - Full AlphaZero pipeline (self-play → training → arena) rather than just an environment
-- Board representation designed specifically for neural network input (14×18 encoding)
+- Board representation designed specifically for neural network input (44×14×14 multi-channel encoding)
 
-### mknapper1/Machine-Learning-Blokus
+#### mknapper1/Machine-Learning-Blokus
 
 - **Repository:** [github.com/mknapper1/Machine-Learning-Blokus](https://github.com/mknapper1/Machine-Learning-Blokus)
 - **Approach:** Random, Greedy, and Minimax strategies
@@ -101,7 +122,7 @@ Pentobi has fundamental limitations that a neural approach can exploit:
   - Compares algorithmic strategies but no ML/RL training
   - Good reference for Blokus game logic in Python
 
-### JunhaoWang/blokus
+#### JunhaoWang/blokus
 
 - **Repository:** [github.com/JunhaoWang/blokus](https://github.com/JunhaoWang/blokus)
 - **Approach:** Generate gameplay data and train classifier using neural networks and RNNs
@@ -113,30 +134,30 @@ Pentobi has fundamental limitations that a neural approach can exploit:
 
 ---
 
-## Academic Work
+### Academic Work
 
-### FPGA-Based Blokus Duo Solver (2015)
+#### FPGA-Based Blokus Duo Solver (2015)
 
 - **Paper:** "Highly scalable, shared-memory, Monte-Carlo tree search based Blokus Duo Solver on FPGA"
 - **Approach:** Hardware-accelerated MCTS on FPGA for massive parallelism
 - **Key result:** Can always beat Pentobi level 1 through brute-force search speed
 - **Relevance:** Demonstrates that raw search speed can compensate for lack of evaluation function. AlphaZero's neural evaluation should achieve the same effect more efficiently in software
 
-### AlphaZero-Inspired General Board Game Learning (2022)
+#### AlphaZero-Inspired General Board Game Learning (2022)
 
 - **Paper:** "AlphaZero-Inspired General Board Game Learning and Playing"
 - **Approach:** Adapting AlphaZero to arbitrary board games
 - **Key insight:** The framework generalises well, but action space encoding and board representation are game-specific challenges
 - **Relevance:** Validates our game-agnostic `IGame`/`INeuralNetWrapper` protocol approach
 
-### AlphaViT (2024)
+#### AlphaViT (2024)
 
 - **Paper:** "AlphaViT: A flexible game-playing AI"
 - **Approach:** Vision Transformer (ViT) replacing ResNet in the AlphaZero framework
 - **Key insight:** ViT can handle variable board sizes with a single model
 - **Relevance:** Interesting architectural alternative, but Blokus's fixed 14×14 board doesn't benefit from variable-size handling. ResNet remains simpler and proven
 
-### Warm-Start AlphaZero (2020)
+#### Warm-Start AlphaZero (2020)
 
 - **Paper:** [arxiv.org/abs/2004.12357](https://arxiv.org/abs/2004.12357)
 - **Approach:** Initialising AlphaZero with knowledge from related games or previous training runs
@@ -145,7 +166,7 @@ Pentobi has fundamental limitations that a neural approach can exploit:
 
 ---
 
-## The AlphaZero Reference Implementation Landscape
+### The AlphaZero Reference Implementation Landscape
 
 AlphaBlokus is built on concepts from existing AlphaZero implementations:
 
@@ -161,11 +182,11 @@ AlphaBlokus draws most directly from `alpha-zero-general`'s architecture (the `I
 
 ---
 
-## Why Neural Blokus Is Hard
+### Why Neural Blokus Is Hard
 
 Several factors make Blokus a challenging target for AlphaZero, explaining why no strong results exist:
 
-### 1. Action Space Scale
+#### 1. Action Space Scale
 
 | Game | Legal Moves (typical) | Total Action Space |
 |------|----------------------|-------------------|
@@ -177,25 +198,25 @@ Several factors make Blokus a challenging target for AlphaZero, explaining why n
 
 Blokus has 3.8× the raw action space of Chess and 49× that of Go. Most actions are illegal at any given position, but the network must still output and mask over the full 17,837-dimensional space.
 
-### 2. Geometric Complexity
+#### 2. Geometric Complexity
 
 Blokus moves are inherently spatial — piece rotations, reflections, corner-touching constraints. This requires the network to develop geometric reasoning that goes beyond simple pattern recognition.
 
-### 3. Move Generation Speed
+#### 3. Move Generation Speed
 
 In Chess/Go, legal move generation is fast. In Blokus, checking whether each of 21 pieces in up to 8 orientations can be legally placed at each board position is computationally expensive. This makes MCTS simulations slower, reducing the number of simulations achievable per move.
 
-### 4. Sparse Rewards
+#### 4. Sparse Rewards
 
 A Blokus game can last 20+ moves per player before the outcome is clear. The reward signal (win/loss) comes only at the end. The value network must learn to evaluate positions with very little direct feedback about intermediate board quality.
 
-### 5. Asymmetric Starting Positions
+#### 5. Asymmetric Starting Positions
 
 Unlike Chess (symmetric) or Go (mostly symmetric), Blokus Duo has players starting in opposite corners (positions (4,4) and (9,9)). The first player has a structural advantage that the network must learn to account for.
 
 ---
 
-## AlphaBlokus Differentiation
+### AlphaBlokus Differentiation
 
 | Feature | Pentobi | Existing RL Projects | AlphaBlokus |
 |---------|---------|---------------------|-------------|
@@ -208,15 +229,15 @@ Unlike Chess (symmetric) or Go (mostly symmetric), Blokus Duo has players starti
 | Game-agnostic framework | No | Some | Yes (`IGame` protocol) |
 | Symmetry augmentation | N/A | Unknown | Planned (4 symmetries) |
 | Configurable network depth | N/A | Varies | Yes (1-8 ResNet blocks) |
-| Board encoding with piece tracking | N/A | Unknown | Yes (14×18) |
+| Board encoding with per-piece spatial planes | N/A | Unknown | Yes (44×14×14) |
 
-### The Core Bet
+#### The Core Bet
 
 AlphaBlokus bets that a neural network trained through self-play can develop positional understanding that outperforms Pentobi's raw search + RAVE heuristic. The AlphaZero paper demonstrated this exact dynamic in Chess (neural evaluation + modest search > deep search + hand-crafted evaluation). The question is whether this transfers to Blokus's unique geometric and combinatorial structure.
 
 ---
 
-## Key References
+### Key References
 
 | Paper | Year | Relevance |
 |-------|------|-----------|
@@ -225,3 +246,65 @@ AlphaBlokus bets that a neural network trained through self-play can develop pos
 | Gelly & Silver, "Monte-Carlo tree search and rapid action value estimation in computer Go" | 2011 | RAVE — Pentobi's core technique |
 | He et al., "Deep Residual Learning for Image Recognition" | 2015 | ResNet architecture we use |
 | Rosin, "Multi-Armed Bandits with Episode Context" | 2011 | PUCT formula used in MCTS |
+
+---
+
+## Key Decisions Log
+
+| Decision | Choice | Rationale |
+|----------|--------|-----------|
+| Validation game | Tic-Tac-Toe | Solved game, fast training, easy to verify correctness |
+| Target game | Blokus Duo (not 4-player) | Two-player variant simplifies to zero-sum game, compatible with AlphaZero's framework |
+| Framework design | Game-agnostic protocols | `IGame` and `INeuralNetWrapper` interfaces make adding new games easy without touching core MCTS/Coach/Arena |
+| Blokus network | ResNet (not plain CNN) | Residual connections help with deeper networks needed for Blokus complexity. Configurable depth (1-8 blocks) allows experimentation |
+| Board encoding | 44×14×14 (per-piece spatial planes) | 21 binary planes per player (one per piece, 1s where that piece sits on the board) + 2 aggregate planes. Follows AlphaZero convention. Piece inventory is implicit: an all-zero plane means the piece hasn't been played |
+| Action space | 14×14×91 + 1 = 17,837 | Grid positions × piece-orientation combos + pass. Large but finite — same approach as AlphaZero for Chess/Go |
+| Piece orientations | Symmetry-reduced basis | Each piece stores only unique orientations (1-8) after removing rotational/reflective duplicates. Reduces 21×8=168 to 91 |
+| Coordinate system | Board coords (bottom-left origin) + array indices (top-left) | Board coords match standard Blokus notation. CoordinateIndexDecoder handles conversion |
+| Training data storage | Pickle per generation → Parquet consolidation | Pickle for fast writes during training, Parquet for efficient analysis afterwards |
+| Reporting | HTML with Plotly | Interactive charts for loss curves, arena results, timing — viewable in browser |
+| Benchmark target | Pentobi | Strongest open-source Blokus AI. Uses MCTS + RAVE but no neural networks. Clear, reproducible benchmark |
+
+---
+
+## Stretch Goal: 4-Player Blokus
+
+**Prerequisite:** Beat Pentobi level 9 in Blokus Duo.
+
+If the Duo agent is strong enough to beat Pentobi, the natural next target is **Classic 4-player Blokus** on a 20×20 board. This is a fundamentally harder problem:
+
+| Property | Blokus Duo | 4-Player Blokus |
+|----------|-----------|----------------|
+| Board size | 14×14 | 20×20 |
+| Players | 2 | 4 |
+| Zero-sum | Yes | No (coalitions possible) |
+| AlphaZero-compatible | Directly | Requires modifications |
+| Action space | 17,837 | ~36,000+ (larger board) |
+| Game length | ~25-30 moves/player | ~20-25 moves/player |
+
+**Key challenges:**
+
+1. **Not zero-sum.** AlphaZero assumes two-player zero-sum games where one player's gain is the other's loss. With 4 players, implicit alliances form — two players might gang up on the leader. The value head would need to predict relative standings rather than binary win/loss
+2. **Larger state space.** 20×20 board with 4 sets of 21 pieces means the board encoding and action space both grow significantly
+3. **Self-play dynamics.** Training 4 agents through self-play raises questions about equilibrium — do the agents converge to a stable strategy or cycle?
+4. **Evaluation is harder.** No clean "majority of 100 games" win criterion when there are 4 players
+
+**Possible approaches:**
+
+- **Treat as 2v2:** If two agents are paired, it reduces back to a zero-sum team game
+- **Population training:** Train a population of agents that play each other, selecting the strongest
+- **Reward shaping:** Use score differential (total squares placed) as a continuous reward signal instead of binary win/loss
+- **Transfer learning:** Warm-start the 4-player network from the trained Duo weights
+
+This is a genuine research-level problem — the existing literature on multi-player AlphaZero is thin. But that's what makes it interesting.
+
+---
+
+## Open Questions
+
+- **Parallel MCTS:** Batching neural network inference across multiple MCTS simulations could dramatically speed up self-play. Root parallelisation vs leaf parallelisation trade-offs need investigation
+- **MCTS node reuse:** Currently trees are rebuilt from scratch each game. Reusing subtrees between moves would save computation
+- **Board representation alternatives:** ~~Current 14x18 encoding may not be optimal~~ Done — migrated to 44-channel per-piece spatial planes (see `plans/archive/board-encoding-options.md` for design rationale)
+- **Connect 4 as debugging step:** If Blokus move generation proves too difficult, Connect 4 could serve as an intermediate complexity game
+- **Regularisation:** Current loss function has no explicit regularisation term. Weight decay or L2 penalty may improve generalisation
+- **cpuct tuning:** The PUCT exploration constant is fixed at 1.0. May need to be tuned for Blokus's larger action space

@@ -1,13 +1,15 @@
 import numpy as np
 import pytest
 
+from games.tictactoe.board import Board
 from games.tictactoe.game import TicTacToeGame
 
 
 def test_initial_board_is_empty(ttt_game: TicTacToeGame):
     board = ttt_game.initialise_board()
-    assert board.shape == (3, 3)
-    assert np.all(board == 0)
+    assert isinstance(board, Board)
+    assert board.as_2d.shape == (3, 3)
+    assert np.all(board.as_2d == 0)
 
 
 def test_board_size(ttt_game: TicTacToeGame):
@@ -43,6 +45,7 @@ def test_valid_moves_after_move(ttt_game: TicTacToeGame):
 def test_get_next_state(ttt_game: TicTacToeGame):
     board = ttt_game.initialise_board()
     new_board, next_player = ttt_game.get_next_state(board, 1, 0)
+    assert isinstance(new_board, Board)
     # Player 1 placed at (0, 0)
     assert new_board[0][0] == 1
     # Next player should be -1
@@ -53,15 +56,28 @@ def test_canonical_form_player1(ttt_game: TicTacToeGame):
     board = ttt_game.initialise_board()
     board, _ = ttt_game.get_next_state(board, 1, 4)  # Centre
     canonical = ttt_game.get_canonical_form(board, 1)
-    np.testing.assert_array_equal(canonical, board)
+    assert isinstance(canonical, Board)
+    # For player 1, canonical board is unchanged
+    assert canonical[1][1] == 1  # Centre has player 1's piece
+    # Net representation should have correct channels
+    net_rep = canonical.as_multi_channel(1)
+    assert net_rep.shape == (2, 3, 3)
+    assert net_rep[0][1][1] == 1   # Channel 0: my stone at centre
+    assert np.sum(net_rep[1]) == 0  # Channel 1: no opponent stones
 
 
 def test_canonical_form_player_neg1(ttt_game: TicTacToeGame):
     board = ttt_game.initialise_board()
     board, _ = ttt_game.get_next_state(board, 1, 4)  # Centre has 1
     canonical = ttt_game.get_canonical_form(board, -1)
-    # Board should be negated
-    np.testing.assert_array_equal(canonical, -board)
+    assert isinstance(canonical, Board)
+    # For player -1, canonical board flips: +1 becomes -1
+    assert canonical[1][1] == -1  # Centre now shows as -1 (flipped)
+    # Net representation from player 1's perspective (MCTS convention)
+    net_rep = canonical.as_multi_channel(1)
+    assert net_rep.shape == (2, 3, 3)
+    assert net_rep[0][1][1] == 0   # Channel 0: player 1 has no +1 stones (they were flipped to -1)
+    assert net_rep[1][1][1] == 1   # Channel 1: the -1 at centre is "opponent"
 
 
 def test_game_not_ended_initially(ttt_game: TicTacToeGame):
@@ -137,15 +153,20 @@ def test_game_ended_draw(ttt_game: TicTacToeGame):
 
 def test_symmetries_count(ttt_game: TicTacToeGame):
     board = ttt_game.initialise_board()
+    canonical = ttt_game.get_canonical_form(board, 1)
     pi = np.ones(ttt_game.get_action_size()) / ttt_game.get_action_size()
-    symmetries = ttt_game.get_symmetries(board, pi)
+    symmetries = ttt_game.get_symmetries(canonical, pi)
     assert len(symmetries) == 8
+    # Each symmetry should be a (Board, NDArray) pair
+    for sym_board, sym_pi in symmetries:
+        assert isinstance(sym_board, Board)
 
 
 def test_symmetries_preserve_policy_sum(ttt_game: TicTacToeGame):
     board = ttt_game.initialise_board()
+    canonical = ttt_game.get_canonical_form(board, 1)
     pi = np.random.dirichlet(np.ones(ttt_game.get_action_size()))
-    symmetries = ttt_game.get_symmetries(board, pi)
+    symmetries = ttt_game.get_symmetries(canonical, pi)
     for _, sym_pi in symmetries:
         assert pytest.approx(sum(sym_pi), abs=1e-6) == 1.0
 
@@ -183,3 +204,53 @@ def test_full_random_game(ttt_game: TicTacToeGame):
 
     result = ttt_game.get_game_ended(board, player)
     assert result != 0
+
+
+def test_as_multi_channel_empty_board(ttt_game: TicTacToeGame):
+    """Empty board should have all-zero channels."""
+    board = ttt_game.initialise_board()
+    net_rep = board.as_multi_channel(1)
+    assert net_rep.shape == (2, 3, 3)
+    assert net_rep.dtype == np.float32
+    assert np.all(net_rep == 0)
+
+
+def test_as_multi_channel_player_perspective(ttt_game: TicTacToeGame):
+    """Calling as_multi_channel with different players should swap channels."""
+    board = ttt_game.initialise_board()
+    board, _ = ttt_game.get_next_state(board, 1, 4)   # Player 1 at centre
+    board, _ = ttt_game.get_next_state(board, -1, 0)  # Player -1 at (0,0)
+
+    rep_p1 = board.as_multi_channel(1)
+    rep_pn1 = board.as_multi_channel(-1)
+
+    # Player 1's perspective: channel 0 has player 1's stones, channel 1 has -1's stones
+    assert rep_p1[0][1][1] == 1   # Player 1 at centre
+    assert rep_p1[1][0][0] == 1   # Player -1 at (0,0)
+
+    # Player -1's perspective: channels are swapped
+    assert rep_pn1[0][0][0] == 1   # Player -1's stone is now "mine" (channel 0)
+    assert rep_pn1[1][1][1] == 1   # Player 1's stone is now "opponent" (channel 1)
+
+    # Channels should be swapped
+    np.testing.assert_array_equal(rep_p1[0], rep_pn1[1])
+    np.testing.assert_array_equal(rep_p1[1], rep_pn1[0])
+
+
+def test_with_move_immutable(ttt_game: TicTacToeGame):
+    """with_move should not affect the original board."""
+    board = ttt_game.initialise_board()
+    new_board = board.with_move((0, 0), 1)
+
+    # Original unchanged
+    assert board[0][0] == 0
+    # New board has the move
+    assert new_board[0][0] == 1
+    assert new_board is not board
+
+
+def test_state_key_on_board(ttt_game: TicTacToeGame):
+    """board.state_key should match game.state_key(board)."""
+    board = ttt_game.initialise_board()
+    board, _ = ttt_game.get_next_state(board, 1, 4)
+    assert board.state_key == ttt_game.state_key(board)

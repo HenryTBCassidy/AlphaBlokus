@@ -8,7 +8,7 @@ from loguru import logger
 from numpy.typing import NDArray
 
 from core.config import MCTSConfig
-from core.interfaces import IGame, INeuralNetWrapper
+from core.interfaces import IBoard, IGame, INeuralNetWrapper
 
 # Constants
 EPS: Final[float] = 1e-8  # Small constant to prevent division by zero
@@ -87,7 +87,7 @@ class MCTS:
         self._num_leaf_expansions: int = 0
         self._num_moves: int = 0
 
-    def get_action_prob(self, canonical_board: NDArray, temp: float = 1) -> list[float]:
+    def get_action_prob(self, canonical_board: IBoard, temp: float = 1) -> list[float]:
         """
         Get action probabilities for the current board state.
 
@@ -131,7 +131,7 @@ class MCTS:
         counts_sum = float(sum(counts))
         return [x / counts_sum for x in counts]
 
-    def search(self, canonical_board: NDArray) -> float:
+    def search(self, canonical_board: IBoard) -> float:
         """
         Perform one iteration of MCTS.
 

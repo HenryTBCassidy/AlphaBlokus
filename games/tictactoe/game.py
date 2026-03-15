@@ -10,9 +10,8 @@ class TicTacToeGame(IGame):
         super().__init__()
         self.n = n
 
-    def initialise_board(self) -> NDArray:
-        b = Board(self.n)
-        return np.array(b.pieces)
+    def initialise_board(self) -> Board:
+        return Board(self.n)
 
     def get_board_size(self) -> tuple[int, int]:
         return self.n, self.n
@@ -20,20 +19,14 @@ class TicTacToeGame(IGame):
     def get_action_size(self) -> int:
         return self.n * self.n + 1
 
-    def get_next_state(self, board: NDArray, player: int, action: int) -> tuple[NDArray, int]:
+    def get_next_state(self, board: Board, player: int, action: int) -> tuple[Board, int]:
         if action == self.n * self.n:
             return board, -player
-        b = Board(self.n)
-        b.pieces = np.copy(board)
-        move = (int(action / self.n), action % self.n)
-        b.execute_move(move, player)
-        return b.pieces, -player
+        return board.with_move((action // self.n, action % self.n), player), -player
 
-    def valid_move_masking(self, board: NDArray, player: int) -> NDArray:
+    def valid_move_masking(self, board: Board, player: int) -> NDArray:
         valids = [0] * self.get_action_size()
-        b = Board(self.n)
-        b.pieces = np.copy(board)
-        legal_moves = b.get_legal_moves(player)
+        legal_moves = board.get_legal_moves(player)
         if len(legal_moves) == 0:
             valids[-1] = 1
             return np.array(valids)
@@ -41,44 +34,43 @@ class TicTacToeGame(IGame):
             valids[self.n * x + y] = 1
         return np.array(valids)
 
-    def get_game_ended(self, board: NDArray, player: int) -> float:
-        b = Board(self.n)
-        b.pieces = np.copy(board)
-
-        if b.is_win(player):
+    def get_game_ended(self, board: Board, player: int) -> float:
+        if board.is_win(player):
             return 1
-        if b.is_win(-player):
+        if board.is_win(-player):
             return -1
-        if b.has_legal_moves():
+        if board.has_legal_moves():
             return 0
         # Draw has a very small value
         return 1e-4
 
-    def get_canonical_form(self, board: NDArray, player: int) -> NDArray:
-        return player * board
+    def get_canonical_form(self, board: Board, player: int) -> Board:
+        return board.canonical(player)
 
-    def get_symmetries(self, board: NDArray, pi: NDArray) -> list[tuple[NDArray, NDArray]]:
+    def get_symmetries(self, board: Board, pi: NDArray) -> list[tuple[Board, NDArray]]:
         assert len(pi) == self.n ** 2 + 1  # 1 for pass
         pi_board = np.reshape(pi[:-1], (self.n, self.n))
-        symmetries: list[tuple[NDArray, NDArray]] = []
+        board_array = board.as_2d
+        symmetries: list[tuple[Board, NDArray]] = []
 
         for i in range(1, 5):
             for is_flipped in [True, False]:
-                new_board = np.rot90(board, i)
+                new_array = np.rot90(board_array, i)
                 new_pi = np.rot90(pi_board, i)
                 if is_flipped:
-                    new_board = np.fliplr(new_board)
+                    new_array = np.fliplr(new_array)
                     new_pi = np.fliplr(new_pi)
+                new_board = Board._from_pieces(self.n, new_array.tolist())
                 new_pi_flat = np.append(new_pi.ravel(), pi[-1])
                 symmetries.append((new_board, new_pi_flat))
         return symmetries
 
-    def state_key(self, board: NDArray) -> bytes:
-        return board.tobytes()
+    def state_key(self, board: Board) -> bytes:
+        return board.state_key
 
     @staticmethod
-    def display(board: NDArray) -> None:
-        n = board.shape[0]
+    def display(board: Board) -> None:
+        n = board.n
 
         print("   ", end="")
         for y in range(n):

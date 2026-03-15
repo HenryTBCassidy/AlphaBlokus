@@ -2,7 +2,7 @@
 
 Living document. Append as we discover new conventions. All code in this repo should follow these rules. Claude should reference this before reviewing or writing code.
 
-Last updated: 2026-03-13
+Last updated: 2026-03-14
 
 ---
 
@@ -71,7 +71,7 @@ Every function signature must have full type annotations — parameters and retu
 
 ```python
 # Good
-def get_next_state(self, board: NDArray, player: int, action: int) -> tuple[NDArray, int]:
+def get_next_state(self, board: IBoard, player: int, action: int) -> tuple[IBoard, int]:
 
 # Bad
 def get_next_state(self, board, player, action):
@@ -100,20 +100,47 @@ Define at the top of each module, after imports:
 from typing import TypeAlias
 
 PolicyVector: TypeAlias = NDArray[np.float64]
-StateStr: TypeAlias = str
-BoardArray: TypeAlias = NDArray[np.int64]
-Player: TypeAlias = Callable[[NDArray], int]
+StateKey: TypeAlias = bytes
+Player: TypeAlias = Callable[[IBoard], int]
 ```
 
-### Protocol over ABC
+### Interfaces: Protocol with explicit subclassing
 
-Use `typing.Protocol` for interfaces, not `abc.ABC`. Protocol gives structural subtyping — implementations don't need to inherit, just implement the right methods.
+Define interfaces as `typing.Protocol`. Implementations **explicitly inherit** from the Protocol — just like `class Foo : IFoo` in C#. This gives us:
+
+- Explicit declaration of intent (you can see what a class implements)
+- Static enforcement by type checkers (missing methods caught at class definition)
+- Runtime enforcement at instantiation (Protocol uses ABCMeta under the hood)
+- Structural subtyping as a fallback (external code with the right shape still matches)
 
 ```python
+# Define the interface
 class IGame(Protocol):
     def get_action_size(self) -> int: ...
-    def get_next_state(self, board: NDArray, player: int, action: int) -> tuple[NDArray, int]: ...
+    def get_next_state(self, board: IBoard, player: int, action: int) -> tuple[IBoard, int]: ...
+
+# Implement it — explicit inheritance
+class TicTacToeGame(IGame):
+    def get_action_size(self) -> int:
+        return self.n * self.n + 1
+    def get_next_state(self, board: Board, player: int, action: int) -> tuple[Board, int]:
+        ...
 ```
+
+When an implementation also needs shared behaviour (e.g. a base class with helpers), inherit from both the Protocol and ABC:
+
+```python
+class BaseNNetWrapper(INeuralNetWrapper, ABC):
+    ...
+```
+
+**Do not** use `@runtime_checkable` — it only checks method existence, not signatures.
+
+**Do not** put `__init__` on Protocols — implementations have their own constructors.
+
+### No quoted type annotations
+
+Never use string-quoted forward references (`board: "IBoard"`). If needed, add `from __future__ import annotations` at the top of the file to make all annotations lazy. Prefer avoiding it entirely by ordering definitions correctly or importing the type.
 
 ### Frozen dataclasses for value objects
 
@@ -355,6 +382,7 @@ per simulation, giving orders-of-magnitude speedup for Blokus.
 - ❌ Bare `except:` — always catch specific exceptions
 - ❌ `os.path` — use `pathlib.Path`
 - ❌ `typing.Tuple/List/Dict/Optional` — use builtins + `X | None`
+- ❌ Quoted type annotations (`board: "IBoard"`) — use `from __future__ import annotations` or fix import order
 - ❌ Docstrings on obvious one-liners — the type hints are enough
 - ❌ Deep nesting — refactor with early returns / guard clauses
 - ❌ Abbreviations that aren't universal — `cfg` (use `config`), `mgr` (use `manager`), `proc` (use `process`)
@@ -365,7 +393,7 @@ per simulation, giving orders-of-magnitude speedup for Blokus.
 
 - ✅ Frozen dataclasses for config and DTOs
 - ✅ TypeAlias definitions at the top of files
-- ✅ Protocol-based interfaces (structural subtyping)
+- ✅ Protocol-based interfaces with explicit subclassing (`class Board(IBoard)`)
 - ✅ StrEnum for enumerations
 - ✅ Computed properties on config objects
 - ✅ Separation of concerns: core/ is game-agnostic

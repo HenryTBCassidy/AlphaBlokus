@@ -3,6 +3,8 @@ from pathlib import Path
 import pytest
 
 from core.config import MCTSConfig, NetConfig, RunConfig
+from games.blokusduo.board import BlokusDuoBoard
+from games.blokusduo.game import BlokusDuoGame
 from games.blokusduo.pieces import PieceManager, pieces_loader
 from games.tictactoe.game import TicTacToeGame
 
@@ -28,7 +30,7 @@ def net_config() -> NetConfig:
         epochs=1,
         batch_size=4,
         cuda=False,
-        num_channels=32,
+        num_filters=32,
         num_residual_blocks=1,
     )
 
@@ -65,3 +67,15 @@ def pieces_path() -> Path:
 def piece_manager(pieces_path: Path) -> PieceManager:
     """PieceManager loaded from the real pieces.json."""
     return pieces_loader(pieces_path)
+
+
+@pytest.fixture(scope="session")
+def blokus_game(pieces_path: Path) -> BlokusDuoGame:
+    """A reusable BlokusDuoGame instance."""
+    return BlokusDuoGame(pieces_config_path=pieces_path)
+
+
+@pytest.fixture
+def blokus_board(blokus_game: BlokusDuoGame) -> BlokusDuoBoard:
+    """A fresh BlokusDuoBoard for each test."""
+    return blokus_game.initialise_board()

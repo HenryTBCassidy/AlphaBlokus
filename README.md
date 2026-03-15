@@ -23,9 +23,53 @@ This is the same approach that achieved superhuman performance in Chess, Shogi, 
 
 ---
 
+## Current Status
+
+| Phase | Status | Notes |
+|-------|--------|-------|
+| Core AlphaZero framework | **Complete** | MCTS, Coach, Arena, config, logging, reporting |
+| Tic-Tac-Toe implementation | **Complete** | Network plays competitively with perfect play |
+| Blokus Duo game logic | **Partial** | Board, pieces, placement validation work; move generation incomplete |
+| Blokus Duo neural net | **Complete** | ResNet architecture defined and compiles |
+| Blokus Duo integration | **Blocked** | Cannot run self-play until move generation is complete |
+
+### What Works
+
+- Full tic-tac-toe training pipeline end-to-end (self-play → training → arena → reporting)
+- IBoard protocol with immutable boards for both games
+- 44-channel per-piece spatial encoding for BlokusDuo neural net input (`board.as_multi_channel`)
+- 2-channel player-split encoding for TicTacToe neural net input
+- State key on board objects (196-byte signed int8 placement board for Blokus, flat board bytes for TicTacToe)
+- Blokus board representation, piece insertion, placement validation, coordinate conversion
+- Initial move caching (all valid first moves for both players pre-computed)
+- Placement point cache (tracks valid placement corners after each piece insertion)
+- Neural network for Blokus compiles and runs forward pass (verified by tests)
+- HTML reporting with Plotly (loss curves, arena win rates, timing statistics)
+
+### What's Blocked
+
+1. **`BlokusDuoBoard.valid_moves()`** — move generation logic unimplemented (returns empty)
+2. **`BlokusDuoGame.valid_move_masking()`** — raises `NotImplementedError`
+3. **`BlokusDuoGame.get_symmetries()`** — raises `NotImplementedError`
+4. **`BlokusDuoBoard.game_ended()`** — raises `NotImplementedError`
+5. **Model loading** in `main.py` — raises `NotImplementedError`
+
+### Critical Path
+
+To get Blokus self-play running, these must be implemented **in order**:
+
+1. `BlokusDuoBoard.valid_moves()` — aggregate valid moves from placement point cache
+2. `BlokusDuoBoard.game_ended()` — check if neither player has legal moves
+3. `BlokusDuoGame.valid_move_masking()` — convert valid moves to binary action-space mask
+4. `BlokusDuoGame.get_symmetries()` — generate symmetric board+policy pairs for data augmentation
+5. Fix `main.py` — switch from TicTacToeGame to BlokusDuoGame
+6. Fix model loading — implement checkpoint resume
+
+---
+
 ## Features
 
-- **Game-agnostic AlphaZero framework** — modular `IGame` and `INeuralNetWrapper` interfaces make it easy to add new games
+- **Game-agnostic AlphaZero framework** — modular `IGame`, `IBoard`, and `INeuralNetWrapper` interfaces make it easy to add new games
 - **Complete Tic-Tac-Toe implementation** — validates the full training pipeline end-to-end (self-play, training, arena evaluation)
 - **ResNet architecture** — configurable depth and width with residual blocks, batch normalisation, and dual policy/value heads
 - **MCTS with PUCT** — Upper Confidence bounds applied to Trees for balanced exploration and exploitation
@@ -44,19 +88,22 @@ AlphaBlokus/
 │   ├── coach.py                # Training orchestrator (self-play → train → arena)
 │   ├── arena.py                # Model evaluation with alternating start positions
 │   ├── config.py               # Configuration dataclasses
-│   └── interfaces.py           # IGame and INeuralNetWrapper protocols
+│   └── interfaces.py           # IGame, IBoard, and INeuralNetWrapper protocols
 ├── games/
+│   ├── base_wrapper.py         # Shared neural net wrapper (train, predict, checkpoint)
 │   ├── tictactoe/              # Reference implementation (complete)
-│   │   ├── game.py             # Tic-Tac-Toe game logic
+│   │   ├── board.py            # Immutable board (IBoard) — 2-channel encoding
+│   │   ├── game.py             # Tic-Tac-Toe game logic (IGame)
 │   │   └── neuralnets/         # 4-layer CNN (Conv → FC → policy + value)
 │   └── blokusduo/              # Target implementation (in progress)
-│       ├── game.py             # Blokus Duo game logic with piece placement
+│       ├── board.py            # Immutable board (IBoard) — 44-channel encoding
+│       ├── game.py             # Blokus Duo game logic (IGame)
 │       ├── pieces.py           # 21 pieces, 91 orientations, symmetry reduction
 │       ├── pieces.json         # Piece definitions with basis orientations
 │       └── neuralnets/         # ResNet (configurable blocks → policy + value)
-├── docs/
-│   ├── reference/              # Stable docs — how things work
-│   └── plans/                  # Active checklists — what to do
+├── docs/                       # Project documentation
+│   ├── guides/                 # Conventions, process, AI assistant context
+│   └── plans/                  # Active checklists and archived plans
 ├── notebooks/                  # Jupyter notebooks (eval.ipynb)
 ├── run_configurations/         # JSON configs for test and production runs
 ├── reporting.py                # HTML report generation with Plotly
@@ -72,7 +119,7 @@ AlphaBlokus/
 | Component | Tic-Tac-Toe | Blokus Duo |
 |-----------|-------------|------------|
 | Architecture | 4-layer CNN | ResNet (configurable depth) |
-| Input | 3x3 board | 14x18 (board + piece encoding) |
+| Input | 2 x 3 x 3 (2-channel) | 44 x 14 x 14 (per-piece spatial planes) |
 | Policy output | 10 actions | 17,837 actions |
 | Value output | Scalar ∈ [-1, 1] | Scalar ∈ [-1, 1] |
 | Residual blocks | None | 1–8 (configurable) |
@@ -137,27 +184,35 @@ python main.py --config run_configurations/test_run.json
 
 ## Documentation
 
-Detailed documentation lives in the [`docs/`](docs/) folder, split into **reference** (how things work) and **plans** (what to do).
+Detailed documentation lives in the [`docs/`](docs/) folder.
 
-### Reference (`docs/reference/`)
+### Reference Docs (`docs/`)
 
 | Document | Description |
 |----------|-------------|
-| [00 — Overview](docs/reference/00-OVERVIEW.md) | Mission, phased approach, key decisions, effort estimates |
-| [01 — Algorithms](docs/reference/01-ALGORITHMS.md) | MCTS implementation, self-play, arena evaluation, caching strategies |
-| [02 — Neural Networks](docs/reference/02-NEURAL-NETWORKS.md) | ResNet and CNN architectures, board encoding, loss functions |
-| [03 — Evaluation](docs/reference/03-EVALUATION.md) | Training diagnostics, Pentobi benchmarking, headline metrics |
-| [04 — Competitive Landscape](docs/reference/04-COMPETITIVE-LANDSCAPE.md) | Pentobi, existing Blokus RL projects, why neural Blokus is hard |
-| [05 — Interfaces](docs/reference/05-INTERFACES.md) | Pentobi GTP adapter, human-playable UI, translation layer |
-| [06 — Appendix](docs/reference/06-APPENDIX.md) | All 21 Blokus pieces, 91 orientations, symmetry analysis |
-| [07 — Handoff](docs/reference/07-HANDOFF.md) | Context for contributors, current state, next steps, gotchas |
+| [01 — Background](docs/01-BACKGROUND.md) | Why Blokus, competitive landscape, key decisions |
+| [02 — Algorithms](docs/02-ALGORITHMS.md) | MCTS implementation, self-play, arena evaluation, caching strategies |
+| [03 — Neural Networks](docs/03-NEURAL-NETWORKS.md) | ResNet and CNN architectures, board encoding, loss functions |
+| [04 — Blokus Duo](docs/04-BLOKUS-DUO.md) | Game rules, 21 pieces, 91 orientations, symmetry analysis |
+| [05 — Evaluation](docs/05-EVALUATION.md) | Training diagnostics, Pentobi benchmarking, headline metrics |
+| [06 — Interfaces](docs/06-INTERFACES.md) | Pentobi GTP adapter, human-playable UI, translation layer |
+| [07 — Data Storage](docs/07-DATA-STORAGE.md) | Parquet format, metrics tables, checkpoints |
+
+### Guides (`docs/guides/`)
+
+| Document | Description |
+|----------|-------------|
+| [Style Guide](docs/guides/STYLE-GUIDE.md) | Code conventions, naming, type system, testing |
+| [Plan Format](docs/guides/PLAN-FORMAT.md) | How to write implementation plans |
+| [AI Context](docs/guides/AI-CONTEXT.md) | Context for Claude / AI assistants |
 
 ### Plans (`docs/plans/`)
 
 | Document | Description |
 |----------|-------------|
-| [Structural Refactor](docs/plans/structural-refactor.md) | Project structure, logging, package management, naming, testing strategy |
 | [Bug Fixes](docs/plans/bug-fixes.md) | Interface mismatches, MCTS performance, board bugs, training pipeline fixes |
+| [Multi-Channel Board Encoding](docs/plans/archive/multi-channel-board-encoding.md) | IBoard protocol, immutable boards, 44-channel BlokusDuo / 2-channel TicTacToe (complete) |
+| [Structural Refactor](docs/plans/archive/structural-refactor.md) | Project structure, logging, package management, naming, testing strategy (complete) |
 
 ---
 
@@ -167,6 +222,7 @@ Detailed documentation lives in the [`docs/`](docs/) folder, split into **refere
 - [x] Tic-Tac-Toe implementation and validation
 - [x] Blokus Duo board representation and piece system
 - [x] Blokus Duo neural network architecture
+- [x] IBoard protocol with immutable boards and multi-channel neural net encoding
 - [ ] Architecture review fixes (MCTS optimisation, interface contracts, piece ID mapping)
 - [ ] Blokus Duo move generation with caching
 - [ ] End-to-end Blokus Duo self-play training

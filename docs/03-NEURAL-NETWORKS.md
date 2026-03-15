@@ -12,14 +12,14 @@ AlphaBlokus uses two neural network architectures: a simple **4-layer CNN** for 
 
 | Property | Tic-Tac-Toe CNN | Blokus ResNet |
 |----------|----------------|---------------|
-| Input dimensions | 3 × 3 (board) | 14 × 18 (board + piece tracking) |
+| Input dimensions | 2 × 3 × 3 (2-channel player split) | 44 × 14 × 14 (per-piece spatial planes) |
 | Action space | 10 (9 squares + pass) | 17,837 (14×14×91 + pass) |
 | Architecture | 4 Conv layers → FC | Conv → N ResNet blocks → heads |
 | Residual connections | No | Yes |
 | Configurable depth | No (fixed 4 layers) | Yes (1-8 residual blocks) |
-| Configurable width | Yes (num_channels) | Yes (num_channels) |
+| Configurable width | Yes (num_filters) | Yes (num_filters) |
 | Dropout | Yes (configurable rate) | No |
-| Parameters (typical) | ~2.6M (512ch) | ~24M (512ch, 4 blocks) |
+| Parameters (typical) | ~8.1M (512ch) | ~26M (512ch, 4 blocks) |
 | Source file | `tictactoe/neuralnets/net.py` | `blokusduo/neuralnets/net.py` |
 
 ---
@@ -31,12 +31,12 @@ How does Blokus Duo stack up against the games AlphaZero was built for? This tab
 | Property | Chess (AlphaZero) | Go (AlphaZero) | Blokus Duo (Ours) |
 |----------|-------------------|----------------|-------------------|
 | Board size | 8 × 8 | 19 × 19 | 14 × 14 |
-| Input encoding | 8 × 8 × 119 planes | 19 × 19 × 17 planes | 14 × 18 × 1 plane |
-| Input features | 8 time steps of piece positions, castling rights, en passant, move counts | 8 time steps of stone positions + colour to play | Current board state + remaining pieces per player |
+| Input encoding | 8 × 8 × 119 planes | 19 × 19 × 17 planes | 14 × 14 × 44 planes |
+| Input features | 8 time steps of piece positions, castling rights, en passant, move counts | 8 time steps of stone positions + colour to play | 44 spatial planes: 21 per-piece binary planes per player + 2 aggregate occupancy planes |
 | Action space | 4,672 (8×8×73) | 362 (19×19 + pass) | 17,837 (14×14×91 + pass) |
 | Residual blocks | 20 | 20 | 1–8 (configurable) |
 | Channels per layer | 256 | 256 | 512 |
-| Parameters (approx.) | ~45M | ~24M | ~28M (4 blocks) |
+| Parameters (approx.) | ~45M | ~24M | ~26M (4 blocks) |
 | Policy head output | 4,672 logits | 362 logits | 17,837 logits |
 | Value head output | Scalar ∈ [-1, 1] | Scalar ∈ [-1, 1] | Scalar ∈ [-1, 1] |
 | Training hardware | 5,000 TPUs | 5,000 TPUs | Consumer GPU |
@@ -45,11 +45,11 @@ How does Blokus Duo stack up against the games AlphaZero was built for? This tab
 
 ### What Stands Out
 
-**Blokus has the largest action space by far.** At 17,837 possible actions, Blokus Duo's action space is ~4× Chess and ~49× Go. This is because every combination of grid position (196) × piece-orientation (91) is a distinct action. The policy head's final FC layer (504 → 17,837 ≈ 9M params) is a direct consequence — it's the single most expensive layer in the network.
+**Blokus has the largest action space by far.** At 17,837 possible actions, Blokus Duo's action space is ~4× Chess and ~49× Go. This is because every combination of grid position (196) × piece-orientation (91) is a distinct action. The policy head's final FC layer (392 → 17,837 ≈ 7M params) is a direct consequence — it's the single most expensive layer in the network.
 
 **Go has a much deeper network for a smaller action space.** AlphaZero uses 20 residual blocks for both Chess and Go, versus our 1–8. The deeper architecture compensates for Go's enormous state space (19×19 board, ~10^170 legal positions) — the network needs more capacity to evaluate positions, even though the number of possible moves per turn is relatively small.
 
-**AlphaZero uses richer input encodings.** Chess encodes the last 8 board positions (119 planes per position), giving the network temporal context about how the game has evolved. Our Blokus encoding uses a single plane with piece tracking columns — simpler, but the network can't see move history. This is a deliberate trade-off: multi-plane history encoding would increase the input from 14×18×1 to something like 14×14×N, significantly increasing the first conv layer's parameter count.
+**AlphaZero uses richer input encodings.** Chess encodes the last 8 board positions (119 planes per position), giving the network temporal context about how the game has evolved. Our Blokus encoding uses 44 spatial planes (21 per-piece planes per player + 2 aggregate planes), following the AlphaZero convention of one plane per piece type per player. We don't encode move history — the network sees only the current position — but the per-piece decomposition gives convolutional filters rich structural information about which pieces have been placed and where.
 
 **Compute budget is the real gap.** AlphaZero trained Chess on 5,000 first-generation TPUs for 9 hours (~44,000 TPU-hours). We're targeting a single consumer GPU. This means fewer MCTS simulations per move (200 vs 800), fewer self-play games per generation, and longer wall-clock training times. The configurable ResNet depth (1–8 blocks vs AlphaZero's fixed 20) is a concession to this — we start shallow and scale up as needed.
 
@@ -64,11 +64,11 @@ Validate the full AlphaZero pipeline on a solved game before tackling Blokus. Th
 ### Architecture Diagram
 
 ```
-Input: 3 × 3 board state
+Input: 2 × 3 × 3 (my stones / opponent stones)
     │
     ▼
 ┌─────────────────────────────┐
-│  Conv2d(1→C, 3×3, pad=1)   │  3×3 → 3×3
+│  Conv2d(2→C, 3×3, pad=1)   │  3×3 → 3×3
 │  BatchNorm2d → ReLU         │
 ├─────────────────────────────┤
 │  Conv2d(C→C, 3×3, pad=1)   │  3×3 → 3×3
@@ -122,8 +122,8 @@ Input: 3 × 3 board state
 ### Forward Pass
 
 ```python
-# Input: batch × 3 × 3
-x = x.view(-1, 1, 3, 3)        # Add channel dim
+# Input: batch × 2 × 3 × 3       # batch_size * 2 * board_rows * board_cols
+x = x.view(-1, 2, 3, 3)        # Add channel dim
 
 # 4 conv layers (last one reduces spatial dims)
 x = relu(bn1(conv1(x)))         # batch × C × 3 × 3
@@ -152,12 +152,13 @@ Learn to evaluate Blokus Duo positions and predict good moves from self-play. Th
 ### Architecture Diagram
 
 ```
-Input: 14 × 18 board state (14×14 board + 2×2 piece tracking columns)
+Input: 44 × 14 × 14 (44-channel per-piece spatial planes)
     │
     ▼
 ┌─────────────────────────────────┐
 │  Initial Conv Block             │
-│  Conv2d(1→C, 3×3, pad=1)       │  14×18 → 14×18
+│  Conv2d(44→C, 3×3, pad=1,      │  14×14 → 14×14
+│         bias=False)             │
 │  BatchNorm2d(C) → ReLU         │
 └─────────────┬───────────────────┘
               │
@@ -182,7 +183,7 @@ Input: 14 × 18 board state (14×14 board + 2×2 piece tracking columns)
 │  (N = config.num_residual_blocks│
 │   typically 1-8)                │
 └─────────────┬───────────────────┘
-              │ features: batch × C × 14 × 18
+              │ features: batch × C × 14 × 14
               │
      ┌────────┴────────┐
      ▼                 ▼
@@ -193,9 +194,9 @@ Input: 14 × 18 board state (14×14 board + 2×2 piece tracking columns)
 │   1×1)        │ │   1×1)        │
 │ BN(2) → ReLU │ │ BN(1) → ReLU │
 │ Flatten       │ │ Flatten       │
-│ (2×14×18=504) │ │ (1×14×18=252) │
+│ (2×14×14=392) │ │ (1×14×14=196) │
 │               │ │               │
-│ FC(504 →      │ │ FC(252 → C)   │
+│ FC(392 →      │ │ FC(196 → C)   │
 │   17837)      │ │ ReLU          │
 │               │ │ FC(C → 1)     │
 │ log_softmax   │ │ Tanh          │
@@ -227,28 +228,38 @@ BatchNorm2d(C)                     │
 ```
 
 - **No bias** in conv layers — BatchNorm absorbs the bias term, so including it would be redundant
-- **Same spatial dimensions** — padding=1 with kernel=3 preserves 14×18 throughout
+- **Same spatial dimensions** — padding=1 with kernel=3 preserves 14×14 throughout
 - **Identity skip connection** — no projection needed since channel count doesn't change
 
-### Board Representation (14 × 18)
+### Board Representation (44 × 14 × 14)
 
-The neural network input encodes both the board state and which pieces each player has used:
+The neural network input is a 44-channel spatial tensor built by
+`BlokusDuoBoard.as_multi_channel(current_player)`:
 
 ```
-┌──────────┬──────────────────────────────────────┬──────────┐
-│ Black's  │                                      │ White's  │
-│ pieces   │          14 × 14 game board           │ pieces   │
-│ encoded  │                                      │ encoded  │
-│ (14 × 2) │    0 = empty, 1 = White, -1 = Black  │ (14 × 2) │
-└──────────┴──────────────────────────────────────┴──────────┘
-  cols 0-1              cols 2-15                  cols 16-17
-
-Total: 14 rows × 18 columns = 252 values per position
+Channels  0-20:  Current player's 21 pieces (one 14×14 binary plane each)
+                 Channel i = 1 where piece (i+1) sits, 0 elsewhere.
+                 All-zero if that piece hasn't been played yet.
+Channels 21-41:  Opponent's 21 pieces (same layout)
+Channel  42:     Aggregate current player occupancy (union of 0-20)
+Channel  43:     Aggregate opponent occupancy (union of 21-41)
 ```
 
-**Piece tracking columns:** Each player has a 14×2 = 28-element region. This is a reshaped version of a length-28 vector (one slot per piece, with padding). When a piece is played, its corresponding slot is set to the player's value (+1 or -1). This tells the network which pieces each player has remaining — critical information for move selection.
+Internally, the board stores a single `_piece_placement_board` (int8, 14×14)
+where +piece_id = White, -piece_id = Black, 0 = empty. The `as_multi_channel`
+method derives the 44-channel tensor from this signed array using a
+perspective-relative encoding: `ppb * current_player > 0` selects "my" pieces,
+`ppb * current_player < 0` selects "opponent" pieces.
 
-**Canonical form:** The board is multiplied by the current player's value before being fed to the network. From the network's perspective, "my pieces" are always +1 and "opponent's pieces" are always -1, regardless of which colour is actually playing.
+Piece inventory is implicit: an all-zero plane means "not yet played."
+No separate inventory vector or column-padding is needed.
+
+**Canonical form:** `board.canonical(player)` negates the placement board and
+swaps all per-player state (remaining pieces, placement caches). After
+canonicalisation, `as_multi_channel(1)` always shows the current player's
+pieces in channels 0-20.
+
+**Design rationale:** Four encoding options were evaluated: column-padded single tensor (1×14×18), late fusion (2×14×14 + inventory vector), per-piece spatial planes (44×14×14), and FiLM conditioning. The per-piece approach was chosen because it follows the AlphaZero convention (one plane per piece type per player), gives conv filters access to piece identity and spatial position simultaneously, and implicitly encodes piece inventory without a separate input. The sparsity of per-piece planes (each piece covers 1-5 of 196 squares) is comparable to AlphaZero Chess (where per-piece planes are 1.6-3.1% dense) and is well-supported by the "Representation Matters" paper (2024) which found richer representations improve performance even when sparse. See `docs/plans/archive/board-encoding-options.md` for the full analysis of all four options.
 
 ### Action Space Encoding
 
@@ -278,8 +289,8 @@ The `PieceManager` maintains a `BidirectionalDict` mapping between `(piece_id, o
 **Policy Head:**
 1. 1×1 convolution reducing C channels → 2 channels (spatial features extraction)
 2. BatchNorm + ReLU
-3. Flatten: 2 × 14 × 18 = 504
-4. Linear projection: 504 → 17,837
+3. Flatten: 2 × 14 × 14 = 392
+4. Linear projection: 392 → 17,837
 5. `log_softmax` for numerical stability during training
 
 The output is log-probabilities. During prediction, `torch.exp(pi)` converts back to probabilities for MCTS.
@@ -287,8 +298,8 @@ The output is log-probabilities. During prediction, `torch.exp(pi)` converts bac
 **Value Head:**
 1. 1×1 convolution reducing C channels → 1 channel
 2. BatchNorm + ReLU
-3. Flatten: 1 × 14 × 18 = 252
-4. FC: 252 → C (compress to channel width)
+3. Flatten: 1 × 14 × 14 = 196
+4. FC: 196 → C (compress to channel width)
 5. ReLU
 6. FC: C → 1
 7. `tanh` → value in [-1, +1]
@@ -364,18 +375,19 @@ Repeat for num_epochs
 ### Prediction
 
 ```python
-# 1. Convert board to tensor
-board = torch.FloatTensor(board.astype(np.float64))
+# 1. Get multi-channel tensor from board
+tensor = board.as_multi_channel(1)
+tensor = torch.FloatTensor(tensor.astype(np.float64))
 
 # 2. Add batch dimension
-board = board.view(1, board_x, board_y)
+tensor = tensor.unsqueeze(0)  # (C, H, W) → (1, C, H, W)
 
 # 3. Set network to eval mode (disables dropout, uses running BN stats)
 self.nnet.eval()
 
 # 4. No gradient computation needed for inference
 with torch.no_grad():
-    pi, v = self.nnet(board)
+    pi, v = self.nnet(tensor)
 
 # 5. Convert log-probabilities back to probabilities
 return torch.exp(pi).data.cpu().numpy()[0], v.data.cpu().numpy()[0]
@@ -396,7 +408,7 @@ return torch.exp(pi).data.cpu().numpy()[0], v.data.cpu().numpy()[0]
 
 | Layer | Parameters |
 |-------|-----------|
-| conv1 (1→512, 3×3) | 4,608 |
+| conv1 (2→512, 3×3) | 9,216 |
 | conv2 (512→512, 3×3) | 2,359,296 |
 | conv3 (512→512, 3×3) | 2,359,296 |
 | conv4 (512→512, 3×3) | 2,359,296 |
@@ -412,16 +424,16 @@ return torch.exp(pi).data.cpu().numpy()[0], v.data.cpu().numpy()[0]
 
 | Layer | Parameters |
 |-------|-----------|
-| Initial conv (1→512, 3×3) + BN | 4,608 + 1,024 |
+| Initial conv (44→512, 3×3) + BN | 202,752 + 1,024 |
 | Per residual block (2 convs + 2 BNs, no bias) | 2 × 512 × 512 × 9 + 2 × 1,024 = 4,720,640 |
 | 4 residual blocks | 4 × 4,720,640 = 18,882,560 |
 | Policy conv (512→2, 1×1) + BN | 1,024 + 4 |
-| Policy FC (504→17,837) | 9,030,348 |
+| Policy FC (392→17,837) | 6,991,904 + 17,837 (bias) ≈ 7.0M |
 | Value conv (512→1, 1×1) + BN | 512 + 2 |
-| Value FC1 (252→512) + FC2 (512→1) | 129,536 + 513 |
-| **Total** | **~28M** |
+| Value FC1 (196→512) + FC2 (512→1) | 100,352 + 513 |
+| **Total** | **~26M** |
 
-The policy head's final FC layer (504 → 17,837 = ~9M params) is the single largest layer due to Blokus's massive action space.
+The policy head's final FC layer (392 → 17,837 ≈ 7M params) is the single largest layer due to Blokus's massive action space.
 
 ---
 
@@ -437,7 +449,7 @@ class NetConfig:
     epochs: int              # Training epochs per generation (e.g., 10)
     batch_size: int          # Batch size (e.g., 64)
     cuda: bool               # GPU acceleration
-    num_channels: int        # Conv channel width (e.g., 512)
+    num_filters: int         # Conv channel width (e.g., 512)
     num_residual_blocks: int # ResNet depth (Blokus only, e.g., 4)
 ```
 
@@ -450,7 +462,7 @@ class NetConfig:
 | epochs | 10 | 10 |
 | batch_size | 64 | 64 |
 | cuda | false | true |
-| num_channels | 512 | 512 |
+| num_filters | 512 | 512 |
 | num_residual_blocks | 1 | 4 |
 
 ---
@@ -460,8 +472,8 @@ class NetConfig:
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | ResNet over plain CNN for Blokus | ResNet | Residual connections prevent degradation in deeper networks. Blokus needs more capacity than TTT. Matches AlphaZero paper architecture |
-| Single input channel | 1 channel | Board state is encoded as a single 2D plane with values -1/0/+1. Simpler than multi-channel encoding. Could experiment with separate channels per player later |
-| 14×18 input (not 14×14) | Extended board | Network needs to know which pieces have been played. Appending 2-column encoded regions per player is the simplest way to provide this |
+| Multi-channel input | 2 ch (TTT), 44 ch (Blokus) | One plane per piece per player, following AlphaZero convention. Richer information for conv filters |
+| 14×14 input with per-piece planes | Spatial encoding | Piece inventory is implicit in the per-piece planes (all-zero = not played). No column padding needed |
 | log_softmax + manual cross-entropy | Performance | Numerically stable when combined with the target × log(pred) loss formula. Could switch to torch.nn.CrossEntropyLoss for clarity |
 | Adam optimiser (no schedule) | Simplicity | Works well out of the box. Learning rate scheduling is listed as future work |
 | No weight decay / L2 | Simplicity | Following the minimal AlphaZero recipe first. Regularisation may improve generalisation — listed as open question |
@@ -472,7 +484,6 @@ class NetConfig:
 ## Open Questions / Future Work
 
 - **Learning rate scheduling:** Warm-up then cosine/step decay could improve training stability, especially for longer runs
-- **Multi-channel input:** Separate binary planes for "my pieces", "opponent pieces", "valid placement points" — richer information for the network
 - **Weight decay:** L2 regularisation in the loss function to prevent overfitting
 - **Mixed precision training (FP16):** Could roughly double training throughput on modern GPUs
 - **Batch normalisation momentum:** Default PyTorch momentum (0.1) may not be optimal for small batch counts
