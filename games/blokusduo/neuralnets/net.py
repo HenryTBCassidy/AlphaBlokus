@@ -5,6 +5,7 @@ import torch.nn as nn
 from torch.nn import functional as F
 
 from core.config import NetConfig
+from core.interfaces import IGame
 
 
 def calc_conv2d_output(y_x, kernel_size=3, stride=1, pad=1, dilation=1):
@@ -65,7 +66,7 @@ class ResNetBlock(nn.Module):
 
 
 class AlphaBlokusDuo(nn.Module):
-    def __init__(self, config: NetConfig):
+    def __init__(self, game: IGame, config: NetConfig):
         """Initialise the Blokus Duo ResNet.
 
         The neural net receives a 44-channel representation produced by
@@ -79,10 +80,9 @@ class AlphaBlokusDuo(nn.Module):
         Net input shape: batch_size x 44 x 14 x 14
         """
         super().__init__()
-        self.board_rows, self.board_cols = 14, 14
+        self.board_rows, self.board_cols = game.get_board_size()
+        self.action_size = game.get_action_size()
         self.num_input_channels = 44
-        # Actions: place any of 91 piece-orientations on any of the 14×14 physical board squares, plus pass
-        self.action_size = (14 * 14 * 91) + 1  # TODO: Get this from the game object (maybe)
         self.config = config
 
         conv_out_y_x = calc_conv2d_output((self.board_rows, self.board_cols), 3, 1, 1)

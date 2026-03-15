@@ -13,4 +13,4 @@ class NNetWrapper(BaseNNetWrapper):
         super().__init__(game, config)
 
     def _create_network(self) -> nn.Module:
-        return AlphaBlokusDuo(self.net_config)
+        return AlphaBlokusDuo(self.game, self.net_config)
