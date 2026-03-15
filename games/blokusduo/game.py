@@ -129,7 +129,7 @@ class BlokusDuoGame(IGame):
         self,
         board: BlokusDuoBoard,
         player: PlayerSide,
-        action: Action
+        action: int
     ) -> tuple[BlokusDuoBoard, PlayerSide]:
         """
         Apply an action to the current board state.
@@ -137,14 +137,17 @@ class BlokusDuoGame(IGame):
         Args:
             board: Current board state
             player: Current player (1 for White, -1 for Black)
-            action: Action to apply
+            action: Flat action index (0–17,836). Use action_codec to convert.
 
         Returns:
             Tuple containing:
                 - BlokusDuoBoard: Updated board state
                 - PlayerSide: Next player to move (-player)
         """
-        return board.with_piece(action=action, player_side=player), -player
+        if self.action_codec.is_pass(action):
+            return board, -player
+        decoded = self.action_codec.decode(action)
+        return board.with_piece(action=decoded, player_side=player), -player
 
     def valid_move_masking(self, board: BlokusDuoBoard, player: PlayerSide) -> NDArray:
         """
