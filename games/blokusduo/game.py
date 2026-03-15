@@ -48,7 +48,7 @@ class BlokusDuoGame(IGame):
         # Canonically will have black start in top left and white in bottom right
         self.white_start = (9, 9)
         self.black_start = (4, 4)
-        self._coordinate_index_decoder = CoordinateIndexDecoder(14)
+        self._coordinate_index_decoder = CoordinateIndexDecoder(self.board_size)
         self.action_codec = ActionCodec(self.board_size, self.piece_manager)
 
         # Calculate all possible starting moves on game init and cache to save time

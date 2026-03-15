@@ -247,7 +247,7 @@ class BlokusDuoBoard(IBoard):
             for j in range(p_wid):
                 if piece_orientation[i, j] != 0:
                     ri, ci = length_idx + i, width_idx + j
-                    if ri > 13 or ci > 13:
+                    if ri >= self.N or ci >= self.N:
                         raise IndexError(
                             f"Piece cannot be inserted at this index, it does not fit on the board! "
                             f"\n{self._piece_insertion_error_message(piece_orientation, action.x_coordinate, action.y_coordinate)}")
@@ -379,42 +379,45 @@ class BlokusDuoBoard(IBoard):
         """Get the placement points cache for the given player."""
         return self._white_placement_points if player_side == 1 else self._black_placement_points
 
-    @staticmethod
-    def _no_sides(i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:
+    @classmethod
+    def _no_sides(cls, i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:
         """Check that a square does not touch any sides of friendly pieces."""
+        n = cls.N
         if i > 0 and board[i - 1, j] == side:
             return False
         if j > 0 and board[i, j - 1] == side:
             return False
-        if j + 1 < 14 and board[i, j + 1] == side:
+        if j + 1 < n and board[i, j + 1] == side:
             return False
-        if i + 1 < 14 and board[i + 1, j] == side:
+        if i + 1 < n and board[i + 1, j] == side:
             return False
         return True
 
-    @staticmethod
-    def _at_least_one_corner(i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:
+    @classmethod
+    def _at_least_one_corner(cls, i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:
         """Check that a square has at least one friendly piece on a diagonal."""
+        n = cls.N
         if i > 0 and j > 0 and board[i - 1, j - 1] == side:
             return True
-        if i > 0 and j + 1 < 14 and board[i - 1, j + 1] == side:
+        if i > 0 and j + 1 < n and board[i - 1, j + 1] == side:
             return True
-        if i + 1 < 14 and j > 0 and board[i + 1, j - 1] == side:
+        if i + 1 < n and j > 0 and board[i + 1, j - 1] == side:
             return True
-        if i + 1 < 14 and j + 1 < 14 and board[i + 1, j + 1] == side:
+        if i + 1 < n and j + 1 < n and board[i + 1, j + 1] == side:
             return True
         return False
 
-    @staticmethod
-    def _valid_placement(i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:
+    @classmethod
+    def _valid_placement(cls, i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:
         """Check if a square can be validly placed on (empty + corner rule + no-sides rule)."""
         if board[i, j] != 0:
             return False
-        return (BlokusDuoBoard._at_least_one_corner(i, j, side, board)
-                and BlokusDuoBoard._no_sides(i, j, side, board))
+        return (cls._at_least_one_corner(i, j, side, board)
+                and cls._no_sides(i, j, side, board))
 
-    @staticmethod
+    @classmethod
     def _update_placement_points(
+        cls,
         points: PlacementDict,
         side: PlayerSide,
         insertion_index: Index,
@@ -427,16 +430,17 @@ class BlokusDuoBoard(IBoard):
         fresh copy when constructing immutable boards.
         """
         p_l, p_w = piece_orientation.shape
-        length_range = (max(0, insertion_index[0] - 1), min(insertion_index[0] + p_l + 1, 14))
-        width_range = (max(0, insertion_index[1] - 1), min(insertion_index[1] + p_w + 1, 14))
+        n = cls.N
+        length_range = (max(0, insertion_index[0] - 1), min(insertion_index[0] + p_l + 1, n))
+        width_range = (max(0, insertion_index[1] - 1), min(insertion_index[1] + p_w + 1, n))
 
         for i in range(length_range[0], length_range[1]):
             for j in range(width_range[0], width_range[1]):
                 if (i, j) in points:
-                    if not BlokusDuoBoard._valid_placement(i, j, side, board_2d):
+                    if not cls._valid_placement(i, j, side, board_2d):
                         del points[(i, j)]
                 else:
-                    if BlokusDuoBoard._valid_placement(i, j, side, board_2d):
+                    if cls._valid_placement(i, j, side, board_2d):
                         points[(i, j)] = {}  # TODO: populate moves when move generation is implemented
 
     def _piece_insertion_error_message(
