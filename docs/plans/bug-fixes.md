@@ -13,7 +13,7 @@ Prerequisites: None. This is the first plan on the `fix/bug-fixes` branch.
 | S1 | Replace `BidirectionalDict` with `OrientationCodec`, fix ID gaps | B5, B14 | 30 min | ✅ |
 | S2 | Build action space codec (`Action` ↔ `int`) | B6 | 45 min | ✅ |
 | S3 | Wire `get_next_state` to accept `int` action index | B2 | 30 min | ✅ |
-| S4 | MCTS: iterate only valid moves | B1 | 15 min | |
+| S4 | MCTS: iterate only valid moves | B1 | 15 min | ✅ |
 | S5 | Replace hardcoded board sizes with `self.N` | B8 | 20 min | |
 | S6 | MCTS: explicit uniform fallback policy | B25 | 5 min | |
 | S7 | Pass `action_size` from game to neural net | B15 | 10 min | |

@@ -196,10 +196,7 @@ class MCTS:
         best_act = -1
 
         # Pick the action with the highest upper confidence bound
-        # TODO: This is inefficient for games with sparse legal moves (e.g. BlokusDuo)
-        #       Consider iterating only over valid moves instead
-        for a in range(self.game.get_action_size()):
-            if valids[a]:
+        for a in np.where(valids)[0]:
                 if (s, a) in self.q_values:
                     u = (self.q_values[(s, a)] +
                          self.config.cpuct * self.policy_priors[s][a] *
