@@ -182,7 +182,7 @@ class MCTS:
                 # All valid moves were masked - use uniform distribution over valid moves
                 # This can indicate issues with neural network architecture or training
                 logger.error("All valid moves were masked, using uniform distribution.")
-                self.policy_priors[s] = self.policy_priors[s] + valids
+                self.policy_priors[s] = valids.astype(float)
                 self.policy_priors[s] /= np.sum(self.policy_priors[s])
 
             # Initialize node statistics
