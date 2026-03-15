@@ -60,6 +60,56 @@ class Action:
     y_coordinate: int
 
 
+class ActionCodec:
+    """
+    Encodes Action instances to flat integer indices (0–17,836) and back.
+
+    Encoding scheme:
+        index = y * (board_size * num_orientations) + x * num_orientations + orientation_id
+
+    Where x, y are board coordinates (bottom-left origin) and orientation_id
+    is the 0-based contiguous ID from OrientationCodec. The pass action occupies
+    the last index (board_size² × num_orientations).
+    """
+
+    def __init__(self, board_size: int, piece_manager: PieceManager) -> None:
+        self._board_size = board_size
+        self._num_orientations = piece_manager.num_entries
+        self._piece_manager = piece_manager
+        self.pass_action_index = board_size * board_size * self._num_orientations
+        self.action_size = self.pass_action_index + 1
+
+    def encode(self, action: Action) -> int:
+        """Convert an Action to a flat action index."""
+        orientation_id = self._piece_manager.get_piece_orientation_id(
+            (action.piece_id, action.orientation)
+        )
+        return (
+            action.y_coordinate * (self._board_size * self._num_orientations)
+            + action.x_coordinate * self._num_orientations
+            + orientation_id
+        )
+
+    def decode(self, index: int) -> Action:
+        """Convert a flat action index to an Action.
+
+        Raises:
+            ValueError: If index is the pass action (use is_pass() to check first).
+        """
+        if index == self.pass_action_index:
+            raise ValueError("Cannot decode pass action index to an Action.")
+        orientation_id = index % self._num_orientations
+        remaining = index // self._num_orientations
+        x = remaining % self._board_size
+        y = remaining // self._board_size
+        piece_id, orientation = self._piece_manager.get_piece_orientation(orientation_id)
+        return Action(piece_id, orientation, x, y)
+
+    def is_pass(self, index: int) -> bool:
+        """Check if an action index represents the pass action."""
+        return index == self.pass_action_index
+
+
 class BlokusDuoBoard(IBoard):
     """
     Immutable game board for Blokus Duo. Implements the IBoard protocol.

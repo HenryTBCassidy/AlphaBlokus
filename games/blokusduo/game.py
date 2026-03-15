@@ -5,6 +5,7 @@ from numpy.typing import NDArray
 
 from games.blokusduo.board import (
     Action,
+    ActionCodec,
     ActionDict,
     BlokusDuoBoard,
     Coordinate,
@@ -48,6 +49,7 @@ class BlokusDuoGame(IGame):
         self.white_start = (9, 9)
         self.black_start = (4, 4)
         self._coordinate_index_decoder = CoordinateIndexDecoder(14)
+        self.action_codec = ActionCodec(self.board_size, self.piece_manager)
 
         # Calculate all possible starting moves on game init and cache to save time
         self.initial_actions: ActionDict = self._calculate_and_cache_initial_actions()
