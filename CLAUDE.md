@@ -24,8 +24,8 @@ uv run python main.py --config run_configurations/test_run.json   # Run training
 Game-agnostic framework (`core/`) with pluggable game implementations (`games/`).
 
 **Core protocols** (in `core/interfaces.py`):
-- `IBoard` — immutable board with `as_2d`, `as_multi_channel(player)`, `state_key`, `canonical(player)`
-- `IGame` — game logic: `get_next_state`, `valid_move_masking`, `get_game_ended`, `get_symmetries`
+- `IBoard` — immutable state snapshot: geometry, encoding (`as_multi_channel`), `state_key`, `canonical`
+- `IGame` — rules engine + action space: legal moves, game-over detection, symmetries, board factory
 - `INeuralNetWrapper` — `train`, `predict`, `save_checkpoint`, `load_checkpoint`
 
 **Two game implementations:**
@@ -41,11 +41,10 @@ Game-agnostic framework (`core/`) with pluggable game implementations (`games/`)
 
 ## Critical path (what needs to happen next)
 
-1. `BlokusDuoBoard.valid_moves()` — aggregate valid moves from placement point cache
-2. `BlokusDuoBoard.game_ended()` — check if neither player has legal moves
-3. `BlokusDuoGame.valid_move_masking()` — convert valid moves to binary action-space mask
-4. `BlokusDuoGame.get_symmetries()` — symmetric board+policy pairs for data augmentation
-5. Switch `main.py` imports from TicTacToe to BlokusDuo once the above are done
+1. `BlokusDuoGame.valid_moves()` — move generation algorithm using board's placement point cache
+2. `BlokusDuoGame.valid_move_masking()` — convert valid moves to binary action-space mask (trivial once valid_moves works)
+3. `BlokusDuoGame.get_symmetries()` — symmetric board+policy pairs for data augmentation
+4. Switch `"game": "blokusduo"` in run config once the above are done
 
 ## Conventions
 
@@ -87,8 +86,9 @@ docs/
 │   └── AI-CONTEXT.md      # Extended context, architecture rationale, gotchas
 └── plans/
     └── archive/
-        ├── bug-fixes.md           # Bug fixes (completed)
-        └── structural-refactor.md # Structural refactor (completed)
+        ├── board-game-separation.md # Board/Game responsibility split (completed)
+        ├── bug-fixes.md             # Bug fixes (completed)
+        └── structural-refactor.md   # Structural refactor (completed)
 ```
 
 ## Things NOT to do
