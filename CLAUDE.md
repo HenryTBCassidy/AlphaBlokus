@@ -10,11 +10,11 @@ AlphaZero implementation for Blokus Duo. Self-play reinforcement learning on a 1
 
 ```bash
 uv sync                                          # Install dependencies
-uv run pytest                                    # Run all tests (116 tests)
+uv run pytest                                    # Run tests
 uv run pytest -m "not slow"                      # Skip integration tests
 uv run pytest tests/test_blokusduo/              # Blokus tests only
 uv run pytest tests/test_core/                   # Core framework tests only
-uv run python main.py --config run_configurations/test_run.json   # Run training (TicTacToe only until move gen done)
+uv run python main.py --config run_configurations/test_run.json   # Run training from some configuration
 ```
 
 **Linter:** `ruff` (configured in pyproject.toml). Line length 120, Python 3.11+.
@@ -45,9 +45,7 @@ Game-agnostic framework (`core/`) with pluggable game implementations (`games/`)
 2. `BlokusDuoBoard.game_ended()` — check if neither player has legal moves
 3. `BlokusDuoGame.valid_move_masking()` — convert valid moves to binary action-space mask
 4. `BlokusDuoGame.get_symmetries()` — symmetric board+policy pairs for data augmentation
-5. Fix `main.py` — switch to BlokusDuoGame, implement checkpoint loading
-
-See `docs/plans/bug-fixes.md` for the full bug list with priorities and effort estimates.
+5. Switch `main.py` imports from TicTacToe to BlokusDuo once the above are done
 
 ## Conventions
 
@@ -66,11 +64,11 @@ Follow `docs/guides/PLAN-FORMAT.md` when creating implementation plans.
 ## Gotchas
 
 1. **Move generation is the blocker.** Everything else works. Don't rewrite the framework — focus on completing Blokus game logic.
-2. **Action space is huge (17,837).** MCTS must iterate only valid moves (`np.where(valids)[0]`), not the full action space.
-3. **Piece-orientation IDs have gaps** in `BidirectionalDict` — the population loop increments `i` one extra time between pieces. Known bug (B5).
+2. **Action space is huge (17,837).** MCTS iterates only valid moves (`np.where(valids)[0]`).
+3. **Orientation IDs are 0-based (0–90).** `OrientationCodec` in `pieces.py` handles `(piece_id, orientation) ↔ int`. `ActionCodec` in `board.py` handles the full `Action ↔ int` (0–17,836) mapping.
 4. **Coordinate systems:** Board = bottom-left origin (Blokus notation). Arrays = top-left origin (numpy). `CoordinateIndexDecoder` handles conversion.
 5. **`eval.ipynb`** has Henry's design notes on the move generation algorithm — read it before implementing.
-6. **No optimizer state in checkpoints** — training "restarts" each generation. Known issue (B10/B11).
+6. **Board sizes use class constants.** `BlokusDuoBoard.N = 14`, `Board.N = 3` (TicTacToe). Never hardcode board dimensions as literals.
 
 ## Documentation
 
@@ -88,8 +86,9 @@ docs/
 │   ├── PLAN-FORMAT.md     # How to write implementation plans
 │   └── AI-CONTEXT.md      # Extended context, architecture rationale, gotchas
 └── plans/
-    ├── bug-fixes.md       # Active bug list with priorities
-    └── archive/           # Completed plans
+    └── archive/
+        ├── bug-fixes.md           # Bug fixes (completed)
+        └── structural-refactor.md # Structural refactor (completed)
 ```
 
 ## Things NOT to do
