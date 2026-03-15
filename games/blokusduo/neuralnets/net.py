@@ -65,24 +65,26 @@ class ResNetBlock(nn.Module):
 
 
 class AlphaBlokusDuo(nn.Module):
-    def __init__(self, config: NetConfig):
+    def __init__(self, board_rows: int, board_cols: int, action_size: int,
+                 num_input_channels: int, config: NetConfig):
         """Initialise the Blokus Duo ResNet.
 
-        The neural net receives a 44-channel representation produced by
-        ``BlokusDuoBoard.as_multi_channel()``:
+        The neural net receives a multi-channel representation produced by
+        ``BlokusDuoBoard.as_multi_channel()``. Channel layout and counts are
+        determined by the board class and passed in as ``num_input_channels``.
 
-            Channels  0-20:  Current player's 21 per-piece binary planes
-            Channels 21-41:  Opponent's 21 per-piece binary planes
-            Channel  42:     Aggregate current player occupancy
-            Channel  43:     Aggregate opponent occupancy
-
-        Net input shape: batch_size x 44 x 14 x 14
+        Args:
+            board_rows: Board height (e.g. 14 for Blokus Duo).
+            board_cols: Board width (e.g. 14 for Blokus Duo).
+            action_size: Total actions including pass (e.g. 17,837 = 14² × 91 + 1).
+            num_input_channels: Input channels (e.g. 44 = 21 per player + 2 aggregate).
+            config: Network hyperparameters.
         """
         super().__init__()
-        self.board_rows, self.board_cols = 14, 14
-        self.num_input_channels = 44
-        # Actions: place any of 91 piece-orientations on any of the 14×14 physical board squares, plus pass
-        self.action_size = (14 * 14 * 91) + 1  # TODO: Get this from the game object (maybe)
+        self.board_rows = board_rows
+        self.board_cols = board_cols
+        self.action_size = action_size
+        self.num_input_channels = num_input_channels
         self.config = config
 
         conv_out_y_x = calc_conv2d_output((self.board_rows, self.board_cols), 3, 1, 1)

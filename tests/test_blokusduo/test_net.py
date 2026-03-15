@@ -9,9 +9,16 @@ from games.blokusduo.neuralnets.net import AlphaBlokusDuo
 
 
 @pytest.fixture
-def blokus_net(net_config: NetConfig) -> AlphaBlokusDuo:
+def blokus_net(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard, net_config: NetConfig) -> AlphaBlokusDuo:
     """A tiny BlokusDuo network for shape tests."""
-    return AlphaBlokusDuo(net_config)
+    rows, cols = blokus_game.get_board_size()
+    return AlphaBlokusDuo(
+        board_rows=rows,
+        board_cols=cols,
+        action_size=blokus_game.get_action_size(),
+        num_input_channels=blokus_board.num_channels,
+        config=net_config,
+    )
 
 
 def test_forward_pass_empty_board(

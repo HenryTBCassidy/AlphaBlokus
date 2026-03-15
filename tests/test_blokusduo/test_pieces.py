@@ -15,8 +15,7 @@ def test_pieces_loader_orientations(pieces_path):
 
 
 def test_piece_manager_lookup_size(piece_manager: PieceManager):
-    # Bidirectional: 91 forward + 91 reverse = 182
-    assert piece_manager.num_entries == 182
+    assert piece_manager.num_entries == 91
 
 
 def test_piece_identity_shape(piece_manager: PieceManager):

@@ -13,4 +13,12 @@ class NNetWrapper(BaseNNetWrapper):
         super().__init__(game, config)
 
     def _create_network(self) -> nn.Module:
-        return AlphaTicTacToe(self.game, self.net_config)
+        board = self.game.initialise_board()
+        rows, cols = self.game.get_board_size()
+        return AlphaTicTacToe(
+            board_rows=rows,
+            board_cols=cols,
+            action_size=self.game.get_action_size(),
+            num_input_channels=board.num_channels,
+            config=self.net_config,
+        )

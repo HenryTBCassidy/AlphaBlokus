@@ -3,7 +3,6 @@ from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
 from collections.abc import Generator
-from typing import Any
 
 import numpy as np
 from dataclass_wizard import fromdict
@@ -89,34 +88,43 @@ class Piece:
         return np.rot90(self.flip, 3)
 
 
-class BidirectionalDict(dict):
+class OrientationCodec:
     """
-    A dictionary that maintains bidirectional mappings between keys and values.
-    
-    When a key-value pair is added, it automatically adds the reverse mapping.
-    This ensures a one-to-one correspondence between keys and values.
+    Bidirectional mapping between (piece_id, orientation) pairs and contiguous 0-based integer IDs.
+
+    IDs run from 0 to (num_orientations - 1) with no gaps. This is critical for the action
+    space encoding where each grid cell maps to exactly `num_orientations` contiguous indices.
     """
 
-    def __setitem__(self, key: Any, val: Any) -> None:
-        """
-        Add both key->value and value->key mappings.
+    def __init__(self, pieces: list[Piece]) -> None:
+        self._id_to_pair: dict[int, tuple[int, Orientation]] = {}
+        self._pair_to_id: dict[tuple[int, Orientation], int] = {}
 
-        Args:
-            key: The key to add
-            val: The value to add
-        """
-        dict.__setitem__(self, key, val)
-        dict.__setitem__(self, val, key)
+        orientation_id = 0
+        for piece in pieces:
+            for orientation in piece.basis_orientations:
+                pair = (piece.id, orientation)
+                self._id_to_pair[orientation_id] = pair
+                self._pair_to_id[pair] = orientation_id
+                orientation_id += 1
 
-    def __delitem__(self, key: Any) -> None:
-        """
-        Remove both key->value and value->key mappings.
+    def encode(self, piece_orientation: tuple[int, Orientation]) -> int:
+        """Convert a (piece_id, orientation) pair to its integer ID."""
+        return self._pair_to_id[piece_orientation]
 
-        Args:
-            key: The key to remove (also removes the corresponding value mapping)
-        """
-        dict.__delitem__(self, self[key])
-        dict.__delitem__(self, key)
+    def decode(self, orientation_id: int) -> tuple[int, Orientation]:
+        """Convert an integer ID to its (piece_id, orientation) pair."""
+        return self._id_to_pair[orientation_id]
+
+    def __len__(self) -> int:
+        """Number of unique piece-orientation combinations."""
+        return len(self._id_to_pair)
+
+    def __contains__(self, key: object) -> bool:
+        """Check if a key (int ID or (piece_id, orientation) tuple) exists."""
+        if isinstance(key, int):
+            return key in self._id_to_pair
+        return key in self._pair_to_id
 
 
 class PieceManager:
@@ -136,7 +144,7 @@ class PieceManager:
             pieces: List of all available Blokus pieces
         """
         self.pieces: dict[int, Piece] = {p.id: p for p in pieces}
-        self._piece_orientation_lookup: BidirectionalDict = self.populate_lookup(pieces)
+        self._orientation_codec: OrientationCodec = OrientationCodec(pieces)
 
     def get_piece_orientation_array(self, piece_id: int, orientation: Orientation) -> NDArray:
         """
@@ -189,7 +197,7 @@ class PieceManager:
                 - piece_id: ID of the piece
                 - orientation: Orientation of the piece
         """
-        return self._piece_orientation_lookup[piece_orientation_id]
+        return self._orientation_codec.decode(piece_orientation_id)
 
     def get_piece_orientation_id(self, piece_orientation: tuple[int, Orientation]) -> int:
         """
@@ -201,33 +209,12 @@ class PieceManager:
         Returns:
             int: Combined ID representing the piece-orientation combination
         """
-        return self._piece_orientation_lookup[piece_orientation]
+        return self._orientation_codec.encode(piece_orientation)
 
     @property
     def num_entries(self) -> int:
         """Number of unique piece-orientation combinations."""
-        return len(self._piece_orientation_lookup)
-
-    @staticmethod
-    def populate_lookup(pieces: list[Piece]) -> BidirectionalDict:
-        """
-        Create a bidirectional mapping between piece-orientation pairs and their IDs.
-
-        Args:
-            pieces: List of all available pieces
-
-        Returns:
-            BidirectionalDict: Mapping between piece-orientation pairs and their IDs
-        """
-        lookup = BidirectionalDict()
-        i = 1  # IDs start at 1
-        for p in pieces:
-            for o in p.basis_orientations:
-                lookup[i] = (p.id, o)
-                i += 1
-            i += 1
-
-        return lookup
+        return len(self._orientation_codec)
 
 
 def pieces_loader(filename: Path) -> PieceManager:
@@ -263,9 +250,9 @@ def pieces_loader(filename: Path) -> PieceManager:
 
     piece_manager = PieceManager(pieces=result)
 
-    if piece_manager.num_entries != 2 * 91:  # twice 91 since values are put in both ways
+    if piece_manager.num_entries != 91:
         raise ValueError(
-            f"Expected {2 * 91} entries in PieceManager, got {piece_manager.num_entries}. "
+            f"Expected 91 entries in PieceManager, got {piece_manager.num_entries}. "
             f"Error constructing Piece-Orientation <-> id lookup!")
 
     return piece_manager

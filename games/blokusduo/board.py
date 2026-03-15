@@ -60,6 +60,56 @@ class Action:
     y_coordinate: int
 
 
+class ActionCodec:
+    """
+    Encodes Action instances to flat integer indices (0–17,836) and back.
+
+    Encoding scheme:
+        index = y * (board_size * num_orientations) + x * num_orientations + orientation_id
+
+    Where x, y are board coordinates (bottom-left origin) and orientation_id
+    is the 0-based contiguous ID from OrientationCodec. The pass action occupies
+    the last index (board_size² × num_orientations).
+    """
+
+    def __init__(self, board_size: int, piece_manager: PieceManager) -> None:
+        self._board_size = board_size
+        self._num_orientations = piece_manager.num_entries
+        self._piece_manager = piece_manager
+        self.pass_action_index = board_size * board_size * self._num_orientations
+        self.action_size = self.pass_action_index + 1
+
+    def encode(self, action: Action) -> int:
+        """Convert an Action to a flat action index."""
+        orientation_id = self._piece_manager.get_piece_orientation_id(
+            (action.piece_id, action.orientation)
+        )
+        return (
+            action.y_coordinate * (self._board_size * self._num_orientations)
+            + action.x_coordinate * self._num_orientations
+            + orientation_id
+        )
+
+    def decode(self, index: int) -> Action:
+        """Convert a flat action index to an Action.
+
+        Raises:
+            ValueError: If index is the pass action (use is_pass() to check first).
+        """
+        if index == self.pass_action_index:
+            raise ValueError("Cannot decode pass action index to an Action.")
+        orientation_id = index % self._num_orientations
+        remaining = index // self._num_orientations
+        x = remaining % self._board_size
+        y = remaining // self._board_size
+        piece_id, orientation = self._piece_manager.get_piece_orientation(orientation_id)
+        return Action(piece_id, orientation, x, y)
+
+    def is_pass(self, index: int) -> bool:
+        """Check if an action index represents the pass action."""
+        return index == self.pass_action_index
+
+
 class BlokusDuoBoard(IBoard):
     """
     Immutable game board for Blokus Duo. Implements the IBoard protocol.
@@ -197,7 +247,7 @@ class BlokusDuoBoard(IBoard):
             for j in range(p_wid):
                 if piece_orientation[i, j] != 0:
                     ri, ci = length_idx + i, width_idx + j
-                    if ri > 13 or ci > 13:
+                    if ri >= self.N or ci >= self.N:
                         raise IndexError(
                             f"Piece cannot be inserted at this index, it does not fit on the board! "
                             f"\n{self._piece_insertion_error_message(piece_orientation, action.x_coordinate, action.y_coordinate)}")
@@ -243,49 +293,6 @@ class BlokusDuoBoard(IBoard):
 
     # -- Game state queries (public) --------------------------------------------
 
-    def valid_moves(self, player_side: PlayerSide) -> list[Action]:
-        """Get all valid moves for the current player."""
-        # TODO: Implement move generation logic
-        return []
-
-    def game_ended(self) -> bool:
-        """Check if the game has ended.
-
-        The game ends when:
-        1. A player has no pieces remaining, or
-        2. Neither player has any legal moves
-        """
-        raise NotImplementedError()
-
-    def game_result(self, player: PlayerSide) -> float:
-        """Get the game result from a player's perspective.
-
-        Returns:
-            1.0 = player won, -1.0 = player lost, 1e-4 = draw.
-        """
-        if not self.game_ended():
-            raise RuntimeError("Trying to calculate the result of a game that hasn't ended!")
-
-        white_score = self._calculate_score(
-            self._white_piece_ids_remaining,
-            self._white_last_piece_played,
-            self._piece_manager,
-        )
-        black_score = self._calculate_score(
-            self._black_piece_ids_remaining,
-            self._black_last_piece_played,
-            self._piece_manager,
-        )
-
-        if white_score == black_score:
-            return 1e-4
-
-        white_win = white_score > black_score
-        if white_win == (player == 1):
-            return 1
-        else:
-            return -1
-
     # -- Private helpers --------------------------------------------------------
 
     @classmethod
@@ -317,54 +324,57 @@ class BlokusDuoBoard(IBoard):
         board._coordinate_index_decoder = coordinate_index_decoder
         return board
 
-    def _remaining_ids(self, player_side: PlayerSide) -> frozenset[int]:
+    def remaining_piece_ids(self, player_side: PlayerSide) -> frozenset[int]:
         """Get remaining piece IDs for the given player."""
         return self._white_piece_ids_remaining if player_side == 1 else self._black_piece_ids_remaining
 
-    def _last_piece_played(self, player_side: PlayerSide) -> int | None:
+    def last_piece_played(self, player_side: PlayerSide) -> int | None:
         """Get the last piece ID played by the given player."""
         return self._white_last_piece_played if player_side == 1 else self._black_last_piece_played
 
-    def _placement_points(self, player_side: PlayerSide) -> PlacementDict:
+    def placement_points(self, player_side: PlayerSide) -> PlacementDict:
         """Get the placement points cache for the given player."""
         return self._white_placement_points if player_side == 1 else self._black_placement_points
 
-    @staticmethod
-    def _no_sides(i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:
+    @classmethod
+    def _no_sides(cls, i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:
         """Check that a square does not touch any sides of friendly pieces."""
+        n = cls.N
         if i > 0 and board[i - 1, j] == side:
             return False
         if j > 0 and board[i, j - 1] == side:
             return False
-        if j + 1 < 14 and board[i, j + 1] == side:
+        if j + 1 < n and board[i, j + 1] == side:
             return False
-        if i + 1 < 14 and board[i + 1, j] == side:
+        if i + 1 < n and board[i + 1, j] == side:
             return False
         return True
 
-    @staticmethod
-    def _at_least_one_corner(i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:
+    @classmethod
+    def _at_least_one_corner(cls, i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:
         """Check that a square has at least one friendly piece on a diagonal."""
+        n = cls.N
         if i > 0 and j > 0 and board[i - 1, j - 1] == side:
             return True
-        if i > 0 and j + 1 < 14 and board[i - 1, j + 1] == side:
+        if i > 0 and j + 1 < n and board[i - 1, j + 1] == side:
             return True
-        if i + 1 < 14 and j > 0 and board[i + 1, j - 1] == side:
+        if i + 1 < n and j > 0 and board[i + 1, j - 1] == side:
             return True
-        if i + 1 < 14 and j + 1 < 14 and board[i + 1, j + 1] == side:
+        if i + 1 < n and j + 1 < n and board[i + 1, j + 1] == side:
             return True
         return False
 
-    @staticmethod
-    def _valid_placement(i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:
+    @classmethod
+    def _valid_placement(cls, i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:
         """Check if a square can be validly placed on (empty + corner rule + no-sides rule)."""
         if board[i, j] != 0:
             return False
-        return (BlokusDuoBoard._at_least_one_corner(i, j, side, board)
-                and BlokusDuoBoard._no_sides(i, j, side, board))
+        return (cls._at_least_one_corner(i, j, side, board)
+                and cls._no_sides(i, j, side, board))
 
-    @staticmethod
+    @classmethod
     def _update_placement_points(
+        cls,
         points: PlacementDict,
         side: PlayerSide,
         insertion_index: Index,
@@ -377,16 +387,17 @@ class BlokusDuoBoard(IBoard):
         fresh copy when constructing immutable boards.
         """
         p_l, p_w = piece_orientation.shape
-        length_range = (max(0, insertion_index[0] - 1), min(insertion_index[0] + p_l + 1, 14))
-        width_range = (max(0, insertion_index[1] - 1), min(insertion_index[1] + p_w + 1, 14))
+        n = cls.N
+        length_range = (max(0, insertion_index[0] - 1), min(insertion_index[0] + p_l + 1, n))
+        width_range = (max(0, insertion_index[1] - 1), min(insertion_index[1] + p_w + 1, n))
 
         for i in range(length_range[0], length_range[1]):
             for j in range(width_range[0], width_range[1]):
                 if (i, j) in points:
-                    if not BlokusDuoBoard._valid_placement(i, j, side, board_2d):
+                    if not cls._valid_placement(i, j, side, board_2d):
                         del points[(i, j)]
                 else:
-                    if BlokusDuoBoard._valid_placement(i, j, side, board_2d):
+                    if cls._valid_placement(i, j, side, board_2d):
                         points[(i, j)] = {}  # TODO: populate moves when move generation is implemented
 
     def _piece_insertion_error_message(
@@ -399,25 +410,3 @@ class BlokusDuoBoard(IBoard):
                 f"Piece: \n {piece_orientation}, \n"
                 f"At ({x_coordinate}, {y_coordinate})")
 
-    @staticmethod
-    def _calculate_score(
-        remaining: frozenset[int],
-        last_played: int | None,
-        piece_manager: PieceManager,
-    ) -> int:
-        """Calculate the score for a player.
-
-        Scoring rules:
-        1. +15 points for placing all pieces
-        2. +5 bonus points for placing the smallest piece last
-        3. Negative points for remaining pieces (sum of squares)
-        """
-        if len(remaining) == 0:
-            score = 15
-            if last_played == 1:  # Smallest piece
-                score += 5
-        else:
-            score = -int(np.sum([
-                piece_manager.pieces[pid].identity.sum() for pid in remaining
-            ]))
-        return score

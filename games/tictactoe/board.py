@@ -19,16 +19,14 @@ class Board(IBoard):
          pieces[2][0] is the bottom left square,
     Squares are stored and manipulated as (x,y) tuples.
     """
+    N: int = 3  # Board size
+
     # list of all 8 directions on the board, as (x,y) offsets
     __directions = [(1, 1), (1, 0), (1, -1), (0, -1), (-1, -1), (-1, 0), (-1, 1), (0, 1)]
 
-    def __init__(self, n: int = 3) -> None:
+    def __init__(self) -> None:
         """Set up initial board configuration."""
-        self.n = n
-        # Create the empty board array.
-        self.pieces: list[list[int]] = []
-        for i in range(self.n):
-            self.pieces.append([0] * self.n)
+        self.pieces: list[list[int]] = [[0] * self.N for _ in range(self.N)]
 
     # ── IBoard protocol ──────────────────────────────────────────────
 
@@ -50,7 +48,7 @@ class Board(IBoard):
             NDArray of shape (2, n, n) with float32 dtype.
         """
         board = self.as_2d
-        rep = np.zeros((2, self.n, self.n), dtype=np.float32)
+        rep = np.zeros((2, self.N, self.N), dtype=np.float32)
         rep[0] = (board == current_player)
         rep[1] = (board == -current_player)
         return rep
@@ -69,73 +67,14 @@ class Board(IBoard):
         """Return the board in canonical form (player 1 perspective)."""
         if player == 1:
             return self
-        return Board._from_pieces(self.n, (self.as_2d * player).tolist())
+        return Board._from_pieces((self.as_2d * player).tolist())
 
     # ── Indexer ───────────────────────────────────────────────────────
 
     def __getitem__(self, index: int) -> list[int]:
         return self.pieces[index]
 
-    # ── Game logic ────────────────────────────────────────────────────
-
-    def get_legal_moves(self, color: int) -> list[tuple[int, int]]:
-        """Returns all the legal moves for the given color.
-        (1 for white, -1 for black)
-        @param color not used and came from previous version.
-        """
-        moves = set()  # stores the legal moves.
-
-        # Get all the empty squares (color==0)
-        for y in range(self.n):
-            for x in range(self.n):
-                if self[x][y] == 0:
-                    new_move = (x, y)
-                    moves.add(new_move)
-        return list(moves)
-
-    def has_legal_moves(self) -> bool:
-        for y in range(self.n):
-            for x in range(self.n):
-                if self[x][y] == 0:
-                    return True
-        return False
-
-    def is_win(self, color: int) -> bool:
-        """Check whether the given player has collected a triplet in any direction;
-        @param color (1=white,-1=black)
-        """
-        win = self.n
-        # check y-strips
-        for y in range(self.n):
-            count = 0
-            for x in range(self.n):
-                if self[x][y] == color:
-                    count += 1
-            if count == win:
-                return True
-        # check x-strips
-        for x in range(self.n):
-            count = 0
-            for y in range(self.n):
-                if self[x][y] == color:
-                    count += 1
-            if count == win:
-                return True
-        # check two diagonal strips
-        count = 0
-        for d in range(self.n):
-            if self[d][d] == color:
-                count += 1
-        if count == win:
-            return True
-        count = 0
-        for d in range(self.n):
-            if self[d][self.n - d - 1] == color:
-                count += 1
-        if count == win:
-            return True
-
-        return False
+    # ── Mutation ─────────────────────────────────────────────────────
 
     def with_move(self, move: tuple[int, int], color: int) -> Board:
         """Return a new board with the given move applied.
@@ -148,14 +87,13 @@ class Board(IBoard):
         x, y = move
         assert new_pieces[x][y] == 0
         new_pieces[x][y] = color
-        return Board._from_pieces(self.n, new_pieces)
+        return Board._from_pieces(new_pieces)
 
     # ── Private constructors ───────────────────────────────────────
 
     @classmethod
-    def _from_pieces(cls, n: int, pieces: list[list[int]]) -> Board:
+    def _from_pieces(cls, pieces: list[list[int]]) -> Board:
         """Construct a board from existing piece data (no mutation)."""
         board = object.__new__(cls)
-        board.n = n
         board.pieces = pieces
         return board

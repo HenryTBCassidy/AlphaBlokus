@@ -27,13 +27,14 @@ class NetConfig:
     and its training process. The network uses a residual architecture
     with convolutional layers for board state processing.
     """
-    learning_rate: float  # Learning rate for the optimizer (TODO: Put this on a schedule)
+    learning_rate: float  # Learning rate for the optimizer
     dropout: float  # Dropout probability for regularisation (0 to 1)
     epochs: int  # Number of training epochs per generation
     batch_size: int  # Number of positions per training batch
     cuda: bool  # Whether to use CUDA for GPU acceleration
     num_filters: int  # Number of convolutional filters per layer (power of 2)
     num_residual_blocks: int  # Number of residual blocks in the network
+    lr_scheduler: str | None = None  # LR schedule: None = constant, "cosine" = CosineAnnealingLR
 
 
 @dataclass(frozen=True)
@@ -53,6 +54,9 @@ class RunConfig:
     2. Training the neural network on the generated games
     3. Evaluating the new network against the previous version
     """
+    # Game selection
+    game: str  # Game to train on: "tictactoe" or "blokusduo"
+
     # Training process parameters
     run_name: str  # Unique identifier for this training run
     num_generations: int  # Number of complete self-play -> train -> evaluate cycles
