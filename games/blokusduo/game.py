@@ -109,9 +109,7 @@ class BlokusDuoGame(IGame):
             0.0 = game continues, 1.0 = player won,
             -1.0 = player lost, 1e-4 = draw.
         """
-        white_has_moves = len(self._valid_moves(board, 1)) > 0
-        black_has_moves = len(self._valid_moves(board, -1)) > 0
-        if white_has_moves or black_has_moves:
+        if self._has_valid_moves(board, 1) or self._has_valid_moves(board, -1):
             return 0
 
         white_score = self._calculate_score(board, 1)
@@ -153,28 +151,32 @@ class BlokusDuoGame(IGame):
 
     @staticmethod
     def _all_cells_valid(
-        piece_array: NDArray,
+        filled_cells: NDArray,
         ins_i: int,
         ins_j: int,
-        player: PlayerSide,
         board_2d: BoardArray,
+        side_danger: NDArray,
     ) -> bool:
         """Check that every filled cell of the piece at the given insertion point is valid.
 
-        A cell is valid if it is empty and not side-adjacent to a friendly piece.
-        The corner check is not needed — the caller guarantees at least one cell
-        lands on a placement point (which already satisfies the diagonal rule).
+        A cell is valid if it is empty and not in the side-adjacency danger zone
+        for the current player. The corner check is not needed — the caller guarantees
+        at least one cell lands on a placement point (which already satisfies the diagonal rule).
+
+        Args:
+            filled_cells: Pre-computed array of shape (num_filled, 2) with (row, col) offsets.
+            ins_i: Insertion row index (top-left of piece bounding box).
+            ins_j: Insertion column index.
+            board_2d: Board state (signed ±1/0).
+            side_danger: Boolean 14×14 array where True = side-adjacent to friendly piece.
         """
-        p_len, p_wid = piece_array.shape
-        for i in range(p_len):
-            for j in range(p_wid):
-                if piece_array[i, j] == 0:
-                    continue
-                ri, rj = ins_i + i, ins_j + j
-                if board_2d[ri, rj] != 0:
-                    return False
-                if not BlokusDuoBoard._no_sides(ri, rj, player, board_2d):
-                    return False
+        for offset in filled_cells:
+            ri = ins_i + int(offset[0])
+            rj = ins_j + int(offset[1])
+            if board_2d[ri, rj] != 0:
+                return False
+            if side_danger[ri, rj]:
+                return False
         return True
 
     def _placements_at_point(
@@ -183,108 +185,78 @@ class BlokusDuoGame(IGame):
         orientation: Orientation,
         target_i: int,
         target_j: int,
-        player: PlayerSide | None = None,
         board_2d: BoardArray | None = None,
+        side_danger: NDArray | None = None,
     ) -> Generator[Action, None, None]:
         """Yield all Actions that place a filled cell of the piece on a target point.
 
         Slides the piece orientation over the target point, trying each filled cell
         as the anchor. For each candidate, checks bounds and optionally validates
         that all cells are empty and not side-adjacent to a friendly piece.
-
-        Args:
-            piece_id: Piece to place.
-            orientation: Orientation of the piece.
-            target_i: Target array row index.
-            target_j: Target array column index.
-            player: If provided (with board_2d), validate cell emptiness and side adjacency.
-            board_2d: Board state for validation. Required if player is provided.
         """
         piece_array = self.piece_manager.get_piece_orientation_array(piece_id, orientation)
+        filled_cells = self.piece_manager.get_filled_cells(piece_id, orientation)
         p_len, p_wid = piece_array.shape
         n = self.board_size
 
-        for di in range(p_len):
-            for dj in range(p_wid):
-                if piece_array[di, dj] == 0:
+        for di, dj in filled_cells:
+            ins_i = target_i - di
+            ins_j = target_j - dj
+
+            if ins_i < 0 or ins_j < 0 or ins_i + p_len > n or ins_j + p_wid > n:
+                continue
+
+            if board_2d is not None and side_danger is not None:
+                if not self._all_cells_valid(filled_cells, ins_i, ins_j, board_2d, side_danger):
                     continue
 
-                ins_i = target_i - di
-                ins_j = target_j - dj
+            coord = self._coordinate_index_decoder.to_coordinate((ins_i, ins_j))
+            yield Action(piece_id, orientation, coord[0], coord[1])
 
-                if ins_i < 0 or ins_j < 0 or ins_i + p_len > n or ins_j + p_wid > n:
-                    continue
+    def _generate_valid_moves(self, board: BlokusDuoBoard, player: PlayerSide) -> Generator[Action, None, None]:
+        """Yield legal moves for a player one at a time.
 
-                if player is not None and board_2d is not None:
-                    if not self._all_cells_valid(piece_array, ins_i, ins_j, player, board_2d):
-                        continue
-
-                coord = self._coordinate_index_decoder.to_coordinate((ins_i, ins_j))
-                yield Action(piece_id, orientation, coord[0], coord[1])
-
-    def _valid_moves(self, board: BlokusDuoBoard, player: PlayerSide) -> list[Action]:
-        """Generate all legal moves for a player.
-
-        Algorithm:
-        1. If the player has placed no pieces, return cached initial actions.
-        2. Otherwise, iterate over placement points (diagonal corners of friendly pieces).
-           For each point, try fitting each remaining piece orientation such that one of
-           its filled cells lands on that point. Validate that all cells are on-board,
-           empty, and not side-adjacent to a friendly piece.
-
-        Returns:
-            List of legal Actions (deduplicated).
+        Core move generation logic shared by _valid_moves and _has_valid_moves.
+        Yields may include duplicates (same Action reachable from multiple
+        placement points) — callers that need uniqueness must deduplicate.
         """
         if len(board.remaining_piece_ids(player)) == 21:
-            return self.initial_actions[player]
+            initial = board._initial_actions[player]
+            board_2d = board.as_2d
+            if not np.any(board_2d):
+                yield from initial
+                return
+            side_danger = board.side_danger_zone(player)
+            for a in initial:
+                if self._all_cells_valid(
+                    self.piece_manager.get_filled_cells(a.piece_id, a.orientation),
+                    *self._coordinate_index_decoder.to_idx((a.x_coordinate, a.y_coordinate)),
+                    board_2d, side_danger,
+                ):
+                    yield a
+            return
 
         board_2d = board.as_2d
+        side_danger = board.side_danger_zone(player)
         points = board.placement_points(player)
         remaining = board.remaining_piece_ids(player)
-        moves: set[Action] = set()
 
         for (pi, pj) in points:
             for piece_id in remaining:
                 piece = self.piece_manager.pieces[piece_id]
                 for orientation in piece.basis_orientations:
-                    moves.update(self._placements_at_point(
+                    yield from self._placements_at_point(
                         piece_id, orientation, pi, pj,
-                        player=player, board_2d=board_2d,
-                    ))
+                        board_2d=board_2d, side_danger=side_danger,
+                    )
 
-        return list(moves)
+    def _has_valid_moves(self, board: BlokusDuoBoard, player: PlayerSide) -> bool:
+        """Check if a player has at least one legal move. Short-circuits on first find."""
+        return next(self._generate_valid_moves(board, player), None) is not None
 
     def _valid_moves(self, board: BlokusDuoBoard, player: PlayerSide) -> list[Action]:
-        """Generate all legal moves for a player.
-
-        Algorithm:
-        1. If the player has placed no pieces, return cached initial actions.
-        2. Otherwise, iterate over placement points (diagonal corners of friendly pieces).
-           For each point, try fitting each remaining piece orientation such that one of
-           its filled cells lands on that point. Validate that all cells are on-board,
-           empty, and not side-adjacent to a friendly piece.
-
-        Returns:
-            List of legal Actions (deduplicated).
-        """
-        if len(board.remaining_piece_ids(player)) == 21:
-            return self.initial_actions[player]
-
-        board_2d = board.as_2d
-        points = board.placement_points(player)
-        remaining = board.remaining_piece_ids(player)
-        moves: set[Action] = set()
-
-        for (pi, pj) in points:
-            for piece_id in remaining:
-                piece = self.piece_manager.pieces[piece_id]
-                for orientation in piece.basis_orientations:
-                    moves.update(self._placements_at_point(
-                        piece_id, orientation, pi, pj,
-                        player=player, board_2d=board_2d,
-                    ))
-
-        return list(moves)
+        """Generate all legal moves for a player (deduplicated)."""
+        return list(set(self._generate_valid_moves(board, player)))
 
     def _calculate_and_cache_initial_actions(self) -> ActionDict:
         """Calculate and cache all possible initial moves for both players."""

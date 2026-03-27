@@ -130,47 +130,49 @@ class OrientationCodec:
 class PieceManager:
     """
     Manages the collection of Blokus pieces and their transformations.
-    
-    This class handles the conversion between piece IDs, orientations, and their
-    actual board representations. It maintains a bidirectional mapping between
-    piece-orientation pairs and their numeric identifiers.
+
+    Pre-computes and caches all piece orientation arrays and their filled cell
+    indices at init time to avoid repeated allocation during move generation.
     """
 
     def __init__(self, pieces: list[Piece]) -> None:
-        """
-        Initialise the piece manager.
-
-        Args:
-            pieces: List of all available Blokus pieces
-        """
         self.pieces: dict[int, Piece] = {p.id: p for p in pieces}
         self._orientation_codec: OrientationCodec = OrientationCodec(pieces)
 
-    def get_piece_orientation_array(self, piece_id: int, orientation: Orientation) -> NDArray:
-        """
-        Get the board representation of a piece in a specific orientation.
+        # Pre-compute all orientation arrays and filled cell indices.
+        # Keyed by (piece_id, orientation) for O(1) lookup.
+        self._cached_arrays: dict[tuple[int, Orientation], NDArray] = {}
+        self._cached_filled_cells: dict[tuple[int, Orientation], NDArray] = {}
+        for piece in pieces:
+            base = np.array(piece.fill_values)
+            orientation_transforms = {
+                Orientation.Identity: base,
+                Orientation.Rot90: np.rot90(base),
+                Orientation.Rot180: np.rot90(base, 2),
+                Orientation.Rot270: np.rot90(base, 3),
+                Orientation.Flip: np.flip(base, axis=1),
+                Orientation.Flip90: np.rot90(np.flip(base, axis=1)),
+                Orientation.Flip180: np.rot90(np.flip(base, axis=1), 2),
+                Orientation.Flip270: np.rot90(np.flip(base, axis=1), 3),
+            }
+            for orientation in piece.basis_orientations:
+                key = (piece.id, orientation)
+                arr = orientation_transforms[orientation]
+                arr.flags.writeable = False  # Immutable — safe to share
+                self._cached_arrays[key] = arr
+                self._cached_filled_cells[key] = np.argwhere(arr != 0)
 
-        Args:
-            piece_id: ID of the piece
-            orientation: Desired orientation
+    def get_piece_orientation_array(self, piece_id: int, orientation: Orientation) -> NDArray:
+        """Get the cached board representation of a piece in a specific orientation."""
+        return self._cached_arrays[(piece_id, orientation)]
+
+    def get_filled_cells(self, piece_id: int, orientation: Orientation) -> NDArray:
+        """Get the pre-computed filled cell indices for a piece orientation.
 
         Returns:
-            NDArray: 2D array representing the piece in the specified orientation
-
-        Raises:
-            ValueError: If the orientation is not valid
+            NDArray of shape (num_filled, 2) where each row is (row_offset, col_offset).
         """
-        piece = self.pieces[piece_id]
-        match orientation:
-            case Orientation.Identity: return piece.identity
-            case Orientation.Rot90: return piece.rot90
-            case Orientation.Rot180: return piece.rot180
-            case Orientation.Rot270: return piece.rot270
-            case Orientation.Flip: return piece.flip
-            case Orientation.Flip90: return piece.flip90
-            case Orientation.Flip180: return piece.flip180
-            case Orientation.Flip270: return piece.flip270
-            case _: raise ValueError(f"Invalid orientation: {orientation}")
+        return self._cached_filled_cells[(piece_id, orientation)]
 
     def all_piece_id_basis_orientations(self) -> Generator[tuple[int, Orientation], None, None]:
         """

@@ -190,6 +190,10 @@ class Coach:
                         total_inference_time_s=stats.total_inference_time_s,
                         num_leaf_expansions=stats.num_leaf_expansions,
                         tree_size=stats.tree_size,
+                        total_valid_moves_time_s=stats.total_valid_moves_time_s,
+                        total_game_ended_time_s=stats.total_game_ended_time_s,
+                        num_valid_moves_calls=stats.num_valid_moves_calls,
+                        num_game_ended_calls=stats.num_game_ended_calls,
                     )
 
                 self_play_end = time.perf_counter()

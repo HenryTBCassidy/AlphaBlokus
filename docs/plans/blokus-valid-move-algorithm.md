@@ -15,7 +15,7 @@ Prerequisites: Placement point cache validated (13 tests passing). Board/Game se
 | M1 | Implement naive correct `_valid_moves` | 1.5 hours | ✅ |
 | M2 | Implement `valid_move_masking` using `_valid_moves` + `ActionCodec` | 15 min | ✅ |
 | M3 | Implement `get_game_ended` using `_valid_moves` | 15 min | ✅ |
-| M4 | Write comprehensive tests for `valid_moves` | 1.5 hours | |
+| M4 | Write comprehensive tests for `valid_moves` | 1.5 hours | ✅ |
 | M5 | Profile: log move counts per turn in MCTS, measure `valid_moves` call time | 1 hour | |
 | M6 | Optimise based on profiling data | TBD | |
 | M7 | Update `docs/02-ALGORITHMS.md` with move generation section | 30 min | |

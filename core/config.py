@@ -16,6 +16,7 @@ class MCTSConfig:
     """
     num_mcts_sims: int  # Number of MCTS simulations per move
     cpuct: float  # Exploration constant in the PUCT formula (typically between 1 and 4)
+    profiling_level: str = "standard"  # "none", "standard" (episode aggregates), "detailed" (per-move breakdown)
 
 
 @dataclass(frozen=True)

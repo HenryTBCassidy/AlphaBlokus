@@ -1,6 +1,7 @@
 import math
+import sys
 import time
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Final, TypeAlias
 
 import numpy as np
@@ -22,6 +23,20 @@ ValidMoves: TypeAlias = NDArray[np.bool_]  # Binary mask of legal moves
 
 
 @dataclass(frozen=True)
+class MCTSMoveStats:
+    """Per-move profiling snapshot. Only collected when profiling_level="detailed"."""
+
+    move_number: int
+    num_sims: int
+    search_time_s: float
+    inference_time_s: float
+    valid_moves_time_s: float
+    game_ended_time_s: float
+    num_leaf_expansions: int
+    num_valid_moves: int
+
+
+@dataclass(frozen=True)
 class MCTSEpisodeStats:
     """Accumulated profiling statistics for an MCTS episode (one game).
 
@@ -29,12 +44,21 @@ class MCTSEpisodeStats:
     one complete game without needing a reset mechanism.
     """
 
+    # Standard fields (always populated)
     num_moves: int  # Number of get_action_prob() calls (moves played)
     total_sims: int  # Total individual search() calls across all moves
     total_search_time_s: float  # Wall time spent in simulation loops
     total_inference_time_s: float  # Wall time spent in nnet.predict() calls
     num_leaf_expansions: int  # New leaf nodes added to the search tree
     tree_size: int  # Number of unique states in the tree (len(state_visits))
+
+    # Detailed fields (populated when profiling_level="detailed")
+    total_valid_moves_time_s: float = 0.0
+    total_game_ended_time_s: float = 0.0
+    num_valid_moves_calls: int = 0
+    num_game_ended_calls: int = 0
+    tree_memory_bytes: int = 0  # Approximate memory used by MCTS tree dictionaries
+    move_stats: tuple[MCTSMoveStats, ...] = ()
 
 
 class MCTS:
@@ -60,59 +84,77 @@ class MCTS:
     """
 
     def __init__(self, game: IGame, nnet: INeuralNetWrapper, config: MCTSConfig) -> None:
-        """
-        Initialize the MCTS with game rules and neural network.
-
-        Args:
-            game: Game implementation providing rules and mechanics
-            nnet: Neural network for policy and value predictions
-            config: Configuration parameters for MCTS
-        """
         self.game = game
         self.nnet = nnet
         self.config = config
+        self._detailed = config.profiling_level == "detailed"
+        self._profiling = config.profiling_level != "none"
 
         # Tree statistics
-        self.q_values: dict[StateAction, float] = {}  # Q values for state-action pairs
-        self.visit_counts: dict[StateAction, int] = {}  # Visit counts for state-action pairs
-        self.state_visits: dict[StateKey, int] = {}  # Visit counts for states
-        self.policy_priors: dict[StateKey, PolicyVector] = {}  # Initial policies for states
-        self.game_ended_cache: dict[StateKey, float] = {}  # Game-ended status for states
-        self.valid_moves_cache: dict[StateKey, ValidMoves] = {}  # Valid moves mask for states
+        self.q_values: dict[StateAction, float] = {}
+        self.visit_counts: dict[StateAction, int] = {}
+        self.state_visits: dict[StateKey, int] = {}
+        self.policy_priors: dict[StateKey, PolicyVector] = {}
+        self.game_ended_cache: dict[StateKey, float] = {}
+        self.valid_moves_cache: dict[StateKey, ValidMoves] = {}
 
-        # Profiling counters (accumulated over the lifetime of this MCTS instance)
+        # Standard profiling counters
         self._total_search_time_s: float = 0.0
         self._total_inference_time_s: float = 0.0
         self._total_sims: int = 0
         self._num_leaf_expansions: int = 0
         self._num_moves: int = 0
 
+        # Detailed profiling counters
+        self._total_valid_moves_time_s: float = 0.0
+        self._total_game_ended_time_s: float = 0.0
+        self._num_valid_moves_calls: int = 0
+        self._num_game_ended_calls: int = 0
+        self._move_stats: list[MCTSMoveStats] = []
+
+    # -- Public methods --------------------------------------------------------
+
     def get_action_prob(self, canonical_board: IBoard, temp: float = 1) -> list[float]:
-        """
-        Get action probabilities for the current board state.
+        """Get action probabilities for the current board state.
 
         Performs multiple MCTS simulations and returns a probability distribution
         over possible actions based on the visit counts of each action.
-
-        Args:
-            canonical_board: The game board in canonical form
-            temp: Temperature parameter controlling exploration:
-                 - temp=0: Choose the best action deterministically
-                 - temp=1: Choose proportionally to visit counts
-                 - temp>1: Increase exploration
-                 - 0<temp<1: Reduce exploration
-
-        Returns:
-            list[float]: Probability distribution over all possible actions.
-                        The probability of illegal moves will be zero.
         """
-        # Perform simulations to build the search tree
         self._num_moves += 1
-        sim_start = time.perf_counter()
+
+        # Snapshot counters before this move (for per-move delta)
+        if self._detailed:
+            pre_sims = self._total_sims
+            pre_inference = self._total_inference_time_s
+            pre_valid_moves = self._total_valid_moves_time_s
+            pre_game_ended = self._total_game_ended_time_s
+            pre_leaf = self._num_leaf_expansions
+
+        # Run simulations
+        if self._profiling:
+            sim_start = time.perf_counter()
+
         for _ in range(self.config.num_mcts_sims):
             self.search(canonical_board)
             self._total_sims += 1
-        self._total_search_time_s += time.perf_counter() - sim_start
+
+        if self._profiling:
+            self._total_search_time_s += time.perf_counter() - sim_start
+
+        # Record per-move stats
+        if self._detailed:
+            s = self.game.state_key(canonical_board)
+            num_valid = int(self.valid_moves_cache[s].sum()) if s in self.valid_moves_cache else 0
+            self._move_stats.append(MCTSMoveStats(
+                move_number=self._num_moves,
+                num_sims=self._total_sims - pre_sims,
+                search_time_s=(time.perf_counter() - sim_start) if self._profiling else 0.0,
+                inference_time_s=self._total_inference_time_s - pre_inference,
+                valid_moves_time_s=self._total_valid_moves_time_s - pre_valid_moves,
+                game_ended_time_s=self._total_game_ended_time_s - pre_game_ended,
+                num_leaf_expansions=self._num_leaf_expansions - pre_leaf,
+                num_valid_moves=num_valid,
+            ))
 
         # Extract visit counts for all actions
         s = self.game.state_key(canonical_board)
@@ -132,45 +174,35 @@ class MCTS:
         return [x / counts_sum for x in counts]
 
     def search(self, canonical_board: IBoard) -> float:
-        """
-        Perform one iteration of MCTS.
-
-        This function implements the four phases of MCTS:
-        1. Selection: Choose actions recursively according to UCB formula
-        2. Expansion: Add a new leaf node to the tree
-        3. Evaluation: Use neural network to evaluate the leaf
-        4. Backpropagation: Update statistics for all visited nodes
-
-        Args:
-            canonical_board: The game board in canonical form
-
-        Returns:
-            float: The negative of the evaluated position value (for opponent's perspective)
-                  Values are in the range [-1, 1] where:
-                  - 1 means the current player is winning
-                  - -1 means the current player is losing
-                  - 0 means the position is equal
-
-        Notes:
-            - The return value is negated because the value is from the opponent's perspective
-            - TODO: Consider optimising the action iteration for games with sparse legal moves
-        """
+        """Perform one iteration of MCTS (selection → expansion → evaluation → backprop)."""
         s = self.game.state_key(canonical_board)
 
         # PHASE 1: Check if game has ended
         if s not in self.game_ended_cache:
-            self.game_ended_cache[s] = self.game.get_game_ended(canonical_board, 1)  # TODO: Player always White
+            if self._detailed:
+                t0 = time.perf_counter()
+            self.game_ended_cache[s] = self.game.get_game_ended(canonical_board, 1)
+            if self._detailed:
+                self._total_game_ended_time_s += time.perf_counter() - t0
+                self._num_game_ended_calls += 1
         if self.game_ended_cache[s] != 0:
             return -self.game_ended_cache[s]
 
         # PHASE 2: Leaf node - evaluate position with neural network
         if s not in self.policy_priors:
-            # Get policy and value predictions
-            infer_start = time.perf_counter()
+            if self._profiling:
+                infer_start = time.perf_counter()
             self.policy_priors[s], v = self.nnet.predict(canonical_board)
-            self._total_inference_time_s += time.perf_counter() - infer_start
+            if self._profiling:
+                self._total_inference_time_s += time.perf_counter() - infer_start
             self._num_leaf_expansions += 1
-            valids = self.game.valid_move_masking(canonical_board, 1)  # TODO: Player always White
+
+            if self._detailed:
+                vm_start = time.perf_counter()
+            valids = self.game.valid_move_masking(canonical_board, 1)
+            if self._detailed:
+                self._total_valid_moves_time_s += time.perf_counter() - vm_start
+                self._num_valid_moves_calls += 1
 
             # Mask invalid moves and renormalise probabilities
             self.policy_priors[s] = self.policy_priors[s] * valids
@@ -179,8 +211,6 @@ class MCTS:
             if sum_priors > 0:
                 self.policy_priors[s] /= sum_priors
             else:
-                # All valid moves were masked - use uniform distribution over valid moves
-                # This can indicate issues with neural network architecture or training
                 logger.error("All valid moves were masked, using uniform distribution.")
                 self.policy_priors[s] = valids.astype(float)
                 self.policy_priors[s] /= np.sum(self.policy_priors[s])
@@ -195,7 +225,6 @@ class MCTS:
         cur_best = -float('inf')
         best_act = -1
 
-        # Pick the action with the highest upper confidence bound
         for a in np.where(valids)[0]:
                 if (s, a) in self.q_values:
                     u = (self.q_values[(s, a)] +
@@ -228,15 +257,30 @@ class MCTS:
         self.state_visits[s] += 1
         return -v
 
-    def get_episode_stats(self) -> MCTSEpisodeStats:
-        """Return accumulated profiling statistics for this MCTS instance.
+    def _estimate_tree_memory_bytes(self) -> int:
+        """Estimate memory used by MCTS tree dictionaries.
 
-        Since MCTS is recreated per episode in Coach, the returned stats
-        cover one complete self-play game.
-
-        Returns:
-            MCTSEpisodeStats: Frozen dataclass with all profiling counters.
+        Counts the approximate size of all cached state data: Q-values,
+        visit counts, policy priors, valid moves masks, and game-ended cache.
         """
+        total = 0
+        # Dict overhead + entries
+        total += sys.getsizeof(self.q_values)
+        total += sys.getsizeof(self.visit_counts)
+        total += sys.getsizeof(self.state_visits)
+        total += sys.getsizeof(self.game_ended_cache)
+        # Policy priors: each is a numpy array (action_size floats)
+        for arr in self.policy_priors.values():
+            total += arr.nbytes
+        total += sys.getsizeof(self.policy_priors)
+        # Valid moves cache: each is a numpy array (action_size bools)
+        for arr in self.valid_moves_cache.values():
+            total += arr.nbytes
+        total += sys.getsizeof(self.valid_moves_cache)
+        return total
+
+    def get_episode_stats(self) -> MCTSEpisodeStats:
+        """Return accumulated profiling statistics for this MCTS instance."""
         return MCTSEpisodeStats(
             num_moves=self._num_moves,
             total_sims=self._total_sims,
@@ -244,4 +288,10 @@ class MCTS:
             total_inference_time_s=self._total_inference_time_s,
             num_leaf_expansions=self._num_leaf_expansions,
             tree_size=len(self.state_visits),
+            total_valid_moves_time_s=self._total_valid_moves_time_s,
+            total_game_ended_time_s=self._total_game_ended_time_s,
+            num_valid_moves_calls=self._num_valid_moves_calls,
+            num_game_ended_calls=self._num_game_ended_calls,
+            tree_memory_bytes=self._estimate_tree_memory_bytes(),
+            move_stats=tuple(self._move_stats),
         )
