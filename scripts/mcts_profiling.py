@@ -363,7 +363,10 @@ def main():
     parser.add_argument("--num-sims", type=int, default=50, help="MCTS simulations per move")
     parser.add_argument("--checkpoint", type=str, default=None, help="Path to model checkpoint")
     parser.add_argument("--game", type=str, default="blokusduo", choices=["blokusduo", "tictactoe"])
+    parser.add_argument("--output-dir", type=str, default=None, help="Output directory (default: temp/mcts_profiling/)")
     args = parser.parse_args()
+
+    output_dir = Path(args.output_dir) if args.output_dir else OUTPUT_DIR
 
     print(f"MCTS Profiling: {args.game}, {args.num_games} games, {args.num_sims} sims/move")
     t0 = time.perf_counter()
@@ -371,7 +374,7 @@ def main():
     elapsed = time.perf_counter() - t0
     print(f"Done in {elapsed:.1f}s")
 
-    build_report(all_stats, args.game, args.num_sims, OUTPUT_DIR)
+    build_report(all_stats, args.game, args.num_sims, output_dir)
 
 
 if __name__ == "__main__":

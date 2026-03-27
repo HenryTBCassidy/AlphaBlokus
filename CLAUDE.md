@@ -86,10 +86,13 @@ docs/
 │   ├── PLAN-FORMAT.md     # How to write implementation plans
 │   └── AI-CONTEXT.md      # Extended context, architecture rationale, gotchas
 └── plans/
+    ├── move-gen-further-optimisation.md  # Deferred: Cython, bitboard, caching (post-training)
     └── archive/
-        ├── board-game-separation.md # Board/Game responsibility split (completed)
-        ├── bug-fixes.md             # Bug fixes (completed)
-        └── structural-refactor.md   # Structural refactor (completed)
+        ├── blokus-valid-move-algorithm.md # Valid move generation (completed)
+        ├── board-game-separation.md       # Board/Game responsibility split (completed)
+        ├── bug-fixes.md                   # Bug fixes (completed)
+        ├── mcts-profiling.md              # MCTS profiling instrumentation (completed)
+        └── structural-refactor.md         # Structural refactor (completed)
 ```
 
 ## Things NOT to do

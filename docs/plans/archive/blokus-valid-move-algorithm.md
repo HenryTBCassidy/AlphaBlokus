@@ -17,8 +17,8 @@ Prerequisites: Placement point cache validated (13 tests passing). Board/Game se
 | M3 | Implement `get_game_ended` using `_valid_moves` | 15 min | ✅ |
 | M4 | Write comprehensive tests for `valid_moves` | 1.5 hours | ✅ |
 | M5 | Profile: log move counts per turn in MCTS, measure `valid_moves` call time | 1 hour | ✅ |
-| M6 | Optimise based on profiling data | TBD | |
-| M7 | Update `docs/02-ALGORITHMS.md` with move generation section | 30 min | |
+| M6 | Optimise based on profiling data | TBD | ✅ |
+| M7 | Update `docs/02-ALGORITHMS.md` with move generation section | 30 min | ✅ |
 
 **Estimated total: ~5 hours** (excluding M6 which depends on profiling results)
 
@@ -135,12 +135,28 @@ This data informs M6.
 
 ## M6. Optimise based on profiling
 
-Potential optimisations (implement only if profiling shows they're needed):
+**Current state:** 3.4x total speedup achieved (6.5s → 1.8s per MCTS game). Move generation at 2.0ms/leaf is 70% of search time. The inner loop of `_all_cells_valid` (Python-level per-cell board lookups) is the bottleneck.
 
-- **Pre-compute piece corners:** For each piece orientation, cache which filled cells are "exterior" (have a diagonal that extends outside the piece). Only these can touch placement points, reducing the inner loop.
-- **Cache piece fits per placement point:** Store all valid actions per point. Incrementally invalidate when a new piece is placed. Complex but eliminates re-enumeration.
-- **Numpy vectorisation:** Replace Python loops with array operations for the validity checks.
-- **Bitboard representation:** Represent board and pieces as bitmasks for fast overlap/adjacency checks.
+**Profiling data saved at:** `temp/mcts_profiling/baseline/`
+
+### Optimisation candidates
+
+| # | Optimisation | Expected | Effort | Status | Notes |
+|---|---|---|---|---|---|
+| O1 | `_has_valid_moves` short-circuit | 2.5x | Low | ✅ Done | Eliminated wasteful full enumeration in `get_game_ended` |
+| O2 | Cache piece orientation arrays | Marginal | Low | ✅ Done | Eliminated `np.rot90`/`np.flip` per call |
+| O3 | Precompute filled cell indices | Marginal | Low | ✅ Done | Eliminated scanning zero cells in pieces |
+| O4 | Side danger zone lookup | 1.4x | Low | ✅ Done | Boolean board replaces 4 neighbour checks per cell |
+| O5 | Deduplicate during generation | 1.1x | Low | ✗ Rejected | Per-yield set check was slower than bulk `set()` at end |
+| O6 | Use tuples instead of Action dataclasses | 1.1x est | Low | ✗ Rejected | No measurable difference — validation loop dominates, not allocation |
+| O7 | Cache `as_2d` on board | 1.05x est | Trivial | ✗ Rejected | No improvement; `_generate_valid_moves` already caches as local var |
+| O8 | Vectorise `_all_cells_valid` with numpy | 2-5x est | Medium | ✗ Rejected | numpy overhead > Python loop for 3-5 element arrays |
+| O9 | Cache valid moves per placement point | ~2x est | High | Deferred | See `docs/plans/move-gen-further-optimisation.md` |
+| O10 | Cython/C for `_all_cells_valid` | 5-10x on fn | High | Deferred | See `docs/plans/move-gen-further-optimisation.md` |
+| O11 | Bitboard representation | 10-50x est | Very high | Deferred | See `docs/plans/move-gen-further-optimisation.md` |
+| O12 | Parallelise placement points | Minimal | Medium | Not recommended | Python GIL; serialisation overhead negates gains |
+
+> **M6 note:** 3.4x total speedup achieved (O1–O4). Low-effort candidates O5–O8 all rejected after benchmarking. High-effort candidates O9–O11 deferred to a separate plan — will revisit after an end-to-end training run reveals whether further optimisation is needed.
 
 ---
 

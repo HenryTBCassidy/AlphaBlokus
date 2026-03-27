@@ -438,6 +438,50 @@ Generation N:
 
 ## AlphaZero Paper Reference
 
+## Move Generation (Blokus Duo)
+
+Legal move generation is the computational bottleneck for Blokus Duo self-play. With 21 pieces per player, 91 piece-orientations, and a 14×14 board, the theoretical action space is 17,837 — but only a fraction are legal at any given position.
+
+### Algorithm
+
+The algorithm centres on **placement points** — board cells that are diagonally adjacent to a friendly piece and not side-adjacent to one. These are the only cells where a new piece can make contact, so they anchor the search.
+
+```
+_valid_moves(board, player):
+    if first move:
+        return initial_actions (pre-computed at game init, filtered for opponent overlap)
+
+    for each placement_point in board.placement_points(player):
+        for each remaining piece_id:
+            for each orientation of that piece:
+                for each filled cell in the piece:
+                    compute insertion point that puts this cell on the placement point
+                    if piece fits on board AND all cells empty AND no friendly side adjacency:
+                        yield Action
+
+    deduplicate via set() (same action reachable from multiple placement points)
+```
+
+A short-circuit variant `_has_valid_moves` returns `True` on the first valid action found, used by `get_game_ended` to avoid computing the full list.
+
+### Caches maintained on the board
+
+- **Placement points** (`PlacementDict`): Updated incrementally by `_update_placement_points()` after each piece placement. Only cells in the neighbourhood of the placed piece are re-checked.
+- **Side danger zone** (`bool[14][14]`): Precomputed boolean board where `True` means orthogonally adjacent to a friendly piece. Replaces 4 per-cell neighbour checks with a single lookup.
+- **Piece orientation arrays and filled cell indices**: Precomputed once at game init by `PieceManager`. Eliminates `np.rot90()`/`np.flip()` calls during move generation.
+
+### Performance
+
+Profiling data (25 MCTS sims, CPU):
+- ~2ms per `valid_move_masking` call (one per leaf expansion)
+- ~300-500 legal moves in the early/mid game, dropping to near zero in late game
+- ~30 moves per game, ~30 turns total
+- Move generation is ~70% of MCTS search time; neural net inference is ~20%
+
+See `docs/08-TRAINING-ESTIMATES.md` for projected training times and `docs/plans/move-gen-further-optimisation.md` for deferred optimisation candidates (Cython, bitboard, batched inference).
+
+---
+
 The original AlphaZero paper (Silver et al., 2018) provides key implementation details that guide this project:
 
 - **MCTS simulations:** 800 per move in Chess, scaled by game complexity

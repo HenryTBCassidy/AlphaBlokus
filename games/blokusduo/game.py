@@ -218,7 +218,7 @@ class BlokusDuoGame(IGame):
 
         Core move generation logic shared by _valid_moves and _has_valid_moves.
         Yields may include duplicates (same Action reachable from multiple
-        placement points) — callers that need uniqueness must deduplicate.
+        placement points) — _valid_moves deduplicates via set().
         """
         if len(board.remaining_piece_ids(player)) == 21:
             initial = board._initial_actions[player]
