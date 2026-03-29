@@ -150,6 +150,8 @@ class BlokusDuoBoard(IBoard):
         self._black_last_piece_played: int | None = None
         self._white_placement_points: PlacementDict = {}
         self._black_placement_points: PlacementDict = {}
+        self._white_side_danger: NDArray = np.zeros((self.N, self.N), dtype=np.bool_)
+        self._black_side_danger: NDArray = np.zeros((self.N, self.N), dtype=np.bool_)
 
         # Shared immutable refs (never copied)
         self._piece_manager = piece_manager
@@ -205,6 +207,7 @@ class BlokusDuoBoard(IBoard):
         """
         if player == 1:
             return self
+        swapped_initial: ActionDict = {1: self._initial_actions[-1], -1: self._initial_actions[1]}
         return BlokusDuoBoard._from_state(
             piece_placement_board=(-self._piece_placement_board).astype(np.int8),
             white_remaining=self._black_piece_ids_remaining,
@@ -213,8 +216,10 @@ class BlokusDuoBoard(IBoard):
             black_last=self._white_last_piece_played,
             white_points=self._black_placement_points,
             black_points=self._white_placement_points,
+            white_side_danger=self._black_side_danger,
+            black_side_danger=self._white_side_danger,
             piece_manager=self._piece_manager,
-            initial_actions=self._initial_actions,
+            initial_actions=swapped_initial,
             coordinate_index_decoder=self._coordinate_index_decoder,
         )
 
@@ -278,6 +283,10 @@ class BlokusDuoBoard(IBoard):
         BlokusDuoBoard._update_placement_points(
             new_black_points, -1, (length_idx, width_idx), piece_orientation, board_2d)
 
+        # Recompute side danger zones from the updated board
+        new_white_danger = BlokusDuoBoard._compute_side_danger(board_2d, 1)
+        new_black_danger = BlokusDuoBoard._compute_side_danger(board_2d, -1)
+
         return BlokusDuoBoard._from_state(
             piece_placement_board=new_ppb,
             white_remaining=new_white_remaining,
@@ -286,6 +295,8 @@ class BlokusDuoBoard(IBoard):
             black_last=new_black_last,
             white_points=new_white_points,
             black_points=new_black_points,
+            white_side_danger=new_white_danger,
+            black_side_danger=new_black_danger,
             piece_manager=self._piece_manager,
             initial_actions=self._initial_actions,
             coordinate_index_decoder=self._coordinate_index_decoder,
@@ -306,6 +317,8 @@ class BlokusDuoBoard(IBoard):
         black_last: int | None,
         white_points: PlacementDict,
         black_points: PlacementDict,
+        white_side_danger: NDArray,
+        black_side_danger: NDArray,
         piece_manager: PieceManager,
         initial_actions: ActionDict,
         coordinate_index_decoder: CoordinateIndexDecoder,
@@ -319,6 +332,8 @@ class BlokusDuoBoard(IBoard):
         board._black_last_piece_played = black_last
         board._white_placement_points = white_points
         board._black_placement_points = black_points
+        board._white_side_danger = white_side_danger
+        board._black_side_danger = black_side_danger
         board._piece_manager = piece_manager
         board._initial_actions = initial_actions
         board._coordinate_index_decoder = coordinate_index_decoder
@@ -335,6 +350,30 @@ class BlokusDuoBoard(IBoard):
     def placement_points(self, player_side: PlayerSide) -> PlacementDict:
         """Get the placement points cache for the given player."""
         return self._white_placement_points if player_side == 1 else self._black_placement_points
+
+    def side_danger_zone(self, player_side: PlayerSide) -> NDArray:
+        """Get the side-adjacency danger zone for a player.
+
+        Returns a boolean 14×14 array where True means placing a friendly piece cell
+        at that position would violate the no-sides rule (orthogonally adjacent to
+        an existing friendly piece).
+        """
+        return self._white_side_danger if player_side == 1 else self._black_side_danger
+
+    @staticmethod
+    def _compute_side_danger(board_2d: BoardArray, player: PlayerSide) -> NDArray:
+        """Compute the side-adjacency danger zone for a player.
+
+        Returns a boolean array where True = orthogonally adjacent to a friendly piece.
+        Uses numpy shifts (no Python loops).
+        """
+        friendly = (board_2d == player)
+        danger = np.zeros_like(friendly)
+        danger[1:, :] |= friendly[:-1, :]   # piece above
+        danger[:-1, :] |= friendly[1:, :]   # piece below
+        danger[:, 1:] |= friendly[:, :-1]   # piece left
+        danger[:, :-1] |= friendly[:, 1:]   # piece right
+        return danger
 
     @classmethod
     def _no_sides(cls, i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:

@@ -139,13 +139,17 @@ class MetricsCollector:
         total_inference_time_s: float,
         num_leaf_expansions: int,
         tree_size: int,
+        total_valid_moves_time_s: float = 0.0,
+        total_game_ended_time_s: float = 0.0,
+        num_valid_moves_calls: int = 0,
+        num_game_ended_calls: int = 0,
     ) -> None:
         """Record MCTS profiling data for a single self-play episode."""
         sims_per_second = total_sims / total_search_time_s if total_search_time_s > 0 else 0.0
         inference_fraction = (
             total_inference_time_s / total_search_time_s if total_search_time_s > 0 else 0.0
         )
-        self._self_play_profiling_records.append({
+        record = {
             "generation": generation,
             "episode": episode,
             "num_moves": num_moves,
@@ -156,7 +160,19 @@ class MetricsCollector:
             "tree_size": tree_size,
             "sims_per_second": sims_per_second,
             "inference_fraction": inference_fraction,
-        })
+        }
+        if total_valid_moves_time_s > 0 or total_game_ended_time_s > 0:
+            valid_moves_fraction = (
+                total_valid_moves_time_s / total_search_time_s if total_search_time_s > 0 else 0.0
+            )
+            record.update({
+                "total_valid_moves_time_s": total_valid_moves_time_s,
+                "total_game_ended_time_s": total_game_ended_time_s,
+                "num_valid_moves_calls": num_valid_moves_calls,
+                "num_game_ended_calls": num_game_ended_calls,
+                "valid_moves_fraction": valid_moves_fraction,
+            })
+        self._self_play_profiling_records.append(record)
 
     def log_resource_usage(
         self,

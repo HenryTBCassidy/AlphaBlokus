@@ -80,15 +80,19 @@ docs/
 ├── 05-EVALUATION.md       # Metrics, Pentobi benchmarking
 ├── 06-INTERFACES.md       # Pentobi adapter, UI, translation layer
 ├── 07-DATA-STORAGE.md     # Parquet format, metrics tables, checkpoints
+├── 08-TRAINING-ESTIMATES.md # Wall-clock time estimates for different configs/hardware
 ├── guides/
 │   ├── STYLE-GUIDE.md     # Code conventions (ALWAYS reference before writing code)
 │   ├── PLAN-FORMAT.md     # How to write implementation plans
 │   └── AI-CONTEXT.md      # Extended context, architecture rationale, gotchas
 └── plans/
+    ├── move-gen-further-optimisation.md  # Deferred: Cython, bitboard, caching (post-training)
     └── archive/
-        ├── board-game-separation.md # Board/Game responsibility split (completed)
-        ├── bug-fixes.md             # Bug fixes (completed)
-        └── structural-refactor.md   # Structural refactor (completed)
+        ├── blokus-valid-move-algorithm.md # Valid move generation (completed)
+        ├── board-game-separation.md       # Board/Game responsibility split (completed)
+        ├── bug-fixes.md                   # Bug fixes (completed)
+        ├── mcts-profiling.md              # MCTS profiling instrumentation (completed)
+        └── structural-refactor.md         # Structural refactor (completed)
 ```
 
 ## Things NOT to do

@@ -51,13 +51,9 @@ def test_piece_flip_preserves_cell_count(piece_manager: PieceManager):
 
 
 def test_all_orientations_produce_arrays(piece_manager: PieceManager):
-    """Every orientation property on every piece returns a valid ndarray."""
-    all_orientations = [
-        Orientation.Identity, Orientation.Rot90, Orientation.Rot180, Orientation.Rot270,
-        Orientation.Flip, Orientation.Flip90, Orientation.Flip180, Orientation.Flip270,
-    ]
+    """Every basis orientation for every piece returns a valid ndarray."""
     for piece in piece_manager.pieces.values():
-        for orient in all_orientations:
+        for orient in piece.basis_orientations:
             arr = piece_manager.get_piece_orientation_array(piece.id, orient)
             assert isinstance(arr, np.ndarray)
             assert arr.ndim == 2

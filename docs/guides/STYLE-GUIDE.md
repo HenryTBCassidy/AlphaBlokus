@@ -246,6 +246,8 @@ Within a file, order things **public-first** ("newspaper" pattern — headlines 
 5. Public classes (public methods first, then private methods within each class)
 6. Module-level code (rare — avoid)
 
+**Method ordering within a class:** Public methods come first, then private methods. Within each group, order methods so that **callees appear before callers** — you should never have to scroll past a function to understand what the calling function does. The reader can always look up to find a method's implementation, never down.
+
 Private helpers belong inside the class that uses them (as `@staticmethod` or regular methods), not floating at module level. This keeps them co-located with their only caller and avoids orphaned functions.
 
 ### Early returns
