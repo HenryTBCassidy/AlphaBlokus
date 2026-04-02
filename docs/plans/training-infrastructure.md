@@ -14,8 +14,12 @@ both TicTacToe validation and eventual BlokusDuo training.
 | I3 | Design BlokusDuo run configurations (when move gen lands) | 30 min | Medium | |
 
 Detailed setup steps for I1 are in Claude memory (not in this repo for security
-reasons). Reference: `memory/reference_gpu_setup_plan.md`. Ask Claude to pull up
-the "GPU setup plan" when ready.
+reasons — contains IPs and usernames). Reference: `memory/reference_gpu_setup_plan.md`.
+Ask Claude to pull up the "GPU setup plan" when ready.
+
+Setup: Tailscale (encrypted mesh VPN) + WSL2 + OpenSSH + tmux. 10 steps, all
+done at home before travelling. Designed for connecting from anywhere (hotel WiFi,
+phone hotspot, etc.) with zero port forwarding and key-only auth.
 
 ---
 
