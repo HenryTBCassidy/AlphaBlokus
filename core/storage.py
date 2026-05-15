@@ -121,17 +121,23 @@ class MetricsCollector:
         Imported lazily so the heavy wandb dependency only loads when actually
         used. The full ``RunConfig`` is captured as the W&B run config so
         hyperparameters appear alongside the metrics in the dashboard.
+
+        The W&B run name appends a UTC timestamp suffix (``_YYYYMMDD_HHMMSS``)
+        so multiple launches of the same config produce distinguishable runs
+        in the dashboard instead of a wall of identical names.
         """
         import wandb  # lazy import — wandb is a heavy dep
+        from datetime import UTC, datetime
 
         assert self.config is not None and self.config.wandb is not None  # narrowed by caller
         wandb_config = self.config.wandb
+        run_name = f"{self.config.run_name}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
         self._wandb_run = wandb.init(
             project=wandb_config.project,
             entity=wandb_config.entity,
             tags=list(wandb_config.tags),
             mode=wandb_config.mode,
-            name=self.config.run_name,
+            name=run_name,
             config=_dataclass_to_jsonable(self.config),
         )
         if self._wandb_run is not None and getattr(self._wandb_run, "url", None):
