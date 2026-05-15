@@ -1,6 +1,11 @@
 # Remote Training Setup — Windows PC Steps
 
-You are setting up a Windows PC (with RTX 3080 Ti GPU) to be remotely accessible via SSH from a MacBook anywhere in the world. The architecture is:
+> **Archived 2026-05-15.** Operational setup is functionally complete: WSL2 + Ubuntu installed, CUDA visible inside WSL2, Tailscale running, OpenSSH Server accepting key-auth connections. The default-shell-to-WSL2 step (T5) and unattended-boot config (T8) were never executed and are tracked in `docs/plans/gpu-training-poc.md`. The repo-clone / `uv sync` step (T7) is also tracked there.
+
+---
+
+
+You are setting up a Windows PC (with RTX 3060 Ti GPU) to be remotely accessible via SSH from a MacBook anywhere in the world. The architecture is:
 
 - **Tailscale** — encrypted mesh VPN that gives both machines stable private IPs (`100.x.x.x`). No port forwarding, no exposure to the public internet.
 - **WSL2** — runs Ubuntu inside Windows, provides a Linux environment with native CUDA GPU access.
@@ -51,7 +56,7 @@ Open WSL2 (type `wsl` in PowerShell):
 nvidia-smi
 ```
 
-Should show the RTX 3080 Ti. No separate Linux NVIDIA driver needed — WSL2 uses the Windows driver automatically.
+Should show the RTX 3060 Ti. No separate Linux NVIDIA driver needed — WSL2 uses the Windows driver automatically.
 
 Install build tools:
 ```bash

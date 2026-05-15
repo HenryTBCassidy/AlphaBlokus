@@ -1,6 +1,11 @@
 # Remote Training Setup — MacBook Steps
 
-You are setting up a MacBook to remotely SSH into a Windows PC (with RTX 3080 Ti GPU) for running ML training jobs. The architecture is:
+> **Archived 2026-05-15.** Operational setup is functionally complete: Tailscale installed, SSH key auth working, `~/.ssh/config` `gpu` and `gpu-cmd` aliases in place. Steps that were never executed (mostly QoL niceties like SSH default-shell on the Windows side) are tracked in `docs/plans/gpu-training-poc.md`.
+
+---
+
+
+You are setting up a MacBook to remotely SSH into a Windows PC (with RTX 3060 Ti GPU) for running ML training jobs. The architecture is:
 
 - **Tailscale** — encrypted mesh VPN that gives both machines stable private IPs (`100.x.x.x`). Works through any WiFi/hotspot/firewall without port forwarding.
 - **SSH with key auth** — the Mac connects to the PC's Tailscale IP. Password auth is disabled; only your ed25519 key works.
@@ -137,7 +142,7 @@ If it connects, run:
 nvidia-smi
 ```
 
-Should show the RTX 3080 Ti. If this works, the PC is fully set up for unattended remote access.
+Should show the RTX 3060 Ti. If this works, the PC is fully set up for unattended remote access.
 
 ---
 

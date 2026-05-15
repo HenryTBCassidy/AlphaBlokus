@@ -1,6 +1,11 @@
 # Remote Training Setup
 
-SSH from MacBook (anywhere in the world) to personal Windows PC (RTX 3080 Ti, at home) for AlphaBlokus training runs. Uses Tailscale (encrypted mesh VPN) + WSL2 (Linux on Windows) + tmux (persistent sessions).
+> **Archived 2026-05-15.** Overview doc for the original remote setup. Network/SSH layer is functionally complete (Tailscale, WSL2, OpenSSH, key auth all working). Remaining operational items — Windows default-shell to WSL2, unattended boot, repo install on the PC, GPU smoke test — are tracked in `docs/plans/gpu-training-poc.md`. The companion mac- and windows-side step lists are also archived alongside this doc.
+
+---
+
+
+SSH from MacBook (anywhere in the world) to personal Windows PC (RTX 3060 Ti, at home) for AlphaBlokus training runs. Uses Tailscale (encrypted mesh VPN) + WSL2 (Linux on Windows) + tmux (persistent sessions).
 
 **Scenario:** Henry is travelling (Sri Lanka/Bangalore), connecting from hotel WiFi, phone hotspots, airport lounges. Needs rock-solid security and persistence.
 
@@ -49,7 +54,7 @@ Open WSL2 (type `wsl` in PowerShell):
 nvidia-smi
 ```
 
-Should show the RTX 3080 Ti. No separate Linux NVIDIA driver needed — WSL2 uses the Windows driver automatically.
+Should show the RTX 3060 Ti. No separate Linux NVIDIA driver needed — WSL2 uses the Windows driver automatically.
 
 Install build tools:
 ```bash
