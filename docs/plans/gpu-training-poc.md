@@ -1,10 +1,10 @@
 # GPU Training POC
 
-Add W&B reporting alongside the existing Plotly HTML reports, then prove the end-to-end training pipeline runs on the home PC's RTX 3060 Ti using TicTacToe as a smoke test. Companion to `docs/plans/archive/remote-training-setup.md` (network/SSH layer, already complete) and `docs/08-TRAINING-ESTIMATES.md` (the timing numbers in there need to be replaced with measurements taken on the actual hardware once the smoke test runs).
+Add W&B reporting alongside the existing Plotly HTML reports, then prove the end-to-end training pipeline runs on the home PC's RTX 3060 Ti using TicTacToe as a smoke test. Companion to `docs/plans/archive/remote-training-setup.md` (network/SSH layer, already complete) and `docs/08-TRAINING-ESTIMATES.md` (the estimated 3080 Ti timing numbers in there need to be replaced with measurements taken on the actual hardware).
 
-The plan spans two phases. Phase 1 (`W1–W7`) is code work on this branch (`feat/wandb-integration`) and ends at a merge into main. Phase 2 (`W8–W14`) is operational work on the home PC over SSH, with no new branch — it's running scripts and editing one or two config files. `W15` archives the plan.
+The plan spans three phases. **Phase 1 (`W1–W6`)** is code work on this branch (`feat/wandb-integration`) — W&B integration + the two run configs. **Phase 2 (`W7–W17`)** is the operational PC test on the *feature branch* (not main): commit/push the code, set up the PC, run training, verify. The branch only merges to main *after* the PC validation passes. **Phase 3 (`W18–W19`)** is post-merge follow-up — re-profile MCTS with real measurements, archive the plan.
 
-Prerequisites: Tailscale + WSL2 + OpenSSH + key auth are already working between Mac and PC (`ssh gpu-cmd nvidia-smi` confirmed 2026-05-15). The PC's WSL2 Ubuntu has `python3` and `git`, but no `uv`, no torch, and no repo cloned.
+Prerequisites: Tailscale + WSL2 + OpenSSH + key auth are already working between Mac and PC (`ssh gpu-cmd nvidia-smi` confirmed 2026-05-15). The PC's WSL2 Ubuntu has `python3` and `git`, but no `uv`, no torch, and no repo cloned. W&B Pro account already set up; API key stored at `local/wandb_api_key.txt` on the Mac (gitignored).
 
 ---
 
@@ -12,21 +12,26 @@ Prerequisites: Tailscale + WSL2 + OpenSSH + key auth are already working between
 
 | #   | Item                                                                                                          | Effort | Priority | Done |
 |-----|---------------------------------------------------------------------------------------------------------------|--------|----------|------|
-| W1  | Add `wandb` to `pyproject.toml`, run `uv sync`, commit lockfile                                               | 10 min | High     |      |
-| W2  | Add `WandbConfig` frozen dataclass and optional field on `RunConfig`; wire through the JSON config loader     | 30 min | High     |      |
-| W3  | Extend `MetricsCollector` (`core/storage.py`) to mirror existing `log_*` calls into `wandb.log`; add `close()` and call it from `Coach` in a `try/finally` | 1.5 hr | High | |
-| W4  | Add a `run_configurations/smoke_test_gpu.json` (TicTacToe, `cuda: true`, W&B enabled) and document the new W&B fields in `smoke_test.json` | 15 min | High | |
-| W5  | Run W4's CPU equivalent locally on the Mac (3 generations TicTacToe), verify the W&B dashboard receives metrics end-to-end and the HTML report still renders | 30 min | High | |
-| W6  | Update `docs/07-DATA-STORAGE.md` with a W&B section explaining what's logged and when to prefer it over the HTML reports | 20 min | Medium | |
-| W7  | Open PR for `feat/wandb-integration`, merge into main, delete branch                                          | 10 min | High     |      |
-| W8  | On the PC: set OpenSSH default shell to WSL2 bash (T5 from the archived remote-setup-windows plan), reconnect, verify `ssh gpu` lands in bash | 10 min | Medium | |
-| W9  | On the PC inside WSL2: clone the repo, install `uv`, `uv sync`, `apt install -y tmux`, run `uv run pytest -m "not slow"` and confirm green | 20 min | High | |
-| W10 | On the PC: confirm `torch.cuda.is_available()` returns `True` and `torch.cuda.get_device_name(0)` reports the RTX 3060 Ti | 5 min | High | |
-| W11 | Design a TicTacToe GPU training config sized to load the GPU meaningfully but finish in under an hour (10–20 generations, moderate net), commit as `run_configurations/ttt_gpu_first_run.json` | 20 min | High | |
-| W12 | Run W11 in `tmux` on the PC; in a second SSH session, watch `nvidia-smi` to confirm the python process is listed and GPU utilisation is non-zero; capture a screenshot for the writeup later | 1 hr | High | |
-| W13 | Post-run verification: W&B dashboard populated end-to-end, parquet metrics on disk, HTML report regenerates locally after `rsync`, arena win-rates sensible for TicTacToe self-play | 20 min | High | |
-| W14 | Re-run `scripts/mcts_profiling.py` on the PC against Blokus and replace the estimated 3080 Ti numbers in `docs/08-TRAINING-ESTIMATES.md` with measurements | 30 min | Medium | |
-| W15 | `git mv docs/plans/gpu-training-poc.md docs/plans/archive/gpu-training-poc.md`                                 | 2 min  | Low      |      |
+| W1  | Add `wandb` to `pyproject.toml`, run `uv sync`, commit lockfile                                               | 10 min | High     | ✅    |
+| W2  | Add `WandbConfig` frozen dataclass and optional field on `RunConfig`; wire through the JSON config loader     | 30 min | High     | ✅    |
+| W3  | Extend `MetricsCollector` (`core/storage.py`) to mirror existing `log_*` calls into `wandb.log`; add `close()` and call it from `Coach` in a `try/finally` | 1.5 hr | High | ✅ |
+| W4  | Add `run_configurations/smoke_test_gpu.json` (TicTacToe, `cuda: true`, W&B enabled); document W&B fields in `smoke_test.json` | 15 min | High | ✅ |
+| W5  | Run W4's CPU equivalent locally on the Mac (3 generations), verify the W&B dashboard receives metrics end-to-end and the HTML report still renders | 30 min | High | ✅ |
+| W6  | Add `run_configurations/ttt_full.json` for the PC run (30 gens, 50 eps, 80 sims, 256 filters / 3 blocks, CUDA on, W&B online) | 5 min | High | ✅ |
+| W7  | Commit the entire W1–W6 working tree as the planned five one-sentence commits: wandb dep, WandbConfig, MetricsCollector W&B integration, smoke configs, mac+full TTT configs | 10 min | High | |
+| W8  | Push `feat/wandb-integration` to origin                                                                       | 2 min  | High     |      |
+| W9  | Update `docs/07-DATA-STORAGE.md` with a W&B section (what is logged, when to use dashboard vs HTML); commit + push | 25 min | Medium | |
+| W10 | On the PC: set OpenSSH default shell to WSL2 bash (T5 from the archived remote-setup-windows plan), reconnect, verify `ssh gpu` lands in bash | 10 min | Medium | |
+| W11 | On the PC inside WSL2: clone the repo, install `uv`, `uv sync`, `apt install -y tmux`, run `uv run pytest -m "not slow"` and confirm green | 20 min | High | |
+| W12 | On the PC: `git fetch origin && git checkout feat/wandb-integration` to get the W&B code on the test branch | 3 min | High | |
+| W13 | On the PC: verify `torch.cuda.is_available()` is `True` and `torch.cuda.get_device_name(0)` reports the RTX 3060 Ti | 5 min | High | |
+| W14 | On the PC: `wandb login` using the API key from `local/wandb_api_key.txt` (copy over via `scp` from Mac) | 5 min | High | |
+| W15 | On the PC: run `ttt_full.json` inside `tmux`; in a second SSH session, run `watch -n 2 nvidia-smi` to confirm utilisation; record actual wall clock vs the 22 min prediction | 30 min | High | |
+| W16 | Post-run verification: W&B dashboard populated end-to-end, `best.pth.tar` exists in `Nets/`, all 7 parquet directories populated for all generations | 15 min | High | |
+| W17 | `rsync -avz gpu:~/AlphaBlokus/temp/ttt_full/ ./temp/ttt_full/` results back to Mac; regenerate the HTML report locally to confirm it renders | 10 min | Medium | |
+| W18 | Open PR for `feat/wandb-integration`, merge into main, delete branch                                          | 10 min | High     |      |
+| W19 | Re-run `scripts/mcts_profiling.py` on the PC against Blokus and replace the estimated 3080 Ti numbers in `docs/08-TRAINING-ESTIMATES.md` with measurements | 30 min | Medium | |
+| W20 | `git mv docs/plans/gpu-training-poc.md docs/plans/archive/gpu-training-poc.md`                                 | 2 min  | Low      |      |
 
 ---
 
@@ -72,7 +77,7 @@ Don't replace the parquet writes or the HTML report — W&B is additive.
 Two files:
 
 - `run_configurations/smoke_test_gpu.json`: copy of `smoke_test.json` with `net_config.cuda: true` and a `wandb` block (`project: "alphablokus-poc"`, `tags: ["smoke", "gpu", "ttt"]`).
-- `run_configurations/smoke_test.json`: leave `cuda: false` but add the `wandb` block (with `mode: "disabled"`) as a documented example so future configs have something to copy.
+- `run_configurations/smoke_test.json`: add a `wandb` block (`mode: "online"`) so the Mac smoke test exercises the full W&B path.
 
 Both run TicTacToe — Blokus is not in scope for this plan.
 
@@ -80,27 +85,58 @@ Both run TicTacToe — Blokus is not in scope for this plan.
 
 ## W5. Local end-to-end smoke test (Mac, CPU)
 
-Run the (CPU) variant of W4 on the MacBook. Expectation: the existing parquet outputs and HTML report look identical to a pre-W&B run, and the W&B dashboard at the project URL shows the same metrics live. Catch any wiring bugs here before pushing to the PC.
+Run the CPU smoke test (`smoke_test.json`) on the Mac with `mode: "online"`. Expectation: the existing parquet outputs and HTML report look identical to a pre-W&B run, and the W&B dashboard at the project URL shows the same metrics live. Catch any wiring bugs here before pushing to the PC.
 
 If `wandb.init` prompts for a login on first run, capture the API key into `~/.netrc` so subsequent runs are non-interactive.
 
 ---
 
-## W6. Documentation
+## W6. Mac demo + full PC config files
 
-Add a "W&B integration" section to `docs/07-DATA-STORAGE.md` covering: what gets logged, where parquet vs. W&B sit in the data flow, when to use the dashboard vs. the HTML report (rule of thumb: dashboard for live monitoring of unattended runs on the PC; HTML report for retrospective deep-dives once results are `rsync`'d back to the Mac), and how to disable W&B for offline/airgapped runs.
+Two more configs:
 
----
-
-## W7. PR and merge
-
-Open a PR against main with a short description linking to this plan. Merge, delete `feat/wandb-integration`. Phase 2 starts on a clean main checkout.
+- `run_configurations/ttt_mac_demo.json` — written for the Mac calibration run (25 gens, 40 eps, 60 sims, 128 filters / 2 blocks). Used to measure actual wall clock against a prediction so PC sizing can be calibrated. Completed 2026-05-15 in 305s (~5 min) vs an 8-min prediction; model converged at gen 10 with `best.pth.tar` saved.
+- `run_configurations/ttt_full.json` — the PC target config: 30 generations, 50 episodes, 80 MCTS sims, 20 arena matches, 256 filters / 3 residual blocks, batch 64, 6 epochs, CUDA on, W&B online. Sized to actually exercise the GPU (the Mac demo's smaller net is kernel-launch bound and barely uses the GPU). Predicted wall clock on the 3060 Ti: **22 minutes** (range 15-30 min).
 
 ---
 
-## W8. OpenSSH default shell on the PC
+## W7. Commit the integration work
 
-`ssh gpu` currently lands in PowerShell because step T5 of the archived remote-setup-windows plan was never executed. From the Mac:
+The W1–W6 working tree is currently uncommitted on `feat/wandb-integration` (Henry reviews diffs first). Once approved, commit as five one-sentence commits matching the W1–W4 + W6 boundaries:
+
+1. `Add wandb dependency` — `pyproject.toml`, `uv.lock`
+2. `Add optional WandbConfig field on RunConfig` — `core/config.py`
+3. `Mirror MetricsCollector log_* calls to W&B when configured` — `core/storage.py`, `core/coach.py`
+4. `Add W&B settings to smoke_test and smoke_test_gpu configs` — `run_configurations/smoke_test.json`, `run_configurations/smoke_test_gpu.json`
+5. `Add TicTacToe Mac demo and full PC run configs` — `run_configurations/ttt_mac_demo.json`, `run_configurations/ttt_full.json`
+
+Plus the gitignore tweak (`wandb/`, `local/wandb_api_key.txt` already covered) and the plan-format tweak (tick rule) as their own one-sentence commits if not already covered.
+
+---
+
+## W8. Push the branch
+
+`git push -u origin feat/wandb-integration`. Confirm the branch is visible on GitHub.
+
+---
+
+## W9. Documentation
+
+Add a "W&B integration" section to `docs/07-DATA-STORAGE.md` covering:
+
+- What gets logged to which namespace (`training/`, `arena/`, `timing/`, `self_play/`, `resources/`, `throughput/`) — table form.
+- How parquet and W&B coexist (W&B is additive; parquet is still the source of truth for HTML reports).
+- When to use which (dashboard for live monitoring of unattended runs; HTML report for retrospective deep-dives once `rsync`'d back).
+- How to disable W&B for offline/airgapped runs (`mode: "disabled"` in the JSON config, or no `wandb` block at all).
+- Where the API key lives (`local/wandb_api_key.txt`, gitignored).
+
+Commit + push as its own one-sentence commit so it can be reviewed independently of the code.
+
+---
+
+## W10. OpenSSH default shell on the PC
+
+`ssh gpu` currently lands in PowerShell because step T5 of the archived `remote-setup-windows` plan was never executed. From the Mac:
 
 ```bash
 ssh gpu-cmd 'powershell -Command "New-ItemProperty -Path HKLM:\\SOFTWARE\\OpenSSH -Name DefaultShell -Value C:\\Windows\\System32\\wsl.exe -PropertyType String -Force; Restart-Service sshd"'
@@ -108,9 +144,11 @@ ssh gpu-cmd 'powershell -Command "New-ItemProperty -Path HKLM:\\SOFTWARE\\OpenSS
 
 Then reconnect with `ssh gpu` and verify the prompt is WSL2 bash. Future SSH sessions skip the `wsl -d Ubuntu -- bash -lc '...'` wrapper.
 
+If this is fiddly or fails, skip it — every PC command for the rest of the plan can be wrapped in `ssh gpu-cmd 'wsl -d Ubuntu -- bash -lc "..."'`. It's a QoL fix, not a blocker.
+
 ---
 
-## W9. PC repo and dependency install
+## W11. PC repo and dependency install
 
 Inside WSL2 over SSH:
 
@@ -125,11 +163,23 @@ sudo apt install -y tmux
 uv run pytest -m "not slow"
 ```
 
-Test suite must pass. If `uv sync` fails on torch CUDA wheels, fall back to the CPU wheel and retry — this is a common WSL2 gotcha and worth noting in `docs/07-DATA-STORAGE.md` if it happens.
+Test suite must pass (170 tests, ~3s on Mac, similar on PC). If `uv sync` fails on torch CUDA wheels, fall back to the CPU wheel and retry — this is a common WSL2 gotcha. Note any deviations in `docs/07-DATA-STORAGE.md` follow-up.
 
 ---
 
-## W10. GPU + PyTorch sanity check
+## W12. Check out the feature branch
+
+```bash
+git fetch origin
+git checkout feat/wandb-integration
+git log --oneline -5  # sanity: should show the W&B commits
+```
+
+We deliberately test on the feature branch before merging to main. If the PC reveals a CUDA-specific bug in our W&B integration, fixing it on the same branch keeps history clean.
+
+---
+
+## W13. GPU + PyTorch sanity check
 
 ```bash
 uv run python -c "import torch; print(torch.cuda.is_available(), torch.cuda.get_device_name(0), torch.cuda.get_device_properties(0).total_memory // (1024**3), 'GB')"
@@ -139,53 +189,88 @@ Expected: `True NVIDIA GeForce RTX 3060 Ti 8 GB`. If `False`, debug WSL2 CUDA dr
 
 ---
 
-## W11. TicTacToe GPU training config
+## W14. W&B login on the PC
 
-Goal: a config that exercises the full pipeline (self-play → train → arena → reporting → W&B) and clearly loads the GPU, but completes in under an hour so we can iterate. Suggested starting point: 15 generations, 30 self-play games/gen, 50 MCTS sims, 128 filters / 3 residual blocks, batch size 64, 10 arena games. Tune up or down based on observed GPU utilisation in W12.
+From the Mac, copy the key:
 
-Commit as `run_configurations/ttt_gpu_first_run.json` on main (no branch — single config file, low risk).
+```bash
+scp local/wandb_api_key.txt gpu:~/wandb_api_key.txt
+ssh gpu 'WANDB_API_KEY=$(cat ~/wandb_api_key.txt) wandb login --relogin && rm ~/wandb_api_key.txt'
+```
+
+The `rm` at the end avoids leaving the key in the PC's home directory once `~/.netrc` is populated. Verify with `ssh gpu 'wandb status'` or by running a tiny `wandb.Api().viewer.entity` check.
 
 ---
 
-## W12. Smoke run on the PC
+## W15. PC training run
 
 ```bash
 ssh gpu
-cd ~/AlphaBlokus && git pull
-tmux new -s ttt-poc
-uv run python main.py --config run_configurations/ttt_gpu_first_run.json
+cd ~/AlphaBlokus
+tmux new -s ttt-full
+uv run python main.py --config run_configurations/ttt_full.json
 # Ctrl-B D to detach
 ```
 
-In a second SSH session:
+In a second SSH session (don't re-attach to tmux — just run side-by-side):
 
 ```bash
-ssh gpu-cmd 'wsl -d Ubuntu -- bash -lc "watch -n 1 nvidia-smi"'
+ssh gpu 'watch -n 2 nvidia-smi'
 ```
 
-Confirm the python process appears in the process list and `GPU-Util` is non-zero during training epochs. Capture a screenshot of the W&B dashboard mid-run for the writeup.
+Confirm the python process appears in the GPU process list and `GPU-Util` is non-zero during training epochs. Take a screenshot of the W&B dashboard mid-run for the writeup.
+
+**Record actual wall clock at the end.** Compare to the 22 min prediction. If it's much faster, the PC is underloaded and we should size up for future runs. If much slower, future runs need scaling down.
 
 ---
 
-## W13. Post-run verification
+## W16. Post-run verification
 
-Sanity checks after the run completes:
+Sanity checks while still SSH'd into the PC:
 
-- W&B dashboard shows all expected metric series end-to-end, no gaps.
-- Parquet files exist under `temp/ttt_gpu_first_run/`.
-- `rsync` results back to Mac and regenerate the HTML report — must look identical in shape to historical TicTacToe runs.
-- Arena win rates are within the range we'd expect for self-play converging on TicTacToe (the game is small enough that strong play emerges in tens of generations, so monotonic improvement is a reasonable smell test).
+- W&B dashboard shows all 6 namespaces (`training/`, `arena/`, `timing/`, `self_play/`, `resources/`, `throughput/`) populated for all 30 generations, no gaps.
+- `temp/ttt_full/Nets/best.pth.tar` exists (means at least one generation was accepted).
+- `find temp/ttt_full -name "*.parquet" | wc -l` — expect 30 generations × 6 parquet types + 30 self-play files = 210ish.
+- Arena win rates look sane (early gens: real wins; later: plateauing toward all-draws).
+- No tracebacks or crashes in `temp/ttt_full/Logs/alpha.log`.
 
-If any of these fail, fix and re-run before moving on.
+If anything looks wrong, fix on the feature branch and re-run before merging.
 
 ---
 
-## W14. Re-profile MCTS on the PC
+## W17. Pull results back to the Mac
+
+```bash
+rsync -avz gpu:~/AlphaBlokus/temp/ttt_full/ ./temp/ttt_full/
+```
+
+Then on the Mac, regenerate the HTML report locally (Coach already wrote it on the PC, but rendering on the Mac confirms the parquets are portable):
+
+```bash
+# If we have a standalone report-regen entry point, use it; otherwise inspect by opening the report.html
+open temp/ttt_full/Reporting/report.html
+```
+
+Optionally `torch.load('temp/ttt_full/Nets/best.pth.tar')` from a notebook on the Mac to confirm the checkpoint loads cleanly. Once everything is verified the PC's `temp/ttt_full/` can be deleted if disk space matters.
+
+---
+
+## W18. PR + merge
+
+Open a PR for `feat/wandb-integration` → `main` with a short description linking to this plan and the PC run's W&B dashboard URL as evidence of working end-to-end. Merge, delete branch, both locally and on origin.
+
+After merge, on the PC: `git checkout main && git pull` so the PC is back on a clean main checkout for future runs.
+
+---
+
+## W19. Re-profile MCTS on the PC
 
 Run `uv run python scripts/mcts_profiling.py` on the PC. Use the output to replace the estimated 3080 Ti numbers in `docs/08-TRAINING-ESTIMATES.md` with measured 3060 Ti numbers, and remove the "needs re-profiling" banner. This makes the doc honest for the first time since the project started.
 
+Commit as a separate one-line commit on main (no branch needed for a one-file doc update).
+
 ---
 
-## W15. Archive
+## W20. Archive
 
-`git mv docs/plans/gpu-training-poc.md docs/plans/archive/gpu-training-poc.md` in the same commit as marking W14 ✅, per the plan-format invariant.
+`git mv docs/plans/gpu-training-poc.md docs/plans/archive/gpu-training-poc.md` in the same commit as marking W19 ✅, per the plan-format invariant.
