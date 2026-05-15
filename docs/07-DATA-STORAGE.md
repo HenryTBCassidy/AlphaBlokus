@@ -231,3 +231,62 @@ Memory is measured at the Python process level (not system-wide). GPU memory cov
 | MCTS counters | `core/mcts.py` | `MCTSEpisodeStats`, `get_episode_stats()` |
 | Training loss + throughput logging | `games/base_wrapper.py` | `BaseNNetWrapper.train()` |
 | Wiring (profiling + resources) | `core/coach.py` | `Coach.learn()` |
+
+---
+
+## Weights & Biases (optional, additive)
+
+W&B is an **additive** reporting layer — it does not replace any of the parquet writes above. If a run's `RunConfig.wandb` is set, every `log_*` call on `MetricsCollector` is mirrored to `wandb.log({...})` in addition to its existing buffer append. Parquet, HTML reports, and Nets behaviour are unchanged.
+
+### When to use which
+
+| Use case | Best tool |
+|----------|-----------|
+| Watch a long unattended run from another machine / phone | **W&B dashboard** (live, browser-based, no `rsync` needed) |
+| Retrospective deep-dive after a run finished | **HTML report** (rendered from local parquets, fully offline, rich Plotly visuals) |
+| Compare runs against each other | W&B (built-in run comparison) |
+| Archival / reproducibility | Parquets in `temp/<run_name>/` (source of truth) |
+| Air-gapped / no network | Set `wandb.mode: "disabled"` or omit the `wandb` block entirely |
+
+### What gets logged to W&B
+
+Every `MetricsCollector.log_*` call has a corresponding `wandb.log` payload, namespaced by topic:
+
+| Namespace | Source method | Granularity | Series |
+|-----------|---------------|-------------|--------|
+| `training/*` | `log_training` | Per training batch | `pi_loss`, `v_loss`, `total_loss`, `avg_pi_loss`, `avg_v_loss` |
+| `arena/*` | `log_arena` | Per generation | `wins`, `losses`, `draws`, `win_rate` |
+| `timing/*` | `log_timing` | Per phase per generation | `{SelfPlay,Training,Arena,WholeCycle}_s` |
+| `self_play/*` | `log_self_play_profiling` | Per self-play episode | `num_moves`, `total_sims`, `search_time_s`, `inference_time_s`, `sims_per_second`, `inference_fraction`, `leaf_expansions`, `tree_size` |
+| `resources/*` | `log_resource_usage` | Per phase per generation | `<phase>_rss_mb`, `<phase>_gpu_mb` (in MB, not bytes — easier to eyeball than the parquet's raw bytes) |
+| `throughput/*` | `log_training_throughput` | Per training epoch | `num_examples`, `epoch_time_s`, `samples_per_second` |
+
+Plus W&B captures the full `RunConfig` (flattened via a Path→str helper) at run init, so hyperparameters appear alongside the metrics in the dashboard's config panel.
+
+### Configuration
+
+A `wandb` block in any run config enables it:
+
+```json
+"wandb": {
+  "project": "alphablokus-poc",
+  "entity": null,
+  "tags": ["ttt", "smoke", "mac"],
+  "mode": "online"
+}
+```
+
+- `project` — W&B project name (auto-created on first run).
+- `entity` — team/user; `null` uses the default for the logged-in account.
+- `tags` — free-text tags surfaced in the W&B UI for filtering.
+- `mode` — `"online"` (sync to cloud), `"offline"` (write to local `wandb/` dir, sync later), or `"disabled"` (no-op, useful for tests).
+
+Omit the `wandb` block entirely (or set it to `null`) to disable W&B without code changes — the existing `test_run.json`, `full_run.json`, and `smoke_test.json` would all behave identically to before the W&B integration if the block were removed.
+
+### Authentication
+
+W&B uses the API key in `~/.netrc` (written by `wandb login`). The project's API key for Henry's account lives at `local/wandb_api_key.txt` (gitignored, never committed). On a fresh machine, copy it across via `scp` and run `wandb login --relogin` once.
+
+### Lifecycle
+
+`MetricsCollector.__init__` calls `wandb.init(...)` if `config.wandb` is set. `Coach._learn_loop` runs the training inside a `try/finally` so `MetricsCollector.close()` (which calls `wandb.finish()`) always fires, including on a crash mid-run. Local `wandb/run-*` directories are gitignored and safe to delete at any time — the cloud has authoritative copies of synced runs.
