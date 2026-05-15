@@ -11,12 +11,13 @@ in the project.  It consolidates two storage classes:
   metadata in the parquet schema.
 """
 
+import dataclasses
 import time
 from collections import deque
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import TypeAlias
+from typing import Any, TypeAlias
 
 import numpy as np
 import pandas as pd
@@ -49,6 +50,29 @@ ProcessedExample: TypeAlias = tuple[NDArray, NDArray, float]  # (board, policy, 
 
 
 # ---------------------------------------------------------------------------
+# Internal helpers
+# ---------------------------------------------------------------------------
+
+def _dataclass_to_jsonable(obj: Any) -> Any:
+    """Recursively convert a dataclass tree into JSON-serialisable primitives.
+
+    ``dataclasses.asdict`` preserves types like ``pathlib.Path`` which W&B's
+    config serialiser rejects. This helper flattens those to strings while
+    leaving plain dataclass fields, lists, tuples, dicts, and primitives
+    untouched.
+    """
+    if dataclasses.is_dataclass(obj) and not isinstance(obj, type):
+        return {f.name: _dataclass_to_jsonable(getattr(obj, f.name)) for f in dataclasses.fields(obj)}
+    if isinstance(obj, Path):
+        return str(obj)
+    if isinstance(obj, (list, tuple)):
+        return [_dataclass_to_jsonable(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _dataclass_to_jsonable(v) for k, v in obj.items()}
+    return obj
+
+
+# ---------------------------------------------------------------------------
 # MetricsCollector (stateful buffer → hive-partitioned parquet)
 # ---------------------------------------------------------------------------
 
@@ -69,7 +93,14 @@ class MetricsCollector:
 
     Reading back: ``pd.read_parquet(directory)`` automatically discovers all
     partitions and reconstructs the ``generation`` column from directory names.
+
+    If ``config.wandb`` is set, the collector also mirrors each ``log_*`` call
+    to Weights & Biases. The W&B run is initialised in ``__post_init__`` and
+    finalised by ``close()`` (call it from the owning component's shutdown
+    path — typically a ``try/finally`` around the training loop).
     """
+
+    config: RunConfig | None = None
 
     _training_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _arena_records: list[dict] = field(default_factory=list, init=False, repr=False)
@@ -77,6 +108,55 @@ class MetricsCollector:
     _self_play_profiling_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _resource_usage_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _training_throughput_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _wandb_run: Any | None = field(default=None, init=False, repr=False)
+
+    def __post_init__(self) -> None:
+        if self.config is None or self.config.wandb is None:
+            return
+        self._init_wandb()
+
+    def _init_wandb(self) -> None:
+        """Initialise a W&B run using the active ``WandbConfig``.
+
+        Imported lazily so the heavy wandb dependency only loads when actually
+        used. The full ``RunConfig`` is captured as the W&B run config so
+        hyperparameters appear alongside the metrics in the dashboard.
+        """
+        import wandb  # lazy import — wandb is a heavy dep
+
+        assert self.config is not None and self.config.wandb is not None  # narrowed by caller
+        wandb_config = self.config.wandb
+        self._wandb_run = wandb.init(
+            project=wandb_config.project,
+            entity=wandb_config.entity,
+            tags=list(wandb_config.tags),
+            mode=wandb_config.mode,
+            name=self.config.run_name,
+            config=_dataclass_to_jsonable(self.config),
+        )
+        if self._wandb_run is not None and getattr(self._wandb_run, "url", None):
+            logger.info("Initialised W&B run: {}", self._wandb_run.url)
+        else:
+            logger.info("Initialised W&B run in {} mode", wandb_config.mode)
+
+    def _publish(self, payload: dict) -> None:
+        """Mirror a metrics payload to W&B if a run is active.
+
+        No-op when W&B is disabled. Keeps the log_* methods small and lets
+        W&B's own batching/throttling handle the network side.
+        """
+        if self._wandb_run is None:
+            return
+        self._wandb_run.log(payload)
+
+    def close(self) -> None:
+        """Finalise the W&B run if one is active. Safe to call multiple times."""
+        if self._wandb_run is None:
+            return
+        import wandb
+
+        wandb.finish()
+        self._wandb_run = None
 
     def log_training(
         self,
@@ -100,6 +180,16 @@ class MetricsCollector:
             "average_pi_loss": avg_pi_loss,
             "average_v_loss": avg_v_loss,
         })
+        self._publish({
+            "training/pi_loss": pi_loss,
+            "training/v_loss": v_loss,
+            "training/total_loss": total_loss,
+            "training/avg_pi_loss": avg_pi_loss,
+            "training/avg_v_loss": avg_v_loss,
+            "generation": generation,
+            "epoch": epoch,
+            "batch": batch_number,
+        })
 
     def log_arena(
         self,
@@ -115,6 +205,15 @@ class MetricsCollector:
             "losses": losses,
             "draws": draws,
         })
+        total = wins + losses + draws
+        win_rate = wins / total if total > 0 else 0.0
+        self._publish({
+            "arena/wins": wins,
+            "arena/losses": losses,
+            "arena/draws": draws,
+            "arena/win_rate": win_rate,
+            "generation": generation,
+        })
 
     def log_timing(
         self,
@@ -127,6 +226,10 @@ class MetricsCollector:
             "generation": generation,
             "cycle_stage": cycle_stage,
             "time_elapsed": time_elapsed,
+        })
+        self._publish({
+            f"timing/{cycle_stage.value}_s": time_elapsed,
+            "generation": generation,
         })
 
     def log_self_play_profiling(
@@ -173,6 +276,18 @@ class MetricsCollector:
                 "valid_moves_fraction": valid_moves_fraction,
             })
         self._self_play_profiling_records.append(record)
+        self._publish({
+            "self_play/num_moves": num_moves,
+            "self_play/total_sims": total_sims,
+            "self_play/search_time_s": total_search_time_s,
+            "self_play/inference_time_s": total_inference_time_s,
+            "self_play/sims_per_second": sims_per_second,
+            "self_play/inference_fraction": inference_fraction,
+            "self_play/leaf_expansions": num_leaf_expansions,
+            "self_play/tree_size": tree_size,
+            "generation": generation,
+            "episode": episode,
+        })
 
     def log_resource_usage(
         self,
@@ -188,6 +303,13 @@ class MetricsCollector:
             "process_rss_bytes": process_rss_bytes,
             "gpu_memory_bytes": gpu_memory_bytes,
         })
+        payload: dict[str, Any] = {
+            f"resources/{cycle_stage.value}_rss_mb": process_rss_bytes / (1024 ** 2),
+            "generation": generation,
+        }
+        if gpu_memory_bytes is not None:
+            payload[f"resources/{cycle_stage.value}_gpu_mb"] = gpu_memory_bytes / (1024 ** 2)
+        self._publish(payload)
 
     def log_training_throughput(
         self,
@@ -204,6 +326,13 @@ class MetricsCollector:
             "num_examples": num_examples,
             "epoch_time_s": epoch_time_s,
             "samples_per_second": samples_per_second,
+        })
+        self._publish({
+            "throughput/num_examples": num_examples,
+            "throughput/epoch_time_s": epoch_time_s,
+            "throughput/samples_per_second": samples_per_second,
+            "generation": generation,
+            "epoch": epoch,
         })
 
     def flush(self, config: RunConfig, generation: int) -> None:
