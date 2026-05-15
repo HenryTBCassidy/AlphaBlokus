@@ -496,7 +496,7 @@ Unchanged from the original architecture review — see [`01-BACKGROUND.md`](../
 
 **Tiered approach:**
 - **Tier 1: Mac M4 Pro** — development, debugging, small test runs (MPS backend)
-- **Tier 2: RTX 3080 Ti PC** — full training runs (CUDA, most mature backend)
+- **Tier 2: RTX 3060 Ti PC** — full training runs (CUDA, most mature backend)
 - **Tier 3: AWS/cloud** — overflow if PC isn't enough (g5.xlarge spot ~8-10/day)
 
 No action item — this informs Phase 3 decisions.

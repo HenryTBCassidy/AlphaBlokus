@@ -4,7 +4,7 @@
 
 AlphaZero implementation for Blokus Duo. Self-play reinforcement learning on a 14x14 board with 21 polyomino pieces per player. The goal is to beat Pentobi (strongest open-source Blokus AI) in a majority of 100 games.
 
-**Current state:** Core framework complete and validated on Tic-Tac-Toe. Blokus Duo game logic partially implemented — board, pieces, placement validation, and neural net all work. **Blocked on move generation** (`valid_moves()`). See README.md "Current Status" for details.
+**Current state:** Core framework complete and validated on Tic-Tac-Toe. Blokus Duo game logic is mostly complete — board, pieces, placement validation, move generation, masking, game-end detection, and neural net all work. Remaining game-logic gap: `BlokusDuoGame.get_symmetries()`. The next *operational* milestone is a TicTacToe training run on the home PC's GPU (W&B integration + GPU smoke test). See README.md "Current Status" for details.
 
 ## Commands
 
@@ -41,10 +41,13 @@ Game-agnostic framework (`core/`) with pluggable game implementations (`games/`)
 
 ## Critical path (what needs to happen next)
 
-1. `BlokusDuoGame.valid_moves()` — move generation algorithm using board's placement point cache
-2. `BlokusDuoGame.valid_move_masking()` — convert valid moves to binary action-space mask (trivial once valid_moves works)
-3. `BlokusDuoGame.get_symmetries()` — symmetric board+policy pairs for data augmentation
-4. Switch `"game": "blokusduo"` in run config once the above are done
+1. W&B integration in `MetricsCollector` (additive to existing HTML reports).
+2. End-to-end TicTacToe training run on the home PC's RTX 3060 Ti (CUDA smoke test).
+3. `BlokusDuoGame.get_symmetries()` — symmetric board+policy pairs for data augmentation.
+4. Fix `main.py` checkpoint loading (currently raises when `load_model: true`).
+5. Switch `"game": "blokusduo"` in run config once the above are done.
+
+Live plan: `docs/plans/gpu-training-poc.md` (to be created on `feat/wandb-integration`).
 
 ## Conventions
 
@@ -62,12 +65,13 @@ Follow `docs/guides/PLAN-FORMAT.md` when creating implementation plans.
 
 ## Gotchas
 
-1. **Move generation is the blocker.** Everything else works. Don't rewrite the framework — focus on completing Blokus game logic.
+1. **Move generation is done; don't rewrite it.** Algorithm is documented inline and in `docs/plans/archive/blokus-valid-move-algorithm.md`. Further speedups (Cython, bitboard) are intentionally deferred — see `docs/plans/move-gen-further-optimisation.md`.
 2. **Action space is huge (17,837).** MCTS iterates only valid moves (`np.where(valids)[0]`).
 3. **Orientation IDs are 0-based (0–90).** `OrientationCodec` in `pieces.py` handles `(piece_id, orientation) ↔ int`. `ActionCodec` in `board.py` handles the full `Action ↔ int` (0–17,836) mapping.
 4. **Coordinate systems:** Board = bottom-left origin (Blokus notation). Arrays = top-left origin (numpy). `CoordinateIndexDecoder` handles conversion.
-5. **`eval.ipynb`** has Henry's design notes on the move generation algorithm — read it before implementing.
+5. **`notebooks/eval.ipynb`** has Henry's original design notes on the move generation algorithm — historical reference now that the algorithm is in code.
 6. **Board sizes use class constants.** `BlokusDuoBoard.N = 14`, `Board.N = 3` (TicTacToe). Never hardcode board dimensions as literals.
+7. **Device selection is a simple `cuda: bool` flag** in `RunConfig.net_config` (`core/config.py:35`, used in `games/base_wrapper.py`). No MPS auto-detection. On the Mac always set `cuda: false`; on the home PC set `cuda: true`.
 
 ## Documentation
 
@@ -85,14 +89,18 @@ docs/
 │   ├── STYLE-GUIDE.md     # Code conventions (ALWAYS reference before writing code)
 │   ├── PLAN-FORMAT.md     # How to write implementation plans
 │   └── AI-CONTEXT.md      # Extended context, architecture rationale, gotchas
-└── plans/
+└── plans/                                # Top-level = in-flight or not-yet-started
     ├── move-gen-further-optimisation.md  # Deferred: Cython, bitboard, caching (post-training)
-    └── archive/
-        ├── blokus-valid-move-algorithm.md # Valid move generation (completed)
-        ├── board-game-separation.md       # Board/Game responsibility split (completed)
-        ├── bug-fixes.md                   # Bug fixes (completed)
-        ├── mcts-profiling.md              # MCTS profiling instrumentation (completed)
-        └── structural-refactor.md         # Structural refactor (completed)
+    ├── training-infrastructure.md        # SSH/GPU/cloud compute options
+    └── archive/                          # Completed plans, retained for context
+        ├── blokus-valid-move-algorithm.md # Valid move generation
+        ├── board-game-separation.md       # Board/Game responsibility split
+        ├── bug-fixes.md                   # Bug fixes
+        ├── mcts-profiling.md              # MCTS profiling instrumentation
+        ├── remote-setup-mac.md            # MacBook-side SSH setup
+        ├── remote-setup-windows.md        # Windows-side WSL2 + SSH setup
+        ├── remote-training-setup.md       # Original combined remote-training plan
+        └── structural-refactor.md         # Structural refactor
 ```
 
 ## Things NOT to do

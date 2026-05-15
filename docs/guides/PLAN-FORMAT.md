@@ -97,7 +97,11 @@ Don't pad sections with filler. If a fix is "change `> 0` to `>= 0` in 4 places,
 
 1. **Draft:** Write the plan in `docs/plans/`, get agreement on scope.
 2. **Execute:** Work through the checklist, marking items done. If an item is intentionally skipped or deferred, mark it `Deferred` in the Done column and add a quoted note below the checklist explaining why.
-3. **Archive:** When the plan is complete (all items done or explicitly deferred), move it to `docs/plans/archive/`. Fix any relative links between plans so cross-references still work after the move. Don't delete completed plans — they explain why the code looks the way it does.
+3. **Archive — do this the moment the plan is complete, not later.** When every checklist item is either ✅ or `Deferred`, move the file to `docs/plans/archive/` using `git mv` (preserves history). Fix any relative links between plans so cross-references still work after the move. Don't delete completed plans — they explain why the code looks the way it does.
+
+> **Invariant:** `docs/plans/` at the top level contains *only* plans that are in flight or not yet started. The archive contains everything else. If you finish a plan and don't archive it in the same commit (or the immediate follow-up), you're leaving the directory in a misleading state — a future reader can't tell what is still live work.
+
+If a plan was superseded mid-flight (its scope was absorbed into another plan, or the approach was abandoned), add a one-paragraph "Archived: superseded" banner at the top explaining what replaced it, then `git mv` to archive. Don't leave it in the active directory just because not every row is ✅.
 
 ### What "complete" means
 
@@ -111,3 +115,4 @@ A plan is complete when every checklist item is either ✅ or marked `Deferred` 
 - **Topic-ordered sections with execution-ordered checklist.** Pick one ordering and use it for both.
 - **No effort estimates.** "This will take a while" is not a plan.
 - **Giant monolithic items.** If a checklist row says "Implement the entire game" it's not useful. Break it down.
+- **Leaving completed plans in `docs/plans/`.** As soon as the last checklist item lands (✅ or `Deferred`), `git mv` the file to `docs/plans/archive/` in the same commit. The active directory is a working surface, not a graveyard.

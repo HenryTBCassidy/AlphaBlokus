@@ -2,6 +2,8 @@
 
 Estimated wall-clock time for Blokus Duo self-play training under various configurations. Based on profiling data from `scripts/mcts_profiling.py` (March 2026).
 
+> ⚠️ **Numbers in this doc need re-profiling.** They were generated assuming the home PC's GPU was an RTX 3060 Ti. The actual card is an RTX **3060 Ti** (~50% the memory bandwidth at small batch sizes). Inference latency is therefore roughly 1.7–2× higher; total wall-clock training time inflates by an estimated ~1.3–1.5× because move generation (CPU-bound) still dominates. Real measurements pending a profiling run on the actual hardware — tracked in `docs/plans/gpu-training-poc.md`.
+
 **Key bottleneck:** Move generation at ~2.9ms per leaf expansion (pure Python, CPU-bound, unaffected by GPU). This dominates self-play time at all scales.
 
 ---
@@ -11,7 +13,7 @@ Estimated wall-clock time for Blokus Duo self-play training under various config
 | Machine | GPU | Inference speed (small/medium/large net) |
 |---------|-----|------------------------------------------|
 | MacBook (M-series) | CPU only | 2.1 / 8.5 / 16.4 ms |
-| Personal PC | RTX 3080 Ti | ~0.3 / ~1.0 / ~2.0 ms (estimated) |
+| Personal PC | RTX 3060 Ti | ~0.5 / ~1.7 / ~3.5 ms (estimated, was 3080 Ti figures × ~1.75) |
 
 ---
 
@@ -30,7 +32,7 @@ Estimated wall-clock time for Blokus Duo self-play training under various config
 | Hardware | Time/move | Time/game | Total |
 |----------|-----------|-----------|-------|
 | MacBook CPU | 430ms | 13s | **5 hours** |
-| RTX 3080 Ti | 279ms | 8s | **3.5 hours** |
+| RTX 3060 Ti | 279ms | 8s | **3.5 hours** |
 
 ### Moderate — net learns something
 
@@ -45,7 +47,7 @@ Estimated wall-clock time for Blokus Duo self-play training under various config
 | Hardware | Time/move | Time/game | Total |
 |----------|-----------|-----------|-------|
 | MacBook CPU | 861ms | 26s | **1.9 days** |
-| RTX 3080 Ti | 559ms | 17s | **1.3 days** |
+| RTX 3060 Ti | 559ms | 17s | **1.3 days** |
 
 ### Serious — aim to beat Pentobi
 
@@ -60,7 +62,7 @@ Estimated wall-clock time for Blokus Duo self-play training under various config
 | Hardware | Time/move | Time/game | Total |
 |----------|-----------|-----------|-------|
 | MacBook CPU | 3.9s | 116s | **24 days** |
-| RTX 3080 Ti | 1.4s | 41s | **8.5 days** |
+| RTX 3060 Ti | 1.4s | 41s | **8.5 days** |
 
 ### Paper-scale — full AlphaZero equivalent
 
@@ -75,7 +77,7 @@ Estimated wall-clock time for Blokus Duo self-play training under various config
 | Hardware | Time/move | Time/game | Total |
 |----------|-----------|-----------|-------|
 | MacBook CPU | 13s | 392s | **1.2 years** |
-| RTX 3080 Ti | 3.4s | 101s | **117 days** |
+| RTX 3060 Ti | 3.4s | 101s | **117 days** |
 
 ---
 
@@ -96,7 +98,7 @@ The massive parallelism (5,000 TPUs generating games simultaneously) is what mak
 
 ## Impact of Move Generation Optimisation
 
-Move generation accounts for ~70% of search time. The current implementation is a naive Python loop. Potential speedups and their impact on the "Serious" config (RTX 3080 Ti):
+Move generation accounts for ~70% of search time. The current implementation is a naive Python loop. Potential speedups and their impact on the "Serious" config (RTX 3060 Ti):
 
 | Move gen speed | Serious total | Speedup |
 |----------------|---------------|---------|

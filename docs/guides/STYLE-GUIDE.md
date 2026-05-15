@@ -355,15 +355,13 @@ Examples:
 
 ### Commit messages
 
-Imperative mood, ≤72 character subject line. Body explains *why*, not *what* (the diff shows *what*).
+**One sentence.** Imperative mood. Aim for ≤72 characters, hard cap ~100. No body, no bullet list — the diff shows *what*, the PR description carries any longer *why*.
 
 ```
 Fix MCTS to iterate only valid actions instead of full action space
-
-The current loop iterates all 17,837 actions per simulation even though
-only ~50 are valid. Using np.where(valids) reduces this to O(valid_moves)
-per simulation, giving orders-of-magnitude speedup for Blokus.
 ```
+
+If you find yourself wanting a body, that's a signal the commit is doing too much — split it into separate commits, each with its own one-sentence message.
 
 ### PR conventions
 

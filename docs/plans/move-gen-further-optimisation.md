@@ -62,7 +62,7 @@ The current Python version is identical logic but each `board_2d[ri, rj]` goes t
 
 **Effort:** 2–3 hours. Cython code is ~30 lines. Build tooling configuration is the annoying part (platform-specific compilation, CI integration, fallback import).
 
-**Expected speedup:** 5–10x on `_all_cells_valid` (C loops vs Python loops). Since that function is ~70% of search time, overall MCTS speedup: ~2–3x. Would bring "Serious" training from 8.5 → ~3–4 days on RTX 3080 Ti.
+**Expected speedup:** 5–10x on `_all_cells_valid` (C loops vs Python loops). Since that function is ~70% of search time, overall MCTS speedup: ~2–3x. Would bring "Serious" training from 8.5 → ~3–4 days on RTX 3060 Ti (re-profiling pending — see `docs/plans/gpu-training-poc.md`).
 
 **Risk:** Low correctness risk (same algorithm, just compiled). Medium build risk (platform portability, dependency on Cython).
 
@@ -105,7 +105,7 @@ Two bitwise ANDs, two comparisons. No loops. Python's native `int` supports arbi
 
 **Effort:** 4–6 hours. 196 bits doesn't fit in standard integer types (but Python's arbitrary-precision int handles it). Column boundary masking for side danger shifts needs careful implementation.
 
-**Expected speedup:** 10–50x on validation (two C-level bitwise ANDs vs ~20 Python-level operations). Overall MCTS: ~3–5x. Would bring "Serious" training from 8.5 → ~2 days on RTX 3080 Ti.
+**Expected speedup:** 10–50x on validation (two C-level bitwise ANDs vs ~20 Python-level operations). Overall MCTS: ~3–5x. Would bring "Serious" training from 8.5 → ~2 days on RTX 3060 Ti (re-profiling pending — see `docs/plans/gpu-training-poc.md`).
 
 **Risk:** Medium — unfamiliar technique for Blokus, 196-bit boundary handling, significant refactor of board internals. Well-established in chess engines but Blokus pieces are larger and more varied.
 
