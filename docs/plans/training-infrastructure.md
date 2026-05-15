@@ -30,7 +30,7 @@ phone hotspot, etc.) with zero port forwarding and key-only auth.
 | Option | GPU | VRAM | Best For | Cost |
 |--------|-----|------|----------|------|
 | **MacBook (Apple Silicon)** | MPS | Shared | Smoke tests, report generation, development | Free |
-| **Personal PC** | RTX 3080 Ti | 12 GB | TicTacToe runs, early Blokus training | Free (electricity) |
+| **Personal PC** | RTX 3060 Ti | 8 GB | TicTacToe runs, early Blokus training | Free (electricity) |
 | **Cloud GPU (if needed)** | Various | 16-80 GB | Long Blokus runs, scaling up | $0.15-2.00/hr |
 
 ### Cloud GPU Providers (researched 2026-03-18)
@@ -71,7 +71,7 @@ phone hotspot, etc.) with zero port forwarding and key-only auth.
 - **Alternating pattern** means the GPU is idle during much of self-play.
 - **Spot/interruptible is fine** — Coach checkpoints every generation. Losing a spot instance
   costs at most one generation of self-play games.
-- **12 GB VRAM (3080 Ti) is sufficient** for our ResNet on 44x14x14 input. Cloud 24 GB cards
+- **8 GB VRAM (3060 Ti) is sufficient** for our ResNet on 44x14x14 input at reasonable batch sizes. Cloud 24 GB cards
   give headroom for larger batch sizes if needed.
 
 ### Recommended Phasing

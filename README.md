@@ -2,7 +2,7 @@
 
 **An AlphaZero implementation for Blokus Duo — training a neural network through self-play to master the board game Blokus.**
 
-> Status: **In Progress** — Tic-Tac-Toe pipeline complete, Blokus Duo game logic under development
+> Status: **In Progress** — Core framework + Tic-Tac-Toe + Blokus Duo game logic complete. End-to-end Blokus training run pending.
 
 ---
 
@@ -29,9 +29,9 @@ This is the same approach that achieved superhuman performance in Chess, Shogi, 
 |-------|--------|-------|
 | Core AlphaZero framework | **Complete** | MCTS, Coach, Arena, config, logging, reporting |
 | Tic-Tac-Toe implementation | **Complete** | Network plays competitively with perfect play |
-| Blokus Duo game logic | **Partial** | Board, pieces, placement validation work; move generation incomplete |
+| Blokus Duo game logic | **Mostly complete** | Board, pieces, placement validation, move generation, and game-end detection all working. `get_symmetries()` still pending. |
 | Blokus Duo neural net | **Complete** | ResNet architecture defined and compiles |
-| Blokus Duo integration | **Blocked** | Cannot run self-play until move generation is complete |
+| End-to-end training run | **Pending** | TicTacToe smoke test on GPU is the next operational milestone (see `docs/plans/`). |
 
 ### What Works
 
@@ -43,27 +43,24 @@ This is the same approach that achieved superhuman performance in Chess, Shogi, 
 - Blokus board representation, piece insertion, placement validation, coordinate conversion
 - Initial move caching (all valid first moves for both players pre-computed)
 - Placement point cache (tracks valid placement corners after each piece insertion)
+- BlokusDuo move generation, masking, and game-end detection (merged via PR #6)
+- MCTS profiling instrumentation for measuring search bottlenecks
 - Neural network for Blokus compiles and runs forward pass (verified by tests)
 - HTML reporting with Plotly (loss curves, arena win rates, timing statistics)
 
-### What's Blocked
+### Remaining Game Logic
 
-1. **`BlokusDuoBoard.valid_moves()`** — move generation logic unimplemented (returns empty)
-2. **`BlokusDuoGame.valid_move_masking()`** — raises `NotImplementedError`
-3. **`BlokusDuoGame.get_symmetries()`** — raises `NotImplementedError`
-4. **`BlokusDuoBoard.game_ended()`** — raises `NotImplementedError`
-5. **Model loading** in `main.py` — raises `NotImplementedError`
+1. **`BlokusDuoGame.get_symmetries()`** — raises `NotImplementedError`. Needed for data augmentation by symmetric board+policy pairs. Not required for the TicTacToe smoke test, but required before serious Blokus training.
+2. **Model checkpoint resume** in `main.py` — currently raises when `load_model: true`.
 
-### Critical Path
+### Next Up
 
-To get Blokus self-play running, these must be implemented **in order**:
+The framework + both games' core logic are in place. The immediate next milestones are operational rather than algorithmic:
 
-1. `BlokusDuoBoard.valid_moves()` — aggregate valid moves from placement point cache
-2. `BlokusDuoBoard.game_ended()` — check if neither player has legal moves
-3. `BlokusDuoGame.valid_move_masking()` — convert valid moves to binary action-space mask
-4. `BlokusDuoGame.get_symmetries()` — generate symmetric board+policy pairs for data augmentation
-5. Fix `main.py` — switch from TicTacToeGame to BlokusDuoGame
-6. Fix model loading — implement checkpoint resume
+1. Add W&B reporting alongside the existing Plotly HTML reports (for live remote dashboards during long unattended runs).
+2. Stand up the home PC's GPU pipeline and validate end-to-end with a TicTacToe run on CUDA.
+3. Implement `get_symmetries()` and fix `main.py` checkpoint loading.
+4. Run real Blokus Duo training and benchmark against Pentobi.
 
 ---
 
@@ -223,8 +220,11 @@ Detailed documentation lives in the [`docs/`](docs/) folder.
 - [x] Blokus Duo board representation and piece system
 - [x] Blokus Duo neural network architecture
 - [x] IBoard protocol with immutable boards and multi-channel neural net encoding
-- [ ] Architecture review fixes (MCTS optimisation, interface contracts, piece ID mapping)
-- [ ] Blokus Duo move generation with caching
+- [x] Architecture review fixes (MCTS optimisation, interface contracts, piece ID mapping)
+- [x] Blokus Duo move generation with caching
+- [ ] W&B integration alongside existing HTML reporting
+- [ ] End-to-end TicTacToe training run on home GPU (smoke test)
+- [ ] `get_symmetries()` for BlokusDuo
 - [ ] End-to-end Blokus Duo self-play training
 - [ ] Learning rate scheduling
 - [ ] Parallel MCTS for faster self-play
