@@ -15,7 +15,7 @@ from tqdm import tqdm
 
 from core.config import RunConfig
 from core.interfaces import IBoard, IGame, INeuralNetWrapper
-from core.storage import MetricsCollector
+from core.storage import EvalSet, MetricsCollector
 
 
 class AverageMeter:
@@ -91,7 +91,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         examples: list[tuple[np.ndarray, np.ndarray, float]],
         generation: int,
         metrics: MetricsCollector | None = None,
-        eval_set: np.ndarray | None = None,
+        eval_set: EvalSet | None = None,
     ) -> None:
         """Train the neural network using provided examples.
 
@@ -99,12 +99,13 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             examples: Training examples produced from self-play.
             generation: Current training generation (for logging).
             metrics: Optional metrics collector for parquet/W&B logging.
-            eval_set: Optional held-out batch of board encodings with shape
-                ``(N, channels, rows, cols)``. When provided, the network's
-                mean policy entropy is computed on this set at the end of every
-                epoch and logged via ``metrics.log_training_entropy``. This is
-                the "is the network itself becoming more confident" signal
-                AlphaZero-style papers usually plot.
+            eval_set: Optional frozen held-out positions. When provided, three
+                AlphaZero-style diagnostics are computed on the network alone
+                (no MCTS) at the end of every training epoch and logged via
+                ``metrics.log_training_entropy``, ``log_policy_accuracy``, and
+                ``log_value_calibration``: policy entropy (confidence),
+                top-1 / top-5 accuracy against MCTS targets, and a value-head
+                reliability diagram.
         """
         if not examples:
             logger.warning("No training examples provided, skipping training.")
@@ -181,40 +182,102 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                     epoch_time_s=epoch_time,
                 )
 
-            # Network policy entropy on the held-out eval set (option 3 metric).
+            # Per-epoch held-out diagnostics on the frozen eval set.
             if eval_set is not None and len(eval_set) > 0 and metrics is not None:
-                mean_h, std_h = self._compute_eval_set_entropy(eval_set)
+                diagnostics = self._compute_eval_set_diagnostics(eval_set)
                 metrics.log_training_entropy(
                     generation=generation,
                     epoch=epoch,
-                    mean_entropy=mean_h,
-                    std_entropy=std_h,
+                    mean_entropy=diagnostics["entropy_mean"],
+                    std_entropy=diagnostics["entropy_std"],
                     eval_set_size=len(eval_set),
                 )
+                metrics.log_policy_accuracy(
+                    generation=generation,
+                    epoch=epoch,
+                    top1_accuracy=diagnostics["top1"],
+                    top5_accuracy=diagnostics["top5"],
+                    eval_set_size=len(eval_set),
+                )
+                metrics.log_value_calibration(
+                    generation=generation,
+                    epoch=epoch,
+                    bucket_centers=diagnostics["calib_centers"],
+                    bucket_means=diagnostics["calib_means"],
+                    bucket_counts=diagnostics["calib_counts"],
+                )
 
-    def _compute_eval_set_entropy(
-        self,
-        eval_set: np.ndarray,
-    ) -> tuple[float, float]:
-        """Forward-pass the network over the eval set and return (mean, std) of
-        per-position policy entropy in nats. The network's policy head outputs
-        log-probabilities, so entropy is ``-Σ exp(log_p) · log_p``.
+    def _compute_eval_set_diagnostics(self, eval_set: EvalSet) -> dict:
+        """Forward-pass the network over the eval set and compute three
+        AlphaZero-style diagnostics in one shot:
+
+        - ``entropy_mean`` / ``entropy_std``: per-position policy entropy.
+        - ``top1`` / ``top5``: fraction of positions where the network's
+          argmax / top-5 actions include the MCTS target's argmax.
+        - Value calibration: 10 reliability buckets over predicted v ∈ [-1, 1]
+          mapping to mean(actual outcome) per bucket. Returned as three
+          aligned arrays (centers, means, counts).
         """
         self.nnet.eval()
         per_position_entropies: list[float] = []
+        top1_hits = 0
+        top5_hits = 0
+        predicted_values: list[float] = []
+
+        target_argmaxes = eval_set.target_policies.argmax(axis=1)
+        target_values = eval_set.target_values
+
         with torch.no_grad():
             for chunk_start in range(0, len(eval_set), self.net_config.batch_size):
-                chunk = eval_set[chunk_start: chunk_start + self.net_config.batch_size]
-                tensor = torch.tensor(chunk, dtype=torch.float32)
+                end = chunk_start + self.net_config.batch_size
+                boards_chunk = eval_set.boards[chunk_start:end]
+                tensor = torch.tensor(boards_chunk, dtype=torch.float32)
                 if self.net_config.cuda:
                     tensor = tensor.cuda()
-                log_pi, _ = self.nnet(tensor)  # log-probs
+                log_pi, v = self.nnet(tensor)
                 pi = torch.exp(log_pi)
-                # -Σ p · log p, summed over the action dimension, per row.
+
+                # Entropy per row.
                 entropies = -(pi * log_pi).sum(dim=1).cpu().numpy()
                 per_position_entropies.extend(entropies.tolist())
-        arr = np.asarray(per_position_entropies, dtype=float)
-        return float(arr.mean()), float(arr.std())
+
+                # Top-1 / Top-5 accuracy vs MCTS targets.
+                k = min(5, log_pi.shape[1])
+                topk = log_pi.topk(k, dim=1).indices.cpu().numpy()
+                chunk_targets = target_argmaxes[chunk_start:end]
+                top1_hits += int((topk[:, 0] == chunk_targets).sum())
+                top5_hits += int(np.isin(chunk_targets, topk).sum())  # broadcast row-wise
+
+                # Value predictions, flattened to 1-D for calibration.
+                predicted_values.extend(v.view(-1).cpu().numpy().tolist())
+
+        ent_arr = np.asarray(per_position_entropies, dtype=float)
+        n = len(eval_set)
+
+        # Reliability binning of predicted v ∈ [-1, 1] into 10 buckets.
+        pred_v = np.asarray(predicted_values, dtype=float)
+        bucket_edges = np.linspace(-1.0, 1.0, 11)
+        bucket_idx = np.clip(
+            np.digitize(pred_v, bucket_edges) - 1, 0, len(bucket_edges) - 2,
+        )
+        bucket_centers = (bucket_edges[:-1] + bucket_edges[1:]) / 2.0
+        bucket_means = np.full(10, np.nan, dtype=float)
+        bucket_counts = np.zeros(10, dtype=int)
+        for b in range(10):
+            mask = bucket_idx == b
+            bucket_counts[b] = int(mask.sum())
+            if bucket_counts[b] > 0:
+                bucket_means[b] = float(target_values[mask].mean())
+
+        return {
+            "entropy_mean": float(ent_arr.mean()),
+            "entropy_std": float(ent_arr.std()),
+            "top1": top1_hits / n,
+            "top5": top5_hits / n,
+            "calib_centers": bucket_centers,
+            "calib_means": bucket_means,
+            "calib_counts": bucket_counts,
+        }
 
     def predict(self, board: IBoard) -> tuple[np.ndarray, float]:
         """Make a prediction for a given board state.

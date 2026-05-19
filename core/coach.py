@@ -17,6 +17,7 @@ from core.interfaces import IBoard, INeuralNetWrapper, IGame
 from core.mcts import MCTS
 from core.storage import (
     CycleStage,
+    EvalSet,
     MetricsCollector,
     ProcessedExample,
     SelfPlayStore,
@@ -94,10 +95,10 @@ class Coach:
         self.metrics = MetricsCollector(config=config)
         self._self_play_store = SelfPlayStore(config.self_play_history_directory)
 
-        # Frozen held-out positions for per-epoch network policy entropy
-        # logging. Built lazily from gen 1's self-play examples; saved to
-        # disk so subsequent runs (or resumed runs) use the same set.
-        self._eval_set: np.ndarray | None = None
+        # Frozen held-out positions for per-epoch network diagnostics (policy
+        # entropy, top-K accuracy, value calibration). Built lazily from gen
+        # 1's self-play examples; saved to disk so resumed runs use the same set.
+        self._eval_set: EvalSet | None = None
         self._eval_set_size: int = 200
 
     def execute_episode(self) -> list[ProcessedExample]:
@@ -301,34 +302,49 @@ class Coach:
         """Build (or load from disk) the frozen held-out eval set.
 
         Sampled once from gen 1's training examples and saved to
-        ``config.eval_set_directory``. Subsequent calls are no-ops once the set
-        is loaded into memory. Skipped entirely if no examples are available
-        yet (e.g. self-play was skipped on a resumed run).
+        ``config.eval_set_directory`` as three numpy files: ``boards.npy``,
+        ``target_policies.npy``, ``target_values.npy``. If any of the three is
+        missing on disk we re-sample (which keeps things consistent between
+        old runs and current ones).
         """
         if self._eval_set is not None:
             return
 
         eval_dir = self.config.eval_set_directory
-        eval_path = eval_dir / "boards.npy"
-        if eval_path.exists():
-            self._eval_set = np.load(eval_path)
+        boards_path = eval_dir / "boards.npy"
+        policies_path = eval_dir / "target_policies.npy"
+        values_path = eval_dir / "target_values.npy"
+        if boards_path.exists() and policies_path.exists() and values_path.exists():
+            self._eval_set = EvalSet(
+                boards=np.load(boards_path),
+                target_policies=np.load(policies_path),
+                target_values=np.load(values_path),
+            )
             logger.info("Loaded eval set ({} positions) from {}",
-                        len(self._eval_set), eval_path)
+                        len(self._eval_set), eval_dir)
             return
 
         if not train_examples:
             return
 
         # Sample positions from the training examples (capped to actual size).
-        boards = np.array([ex[0] for ex in train_examples])
-        n = min(self._eval_set_size, len(boards))
+        boards_all = np.array([ex[0] for ex in train_examples])
+        policies_all = np.array([ex[1] for ex in train_examples])
+        values_all = np.array([ex[2] for ex in train_examples])
+        n = min(self._eval_set_size, len(boards_all))
         rng = np.random.default_rng(seed=0)
-        idx = rng.choice(len(boards), size=n, replace=False)
-        self._eval_set = boards[idx]
+        idx = rng.choice(len(boards_all), size=n, replace=False)
+        self._eval_set = EvalSet(
+            boards=boards_all[idx],
+            target_policies=policies_all[idx],
+            target_values=values_all[idx],
+        )
 
         eval_dir.mkdir(parents=True, exist_ok=True)
-        np.save(eval_path, self._eval_set)
-        logger.info("Built eval set ({} positions) → {}", n, eval_path)
+        np.save(boards_path, self._eval_set.boards)
+        np.save(policies_path, self._eval_set.target_policies)
+        np.save(values_path, self._eval_set.target_values)
+        logger.info("Built eval set ({} positions) → {}", n, eval_dir)
 
     def _generation_window_size(self, generation: int) -> int:
         """

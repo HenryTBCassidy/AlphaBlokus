@@ -162,6 +162,16 @@ class RunConfig:
         """Directory for per-epoch network policy entropy on the held-out eval set."""
         return self.run_directory / "TrainingEntropy"
 
+    @property
+    def policy_accuracy_directory(self) -> Path:
+        """Directory for per-epoch network top-1 / top-5 policy accuracy on the eval set."""
+        return self.run_directory / "PolicyAccuracy"
+
+    @property
+    def value_calibration_directory(self) -> Path:
+        """Directory for per-epoch network value-head reliability buckets on the eval set."""
+        return self.run_directory / "ValueCalibration"
+
 
 def load_args(config_path: str | Path) -> RunConfig:
     """

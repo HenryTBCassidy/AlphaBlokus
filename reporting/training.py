@@ -372,6 +372,87 @@ def _make_network_entropy_plot(entropy_data: pd.DataFrame) -> go.Figure:
     return _apply_defaults(fig)
 
 
+def _make_policy_accuracy_plot(accuracy_data: pd.DataFrame) -> go.Figure:
+    """Network top-1 / top-5 policy accuracy vs MCTS targets, per generation.
+
+    Computed on the frozen eval set after every training epoch; one point
+    per generation is shown (mean across epochs). Top-1 should rise from
+    1/num_actions toward 1.0 as the network internalises MCTS preferences;
+    Top-5 typically saturates fast on small action spaces.
+    """
+    df = accuracy_data.copy()
+    agg = df.groupby("generation").agg(
+        top1_mean=("top1_accuracy", "mean"),
+        top5_mean=("top5_accuracy", "mean"),
+    ).reset_index().sort_values("generation")
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=agg["generation"], y=100 * agg["top1_mean"],
+        mode="lines+markers", name="Top-1",
+        line={"width": 2.5, "color": _COLORS["primary"]},
+        hovertemplate="Gen %{x} — top-1: %{y:.1f}%<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=agg["generation"], y=100 * agg["top5_mean"],
+        mode="lines+markers", name="Top-5",
+        line={"width": 2.5, "color": _COLORS["tertiary"], "dash": "dot"},
+        hovertemplate="Gen %{x} — top-5: %{y:.1f}%<extra></extra>",
+    ))
+    fig.update_layout(
+        xaxis_title="Generation", yaxis_title="Accuracy (%)",
+        yaxis_range=[0, 105],
+        title="Policy Accuracy vs MCTS (held-out set)",
+        xaxis={"dtick": 1 if agg["generation"].max() < 40 else 5},
+    )
+    return _apply_defaults(fig)
+
+
+def _make_value_calibration_plot(calibration_data: pd.DataFrame) -> go.Figure:
+    """Reliability diagram for the value head, taken from the final epoch of
+    the latest generation. Buckets predicted v ∈ [-1, 1] and plots mean(actual
+    outcome) per bucket. Well-calibrated → points sit on the y=x diagonal.
+    """
+    df = calibration_data.copy()
+    last_gen = df["generation"].max()
+    last_epoch = df[df["generation"] == last_gen]["epoch"].max()
+    latest = df[(df["generation"] == last_gen) & (df["epoch"] == last_epoch)]
+    latest = latest.dropna(subset=["bucket_mean_actual"]).sort_values("bucket_center")
+
+    fig = go.Figure()
+    # Perfect-calibration diagonal
+    fig.add_trace(go.Scatter(
+        x=[-1, 1], y=[-1, 1],
+        mode="lines", name="Perfect calibration",
+        line={"dash": "dash", "color": _COLORS["neutral"], "width": 1},
+        hoverinfo="skip",
+    ))
+    # Bucket means — marker size proportional to bucket count
+    max_count = max(int(latest["bucket_count"].max()), 1)
+    sizes = 6 + 24 * latest["bucket_count"] / max_count
+    fig.add_trace(go.Scatter(
+        x=latest["bucket_center"], y=latest["bucket_mean_actual"],
+        mode="markers+lines", name=f"Gen {int(last_gen)} epoch {int(last_epoch)}",
+        marker={
+            "size": sizes,
+            "color": _COLORS["accent"],
+            "line": {"width": 1, "color": _COLORS["accent"]},
+        },
+        customdata=latest["bucket_count"],
+        hovertemplate=(
+            "Predicted ≈ %{x:.1f}, actual mean: %{y:.2f}"
+            " (%{customdata} positions)<extra></extra>"
+        ),
+    ))
+    fig.update_layout(
+        xaxis_title="Predicted value (bucket centre)",
+        yaxis_title="Mean actual outcome",
+        title="Value-Head Reliability (latest epoch)",
+        xaxis_range=[-1.05, 1.05], yaxis_range=[-1.05, 1.05],
+    )
+    return _apply_defaults(fig)
+
+
 def _make_resource_usage_plot(resource_data: pd.DataFrame) -> go.Figure:
     """Line chart of memory usage over generations — one line per phase.
 
@@ -639,6 +720,14 @@ def create_html_report(config: RunConfig) -> None:
         _load_metrics(config.training_entropy_directory)
         if config.training_entropy_directory.exists() else None
     )
+    policy_accuracy_data = (
+        _load_metrics(config.policy_accuracy_directory)
+        if config.policy_accuracy_directory.exists() else None
+    )
+    value_calibration_data = (
+        _load_metrics(config.value_calibration_directory)
+        if config.value_calibration_directory.exists() else None
+    )
 
     # Build figures
     fig_loss_gen = _make_loss_per_generation(loss_data)
@@ -651,6 +740,16 @@ def create_html_report(config: RunConfig) -> None:
     fig_network_entropy = (
         _make_network_entropy_plot(network_entropy_data)
         if network_entropy_data is not None and not network_entropy_data.empty
+        else None
+    )
+    fig_policy_accuracy = (
+        _make_policy_accuracy_plot(policy_accuracy_data)
+        if policy_accuracy_data is not None and not policy_accuracy_data.empty
+        else None
+    )
+    fig_value_calibration = (
+        _make_value_calibration_plot(value_calibration_data)
+        if value_calibration_data is not None and not value_calibration_data.empty
         else None
     )
 
@@ -668,17 +767,32 @@ def create_html_report(config: RunConfig) -> None:
     )
     config_html = _make_config_table(config)
 
-    if fig_network_entropy is not None:
-        network_entropy_html = (
-            '<p class="section-desc" style="margin-top:24px;">'
-            "Network policy entropy on a frozen held-out set of positions "
-            "sampled from generation 1's self-play. Falls as the network "
-            "internalises stronger move selection — isolated from MCTS noise."
-            "</p>"
-            + _chart(fig_network_entropy)
-        )
-    else:
-        network_entropy_html = ""
+    diagnostics_html = ""
+    if (
+        fig_network_entropy is not None
+        or fig_policy_accuracy is not None
+        or fig_value_calibration is not None
+    ):
+        parts = [
+            '<section>',
+            '<h2>Network Diagnostics</h2>',
+            '<p class="section-desc">'
+            'Per-epoch evaluation of the network alone (no MCTS) on a frozen '
+            'held-out set of positions sampled from generation 1\'s self-play. '
+            'These are the AlphaZero-style training health curves — they '
+            'isolate the network\'s learning from MCTS noise.'
+            '</p>',
+        ]
+        if fig_network_entropy is not None:
+            parts.append(_chart(fig_network_entropy))
+        if fig_policy_accuracy is not None:
+            parts.append(_chart(fig_policy_accuracy))
+        if fig_value_calibration is not None:
+            parts.append(_chart(fig_value_calibration))
+        parts.append('</section>')
+        diagnostics_html = "\n".join(parts)
+
+    network_entropy_html = ""  # rolled into diagnostics_html above
 
     with open(filename, "w") as f:
         f.write(f"""<!DOCTYPE html>
@@ -708,8 +822,9 @@ def create_html_report(config: RunConfig) -> None:
     <summary>Per-Batch Detail</summary>
     {_chart(fig_loss_timeline)}
 </details>
-{network_entropy_html}
 </section>
+
+{diagnostics_html}
 
 <section>
 <h2>Arena</h2>

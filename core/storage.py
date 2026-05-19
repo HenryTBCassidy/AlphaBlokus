@@ -49,6 +49,29 @@ class CycleStage(StrEnum):
 ProcessedExample: TypeAlias = tuple[NDArray, NDArray, float]  # (board, policy, value)
 
 
+@dataclass(frozen=True)
+class EvalSet:
+    """Frozen held-out positions used for per-epoch network diagnostics.
+
+    Sampled once from the first generation's self-play and reused unchanged for
+    every subsequent epoch. The three fields are aligned by index:
+
+    - ``boards[i]``: model-channel encoded board at position i
+    - ``target_policies[i]``: MCTS-improved policy that was actually used to
+      generate that example. Used as the "ground truth" for top-1/top-5
+      policy accuracy.
+    - ``target_values[i]``: the final game outcome from that position's
+      perspective, in {-1, 0, +1}. Used for value calibration.
+    """
+
+    boards: NDArray
+    target_policies: NDArray
+    target_values: NDArray
+
+    def __len__(self) -> int:
+        return len(self.boards)
+
+
 # ---------------------------------------------------------------------------
 # Internal helpers
 # ---------------------------------------------------------------------------
@@ -109,6 +132,8 @@ class MetricsCollector:
     _resource_usage_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _training_throughput_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _training_entropy_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _policy_accuracy_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _value_calibration_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _wandb_run: Any | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -356,6 +381,73 @@ class MetricsCollector:
             "epoch": epoch,
         })
 
+    def log_policy_accuracy(
+        self,
+        generation: int,
+        epoch: int,
+        top1_accuracy: float,
+        top5_accuracy: float,
+        eval_set_size: int,
+    ) -> None:
+        """Record network top-1 / top-5 policy accuracy vs MCTS targets on the
+        frozen eval set. ``top1_accuracy`` is the fraction of eval positions
+        where the network's argmax matches the MCTS target's argmax; ``top5``
+        is the fraction where the MCTS argmax is in the network's top-5.
+        Should rise toward 1.0 as the network internalises MCTS preferences.
+        """
+        self._policy_accuracy_records.append({
+            "generation": generation,
+            "epoch": epoch,
+            "top1_accuracy": top1_accuracy,
+            "top5_accuracy": top5_accuracy,
+            "eval_set_size": eval_set_size,
+        })
+        self._publish({
+            "training/network_top1_accuracy": top1_accuracy,
+            "training/network_top5_accuracy": top5_accuracy,
+            "generation": generation,
+            "epoch": epoch,
+        })
+
+    def log_value_calibration(
+        self,
+        generation: int,
+        epoch: int,
+        bucket_centers: NDArray,
+        bucket_means: NDArray,
+        bucket_counts: NDArray,
+    ) -> None:
+        """Record a reliability diagram for the value head.
+
+        Predicted v ∈ [-1, 1] is binned into 10 equal buckets. For each
+        bucket we record (a) its centre, (b) the mean *actual* outcome of
+        positions whose predicted v fell in this bucket, (c) the bucket
+        count. A perfectly calibrated value head has bucket_mean ≈ bucket_centre
+        (the y=x diagonal of the reliability plot).
+        """
+        for i, (centre, mean_v, count) in enumerate(
+            zip(bucket_centers, bucket_means, bucket_counts, strict=True),
+        ):
+            self._value_calibration_records.append({
+                "generation": generation,
+                "epoch": epoch,
+                "bucket_idx": i,
+                "bucket_center": float(centre),
+                "bucket_mean_actual": float(mean_v) if not np.isnan(mean_v) else None,
+                "bucket_count": int(count),
+            })
+
+        # W&B summary: log the mean absolute calibration error across populated
+        # buckets — a single scalar that tracks "how off is the value head?"
+        populated = bucket_counts > 0
+        if populated.any():
+            errs = np.abs(bucket_means[populated] - bucket_centers[populated])
+            self._publish({
+                "training/value_calibration_error": float(errs.mean()),
+                "generation": generation,
+                "epoch": epoch,
+            })
+
     def log_training_throughput(
         self,
         generation: int,
@@ -462,6 +554,26 @@ class MetricsCollector:
             )
             count += len(self._training_entropy_records)
             self._training_entropy_records.clear()
+
+        if self._policy_accuracy_records:
+            self._write_partition(
+                pd.DataFrame(self._policy_accuracy_records),
+                config.policy_accuracy_directory,
+                generation,
+                "accuracy.parquet",
+            )
+            count += len(self._policy_accuracy_records)
+            self._policy_accuracy_records.clear()
+
+        if self._value_calibration_records:
+            self._write_partition(
+                pd.DataFrame(self._value_calibration_records),
+                config.value_calibration_directory,
+                generation,
+                "calibration.parquet",
+            )
+            count += len(self._value_calibration_records)
+            self._value_calibration_records.clear()
 
         elapsed = time.perf_counter() - start
         logger.info(f"Flushed {count} metric records for generation {generation} in {elapsed:.2f}s")
