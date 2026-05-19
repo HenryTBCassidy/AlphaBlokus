@@ -387,28 +387,41 @@ def _make_resource_usage_plot(resource_data: pd.DataFrame) -> go.Figure:
 
 
 def _make_profiling_plot(profiling_data: pd.DataFrame) -> go.Figure:
-    """Self-play profiling — mean line + std band for game length and MCTS sims/s per gen.
+    """Self-play profiling — mean line + std band per generation for three diagnostics.
 
-    Replaces the earlier violin/box chart. For both metrics the headline signal
-    is the *trend across generations*, not the per-gen distribution shape.
-    A mean line with a one-sigma shaded band reads at a glance and avoids the
-    blocky look that violins produce when the data is near-discrete (e.g. TTT
-    game lengths only take values 5-9).
+    For each metric the headline signal is the *trend across generations*, not
+    the per-gen distribution shape. Mean line + one-sigma shaded band reads at
+    a glance and avoids the blocky look violins produce on near-discrete data
+    (e.g. TTT game lengths only take values 5-9).
+
+    Three rows:
+    1. Game length (moves per game).
+    2. MCTS throughput (sims/s).
+    3. MCTS policy entropy (nats, on the pre-temperature visit distribution).
+       Should drop over training as the model becomes more confident.
     """
     df = profiling_data.copy()
+    if "mean_policy_entropy" not in df.columns:
+        df["mean_policy_entropy"] = 0.0  # backward compat with pre-R8 runs
     agg = df.groupby("generation").agg(
         moves_mean=("num_moves", "mean"),
         moves_std=("num_moves", "std"),
         sims_mean=("sims_per_second", "mean"),
         sims_std=("sims_per_second", "std"),
+        entropy_mean=("mean_policy_entropy", "mean"),
+        entropy_std=("mean_policy_entropy", "std"),
     ).reset_index().sort_values("generation")
-    agg["moves_std"] = agg["moves_std"].fillna(0.0)
-    agg["sims_std"] = agg["sims_std"].fillna(0.0)
+    for col in ("moves_std", "sims_std", "entropy_std"):
+        agg[col] = agg[col].fillna(0.0)
 
     fig = make_subplots(
-        rows=2, cols=1,
-        subplot_titles=["Game Length (moves)", "MCTS Throughput (sims/s)"],
-        vertical_spacing=0.18,
+        rows=3, cols=1,
+        subplot_titles=[
+            "Game Length (moves)",
+            "MCTS Throughput (sims/s)",
+            "MCTS Policy Entropy (nats)",
+        ],
+        vertical_spacing=0.12,
     )
 
     _mean_band_trace(
@@ -421,14 +434,19 @@ def _make_profiling_plot(profiling_data: pd.DataFrame) -> go.Figure:
         color=_COLORS["secondary"], name="Sims/s",
         unit="sims/s", row=2, col=1,
     )
+    _mean_band_trace(
+        fig, agg["generation"], agg["entropy_mean"], agg["entropy_std"],
+        color=_COLORS["accent"], name="Policy Entropy",
+        unit="nats", row=3, col=1,
+    )
 
-    fig.update_xaxes(title_text="Generation", row=2, col=1)
-    for r in (1, 2):
+    fig.update_xaxes(title_text="Generation", row=3, col=1)
+    for r in (1, 2, 3):
         fig.update_xaxes(
             row=r, col=1, dtick=1 if agg["generation"].max() < 40 else 5,
         )
     fig.update_layout(title="Self-Play Profiling", showlegend=False)
-    return _apply_defaults(fig, width=_HALF_WIDTH, height=_GRID_HEIGHT)
+    return _apply_defaults(fig, width=_HALF_WIDTH, height=int(_GRID_HEIGHT * 1.4))
 
 
 def _mean_band_trace(

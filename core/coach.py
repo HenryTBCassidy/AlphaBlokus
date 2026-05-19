@@ -198,6 +198,7 @@ class Coach:
                         total_inference_time_s=stats.total_inference_time_s,
                         num_leaf_expansions=stats.num_leaf_expansions,
                         tree_size=stats.tree_size,
+                        mean_policy_entropy=stats.mean_policy_entropy,
                         total_valid_moves_time_s=stats.total_valid_moves_time_s,
                         total_game_ended_time_s=stats.total_game_ended_time_s,
                         num_valid_moves_calls=stats.num_valid_moves_calls,

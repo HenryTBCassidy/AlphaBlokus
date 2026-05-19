@@ -248,12 +248,19 @@ class MetricsCollector:
         total_inference_time_s: float,
         num_leaf_expansions: int,
         tree_size: int,
+        mean_policy_entropy: float = 0.0,
         total_valid_moves_time_s: float = 0.0,
         total_game_ended_time_s: float = 0.0,
         num_valid_moves_calls: int = 0,
         num_game_ended_calls: int = 0,
     ) -> None:
-        """Record MCTS profiling data for a single self-play episode."""
+        """Record MCTS profiling data for a single self-play episode.
+
+        ``mean_policy_entropy`` is the per-episode mean of the raw MCTS visit
+        distribution's entropy (in nats), computed move-by-move on the
+        pre-temperature distribution. Falls to zero as the model becomes more
+        confident in its move choice.
+        """
         sims_per_second = total_sims / total_search_time_s if total_search_time_s > 0 else 0.0
         inference_fraction = (
             total_inference_time_s / total_search_time_s if total_search_time_s > 0 else 0.0
@@ -269,6 +276,7 @@ class MetricsCollector:
             "tree_size": tree_size,
             "sims_per_second": sims_per_second,
             "inference_fraction": inference_fraction,
+            "mean_policy_entropy": mean_policy_entropy,
         }
         if total_valid_moves_time_s > 0 or total_game_ended_time_s > 0:
             valid_moves_fraction = (
@@ -291,6 +299,7 @@ class MetricsCollector:
             "self_play/inference_fraction": inference_fraction,
             "self_play/leaf_expansions": num_leaf_expansions,
             "self_play/tree_size": tree_size,
+            "self_play/policy_entropy": mean_policy_entropy,
             "generation": generation,
             "episode": episode,
         })
