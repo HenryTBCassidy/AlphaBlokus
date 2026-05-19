@@ -1,19 +1,32 @@
 # Training Time Estimates
 
-Estimated wall-clock time for Blokus Duo self-play training under various configurations. Based on profiling data from `scripts/mcts_profiling.py` (March 2026).
+Estimated wall-clock time for Blokus Duo self-play training under various configurations. Originally derived from Mac CPU profiling (March 2026); updated 2026-05-18 with **measured** RTX 3060 Ti numbers from `scripts/mcts_profiling.py` on the home PC.
 
-> ⚠️ **Numbers in this doc need re-profiling.** They were generated assuming the home PC's GPU was an RTX 3060 Ti. The actual card is an RTX **3060 Ti** (~50% the memory bandwidth at small batch sizes). Inference latency is therefore roughly 1.7–2× higher; total wall-clock training time inflates by an estimated ~1.3–1.5× because move generation (CPU-bound) still dominates. Real measurements pending a profiling run on the actual hardware — tracked in `docs/plans/gpu-training-poc.md`.
+**Key bottleneck:** Move generation, which is pure-Python and CPU-bound. Across all profiled runs, move generation is **65-72% of MCTS search time**, neural net inference is **17-27%**, and everything else (UCB selection, game-ended checks) is the remainder. **The GPU only accelerates the smaller portion** — total wall clock is bound by Python-side move gen on the CPU.
 
-**Key bottleneck:** Move generation at ~2.9ms per leaf expansion (pure Python, CPU-bound, unaffected by GPU). This dominates self-play time at all scales.
+## Surprising finding: the home PC is slower than the Mac for self-play
+
+The earlier estimates in this doc projected 3080 Ti speedups assuming inference was the bottleneck. That premise was wrong. Measured Blokus self-play on the **small profiling net** (5 games, 50 sims/move):
+
+| Machine | ms/sim | ms/move | Inference fraction | Move-gen fraction |
+|---------|--------|---------|--------------------|-------------------|
+| Mac (Apple Silicon, CPU inference) | 2.96 | 74.0 | 26% | 67% |
+| Home PC (RTX 3060 Ti, CUDA inference) | **4.95** | **247.4** | 17% | **72%** |
+
+The PC is **~1.7× slower per simulation** than the Mac. The GPU does shave inference time (smaller % of total), but the PC's CPU is enough slower at move generation that the net effect is a slowdown. WSL2 syscall overhead and a slower CPU vs the Mac M-series likely both contribute.
+
+**Implication:** the GPU PC only pays off when nets get large enough that inference dominates — which happens at Serious/Paper-scale net sizes (256+ filters, 10+ residual blocks). For Minimal/Moderate configs, the Mac is faster.
 
 ---
 
 ## Hardware
 
-| Machine | GPU | Inference speed (small/medium/large net) |
-|---------|-----|------------------------------------------|
-| MacBook (M-series) | CPU only | 2.1 / 8.5 / 16.4 ms |
-| Personal PC | RTX 3060 Ti | ~0.5 / ~1.7 / ~3.5 ms (estimated, was 3080 Ti figures × ~1.75) |
+| Machine | GPU | Measured ms/sim (small profiling net) | Inference fraction | Notes |
+|---------|-----|---------------------------------------|--------------------|-------|
+| MacBook (M-series) | CPU only | 2.96 | 26% | Faster overall for small/medium nets — single-thread perf wins |
+| Personal PC | RTX 3060 Ti | **4.95** | 17% | GPU under-utilised; CPU is the bottleneck for current configs |
+
+Inference cost for **larger** nets has not been directly measured at full training sim counts; the projections below assume inference scales roughly with parameter count (rough, not measured).
 
 ---
 
@@ -29,10 +42,10 @@ Estimated wall-clock time for Blokus Duo self-play training under various config
 | Arena games | 20 |
 | Generations | 50 |
 
-| Hardware | Time/move | Time/game | Total |
-|----------|-----------|-----------|-------|
-| MacBook CPU | 430ms | 13s | **5 hours** |
-| RTX 3060 Ti | 279ms | 8s | **3.5 hours** |
+| Hardware | Time/move | Time/game | Total | Source |
+|----------|-----------|-----------|-------|--------|
+| MacBook CPU | ~430ms | ~13s | **~5 hours** | March 2026 measurement |
+| RTX 3060 Ti | ~540ms | ~16s | **~6.5 hours** | Projected from measured 4.95 ms/sim + ~1.5× inflation for the bigger net's heavier inference |
 
 ### Moderate — net learns something
 
@@ -44,10 +57,10 @@ Estimated wall-clock time for Blokus Duo self-play training under various config
 | Arena games | 40 |
 | Generations | 100 |
 
-| Hardware | Time/move | Time/game | Total |
-|----------|-----------|-----------|-------|
-| MacBook CPU | 861ms | 26s | **1.9 days** |
-| RTX 3060 Ti | 559ms | 17s | **1.3 days** |
+| Hardware | Time/move | Time/game | Total | Source |
+|----------|-----------|-----------|-------|--------|
+| MacBook CPU | ~861ms | ~26s | **~1.9 days** | March 2026 measurement |
+| RTX 3060 Ti | ~1080ms | ~32s | **~2.4 days** | Projected — PC roughly tracks Mac at moderate sim counts |
 
 ### Serious — aim to beat Pentobi
 
@@ -59,10 +72,10 @@ Estimated wall-clock time for Blokus Duo self-play training under various config
 | Arena games | 40 |
 | Generations | 200 |
 
-| Hardware | Time/move | Time/game | Total |
-|----------|-----------|-----------|-------|
-| MacBook CPU | 3.9s | 116s | **24 days** |
-| RTX 3060 Ti | 1.4s | 41s | **8.5 days** |
+| Hardware | Time/move | Time/game | Total | Source |
+|----------|-----------|-----------|-------|--------|
+| MacBook CPU | ~3.9s | ~116s | **~24 days** | March 2026 measurement |
+| RTX 3060 Ti | ~3.0s | ~90s | **~18 days** | Projected — bigger net (19M params) means inference is finally a meaningful slice, GPU helps |
 
 ### Paper-scale — full AlphaZero equivalent
 
@@ -74,10 +87,12 @@ Estimated wall-clock time for Blokus Duo self-play training under various config
 | Arena games | 400 |
 | Generations | 200 |
 
-| Hardware | Time/move | Time/game | Total |
-|----------|-----------|-----------|-------|
-| MacBook CPU | 13s | 392s | **1.2 years** |
-| RTX 3060 Ti | 3.4s | 101s | **117 days** |
+| Hardware | Time/move | Time/game | Total | Source |
+|----------|-----------|-----------|-------|--------|
+| MacBook CPU | ~13s | ~392s | **~1.2 years** | March 2026 measurement |
+| RTX 3060 Ti | ~8s | ~240s | **~165 days** | Projected — GPU pays off most here (30M params), but still not feasible on this hardware |
+
+The home PC genuinely helps at Paper-scale because inference becomes a meaningful fraction of total time. But "165 days" is still not feasible on a single 3060 Ti — for Paper-scale we'd want either parallel self-play, a real datacenter GPU, or scope reduction.
 
 ---
 
@@ -98,16 +113,16 @@ The massive parallelism (5,000 TPUs generating games simultaneously) is what mak
 
 ## Impact of Move Generation Optimisation
 
-Move generation accounts for ~70% of search time. The current implementation is a naive Python loop. Potential speedups and their impact on the "Serious" config (RTX 3060 Ti):
+Move generation is 65-72% of MCTS search time on both Mac and PC. The current implementation is a naive Python loop. Potential speedups and their impact on the "Serious" config (RTX 3060 Ti, ~18 days baseline):
 
-| Move gen speed | Serious total | Speedup |
-|----------------|---------------|---------|
-| 2.9ms (current) | 8.5 days | baseline |
-| 1.5ms (2x faster) | 5 days | 1.7x |
-| 0.5ms (6x faster) | 2.5 days | 3.4x |
-| 0.1ms (30x faster, e.g. bitboard) | 1.5 days | 5.7x |
+| Move gen speed | Serious total | Speedup vs baseline |
+|----------------|---------------|---------------------|
+| 3.6ms (current measured PC) | ~18 days | baseline |
+| 1.5ms (2× faster) | ~9 days | ~2× |
+| 0.5ms (6× faster) | ~4 days | ~4.5× |
+| 0.1ms (30× faster, e.g. bitboard) | ~2 days | ~9× |
 
-Optimisation approaches (from plan M6): pre-computed piece corners, numpy vectorisation, bitboard representation.
+Optimisation approaches (deferred to `docs/plans/move-gen-further-optimisation.md`): pre-computed piece corners, numpy vectorisation, bitboard representation. These are the highest-leverage performance work because the PC GPU is currently bottlenecked on Python.
 
 ---
 
@@ -120,4 +135,4 @@ Optimisation approaches (from plan M6): pre-computed piece corners, numpy vector
 - Single-threaded self-play (no parallel game generation)
 - GPU inference estimates are rough (5-8x CPU speedup for this model size)
 
-*Last updated: March 2026. Re-run `scripts/mcts_profiling.py` after optimisations to update these numbers.*
+*Originally compiled March 2026 (Mac CPU only, PC numbers estimated). Updated 2026-05-18 with measured 3060 Ti baseline (5 games, 50 sims/move, small profiling net) from `temp/mcts_profiling/pc_3060ti/`. Re-run `scripts/mcts_profiling.py` after move-gen optimisations or net-size changes to refresh these numbers.*
