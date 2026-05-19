@@ -235,10 +235,10 @@ def _make_loss_timeline(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
 
     for col, name, color in series:
-        # Raw data — visible but secondary to the smoothed line.
+        # Raw data — visible context, secondary to the smoothed line.
         fig.add_trace(go.Scatter(
             x=sorted_df["step"], y=sorted_df[col],
-            mode="markers", marker={"size": 3, "color": color, "opacity": 0.4},
+            mode="markers", marker={"size": 3, "color": color, "opacity": 0.25},
             showlegend=False, hoverinfo="skip",
         ))
         # Smoothed line

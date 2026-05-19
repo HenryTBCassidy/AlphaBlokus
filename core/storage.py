@@ -151,6 +151,11 @@ class MetricsCollector:
         The W&B run name appends a UTC timestamp suffix (``_YYYYMMDD_HHMMSS``)
         so multiple launches of the same config produce distinguishable runs
         in the dashboard instead of a wall of identical names.
+
+        ``define_metric`` is used so the ``*_per_gen/*`` namespaces use
+        ``generation`` as their x-axis — gives clean per-generation trend
+        charts in the dashboard instead of the noisy auto-step view that the
+        per-episode / per-batch metrics produce.
         """
         import wandb  # lazy import — wandb is a heavy dep
         from datetime import UTC, datetime
@@ -170,6 +175,14 @@ class MetricsCollector:
             logger.info("Initialised W&B run: {}", self._wandb_run.url)
         else:
             logger.info("Initialised W&B run in {} mode", wandb_config.mode)
+
+        # Wire generation-indexed namespaces to use generation as their X axis.
+        # Without this, W&B uses its auto-incrementing step counter which
+        # makes per-gen aggregates plot against the cumulative log call count
+        # instead of against the generation they represent.
+        self._wandb_run.define_metric("generation")
+        self._wandb_run.define_metric("self_play_per_gen/*", step_metric="generation")
+        self._wandb_run.define_metric("training_per_gen/*", step_metric="generation")
 
     def _publish(self, payload: dict) -> None:
         """Mirror a metrics payload to W&B if a run is active.
@@ -481,10 +494,20 @@ class MetricsCollector:
         column is dropped from the parquet data since it's encoded in the
         directory name and restored automatically on read.
 
+        Per-generation aggregates of the noisy per-episode/per-batch buffers
+        are also published to W&B (under ``self_play_per_gen/*`` and
+        ``training_per_gen/*``) before the buffers are cleared. These give
+        the dashboard a clean per-generation trend view alongside the
+        existing fine-grained per-episode / per-batch view.
+
         Buffers are cleared after a successful write so memory stays bounded.
         """
         start = time.perf_counter()
         count = 0
+
+        # W&B per-gen aggregates first — must run before we clear the buffers.
+        self._publish_self_play_per_gen()
+        self._publish_training_per_gen()
 
         if self._training_records:
             df = pd.DataFrame(self._training_records).astype(
@@ -576,6 +599,45 @@ class MetricsCollector:
 
         elapsed = time.perf_counter() - start
         logger.info(f"Flushed {count} metric records for generation {generation} in {elapsed:.2f}s")
+
+    def _publish_self_play_per_gen(self) -> None:
+        """Publish per-generation aggregates of self-play profiling metrics to
+        W&B, keyed by generation. No-op if W&B isn't active or buffer is empty.
+        """
+        if self._wandb_run is None or not self._self_play_profiling_records:
+            return
+        df = pd.DataFrame(self._self_play_profiling_records)
+        for gen, group in df.groupby("generation"):
+            payload = {
+                "self_play_per_gen/policy_entropy_mean": float(group["mean_policy_entropy"].mean()),
+                "self_play_per_gen/policy_entropy_std": float(group["mean_policy_entropy"].std() or 0.0),
+                "self_play_per_gen/num_moves_mean": float(group["num_moves"].mean()),
+                "self_play_per_gen/tree_size_mean": float(group["tree_size"].mean()),
+                "self_play_per_gen/sims_per_second_mean": float(group["sims_per_second"].mean()),
+                "self_play_per_gen/inference_fraction_mean": float(group["inference_fraction"].mean()),
+                "generation": int(gen),
+            }
+            self._wandb_run.log(payload)
+
+    def _publish_training_per_gen(self) -> None:
+        """Publish per-generation aggregates of training loss to W&B. Uses
+        the *last training epoch's* batches per gen — i.e. the state of
+        learning at the end of that gen's training — to avoid the noise of
+        early-epoch batches contaminating the trend.
+        """
+        if self._wandb_run is None or not self._training_records:
+            return
+        df = pd.DataFrame(self._training_records)
+        for gen, group in df.groupby("generation"):
+            last_epoch = group["epoch"].max()
+            last = group[group["epoch"] == last_epoch]
+            payload = {
+                "training_per_gen/pi_loss": float(last["pi_loss"].mean()),
+                "training_per_gen/v_loss": float(last["v_loss"].mean()),
+                "training_per_gen/total_loss": float(last["total_loss"].mean()),
+                "generation": int(gen),
+            }
+            self._wandb_run.log(payload)
 
     @staticmethod
     def _write_partition(
