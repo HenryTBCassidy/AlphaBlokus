@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -11,6 +12,20 @@ from plotly.subplots import make_subplots
 
 if TYPE_CHECKING:
     from core.config import RunConfig
+
+
+def _load_metrics(directory: Path) -> pd.DataFrame:
+    """Read a hive-partitioned metrics directory and normalise the generation column.
+
+    Pandas/PyArrow infer hive-partition keys as ``category`` dtype, which sorts
+    by the order categories were inserted (effectively alphabetical: 1, 10, 11,
+    ..., 2, 20). Casting to ``int`` here means every downstream ``sort_values``
+    and groupby produces numerically correct results.
+    """
+    df = pd.read_parquet(directory)
+    if "generation" in df.columns:
+        df["generation"] = df["generation"].astype(int)
+    return df
 
 # ---------------------------------------------------------------------------
 # D1: Consistent color palette and chart defaults
@@ -64,12 +79,25 @@ def _format_duration(seconds: float) -> str:
     return f"{minutes / 60:.1f}h"
 
 
+def _accepted_mask(arena_data: pd.DataFrame, update_threshold: float) -> pd.Series:
+    """Return a boolean Series marking generations whose new net was accepted.
+
+    Matches ``Coach._should_accept_new_network``: draws are excluded from the
+    denominator, the win rate uses ``wins / (wins + losses)``, and the
+    comparison is ``>= update_threshold`` (not a hardcoded 0.5).
+    """
+    decided = arena_data["wins"] + arena_data["losses"]
+    win_rate = arena_data["wins"].astype(float) / decided.where(decided > 0, 1)
+    return (decided > 0) & (win_rate >= update_threshold)
+
+
 def _make_kpi_cards(
     loss_data: pd.DataFrame,
     arena_data: pd.DataFrame,
     timings_data: pd.DataFrame,
     profiling_data: pd.DataFrame,
     throughput_data: pd.DataFrame,
+    update_threshold: float,
 ) -> str:
     """D2: Build HTML for the KPI card row."""
     # Final loss + delta
@@ -79,9 +107,9 @@ def _make_kpi_cards(
     first_loss = by_gen.iloc[0]
     loss_delta_pct = ((final_loss - first_loss) / first_loss) * 100
 
-    # Accept rate
-    total_arena = arena_data["wins"] + arena_data["losses"] + arena_data["draws"]
-    accepted = (arena_data["wins"] / total_arena) > 0.5
+    # Accept rate — matches Coach._should_accept_new_network (draws excluded,
+    # configured threshold used, not a hardcoded 0.5).
+    accepted = _accepted_mask(arena_data, update_threshold)
     accept_count = int(accepted.sum())
     total_gens = len(arena_data)
 
@@ -227,7 +255,7 @@ def _make_arena_plot(arena_data: pd.DataFrame, update_threshold: float) -> go.Fi
     df["pct_wins"] = 100 * df["wins"] / total
     df["pct_draws"] = 100 * df["draws"] / total
     df["pct_losses"] = 100 * df["losses"] / total
-    df["is_accepted"] = (df["wins"] / total) > update_threshold
+    df["is_accepted"] = _accepted_mask(df, update_threshold).values
 
     fig = go.Figure()
     fig.add_trace(go.Bar(
@@ -255,17 +283,19 @@ def _make_arena_plot(arena_data: pd.DataFrame, update_threshold: float) -> go.Fi
         annotation_position="top left",
     )
 
-    for _, row in df.iterrows():
-        label = "Accepted" if row["is_accepted"] else "Rejected"
-        color = _COLORS["positive"] if row["is_accepted"] else _COLORS["negative"]
+    # Only annotate ACCEPTED generations — rejected is the default expectation
+    # and labelling every bar caused overlap with 30+ generations.
+    for _, row in df[df["is_accepted"]].iterrows():
         fig.add_annotation(
-            x=row["generation"], y=102, text=label, showarrow=False,
-            font={"size": 11, "color": color},
+            x=row["generation"], y=108, text="✓ Accepted", showarrow=False,
+            font={"size": 11, "color": _COLORS["positive"], "family": "monospace"},
         )
 
     fig.update_layout(
         barmode="stack",
-        xaxis_title="Generation", yaxis_title="Percentage", yaxis_range=[0, 115],
+        xaxis_title="Generation", yaxis_title="Percentage", yaxis_range=[0, 120],
+        xaxis={"type": "category", "categoryorder": "array",
+               "categoryarray": [str(g) for g in df["generation"]]},
         title="Arena: New Net vs Predecessor",
     )
     return _apply_defaults(fig)
@@ -313,25 +343,14 @@ def _make_throughput_plot(throughput_data: pd.DataFrame) -> go.Figure:
 
 
 def _make_resource_usage_plot(resource_data: pd.DataFrame) -> go.Figure:
-    """Grouped bar of process RSS (MB) per stage per generation."""
+    """Line chart of memory usage over generations — one line per phase.
+
+    Replaces the previous 90-bar grouped chart, which was unreadable for runs
+    with more than a few generations.
+    """
     df = resource_data.copy()
     df["rss_mb"] = df["process_rss_bytes"] / (1024 ** 2)
-
-    fig = go.Figure()
-    for stage in ["SelfPlay", "Training", "Arena"]:
-        stage_df = df[df["cycle_stage"] == stage]
-        if stage_df.empty:
-            continue
-        fig.add_trace(go.Bar(
-            x=stage_df["generation"], y=stage_df["rss_mb"],
-            name=stage, marker_color=_PHASE_COLORS.get(stage, _COLORS["neutral"]),
-        ))
-
-    fig.update_layout(
-        barmode="group",
-        xaxis_title="Generation", yaxis_title="RSS (MB)",
-        title="Process Memory",
-    )
+    df = df.sort_values("generation")
 
     has_gpu = (
         "gpu_memory_bytes" in df.columns
@@ -340,21 +359,51 @@ def _make_resource_usage_plot(resource_data: pd.DataFrame) -> go.Figure:
     )
     if has_gpu:
         df["gpu_mb"] = df["gpu_memory_bytes"] / (1024 ** 2)
-        for stage in df["cycle_stage"].unique():
-            stage_df = df[df["cycle_stage"] == stage]
-            fig.add_trace(go.Bar(
+
+    fig = go.Figure()
+    for stage in ["SelfPlay", "Training", "Arena"]:
+        stage_df = df[df["cycle_stage"] == stage]
+        if stage_df.empty:
+            continue
+        fig.add_trace(go.Scatter(
+            x=stage_df["generation"], y=stage_df["rss_mb"],
+            mode="lines+markers", name=f"{stage} (RSS)",
+            line={"width": 2, "color": _PHASE_COLORS.get(stage, _COLORS["neutral"])},
+        ))
+        if has_gpu:
+            fig.add_trace(go.Scatter(
                 x=stage_df["generation"], y=stage_df["gpu_mb"],
-                name=f"{stage} (GPU)", marker_color=_PHASE_COLORS.get(stage),
-                marker_pattern_shape="/",
+                mode="lines+markers", name=f"{stage} (GPU)",
+                line={"width": 2, "dash": "dot",
+                      "color": _PHASE_COLORS.get(stage, _COLORS["neutral"])},
+                showlegend=True,
             ))
 
+    fig.update_layout(
+        xaxis_title="Generation", yaxis_title="Memory (MB)",
+        title="Memory Usage" if has_gpu else "Process Memory (RSS)",
+    )
     return _apply_defaults(fig, width=_HALF_WIDTH, height=_GRID_HEIGHT)
 
 
 def _make_profiling_plot(profiling_data: pd.DataFrame) -> go.Figure:
-    """Simplified profiling: game length and MCTS throughput box plots."""
+    """Self-play profiling — mean line + std band for game length and MCTS sims/s per gen.
+
+    Replaces the earlier violin/box chart. For both metrics the headline signal
+    is the *trend across generations*, not the per-gen distribution shape.
+    A mean line with a one-sigma shaded band reads at a glance and avoids the
+    blocky look that violins produce when the data is near-discrete (e.g. TTT
+    game lengths only take values 5-9).
+    """
     df = profiling_data.copy()
-    df["generation"] = df["generation"].astype(str)
+    agg = df.groupby("generation").agg(
+        moves_mean=("num_moves", "mean"),
+        moves_std=("num_moves", "std"),
+        sims_mean=("sims_per_second", "mean"),
+        sims_std=("sims_per_second", "std"),
+    ).reset_index().sort_values("generation")
+    agg["moves_std"] = agg["moves_std"].fillna(0.0)
+    agg["sims_std"] = agg["sims_std"].fillna(0.0)
 
     fig = make_subplots(
         rows=2, cols=1,
@@ -362,25 +411,74 @@ def _make_profiling_plot(profiling_data: pd.DataFrame) -> go.Figure:
         vertical_spacing=0.18,
     )
 
-    fig.add_trace(
-        go.Box(
-            x=df["generation"], y=df["num_moves"],
-            name="Game Length", showlegend=False,
-            marker_color=_COLORS["primary"],
-        ),
-        row=1, col=1,
+    _mean_band_trace(
+        fig, agg["generation"], agg["moves_mean"], agg["moves_std"],
+        color=_COLORS["primary"], name="Game Length",
+        unit="moves", row=1, col=1,
     )
-    fig.add_trace(
-        go.Box(
-            x=df["generation"], y=df["sims_per_second"],
-            name="Sims/s", showlegend=False,
-            marker_color=_COLORS["secondary"],
-        ),
-        row=2, col=1,
+    _mean_band_trace(
+        fig, agg["generation"], agg["sims_mean"], agg["sims_std"],
+        color=_COLORS["secondary"], name="Sims/s",
+        unit="sims/s", row=2, col=1,
     )
+
     fig.update_xaxes(title_text="Generation", row=2, col=1)
-    fig.update_layout(title="Self-Play Profiling")
+    for r in (1, 2):
+        fig.update_xaxes(
+            row=r, col=1, dtick=1 if agg["generation"].max() < 40 else 5,
+        )
+    fig.update_layout(title="Self-Play Profiling", showlegend=False)
     return _apply_defaults(fig, width=_HALF_WIDTH, height=_GRID_HEIGHT)
+
+
+def _mean_band_trace(
+    fig: go.Figure,
+    x: pd.Series,
+    mean: pd.Series,
+    std: pd.Series,
+    *,
+    color: str,
+    name: str,
+    unit: str,
+    row: int,
+    col: int,
+) -> None:
+    """Add a mean line + one-sigma shaded band to a subplot cell.
+
+    Hover shows ``Gen N — mean: X (unit), ± std`` for the active point.
+    """
+    upper = mean + std
+    lower = mean - std
+
+    # Band (drawn first so the mean line sits on top)
+    fig.add_trace(
+        go.Scatter(
+            x=pd.concat([x, x[::-1]]),
+            y=pd.concat([upper, lower[::-1]]),
+            fill="toself",
+            fillcolor=color,
+            opacity=0.18,
+            line={"width": 0},
+            hoverinfo="skip",
+            showlegend=False,
+        ),
+        row=row, col=col,
+    )
+    # Mean line
+    fig.add_trace(
+        go.Scatter(
+            x=x, y=mean,
+            mode="lines+markers", name=name,
+            line={"width": 2.5, "color": color},
+            marker={"size": 5},
+            customdata=std,
+            hovertemplate=(
+                f"Gen %{{x}} — mean: %{{y:.2f}} {unit}, "
+                f"± %{{customdata:.2f}}<extra></extra>"
+            ),
+        ),
+        row=row, col=col,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -475,13 +573,14 @@ def create_html_report(config: RunConfig) -> None:
     logger.info("Writing report...")
     start = time.perf_counter()
 
-    # Read all data sources
-    loss_data = pd.read_parquet(config.training_data_directory)
-    arena_data = pd.read_parquet(config.arena_data_directory)
-    timings_data = pd.read_parquet(config.timings_directory)
-    resource_data = pd.read_parquet(config.resource_usage_directory)
-    profiling_data = pd.read_parquet(config.self_play_profiling_directory)
-    throughput_data = pd.read_parquet(config.training_throughput_directory)
+    # Read all data sources — _load_metrics casts the hive-partitioned
+    # `generation` column from category dtype to int so sorts are numeric.
+    loss_data = _load_metrics(config.training_data_directory)
+    arena_data = _load_metrics(config.arena_data_directory)
+    timings_data = _load_metrics(config.timings_directory)
+    resource_data = _load_metrics(config.resource_usage_directory)
+    profiling_data = _load_metrics(config.self_play_profiling_directory)
+    throughput_data = _load_metrics(config.training_throughput_directory)
 
     # Build figures
     fig_loss_gen = _make_loss_per_generation(loss_data)
@@ -500,7 +599,10 @@ def create_html_report(config: RunConfig) -> None:
         return fig.to_html(full_html=False, include_plotlyjs=False)
 
     today = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d")
-    kpi_html = _make_kpi_cards(loss_data, arena_data, timings_data, profiling_data, throughput_data)
+    kpi_html = _make_kpi_cards(
+        loss_data, arena_data, timings_data, profiling_data, throughput_data,
+        update_threshold=config.update_threshold,
+    )
     config_html = _make_config_table(config)
 
     with open(filename, "w") as f:
