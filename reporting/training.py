@@ -212,16 +212,20 @@ def _make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 def _make_loss_timeline(df: pd.DataFrame) -> go.Figure:
-    """Smoothed loss over the full training timeline with generation boundaries."""
+    """Smoothed loss over the full training timeline with generation boundaries.
+
+    Convention follows W&B / TensorBoard: raw per-batch values plotted as
+    semi-transparent dots, EWM-smoothed line on top in full saturation.
+    A Linear/Log button lets the reader switch the y-axis scale — useful for
+    long runs where loss drops by multiple orders of magnitude.
+    """
     sorted_df = df.sort_values(["generation", "epoch", "batch_number"]).reset_index(drop=True)
     sorted_df["step"] = range(len(sorted_df))
 
     span = max(5, len(sorted_df) // 15)
 
-    # Plot raw per-batch losses, smoothed via an exponentially weighted moving
-    # average so the line reads cleanly. The running-mean fields that used to
-    # spike at epoch boundaries are gone — this gives the same visual shape
-    # without the artefacts.
+    # Raw dots at opacity 0.4 (not 0.15) so the reader can see the noise
+    # underneath the smoothing — not a hidden detail, an explicit one.
     series = [
         ("total_loss", "Total", _COLORS["primary"]),
         ("pi_loss", "Policy", _COLORS["secondary"]),
@@ -231,10 +235,10 @@ def _make_loss_timeline(df: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
 
     for col, name, color in series:
-        # Raw data (faint)
+        # Raw data — visible but secondary to the smoothed line.
         fig.add_trace(go.Scatter(
             x=sorted_df["step"], y=sorted_df[col],
-            mode="markers", marker={"size": 2, "color": color, "opacity": 0.15},
+            mode="markers", marker={"size": 3, "color": color, "opacity": 0.4},
             showlegend=False, hoverinfo="skip",
         ))
         # Smoothed line
@@ -259,6 +263,99 @@ def _make_loss_timeline(df: pd.DataFrame) -> go.Figure:
     fig.update_layout(
         xaxis_title="Training Step (sequential)", yaxis_title="Loss",
         title="Per-Batch Loss (smoothed)",
+        updatemenus=[{
+            "type": "buttons",
+            "direction": "right",
+            "x": 1.0, "y": 1.15, "xanchor": "right", "yanchor": "top",
+            "buttons": [
+                {"label": "Linear", "method": "relayout",
+                 "args": [{"yaxis.type": "linear"}]},
+                {"label": "Log", "method": "relayout",
+                 "args": [{"yaxis.type": "log"}]},
+            ],
+        }],
+    )
+    return _apply_defaults(fig)
+
+
+def _make_per_gen_loss_curves(df: pd.DataFrame) -> go.Figure:
+    """One smoothed total-loss curve per generation, coloured by generation.
+
+    Reads at a glance: are later generations starting at lower loss? Reaching
+    convergence faster? Is the curve shape consistent across gens? These are
+    questions the per-batch timeline and the per-gen summary chart don't
+    directly answer — this overlay does.
+
+    X axis: training step within a generation (sequential batch index across
+    that gen's epochs). Y axis: total loss (smoothed lightly with EWM).
+    Colour: viridis gradient from earliest gen (deep purple) to latest gen
+    (bright yellow). Colorbar on the right labels the gradient.
+    """
+    import plotly.colors as pc  # local import — only used here
+
+    sorted_df = df.sort_values(["generation", "epoch", "batch_number"]).copy()
+    sorted_df["step_in_gen"] = sorted_df.groupby("generation").cumcount()
+
+    gens = sorted(sorted_df["generation"].unique())
+    n_gens = len(gens)
+
+    # Sample the Viridis colorscale at n_gens evenly-spaced points.
+    sample_positions = (
+        [i / max(n_gens - 1, 1) for i in range(n_gens)] if n_gens > 1 else [0.5]
+    )
+    palette = pc.sample_colorscale("Viridis", sample_positions)
+
+    fig = go.Figure()
+    for gen, colour in zip(gens, palette, strict=True):
+        gen_df = sorted_df[sorted_df["generation"] == gen]
+        if len(gen_df) < 2:
+            continue
+        # Light per-gen smoothing — short span so we don't over-flatten the
+        # within-gen learning curve we're trying to see.
+        span = max(3, len(gen_df) // 10)
+        smoothed = gen_df["total_loss"].ewm(span=span, adjust=False).mean()
+        fig.add_trace(go.Scatter(
+            x=gen_df["step_in_gen"], y=smoothed,
+            mode="lines",
+            line={"width": 1.5, "color": colour},
+            name=f"Gen {gen}",
+            showlegend=False,
+            hovertemplate=f"Gen {gen}, step %{{x}}: loss %{{y:.3f}}<extra></extra>",
+        ))
+
+    # Invisible scatter trace just to carry the colorbar.
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None],
+        mode="markers",
+        marker={
+            "size": 0.1,
+            "colorscale": "Viridis",
+            "cmin": min(gens), "cmax": max(gens),
+            "color": [min(gens)],
+            "showscale": True,
+            "colorbar": {
+                "title": {"text": "Generation"},
+                "thickness": 12, "len": 0.85,
+            },
+        },
+        showlegend=False, hoverinfo="skip",
+    ))
+
+    fig.update_layout(
+        xaxis_title="Batch within generation",
+        yaxis_title="Total loss",
+        title="Loss Curves by Generation (overlaid)",
+        updatemenus=[{
+            "type": "buttons",
+            "direction": "right",
+            "x": 1.0, "y": 1.15, "xanchor": "right", "yanchor": "top",
+            "buttons": [
+                {"label": "Linear", "method": "relayout",
+                 "args": [{"yaxis.type": "linear"}]},
+                {"label": "Log", "method": "relayout",
+                 "args": [{"yaxis.type": "log"}]},
+            ],
+        }],
     )
     return _apply_defaults(fig)
 
@@ -751,6 +848,7 @@ def create_html_report(config: RunConfig) -> None:
     # Build figures
     fig_loss_gen = _make_loss_per_generation(loss_data)
     fig_loss_timeline = _make_loss_timeline(loss_data)
+    fig_per_gen_curves = _make_per_gen_loss_curves(loss_data)
     fig_arena = _make_arena_plot(arena_data, config.update_threshold)
     fig_timing = _make_timing_plot(timings_data)
     fig_throughput = _make_throughput_plot(throughput_data)
@@ -840,6 +938,14 @@ def create_html_report(config: RunConfig) -> None:
 <details>
     <summary>Per-Batch Detail</summary>
     {_chart(fig_loss_timeline)}
+    <p class="section-desc" style="margin-top:18px;">
+        Overlay of each generation's smoothed training curve. Colours run from
+        earliest gen (purple) to latest (yellow). If later generations start
+        at lower loss or converge faster, the curves drift down and steepen
+        with colour — direct visual answer to "is the network getting better
+        at learning the task itself over time?"
+    </p>
+    {_chart(fig_per_gen_curves)}
 </details>
 </section>
 
