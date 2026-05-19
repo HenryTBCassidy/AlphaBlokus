@@ -23,7 +23,7 @@ Companion docs: `docs/05-EVALUATION.md` (what to measure), `docs/07-DATA-STORAGE
 | R5 | Fix arena annotation overlap: only annotate accepted gens (more legible) or rotate/reposition labels | Bug fixes | 20 min | Medium | ✅ |
 | R6 | Replace Process Memory grouped-bar chart with a line chart over generations (3 stages = 3 lines), much easier to read | Bug fixes | 25 min | Medium | ✅ |
 | R7 | Re-render the `ttt_full` HTML report from existing parquets and visually confirm all 6 bugs are gone | Bug fixes | 10 min | High | ✅ |
-| R8 | Extend `MetricsCollector` to compute and log **policy entropy** (`H(π) = -Σ π·log(π)`) per training batch and per self-play position | New metrics | 1 hr | High | |
+| R8 | Log **policy entropy** in two complementary ways: (a) per self-play episode, mean entropy of the MCTS visit distribution (joint MCTS+net signal); (b) per training epoch, mean entropy of the *network alone* on a frozen held-out eval set sampled from gen-1 self-play (clean isolated-net signal — the AlphaZero-paper headline curve) | New metrics | 2 hr | High | ✅ |
 | R9 | Add **policy top-1 / top-5 accuracy** logging: at the end of each training epoch, compare network's argmax / top-5 to MCTS's argmax / top-5 on a held-out batch | New metrics | 1.5 hr | High | |
 | R10 | Add **value calibration** metric: bin predicted v ∈ [-1,1] into 10 buckets, log mean(actual outcome) per bucket per generation | New metrics | 1.5 hr | High | |
 | R11 | Drop the `average_pi_loss` / `average_v_loss` running-mean fields from `log_training` payloads — replaced by smoothed visualisations of raw losses | New metrics | 30 min | High | |
