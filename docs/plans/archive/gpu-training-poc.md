@@ -29,9 +29,9 @@ Prerequisites: Tailscale + WSL2 + OpenSSH + key auth are already working between
 | W15 | On the PC: run `ttt_full.json` via a long-running foreground SSH session (NOT `nohup & disown` — disowned WSL processes get SIGHUP'd when SSH closes). Predicted 22 min, actual **6.6 min**. | 30 min | High | ✅ |
 | W16 | Post-run verification: W&B dashboard populated end-to-end, `best.pth.tar` exists in `Nets/` (gen 11), all 7 parquet directories populated for all 30 generations (210 files) | 15 min | High | ✅ |
 | W17 | Pull results back to Mac. Rsync doesn't work cleanly through PowerShell→WSL relay, so use tar+scp: `wsl tar czf /mnt/c/Users/Henry/ttt_full.tar.gz`, `scp gpu-cmd:ttt_full.tar.gz /tmp/`, untar locally. Confirmed `best.pth.tar` loads (2.58M params) and HTML report (1.4 MB) is present. | 10 min | Medium | ✅ |
-| W18 | Open PR for `feat/wandb-integration`, merge into main, delete branch                                          | 10 min | High     |      |
+| W18 | Open PR for `feat/wandb-integration`, merge into main, delete branch (PR opened; merge + branch delete happens via the GitHub UI as part of accepting the PR) | 10 min | High     | ✅    |
 | W19 | Re-run `scripts/mcts_profiling.py` on the PC against Blokus and replace the estimated 3080 Ti numbers in `docs/08-TRAINING-ESTIMATES.md` with measurements. Surprise finding: PC is ~1.7× slower per sim than Mac because move gen (CPU) dominates and the PC's CPU is slower; GPU only helps at large net sizes. | 30 min | Medium | ✅ |
-| W20 | `git mv docs/plans/gpu-training-poc.md docs/plans/archive/gpu-training-poc.md`                                 | 2 min  | Low      |      |
+| W20 | `git mv docs/plans/gpu-training-poc.md docs/plans/archive/gpu-training-poc.md` as the final commit on the feature branch | 2 min | Low | ✅ |
 
 ---
 
