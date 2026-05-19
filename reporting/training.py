@@ -100,9 +100,14 @@ def _make_kpi_cards(
     update_threshold: float,
 ) -> str:
     """D2: Build HTML for the KPI card row."""
-    # Final loss + delta
+    # Final loss + delta — mean of each generation's last epoch (the
+    # epoch where the network is most trained). Avoids the noise of a
+    # single trailing batch and the artefact of running-mean resets.
     sorted_loss = loss_data.sort_values(["generation", "epoch", "batch_number"])
-    by_gen = sorted_loss.groupby("generation")["average_loss"].last()
+    last_epoch_per_gen = sorted_loss.groupby("generation")["epoch"].max()
+    by_gen = sorted_loss[
+        sorted_loss["epoch"] == sorted_loss["generation"].map(last_epoch_per_gen)
+    ].groupby("generation")["total_loss"].mean()
     final_loss = by_gen.iloc[-1]
     first_loss = by_gen.iloc[0]
     loss_delta_pct = ((final_loss - first_loss) / first_loss) * 100
@@ -151,13 +156,23 @@ def _make_kpi_cards(
 # ---------------------------------------------------------------------------
 
 def _make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
-    """Line chart with pi_loss, v_loss, and total loss per generation."""
+    """Line chart with mean pi_loss, v_loss, and total_loss per generation.
+
+    Each generation's value is the mean of its **last epoch's** per-batch
+    losses — i.e. where the network is most trained for that gen. Aggregating
+    raw per-batch values avoids the running-mean reset spikes that used to
+    appear at epoch boundaries.
+    """
     sorted_df = df.sort_values(["generation", "epoch", "batch_number"])
-    agg = sorted_df.groupby("generation").agg(
-        pi_loss=("average_pi_loss", "last"),
-        v_loss=("average_v_loss", "last"),
-        total_loss=("average_loss", "last"),
-    ).reset_index()
+    last_epoch = sorted_df.groupby("generation")["epoch"].max()
+    last_epoch_df = sorted_df[
+        sorted_df["epoch"] == sorted_df["generation"].map(last_epoch)
+    ]
+    agg = last_epoch_df.groupby("generation").agg(
+        pi_loss=("pi_loss", "mean"),
+        v_loss=("v_loss", "mean"),
+        total_loss=("total_loss", "mean"),
+    ).reset_index().sort_values("generation")
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -203,10 +218,14 @@ def _make_loss_timeline(df: pd.DataFrame) -> go.Figure:
 
     span = max(5, len(sorted_df) // 15)
 
+    # Plot raw per-batch losses, smoothed via an exponentially weighted moving
+    # average so the line reads cleanly. The running-mean fields that used to
+    # spike at epoch boundaries are gone — this gives the same visual shape
+    # without the artefacts.
     series = [
-        ("average_loss", "Total", _COLORS["primary"]),
-        ("average_pi_loss", "Policy", _COLORS["secondary"]),
-        ("average_v_loss", "Value", _COLORS["tertiary"]),
+        ("total_loss", "Total", _COLORS["primary"]),
+        ("pi_loss", "Policy", _COLORS["secondary"]),
+        ("v_loss", "Value", _COLORS["tertiary"]),
     ]
 
     fig = go.Figure()

@@ -198,10 +198,15 @@ class MetricsCollector:
         pi_loss: float,
         v_loss: float,
         total_loss: float,
-        avg_pi_loss: float,
-        avg_v_loss: float,
     ) -> None:
-        """Record metrics from a single training batch."""
+        """Record raw per-batch policy, value, and total loss.
+
+        Earlier versions also logged ``average_pi_loss`` and ``average_v_loss``
+        running means within the epoch. Those were dropped because they reset
+        every epoch — producing characteristic upward spikes at epoch starts
+        that misled the eye. The reporting layer now smooths the raw per-batch
+        losses visually instead (EWM in HTML, native in W&B).
+        """
         self._training_records.append({
             "generation": generation,
             "epoch": epoch,
@@ -209,15 +214,11 @@ class MetricsCollector:
             "pi_loss": pi_loss,
             "v_loss": v_loss,
             "total_loss": total_loss,
-            "average_pi_loss": avg_pi_loss,
-            "average_v_loss": avg_v_loss,
         })
         self._publish({
             "training/pi_loss": pi_loss,
             "training/v_loss": v_loss,
             "training/total_loss": total_loss,
-            "training/avg_pi_loss": avg_pi_loss,
-            "training/avg_v_loss": avg_v_loss,
             "generation": generation,
             "epoch": epoch,
             "batch": batch_number,
@@ -486,9 +487,7 @@ class MetricsCollector:
         count = 0
 
         if self._training_records:
-            df = pd.DataFrame(self._training_records).assign(
-                average_loss=lambda df: df.average_pi_loss + df.average_v_loss
-            ).astype(
+            df = pd.DataFrame(self._training_records).astype(
                 {"pi_loss": "float64", "v_loss": "float64", "total_loss": "float64"}
             )
             self._write_partition(df, config.training_data_directory, generation, "data.parquet")

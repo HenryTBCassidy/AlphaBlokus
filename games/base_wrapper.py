@@ -162,8 +162,6 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                         pi_loss=l_pi.item(),
                         v_loss=l_v.item(),
                         total_loss=total_loss.item(),
-                        avg_pi_loss=pi_losses.avg,
-                        avg_v_loss=v_losses.avg,
                     )
 
                 self.optimizer.zero_grad()
