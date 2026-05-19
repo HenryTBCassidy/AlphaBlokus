@@ -76,11 +76,29 @@ class NetworkPlayer:
         self._last_pi: np.ndarray | None = None
 
     def __call__(self, board: IBoard) -> int:
-        pi = self._mcts.get_action_prob(board, temp=self._temp)
-        self._last_pi = np.asarray(pi, dtype=float)
+        # Run MCTS + get the action distribution at the configured temperature
+        # for actual play (temp=0 → one-hot deterministic; temp=1 → sampled).
+        pi_play = self._mcts.get_action_prob(board, temp=self._temp)
+
+        # Separately, extract the *raw visit-count distribution* (i.e. what
+        # the policy looks like before temperature is applied). This is the
+        # informative record for replays — at temp=0 the play distribution is
+        # one-hot and useless for "what was the model considering?" analysis.
+        s = self._game.state_key(board)
+        n_actions = self._game.get_action_size()
+        counts = np.array(
+            [self._mcts.visit_counts.get((s, a), 0) for a in range(n_actions)],
+            dtype=float,
+        )
+        total = counts.sum()
+        if total > 0:
+            self._last_pi = counts / total
+        else:
+            self._last_pi = np.asarray(pi_play, dtype=float)
+
         if self._temp == 0:
-            return int(np.argmax(pi))
-        return int(np.random.choice(len(pi), p=pi))
+            return int(np.argmax(pi_play))
+        return int(np.random.choice(len(pi_play), p=pi_play))
 
     def get_last_policy(self) -> np.ndarray | None:
         """Return the policy vector from the most recent call, or None."""

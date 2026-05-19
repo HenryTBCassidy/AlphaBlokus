@@ -210,6 +210,11 @@ class RunConfig:
         """Directory for per-generation results vs a perfect-play minimax opponent (TTT only)."""
         return self.run_directory / "MinimaxResults"
 
+    @property
+    def arena_replays_directory(self) -> Path:
+        """Directory for recorded arena games (move sequences + top-K policies per move)."""
+        return self.run_directory / "ArenaReplays"
+
 
 def load_args(config_path: str | Path) -> RunConfig:
     """

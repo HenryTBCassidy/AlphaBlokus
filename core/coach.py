@@ -288,22 +288,42 @@ class Coach:
             )
 
             # PHASE 3: Evaluate new network
-            nmcts = MCTS(self.game, self.nnet, self.config.mcts_config)
-            
             logger.info(f'Evaluating Against Previous Version For Generation #{generation} ...')
             arena_start = time.perf_counter()
 
-            arena = Arena(
-                lambda x: np.argmax(pmcts.get_action_prob(x, temp=0)),
-                lambda x: np.argmax(nmcts.get_action_prob(x, temp=0)),
-                self.game
+            # Use NetworkPlayer instances (not bare lambdas) so the arena can
+            # record each move's top-K policy for replay inspection later.
+            prev_player = NetworkPlayer(
+                game=self.game, nnet=self.pnet,
+                mcts_config=self.config.mcts_config, temp=0.0,
             )
-
-            pwins, nwins, draws, _ = arena.play_games(self.config.num_arena_matches)
+            new_player = NetworkPlayer(
+                game=self.game, nnet=self.nnet,
+                mcts_config=self.config.mcts_config, temp=0.0,
+            )
+            arena = Arena(prev_player, new_player, self.game)
+            # ``top_k`` capped at the action-space size (TTT only has 10
+            # actions; for Blokus's 17,837 actions 20 is plenty to capture
+            # the meaningful head). Recording at least 20 also guarantees
+            # the played action is in the recorded list even when MCTS is
+            # uniform across many tied actions.
+            top_k_to_record = min(self.game.get_action_size(), 20)
+            pwins, nwins, draws, game_records = arena.play_games(
+                self.config.num_arena_matches, record=True, top_k=top_k_to_record,
+            )
 
             arena_end = time.perf_counter()
             self.metrics.log_arena(generation, wins=nwins, losses=pwins, draws=draws)
             self.metrics.log_timing(generation, CycleStage.ARENA, arena_end - arena_start)
+
+            # Persist arena game replays for offline inspection in the HTML
+            # report and via `scripts/replay.py`. Recorded for every gen.
+            for game_idx, record in enumerate(game_records):
+                self.metrics.log_arena_game(
+                    generation=generation,
+                    game_idx=game_idx,
+                    record=record,
+                )
 
             # Memory snapshot after arena phase
             snapshot = _get_memory_snapshot()

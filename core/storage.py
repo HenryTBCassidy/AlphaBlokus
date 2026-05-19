@@ -17,7 +17,7 @@ from collections import deque
 from dataclasses import dataclass, field
 from enum import StrEnum
 from pathlib import Path
-from typing import Any, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 import numpy as np
 import pandas as pd
@@ -27,6 +27,9 @@ from loguru import logger
 from numpy.typing import NDArray
 
 from core.config import RunConfig
+
+if TYPE_CHECKING:
+    from core.arena import GameRecord
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +139,7 @@ class MetricsCollector:
     _value_calibration_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _elo_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _minimax_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _arena_replay_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _wandb_run: Any | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -512,6 +516,36 @@ class MetricsCollector:
             "generation": generation,
         })
 
+    def log_arena_game(
+        self,
+        generation: int,
+        game_idx: int,
+        record: "GameRecord",
+    ) -> None:
+        """Record one arena game's move-by-move history with top-K policies.
+
+        Flattens the ``GameRecord`` into one row per move so the parquet stays
+        tabular. Outcome and "player1 played White" flag are denormalised onto
+        every row of the game for easy filtering at render time.
+
+        Not mirrored to W&B (this is bulky structured data; the dashboard
+        already has the aggregate W/L/D outcomes from ``log_arena``).
+        """
+        outcome = float(record.outcome)
+        p1_white = bool(record.player1_was_white)
+        for move_idx, move in enumerate(record.moves):
+            self._arena_replay_records.append({
+                "generation": generation,
+                "game_idx": game_idx,
+                "move_idx": move_idx,
+                "player": move.player,
+                "action": move.action,
+                "top_k_actions": list(move.top_k_actions),
+                "top_k_probs": list(move.top_k_probs),
+                "outcome": outcome,
+                "player1_was_white": p1_white,
+            })
+
     def log_minimax(
         self,
         generation: int,
@@ -701,6 +735,16 @@ class MetricsCollector:
             )
             count += len(self._minimax_records)
             self._minimax_records.clear()
+
+        if self._arena_replay_records:
+            self._write_partition(
+                pd.DataFrame(self._arena_replay_records),
+                config.arena_replays_directory,
+                generation,
+                "games.parquet",
+            )
+            count += len(self._arena_replay_records)
+            self._arena_replay_records.clear()
 
         elapsed = time.perf_counter() - start
         logger.info(f"Flushed {count} metric records for generation {generation} in {elapsed:.2f}s")
