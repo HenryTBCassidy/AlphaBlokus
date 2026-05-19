@@ -488,6 +488,74 @@ def _make_network_entropy_plot(entropy_data: pd.DataFrame) -> go.Figure:
     return _apply_defaults(fig)
 
 
+def _make_elo_plot(elo_data: pd.DataFrame) -> go.Figure:
+    """Elo rating over generations vs the frozen gen-0 baseline.
+
+    The headline strength curve for AlphaZero-style work. Each gen's *new*
+    network this gen is measured against the random-init network from the
+    start of training. Score rate uses chess-style scoring (draws = 0.5
+    wins). Positive Elo = stronger than gen-0; cap at ±1200 by clamping
+    score rate ∈ [0.001, 0.999].
+    """
+    df = elo_data.sort_values("generation").copy()
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df["generation"], y=df["elo"],
+        mode="lines+markers", name="Elo vs gen-0",
+        line={"width": 2.5, "color": _COLORS["accent"]},
+        marker={"size": 6},
+        customdata=df[["score_rate", "wins", "losses", "draws"]].values,
+        hovertemplate=(
+            "Gen %{x} — Elo: %{y:+.1f}<br>"
+            "Score rate: %{customdata[0]:.3f} (W%{customdata[1]} L%{customdata[2]} D%{customdata[3]})"
+            "<extra></extra>"
+        ),
+    ))
+    # Reference line at 0 — the baseline itself.
+    fig.add_hline(
+        y=0, line_dash="dash", line_color=_COLORS["neutral"], line_width=1,
+        annotation_text="Baseline (gen 0)", annotation_position="bottom right",
+        annotation_font_size=10, annotation_font_color=_COLORS["neutral"],
+    )
+    fig.update_layout(
+        xaxis_title="Generation", yaxis_title="Elo difference",
+        title="Elo Rating vs Frozen Gen-0 Baseline",
+        xaxis={"dtick": 1 if df["generation"].max() < 40 else 5},
+    )
+    return _apply_defaults(fig)
+
+
+def _make_minimax_plot(minimax_data: pd.DataFrame) -> go.Figure:
+    """Vs perfect-play minimax (TTT only): draw rate and loss rate per gen.
+
+    Against perfect play, TTT is a forced draw — so an optimal model should
+    have ``draw_rate → 1.0`` and ``loss_rate → 0`` over training. Loss rate
+    falling first, then draw rate rising as remaining wins disappear, is the
+    canonical learning signature for a solved game.
+    """
+    df = minimax_data.sort_values("generation").copy()
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df["generation"], y=100 * df["draw_rate"],
+        mode="lines+markers", name="Draw rate (target: 100%)",
+        line={"width": 2.5, "color": _COLORS["tertiary"]},
+        hovertemplate="Gen %{x} — draws: %{y:.0f}%<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=df["generation"], y=100 * df["loss_rate"],
+        mode="lines+markers", name="Loss rate (target: 0%)",
+        line={"width": 2.5, "color": _COLORS["negative"], "dash": "dot"},
+        hovertemplate="Gen %{x} — losses: %{y:.0f}%<extra></extra>",
+    ))
+    fig.update_layout(
+        xaxis_title="Generation", yaxis_title="Rate (%)",
+        yaxis_range=[-2, 102],
+        title="Vs Perfect-Play Minimax (TTT)",
+        xaxis={"dtick": 1 if df["generation"].max() < 40 else 5},
+    )
+    return _apply_defaults(fig)
+
+
 def _make_policy_accuracy_plot(accuracy_data: pd.DataFrame) -> go.Figure:
     """Network top-1 / top-5 policy accuracy vs MCTS targets, per generation.
 
@@ -844,6 +912,14 @@ def create_html_report(config: RunConfig) -> None:
         _load_metrics(config.value_calibration_directory)
         if config.value_calibration_directory.exists() else None
     )
+    elo_data = (
+        _load_metrics(config.elo_ratings_directory)
+        if config.elo_ratings_directory.exists() else None
+    )
+    minimax_data = (
+        _load_metrics(config.minimax_results_directory)
+        if config.minimax_results_directory.exists() else None
+    )
 
     # Build figures
     fig_loss_gen = _make_loss_per_generation(loss_data)
@@ -869,6 +945,16 @@ def create_html_report(config: RunConfig) -> None:
         if value_calibration_data is not None and not value_calibration_data.empty
         else None
     )
+    fig_elo = (
+        _make_elo_plot(elo_data)
+        if elo_data is not None and not elo_data.empty
+        else None
+    )
+    fig_minimax = (
+        _make_minimax_plot(minimax_data)
+        if minimax_data is not None and not minimax_data.empty
+        else None
+    )
 
     # Write HTML
     filename = config.report_directory / "report.html"
@@ -883,6 +969,25 @@ def create_html_report(config: RunConfig) -> None:
         update_threshold=config.update_threshold,
     )
     config_html = _make_config_table(config)
+
+    strength_html = ""
+    if fig_elo is not None or fig_minimax is not None:
+        parts = [
+            '<section>',
+            '<h2>Strength vs Fixed Baselines</h2>',
+            '<p class="section-desc">'
+            'External strength measurements: how does the new network this '
+            'generation compare to fixed opponents, regardless of whether it '
+            'was accepted in arena? Elo is the headline progress curve; '
+            'minimax (TTT only) is the absolute "is this optimal?" signal.'
+            '</p>',
+        ]
+        if fig_elo is not None:
+            parts.append(_chart(fig_elo))
+        if fig_minimax is not None:
+            parts.append(_chart(fig_minimax))
+        parts.append('</section>')
+        strength_html = "\n".join(parts)
 
     diagnostics_html = ""
     if (
@@ -959,6 +1064,8 @@ def create_html_report(config: RunConfig) -> None:
 </p>
 {_chart(fig_arena)}
 </section>
+
+{strength_html}
 
 <section>
 <h2>Performance</h2>

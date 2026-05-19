@@ -1,3 +1,4 @@
+import math
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from core.arena import Arena
 from core.config import RunConfig
 from core.interfaces import IBoard, INeuralNetWrapper, IGame
 from core.mcts import MCTS
+from core.players import NetworkPlayer
 from core.storage import (
     CycleStage,
     EvalSet,
@@ -22,6 +24,22 @@ from core.storage import (
     ProcessedExample,
     SelfPlayStore,
 )
+
+
+def _compute_elo(wins: int, losses: int, draws: int) -> tuple[float, float]:
+    """Chess-style Elo difference vs an anchor opponent.
+
+    Score rate = (wins + 0.5·draws) / total_games, clamped to [0.001, 0.999]
+    to avoid log(0). Elo difference = 400 · log₁₀(score_rate / (1−score_rate)).
+    Returns ``(elo_diff, score_rate)``.
+    """
+    total = wins + losses + draws
+    if total == 0:
+        return 0.0, 0.0
+    raw = (wins + 0.5 * draws) / total
+    score_rate = max(0.001, min(0.999, raw))
+    elo = 400 * math.log10(score_rate / (1 - score_rate))
+    return elo, raw
 
 # Type aliases for improved readability
 TrainingExample: TypeAlias = tuple[IBoard, int, NDArray, float | None]  # (board, player, policy, value)
@@ -100,6 +118,18 @@ class Coach:
         # 1's self-play examples; saved to disk so resumed runs use the same set.
         self._eval_set: EvalSet | None = None
         self._eval_set_size: int = 200
+
+        # Elo evaluation: freeze the random-init network as the anchor opponent.
+        # ``elo_baseline_net`` is a separate wrapper instance with that frozen
+        # state so the current ``self.nnet`` can train without disturbing it.
+        # Saved to disk under ``Nets/elo_baseline.pth.tar`` so resumed runs use
+        # the same baseline.
+        if self.config.elo_games_per_gen > 0:
+            self.nnet.save_checkpoint(filename="elo_baseline.pth.tar")
+            self.elo_baseline_net: INeuralNetWrapper | None = self.nnet.__class__(self.game, config)
+            self.elo_baseline_net.load_checkpoint(filename="elo_baseline.pth.tar")
+        else:
+            self.elo_baseline_net = None
 
     def execute_episode(self) -> list[ProcessedExample]:
         """
@@ -293,10 +323,95 @@ class Coach:
                 self.nnet.save_checkpoint(filename=f'rejected_{generation}.pth.tar')
                 self.nnet.load_checkpoint(filename='temp.pth.tar')
 
+            # PHASE 4: Strength evaluation against fixed baselines.
+            # The new network this gen is measured against the frozen gen-0
+            # baseline (Elo) and, for TTT, a perfect-play minimax opponent.
+            # Logged whether or not the new network was accepted in arena.
+            self._evaluate_strength_vs_baselines(generation)
+
             # Record total generation time and flush metrics
             generation_end = time.perf_counter()
             self.metrics.log_timing(generation, CycleStage.WHOLE_CYCLE, generation_end - generation_start)
             self.metrics.flush(self.config, generation)
+
+    def _evaluate_strength_vs_baselines(self, generation: int) -> None:
+        """Play the new network this gen against fixed baselines, log results.
+
+        Two baselines:
+
+        1. **Elo vs gen-0** (always, when ``elo_games_per_gen > 0``): the
+           frozen random-init network from training start. Score rate +
+           Elo diff are computed via :func:`_compute_elo` and logged via
+           :meth:`MetricsCollector.log_elo`.
+        2. **TTT minimax** (only when the game is TicTacToe and
+           ``minimax_games_per_gen > 0``): perfect-play opponent. Draw rate
+           rising to 1.0 with loss rate falling to 0 means the model has
+           internalised optimal play.
+
+        Both arenas use the same MCTS sim count as the regular accept/reject
+        arena, for consistent comparison. The new network's MCTS tree is
+        reset between games via the :class:`NetworkPlayer.startGame` hook.
+        """
+        if self.elo_baseline_net is not None and self.config.elo_games_per_gen > 0:
+            self._evaluate_elo_vs_baseline(generation)
+        if (
+            self.config.game == "tictactoe"
+            and self.config.minimax_games_per_gen > 0
+        ):
+            self._evaluate_minimax_tictactoe(generation)
+
+    def _evaluate_elo_vs_baseline(self, generation: int) -> None:
+        assert self.elo_baseline_net is not None
+        n = self.config.elo_games_per_gen
+        logger.info(f"Evaluating Elo vs frozen gen-0 baseline ({n} games) ...")
+        elo_start = time.perf_counter()
+
+        new_player = NetworkPlayer(
+            game=self.game, nnet=self.nnet,
+            mcts_config=self.config.mcts_config, temp=0.0,
+        )
+        baseline_player = NetworkPlayer(
+            game=self.game, nnet=self.elo_baseline_net,
+            mcts_config=self.config.mcts_config, temp=0.0,
+        )
+        arena = Arena(new_player, baseline_player, self.game)
+        wins, losses, draws = arena.play_games(n)
+        elo, score_rate = _compute_elo(wins, losses, draws)
+        elapsed = time.perf_counter() - elo_start
+        logger.info(
+            "Gen {} Elo vs gen-0: {:+.1f} (W{} L{} D{}, score rate {:.3f}, {:.1f}s)",
+            generation, elo, wins, losses, draws, score_rate, elapsed,
+        )
+        self.metrics.log_elo(
+            generation=generation, elo=elo, score_rate=score_rate,
+            wins=wins, losses=losses, draws=draws, games=wins + losses + draws,
+        )
+
+    def _evaluate_minimax_tictactoe(self, generation: int) -> None:
+        from core.players import NetworkPlayer
+        from games.tictactoe.minimax import MinimaxTicTacToePlayer
+
+        n = self.config.minimax_games_per_gen
+        logger.info(f"Evaluating vs TTT minimax perfect-play ({n} games) ...")
+        mm_start = time.perf_counter()
+
+        new_player = NetworkPlayer(
+            game=self.game, nnet=self.nnet,
+            mcts_config=self.config.mcts_config, temp=0.0,
+        )
+        minimax_player = MinimaxTicTacToePlayer(self.game)
+        arena = Arena(new_player, minimax_player, self.game)
+        wins, losses, draws = arena.play_games(n)
+        elapsed = time.perf_counter() - mm_start
+        logger.info(
+            "Gen {} vs minimax: W{} L{} D{} (draw_rate {:.2f}, {:.1f}s)",
+            generation, wins, losses, draws,
+            draws / max(wins + losses + draws, 1), elapsed,
+        )
+        self.metrics.log_minimax(
+            generation=generation, wins=wins, losses=losses, draws=draws,
+            games=wins + losses + draws,
+        )
 
     def _ensure_eval_set(self, train_examples: list[ProcessedExample]) -> None:
         """Build (or load from disk) the frozen held-out eval set.

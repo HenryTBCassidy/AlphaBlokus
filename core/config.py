@@ -95,6 +95,16 @@ class RunConfig:
     # Optional reporting backends
     wandb: WandbConfig | None = None  # If set, mirror metrics to Weights & Biases
 
+    # Elo evaluation: number of games per generation to play vs the frozen
+    # gen-0 baseline. 0 disables Elo tracking entirely. The default of 50 is
+    # always-on by intention — Elo vs gen-0 is the headline "is the model
+    # actually getting stronger?" curve for AlphaZero-style work.
+    elo_games_per_gen: int = 50
+
+    # TTT-specific: games per generation to play vs a perfect-play minimax
+    # opponent. Only used when ``game == "tictactoe"``. 0 disables.
+    minimax_games_per_gen: int = 20
+
     @property
     def run_directory(self) -> Path:
         """Base directory for all files related to this training run."""
@@ -171,6 +181,16 @@ class RunConfig:
     def value_calibration_directory(self) -> Path:
         """Directory for per-epoch network value-head reliability buckets on the eval set."""
         return self.run_directory / "ValueCalibration"
+
+    @property
+    def elo_ratings_directory(self) -> Path:
+        """Directory for per-generation Elo rating measured against the frozen gen-0 baseline."""
+        return self.run_directory / "EloRatings"
+
+    @property
+    def minimax_results_directory(self) -> Path:
+        """Directory for per-generation results vs a perfect-play minimax opponent (TTT only)."""
+        return self.run_directory / "MinimaxResults"
 
 
 def load_args(config_path: str | Path) -> RunConfig:

@@ -134,6 +134,8 @@ class MetricsCollector:
     _training_entropy_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _policy_accuracy_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _value_calibration_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _elo_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _minimax_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _wandb_run: Any | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -183,6 +185,8 @@ class MetricsCollector:
         self._wandb_run.define_metric("generation")
         self._wandb_run.define_metric("self_play_per_gen/*", step_metric="generation")
         self._wandb_run.define_metric("training_per_gen/*", step_metric="generation")
+        self._wandb_run.define_metric("elo/*", step_metric="generation")
+        self._wandb_run.define_metric("minimax/*", step_metric="generation")
 
     def _publish(self, payload: dict) -> None:
         """Mirror a metrics payload to W&B if a run is active.
@@ -462,6 +466,80 @@ class MetricsCollector:
                 "epoch": epoch,
             })
 
+    def log_elo(
+        self,
+        generation: int,
+        elo: float,
+        score_rate: float,
+        wins: int,
+        losses: int,
+        draws: int,
+        games: int,
+    ) -> None:
+        """Record the new network's Elo rating vs the frozen gen-0 baseline.
+
+        ``score_rate`` is chess-style: ``(wins + 0.5 · draws) / games``.
+        ``elo`` is the Elo difference vs the baseline (positive = stronger):
+        ``400 · log10(score_rate / (1 − score_rate))`` with score_rate clamped
+        to ``[0.001, 0.999]`` to avoid divide-by-zero at the saturation tails.
+
+        Logged unconditionally for *every* generation, including ones where
+        the new network was rejected in arena — this exposes the training
+        noise floor (rejected gens may produce a dip in the Elo curve).
+        """
+        self._elo_records.append({
+            "generation": generation,
+            "elo": elo,
+            "score_rate": score_rate,
+            "wins": wins,
+            "losses": losses,
+            "draws": draws,
+            "games": games,
+        })
+        self._publish({
+            "elo/rating": elo,
+            "elo/score_rate": score_rate,
+            "elo/wins": wins,
+            "elo/losses": losses,
+            "elo/draws": draws,
+            "generation": generation,
+        })
+
+    def log_minimax(
+        self,
+        generation: int,
+        wins: int,
+        losses: int,
+        draws: int,
+        games: int,
+    ) -> None:
+        """Record results vs a perfect-play minimax opponent (TTT only).
+
+        Against perfect play, the *best* a model can do is draw every game
+        (since TTT is fully solved as a forced draw). ``draw_rate`` rising
+        toward 1.0 with ``loss_rate`` collapsing to 0 is the "is this model
+        optimal?" signal.
+        """
+        draw_rate = draws / games if games > 0 else 0.0
+        loss_rate = losses / games if games > 0 else 0.0
+        self._minimax_records.append({
+            "generation": generation,
+            "wins": wins,
+            "losses": losses,
+            "draws": draws,
+            "games": games,
+            "draw_rate": draw_rate,
+            "loss_rate": loss_rate,
+        })
+        self._publish({
+            "minimax/draw_rate": draw_rate,
+            "minimax/loss_rate": loss_rate,
+            "minimax/wins": wins,
+            "minimax/losses": losses,
+            "minimax/draws": draws,
+            "generation": generation,
+        })
+
     def log_training_throughput(
         self,
         generation: int,
@@ -596,6 +674,26 @@ class MetricsCollector:
             )
             count += len(self._value_calibration_records)
             self._value_calibration_records.clear()
+
+        if self._elo_records:
+            self._write_partition(
+                pd.DataFrame(self._elo_records),
+                config.elo_ratings_directory,
+                generation,
+                "elo.parquet",
+            )
+            count += len(self._elo_records)
+            self._elo_records.clear()
+
+        if self._minimax_records:
+            self._write_partition(
+                pd.DataFrame(self._minimax_records),
+                config.minimax_results_directory,
+                generation,
+                "minimax.parquet",
+            )
+            count += len(self._minimax_records)
+            self._minimax_records.clear()
 
         elapsed = time.perf_counter() - start
         logger.info(f"Flushed {count} metric records for generation {generation} in {elapsed:.2f}s")
