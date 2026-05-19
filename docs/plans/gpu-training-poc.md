@@ -18,19 +18,19 @@ Prerequisites: Tailscale + WSL2 + OpenSSH + key auth are already working between
 | W4  | Add `run_configurations/smoke_test_gpu.json` (TicTacToe, `cuda: true`, W&B enabled); document W&B fields in `smoke_test.json` | 15 min | High | ✅ |
 | W5  | Run W4's CPU equivalent locally on the Mac (3 generations), verify the W&B dashboard receives metrics end-to-end and the HTML report still renders | 30 min | High | ✅ |
 | W6  | Add `run_configurations/ttt_full.json` for the PC run (30 gens, 50 eps, 80 sims, 256 filters / 3 blocks, CUDA on, W&B online) | 5 min | High | ✅ |
-| W7  | Commit the entire W1–W6 working tree as the planned five one-sentence commits: wandb dep, WandbConfig, MetricsCollector W&B integration, smoke configs, mac+full TTT configs | 10 min | High | |
-| W8  | Push `feat/wandb-integration` to origin                                                                       | 2 min  | High     |      |
-| W9  | Update `docs/07-DATA-STORAGE.md` with a W&B section (what is logged, when to use dashboard vs HTML); commit + push | 25 min | Medium | |
-| W10 | On the PC: set OpenSSH default shell to WSL2 bash (T5 from the archived remote-setup-windows plan), reconnect, verify `ssh gpu` lands in bash | 10 min | Medium | |
-| W11 | On the PC inside WSL2: clone the repo, install `uv`, `uv sync`, `apt install -y tmux`, run `uv run pytest -m "not slow"` and confirm green | 20 min | High | |
-| W12 | On the PC: `git fetch origin && git checkout feat/wandb-integration` to get the W&B code on the test branch | 3 min | High | |
-| W13 | On the PC: verify `torch.cuda.is_available()` is `True` and `torch.cuda.get_device_name(0)` reports the RTX 3060 Ti | 5 min | High | |
-| W14 | On the PC: `wandb login` using the API key from `local/wandb_api_key.txt` (copy over via `scp` from Mac) | 5 min | High | |
-| W15 | On the PC: run `ttt_full.json` inside `tmux`; in a second SSH session, run `watch -n 2 nvidia-smi` to confirm utilisation; record actual wall clock vs the 22 min prediction | 30 min | High | |
-| W16 | Post-run verification: W&B dashboard populated end-to-end, `best.pth.tar` exists in `Nets/`, all 7 parquet directories populated for all generations | 15 min | High | |
-| W17 | `rsync -avz gpu:~/AlphaBlokus/temp/ttt_full/ ./temp/ttt_full/` results back to Mac; regenerate the HTML report locally to confirm it renders | 10 min | Medium | |
+| W7  | Commit the entire W1–W6 working tree as the planned five one-sentence commits: wandb dep, WandbConfig, MetricsCollector W&B integration, smoke configs, mac+full TTT configs | 10 min | High | ✅ |
+| W8  | Push `feat/wandb-integration` to origin                                                                       | 2 min  | High     | ✅    |
+| W9  | Update `docs/07-DATA-STORAGE.md` with a W&B section (what is logged, when to use dashboard vs HTML); commit + push | 25 min | Medium | ✅ |
+| W10 | On the PC: set OpenSSH default shell to WSL2 bash (T5 from the archived remote-setup-windows plan), reconnect, verify `ssh gpu` lands in bash | 10 min | Medium | Deferred |
+| W11 | On the PC inside WSL2: clone the repo, install `uv`, `uv sync --extra dev`, run `uv run pytest -q` and confirm green (tmux already installed) | 20 min | High | ✅ |
+| W12 | On the PC: `git fetch origin && git checkout feat/wandb-integration` to get the W&B code on the test branch | 3 min | High | ✅ |
+| W13 | On the PC: verify `torch.cuda.is_available()` is `True` and `torch.cuda.get_device_name(0)` reports the RTX 3060 Ti | 5 min | High | ✅ |
+| W14 | On the PC: `wandb login` using the API key from `local/wandb_api_key.txt` (copy over via `scp` from Mac, then `wandb.login(key=...)` via Python — CLI path unreliable) | 5 min | High | ✅ |
+| W15 | On the PC: run `ttt_full.json` via a long-running foreground SSH session (NOT `nohup & disown` — disowned WSL processes get SIGHUP'd when SSH closes). Predicted 22 min, actual **6.6 min**. | 30 min | High | ✅ |
+| W16 | Post-run verification: W&B dashboard populated end-to-end, `best.pth.tar` exists in `Nets/` (gen 11), all 7 parquet directories populated for all 30 generations (210 files) | 15 min | High | ✅ |
+| W17 | Pull results back to Mac. Rsync doesn't work cleanly through PowerShell→WSL relay, so use tar+scp: `wsl tar czf /mnt/c/Users/Henry/ttt_full.tar.gz`, `scp gpu-cmd:ttt_full.tar.gz /tmp/`, untar locally. Confirmed `best.pth.tar` loads (2.58M params) and HTML report (1.4 MB) is present. | 10 min | Medium | ✅ |
 | W18 | Open PR for `feat/wandb-integration`, merge into main, delete branch                                          | 10 min | High     |      |
-| W19 | Re-run `scripts/mcts_profiling.py` on the PC against Blokus and replace the estimated 3080 Ti numbers in `docs/08-TRAINING-ESTIMATES.md` with measurements | 30 min | Medium | |
+| W19 | Re-run `scripts/mcts_profiling.py` on the PC against Blokus and replace the estimated 3080 Ti numbers in `docs/08-TRAINING-ESTIMATES.md` with measurements. Surprise finding: PC is ~1.7× slower per sim than Mac because move gen (CPU) dominates and the PC's CPU is slower; GPU only helps at large net sizes. | 30 min | Medium | ✅ |
 | W20 | `git mv docs/plans/gpu-training-poc.md docs/plans/archive/gpu-training-poc.md`                                 | 2 min  | Low      |      |
 
 ---
@@ -135,6 +135,11 @@ Commit + push as its own one-sentence commit so it can be reviewed independently
 ---
 
 ## W10. OpenSSH default shell on the PC
+
+> **Deferred 2026-05-15.** Setting the registry key under `HKLM:\SOFTWARE\OpenSSH` requires Administrator elevation, which isn't reliably available over a non-interactive SSH session. All subsequent PC commands in this plan are wrapped in `ssh gpu-cmd 'wsl -d Ubuntu -- bash -lc "..."'`, which works regardless of the default shell. This is a QoL fix Henry can do interactively later from an Admin PowerShell.
+
+### Original instructions (kept for reference)
+
 
 `ssh gpu` currently lands in PowerShell because step T5 of the archived `remote-setup-windows` plan was never executed. From the Mac:
 
