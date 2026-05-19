@@ -88,6 +88,7 @@ docs/
 ├── guides/
 │   ├── STYLE-GUIDE.md     # Code conventions (ALWAYS reference before writing code)
 │   ├── PLAN-FORMAT.md     # How to write implementation plans
+│   ├── REMOTE-TRAINING.md # Runbook for running training on the home PC over SSH
 │   └── AI-CONTEXT.md      # Extended context, architecture rationale, gotchas
 └── plans/                                # Top-level = in-flight or not-yet-started
     ├── move-gen-further-optimisation.md  # Deferred: Cython, bitboard, caching (post-training)
