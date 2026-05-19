@@ -52,6 +52,10 @@ class NetworkPlayer:
     network wrapper and search depth. The default ``temp=0`` gives
     deterministic best-move play; ``temp=1`` samples by visit count for
     self-play-style behaviour.
+
+    Records the full policy from its most recent call for downstream
+    analysis (top-K extraction for arena replays). Access via
+    :meth:`get_last_policy`.
     """
 
     def __init__(
@@ -69,12 +73,18 @@ class NetworkPlayer:
         self._mcts_config = mcts_config
         self._temp = temp
         self._mcts = MCTS(game, nnet, mcts_config)
+        self._last_pi: np.ndarray | None = None
 
     def __call__(self, board: IBoard) -> int:
         pi = self._mcts.get_action_prob(board, temp=self._temp)
+        self._last_pi = np.asarray(pi, dtype=float)
         if self._temp == 0:
             return int(np.argmax(pi))
         return int(np.random.choice(len(pi), p=pi))
+
+    def get_last_policy(self) -> np.ndarray | None:
+        """Return the policy vector from the most recent call, or None."""
+        return self._last_pi
 
     def reset_search_tree(self) -> None:
         """Discard the MCTS tree between games for a clean evaluation slate.

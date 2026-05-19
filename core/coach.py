@@ -299,7 +299,7 @@ class Coach:
                 self.game
             )
 
-            pwins, nwins, draws = arena.play_games(self.config.num_arena_matches)
+            pwins, nwins, draws, _ = arena.play_games(self.config.num_arena_matches)
 
             arena_end = time.perf_counter()
             self.metrics.log_arena(generation, wins=nwins, losses=pwins, draws=draws)
@@ -376,7 +376,7 @@ class Coach:
             mcts_config=self.config.mcts_config, temp=0.0,
         )
         arena = Arena(new_player, baseline_player, self.game)
-        wins, losses, draws = arena.play_games(n)
+        wins, losses, draws, _ = arena.play_games(n)
         elo_diff, score_rate = _compute_elo(wins, losses, draws)
         absolute = baseline_rating + elo_diff
         elapsed = time.perf_counter() - elo_start
@@ -404,7 +404,7 @@ class Coach:
         )
         minimax_player = MinimaxTicTacToePlayer(self.game)
         arena = Arena(new_player, minimax_player, self.game)
-        wins, losses, draws = arena.play_games(n)
+        wins, losses, draws, _ = arena.play_games(n)
         elapsed = time.perf_counter() - mm_start
         logger.info(
             "Gen {} vs minimax: W{} L{} D{} (draw_rate {:.2f}, {:.1f}s)",

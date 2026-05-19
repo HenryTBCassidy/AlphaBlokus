@@ -140,7 +140,7 @@ def main() -> None:
     print(f"Playing {args.num_games} games (MCTS sims: {config.mcts_config.num_mcts_sims}) ...")
 
     arena = Arena(p1, p2, game)
-    p1_wins, p2_wins, draws = arena.play_games(args.num_games)
+    p1_wins, p2_wins, draws, _ = arena.play_games(args.num_games)
     total = p1_wins + p2_wins + draws
 
     print()
