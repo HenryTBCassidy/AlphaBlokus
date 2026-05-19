@@ -103,11 +103,21 @@ class RunConfig:
 
     # Anchor rating shown for the gen-0 baseline. Display-only — the
     # underlying Elo difference math is unchanged. There's no universal
-    # convention here: AlphaGo Zero's papers anchor random nets at 0, USCF
-    # and Chess.com both default unrated players to 1200, Lichess uses 1500.
-    # Going with 1200 because it's the most widely-recognised "amateur
-    # starting" anchor a non-research reader will know.
-    elo_baseline_rating: int = 1200
+    # convention here:
+    #
+    # - AlphaGo Zero / AlphaZero papers anchor random nets at 0 Elo and let
+    #   the curve climb monotonically. Works for them because at their scale
+    #   it never dips below.
+    # - USCF / Chess.com default unrated players to 1200; Lichess uses 1500.
+    #   These imply "random plays at average human" which is misleading.
+    #
+    # 400 sits in the middle: above 0 (so a trained net that briefly learns
+    # something worse-than-random has room to dip without going negative —
+    # this can happen with early-gen overfitting on noisy MCTS targets),
+    # but low enough to read as "weak baseline." Matches the scholastic /
+    # kids'-tournament starting range; gives the converged model room to
+    # climb to ~800-1200+ at full training.
+    elo_baseline_rating: int = 400
 
     # TTT-specific: games per generation to play vs a perfect-play minimax
     # opponent. Only used when ``game == "tictactoe"``. 0 disables.
