@@ -108,6 +108,7 @@ class MetricsCollector:
     _self_play_profiling_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _resource_usage_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _training_throughput_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _training_entropy_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _wandb_run: Any | None = field(default=None, init=False, repr=False)
 
     def __post_init__(self) -> None:
@@ -326,6 +327,35 @@ class MetricsCollector:
             payload[f"resources/{cycle_stage.value}_gpu_mb"] = gpu_memory_bytes / (1024 ** 2)
         self._publish(payload)
 
+    def log_training_entropy(
+        self,
+        generation: int,
+        epoch: int,
+        mean_entropy: float,
+        std_entropy: float,
+        eval_set_size: int,
+    ) -> None:
+        """Record the network's mean policy entropy on the held-out eval set.
+
+        Computed by forward-passing the network (no MCTS) over a frozen set of
+        positions sampled once from gen-1 self-play. Falls over training as the
+        network internalises stronger move selection. The papers' headline
+        "is the network learning?" curve.
+        """
+        self._training_entropy_records.append({
+            "generation": generation,
+            "epoch": epoch,
+            "mean_entropy": mean_entropy,
+            "std_entropy": std_entropy,
+            "eval_set_size": eval_set_size,
+        })
+        self._publish({
+            "training/network_policy_entropy": mean_entropy,
+            "training/network_policy_entropy_std": std_entropy,
+            "generation": generation,
+            "epoch": epoch,
+        })
+
     def log_training_throughput(
         self,
         generation: int,
@@ -422,6 +452,16 @@ class MetricsCollector:
             )
             count += len(self._training_throughput_records)
             self._training_throughput_records.clear()
+
+        if self._training_entropy_records:
+            self._write_partition(
+                pd.DataFrame(self._training_entropy_records),
+                config.training_entropy_directory,
+                generation,
+                "entropy.parquet",
+            )
+            count += len(self._training_entropy_records)
+            self._training_entropy_records.clear()
 
         elapsed = time.perf_counter() - start
         logger.info(f"Flushed {count} metric records for generation {generation} in {elapsed:.2f}s")

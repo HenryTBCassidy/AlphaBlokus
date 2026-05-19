@@ -150,6 +150,18 @@ class RunConfig:
         """Directory for per-epoch training throughput metrics."""
         return self.run_directory / "TrainingThroughput"
 
+    @property
+    def eval_set_directory(self) -> Path:
+        """Directory holding the frozen held-out positions used for per-epoch
+        network-entropy evaluation. Built once after the first generation's
+        self-play and reused for every subsequent epoch."""
+        return self.run_directory / "EvalSet"
+
+    @property
+    def training_entropy_directory(self) -> Path:
+        """Directory for per-epoch network policy entropy on the held-out eval set."""
+        return self.run_directory / "TrainingEntropy"
+
 
 def load_args(config_path: str | Path) -> RunConfig:
     """

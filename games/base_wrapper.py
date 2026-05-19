@@ -91,8 +91,21 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         examples: list[tuple[np.ndarray, np.ndarray, float]],
         generation: int,
         metrics: MetricsCollector | None = None,
+        eval_set: np.ndarray | None = None,
     ) -> None:
-        """Train the neural network using provided examples."""
+        """Train the neural network using provided examples.
+
+        Args:
+            examples: Training examples produced from self-play.
+            generation: Current training generation (for logging).
+            metrics: Optional metrics collector for parquet/W&B logging.
+            eval_set: Optional held-out batch of board encodings with shape
+                ``(N, channels, rows, cols)``. When provided, the network's
+                mean policy entropy is computed on this set at the end of every
+                epoch and logged via ``metrics.log_training_entropy``. This is
+                the "is the network itself becoming more confident" signal
+                AlphaZero-style papers usually plot.
+        """
         if not examples:
             logger.warning("No training examples provided, skipping training.")
             return
@@ -167,6 +180,41 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                     num_examples=len(examples),
                     epoch_time_s=epoch_time,
                 )
+
+            # Network policy entropy on the held-out eval set (option 3 metric).
+            if eval_set is not None and len(eval_set) > 0 and metrics is not None:
+                mean_h, std_h = self._compute_eval_set_entropy(eval_set)
+                metrics.log_training_entropy(
+                    generation=generation,
+                    epoch=epoch,
+                    mean_entropy=mean_h,
+                    std_entropy=std_h,
+                    eval_set_size=len(eval_set),
+                )
+
+    def _compute_eval_set_entropy(
+        self,
+        eval_set: np.ndarray,
+    ) -> tuple[float, float]:
+        """Forward-pass the network over the eval set and return (mean, std) of
+        per-position policy entropy in nats. The network's policy head outputs
+        log-probabilities, so entropy is ``-Σ exp(log_p) · log_p``.
+        """
+        self.nnet.eval()
+        per_position_entropies: list[float] = []
+        with torch.no_grad():
+            for chunk_start in range(0, len(eval_set), self.net_config.batch_size):
+                chunk = eval_set[chunk_start: chunk_start + self.net_config.batch_size]
+                tensor = torch.tensor(chunk, dtype=torch.float32)
+                if self.net_config.cuda:
+                    tensor = tensor.cuda()
+                log_pi, _ = self.nnet(tensor)  # log-probs
+                pi = torch.exp(log_pi)
+                # -Σ p · log p, summed over the action dimension, per row.
+                entropies = -(pi * log_pi).sum(dim=1).cpu().numpy()
+                per_position_entropies.extend(entropies.tolist())
+        arr = np.asarray(per_position_entropies, dtype=float)
+        return float(arr.mean()), float(arr.std())
 
     def predict(self, board: IBoard) -> tuple[np.ndarray, float]:
         """Make a prediction for a given board state.

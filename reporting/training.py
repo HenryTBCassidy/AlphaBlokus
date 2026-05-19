@@ -342,6 +342,36 @@ def _make_throughput_plot(throughput_data: pd.DataFrame) -> go.Figure:
     return _apply_defaults(fig, width=_HALF_WIDTH, height=_GRID_HEIGHT)
 
 
+def _make_network_entropy_plot(entropy_data: pd.DataFrame) -> go.Figure:
+    """Network policy entropy on the held-out eval set, per generation.
+
+    Each generation contributes one point: the mean entropy across all
+    training epochs in that generation. Lower entropy means the network is
+    more confident in its move choices on a fixed reference set of positions.
+    This is the cleanest "is the network itself learning?" signal because it
+    isolates the network from MCTS noise.
+    """
+    df = entropy_data.copy()
+    agg = df.groupby("generation").agg(
+        mean=("mean_entropy", "mean"),
+        std=("mean_entropy", "std"),
+    ).reset_index().sort_values("generation")
+    agg["std"] = agg["std"].fillna(0.0)
+
+    fig = go.Figure()
+    _mean_band_trace(
+        fig, agg["generation"], agg["mean"], agg["std"],
+        color=_COLORS["accent"], name="Network Entropy",
+        unit="nats",
+    )
+    fig.update_layout(
+        xaxis_title="Generation", yaxis_title="Mean entropy (nats)",
+        title="Network Policy Entropy on Held-Out Set",
+        xaxis={"dtick": 1 if agg["generation"].max() < 40 else 5},
+    )
+    return _apply_defaults(fig)
+
+
 def _make_resource_usage_plot(resource_data: pd.DataFrame) -> go.Figure:
     """Line chart of memory usage over generations — one line per phase.
 
@@ -458,15 +488,20 @@ def _mean_band_trace(
     color: str,
     name: str,
     unit: str,
-    row: int,
-    col: int,
+    row: int | None = None,
+    col: int | None = None,
 ) -> None:
-    """Add a mean line + one-sigma shaded band to a subplot cell.
+    """Add a mean line + one-sigma shaded band to a figure.
+
+    Pass ``row`` and ``col`` to target a subplot cell; omit them for a
+    single-plot figure (no ``make_subplots`` grid).
 
     Hover shows ``Gen N — mean: X (unit), ± std`` for the active point.
     """
     upper = mean + std
     lower = mean - std
+
+    target = {"row": row, "col": col} if row is not None and col is not None else {}
 
     # Band (drawn first so the mean line sits on top)
     fig.add_trace(
@@ -480,7 +515,7 @@ def _mean_band_trace(
             hoverinfo="skip",
             showlegend=False,
         ),
-        row=row, col=col,
+        **target,
     )
     # Mean line
     fig.add_trace(
@@ -495,7 +530,7 @@ def _mean_band_trace(
                 f"± %{{customdata:.2f}}<extra></extra>"
             ),
         ),
-        row=row, col=col,
+        **target,
     )
 
 
@@ -599,6 +634,11 @@ def create_html_report(config: RunConfig) -> None:
     resource_data = _load_metrics(config.resource_usage_directory)
     profiling_data = _load_metrics(config.self_play_profiling_directory)
     throughput_data = _load_metrics(config.training_throughput_directory)
+    # Optional — only populated when an eval set was built (i.e. recent runs).
+    network_entropy_data = (
+        _load_metrics(config.training_entropy_directory)
+        if config.training_entropy_directory.exists() else None
+    )
 
     # Build figures
     fig_loss_gen = _make_loss_per_generation(loss_data)
@@ -608,6 +648,11 @@ def create_html_report(config: RunConfig) -> None:
     fig_throughput = _make_throughput_plot(throughput_data)
     fig_resources = _make_resource_usage_plot(resource_data)
     fig_profiling = _make_profiling_plot(profiling_data)
+    fig_network_entropy = (
+        _make_network_entropy_plot(network_entropy_data)
+        if network_entropy_data is not None and not network_entropy_data.empty
+        else None
+    )
 
     # Write HTML
     filename = config.report_directory / "report.html"
@@ -622,6 +667,18 @@ def create_html_report(config: RunConfig) -> None:
         update_threshold=config.update_threshold,
     )
     config_html = _make_config_table(config)
+
+    if fig_network_entropy is not None:
+        network_entropy_html = (
+            '<p class="section-desc" style="margin-top:24px;">'
+            "Network policy entropy on a frozen held-out set of positions "
+            "sampled from generation 1's self-play. Falls as the network "
+            "internalises stronger move selection — isolated from MCTS noise."
+            "</p>"
+            + _chart(fig_network_entropy)
+        )
+    else:
+        network_entropy_html = ""
 
     with open(filename, "w") as f:
         f.write(f"""<!DOCTYPE html>
@@ -651,6 +708,7 @@ def create_html_report(config: RunConfig) -> None:
     <summary>Per-Batch Detail</summary>
     {_chart(fig_loss_timeline)}
 </details>
+{network_entropy_html}
 </section>
 
 <section>

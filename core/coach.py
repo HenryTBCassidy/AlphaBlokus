@@ -94,6 +94,12 @@ class Coach:
         self.metrics = MetricsCollector(config=config)
         self._self_play_store = SelfPlayStore(config.self_play_history_directory)
 
+        # Frozen held-out positions for per-epoch network policy entropy
+        # logging. Built lazily from gen 1's self-play examples; saved to
+        # disk so subsequent runs (or resumed runs) use the same set.
+        self._eval_set: np.ndarray | None = None
+        self._eval_set_size: int = 200
+
     def execute_episode(self) -> list[ProcessedExample]:
         """
         Execute one complete self-play game to generate training data.
@@ -223,7 +229,11 @@ class Coach:
 
             # PHASE 2: Train neural network
             train_examples = self._prepare_training_data()
-            
+
+            # Build/load the frozen eval set used for per-epoch network
+            # entropy logging. First gen's self-play is the source.
+            self._ensure_eval_set(train_examples)
+
             # Preserve current best network
             self.nnet.save_checkpoint(filename='temp.pth.tar')
             self.pnet.load_checkpoint(filename='temp.pth.tar')
@@ -232,7 +242,10 @@ class Coach:
             # Train network on accumulated data
             logger.info(f'Starting Training For Generation #{generation} ...')
             training_start = time.perf_counter()
-            self.nnet.train(train_examples, generation, metrics=self.metrics)
+            self.nnet.train(
+                train_examples, generation,
+                metrics=self.metrics, eval_set=self._eval_set,
+            )
             training_end = time.perf_counter()
             self.metrics.log_timing(generation, CycleStage.TRAINING, training_end - training_start)
 
@@ -283,6 +296,39 @@ class Coach:
             generation_end = time.perf_counter()
             self.metrics.log_timing(generation, CycleStage.WHOLE_CYCLE, generation_end - generation_start)
             self.metrics.flush(self.config, generation)
+
+    def _ensure_eval_set(self, train_examples: list[ProcessedExample]) -> None:
+        """Build (or load from disk) the frozen held-out eval set.
+
+        Sampled once from gen 1's training examples and saved to
+        ``config.eval_set_directory``. Subsequent calls are no-ops once the set
+        is loaded into memory. Skipped entirely if no examples are available
+        yet (e.g. self-play was skipped on a resumed run).
+        """
+        if self._eval_set is not None:
+            return
+
+        eval_dir = self.config.eval_set_directory
+        eval_path = eval_dir / "boards.npy"
+        if eval_path.exists():
+            self._eval_set = np.load(eval_path)
+            logger.info("Loaded eval set ({} positions) from {}",
+                        len(self._eval_set), eval_path)
+            return
+
+        if not train_examples:
+            return
+
+        # Sample positions from the training examples (capped to actual size).
+        boards = np.array([ex[0] for ex in train_examples])
+        n = min(self._eval_set_size, len(boards))
+        rng = np.random.default_rng(seed=0)
+        idx = rng.choice(len(boards), size=n, replace=False)
+        self._eval_set = boards[idx]
+
+        eval_dir.mkdir(parents=True, exist_ok=True)
+        np.save(eval_path, self._eval_set)
+        logger.info("Built eval set ({} positions) → {}", n, eval_path)
 
     def _generation_window_size(self, generation: int) -> int:
         """
