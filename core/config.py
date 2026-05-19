@@ -101,6 +101,13 @@ class RunConfig:
     # actually getting stronger?" curve for AlphaZero-style work.
     elo_games_per_gen: int = 50
 
+    # Anchor rating shown for the gen-0 baseline. Display-only — the underlying
+    # Elo difference math is unchanged. 1000 is the conventional "novice
+    # chess" anchor; pick whatever round number reads nicely for your audience.
+    # Setting this to 1000 means a trained-net Elo of 1200 reads as
+    # "+200 vs the random-init baseline".
+    elo_baseline_rating: int = 1000
+
     # TTT-specific: games per generation to play vs a perfect-play minimax
     # opponent. Only used when ``game == "tictactoe"``. 0 disables.
     minimax_games_per_gen: int = 20

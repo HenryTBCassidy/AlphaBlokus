@@ -489,36 +489,40 @@ def _make_network_entropy_plot(entropy_data: pd.DataFrame) -> go.Figure:
 
 
 def _make_elo_plot(elo_data: pd.DataFrame) -> go.Figure:
-    """Elo rating over generations vs the frozen gen-0 baseline.
+    """Absolute Elo rating over generations, with the gen-0 baseline anchored.
 
-    The headline strength curve for AlphaZero-style work. Each gen's *new*
-    network this gen is measured against the random-init network from the
-    start of training. Score rate uses chess-style scoring (draws = 0.5
-    wins). Positive Elo = stronger than gen-0; cap at ±1200 by clamping
-    score rate ∈ [0.001, 0.999].
+    The headline strength curve, following AlphaZero-paper convention: the
+    random-init network is anchored at ``baseline_rating`` (default 1000) and
+    every other generation is shown relative to that as an absolute rating.
+    A dashed horizontal line marks the baseline. The dip below the baseline
+    that you sometimes see in early gens (training noise floor) is preserved
+    — it just sits below the dashed line rather than at a negative number.
     """
     df = elo_data.sort_values("generation").copy()
+    baseline = int(df["baseline_rating"].iloc[0])
     fig = go.Figure()
     fig.add_trace(go.Scatter(
-        x=df["generation"], y=df["elo"],
-        mode="lines+markers", name="Elo vs gen-0",
+        x=df["generation"], y=df["elo_rating"],
+        mode="lines+markers", name="Model Elo",
         line={"width": 2.5, "color": _COLORS["accent"]},
         marker={"size": 6},
-        customdata=df[["score_rate", "wins", "losses", "draws"]].values,
+        customdata=df[["elo_diff", "score_rate", "wins", "losses", "draws"]].values,
         hovertemplate=(
-            "Gen %{x} — Elo: %{y:+.1f}<br>"
-            "Score rate: %{customdata[0]:.3f} (W%{customdata[1]} L%{customdata[2]} D%{customdata[3]})"
+            "Gen %{x} — Elo: %{y:.0f} "
+            "(%{customdata[0]:+.0f} vs baseline)<br>"
+            "Score rate: %{customdata[1]:.3f} "
+            "(W%{customdata[2]} L%{customdata[3]} D%{customdata[4]})"
             "<extra></extra>"
         ),
     ))
-    # Reference line at 0 — the baseline itself.
     fig.add_hline(
-        y=0, line_dash="dash", line_color=_COLORS["neutral"], line_width=1,
-        annotation_text="Baseline (gen 0)", annotation_position="bottom right",
+        y=baseline, line_dash="dash", line_color=_COLORS["neutral"], line_width=1,
+        annotation_text=f"Baseline (gen 0) = {baseline}",
+        annotation_position="bottom right",
         annotation_font_size=10, annotation_font_color=_COLORS["neutral"],
     )
     fig.update_layout(
-        xaxis_title="Generation", yaxis_title="Elo difference",
+        xaxis_title="Generation", yaxis_title="Elo rating",
         title="Elo Rating vs Frozen Gen-0 Baseline",
         xaxis={"dtick": 1 if df["generation"].max() < 40 else 5},
     )

@@ -363,6 +363,7 @@ class Coach:
     def _evaluate_elo_vs_baseline(self, generation: int) -> None:
         assert self.elo_baseline_net is not None
         n = self.config.elo_games_per_gen
+        baseline_rating = self.config.elo_baseline_rating
         logger.info(f"Evaluating Elo vs frozen gen-0 baseline ({n} games) ...")
         elo_start = time.perf_counter()
 
@@ -376,15 +377,17 @@ class Coach:
         )
         arena = Arena(new_player, baseline_player, self.game)
         wins, losses, draws = arena.play_games(n)
-        elo, score_rate = _compute_elo(wins, losses, draws)
+        elo_diff, score_rate = _compute_elo(wins, losses, draws)
+        absolute = baseline_rating + elo_diff
         elapsed = time.perf_counter() - elo_start
         logger.info(
-            "Gen {} Elo vs gen-0: {:+.1f} (W{} L{} D{}, score rate {:.3f}, {:.1f}s)",
-            generation, elo, wins, losses, draws, score_rate, elapsed,
+            "Gen {} Elo: {:.0f} ({:+.0f} vs baseline) — W{} L{} D{}, score rate {:.3f}, {:.1f}s",
+            generation, absolute, elo_diff, wins, losses, draws, score_rate, elapsed,
         )
         self.metrics.log_elo(
-            generation=generation, elo=elo, score_rate=score_rate,
-            wins=wins, losses=losses, draws=draws, games=wins + losses + draws,
+            generation=generation, elo_diff=elo_diff, baseline_rating=baseline_rating,
+            score_rate=score_rate, wins=wins, losses=losses, draws=draws,
+            games=wins + losses + draws,
         )
 
     def _evaluate_minimax_tictactoe(self, generation: int) -> None:

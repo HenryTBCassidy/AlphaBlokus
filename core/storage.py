@@ -469,7 +469,8 @@ class MetricsCollector:
     def log_elo(
         self,
         generation: int,
-        elo: float,
+        elo_diff: float,
+        baseline_rating: int,
         score_rate: float,
         wins: int,
         losses: int,
@@ -478,18 +479,22 @@ class MetricsCollector:
     ) -> None:
         """Record the new network's Elo rating vs the frozen gen-0 baseline.
 
-        ``score_rate`` is chess-style: ``(wins + 0.5 · draws) / games``.
-        ``elo`` is the Elo difference vs the baseline (positive = stronger):
-        ``400 · log10(score_rate / (1 − score_rate))`` with score_rate clamped
-        to ``[0.001, 0.999]`` to avoid divide-by-zero at the saturation tails.
+        Math: ``score_rate = (wins + 0.5·draws) / games``;
+        ``elo_diff = 400 · log10(score_rate / (1 − score_rate))`` with score_rate
+        clamped to ``[0.001, 0.999]``. ``baseline_rating`` is the *display
+        anchor* for the random-init network (default 1000 — set in
+        ``RunConfig.elo_baseline_rating``). Absolute rating = baseline + diff,
+        which is what AlphaZero-style papers actually plot.
 
         Logged unconditionally for *every* generation, including ones where
-        the new network was rejected in arena — this exposes the training
-        noise floor (rejected gens may produce a dip in the Elo curve).
+        the new network was rejected in arena.
         """
+        elo_absolute = baseline_rating + elo_diff
         self._elo_records.append({
             "generation": generation,
-            "elo": elo,
+            "elo_rating": elo_absolute,
+            "elo_diff": elo_diff,
+            "baseline_rating": baseline_rating,
             "score_rate": score_rate,
             "wins": wins,
             "losses": losses,
@@ -497,7 +502,9 @@ class MetricsCollector:
             "games": games,
         })
         self._publish({
-            "elo/rating": elo,
+            "elo/rating": elo_absolute,
+            "elo/diff_vs_baseline": elo_diff,
+            "elo/baseline_rating": baseline_rating,
             "elo/score_rate": score_rate,
             "elo/wins": wins,
             "elo/losses": losses,
@@ -718,23 +725,62 @@ class MetricsCollector:
             self._wandb_run.log(payload)
 
     def _publish_training_per_gen(self) -> None:
-        """Publish per-generation aggregates of training loss to W&B. Uses
-        the *last training epoch's* batches per gen — i.e. the state of
-        learning at the end of that gen's training — to avoid the noise of
-        early-epoch batches contaminating the trend.
+        """Publish per-generation aggregates of training-side metrics to W&B.
+
+        Covers loss (per-batch records → last epoch's mean) plus the per-epoch
+        network diagnostics (entropy, top-K accuracy, value-calibration error)
+        — each reduced to one point per generation so the dashboard reads as
+        a clean trend instead of a sparse spiky line.
         """
-        if self._wandb_run is None or not self._training_records:
+        if self._wandb_run is None:
             return
-        df = pd.DataFrame(self._training_records)
-        for gen, group in df.groupby("generation"):
-            last_epoch = group["epoch"].max()
-            last = group[group["epoch"] == last_epoch]
-            payload = {
-                "training_per_gen/pi_loss": float(last["pi_loss"].mean()),
-                "training_per_gen/v_loss": float(last["v_loss"].mean()),
-                "training_per_gen/total_loss": float(last["total_loss"].mean()),
-                "generation": int(gen),
-            }
+
+        # Per-gen payload assembled across multiple buffers, keyed by gen.
+        per_gen_payload: dict[int, dict[str, float]] = {}
+
+        if self._training_records:
+            df = pd.DataFrame(self._training_records)
+            for gen, group in df.groupby("generation"):
+                last_epoch = group["epoch"].max()
+                last = group[group["epoch"] == last_epoch]
+                per_gen_payload.setdefault(int(gen), {}).update({
+                    "training_per_gen/pi_loss": float(last["pi_loss"].mean()),
+                    "training_per_gen/v_loss": float(last["v_loss"].mean()),
+                    "training_per_gen/total_loss": float(last["total_loss"].mean()),
+                })
+
+        if self._training_entropy_records:
+            ent = pd.DataFrame(self._training_entropy_records)
+            for gen, group in ent.groupby("generation"):
+                last = group[group["epoch"] == group["epoch"].max()]
+                per_gen_payload.setdefault(int(gen), {}).update({
+                    "training_per_gen/network_policy_entropy": float(last["mean_entropy"].iloc[0]),
+                })
+
+        if self._policy_accuracy_records:
+            acc = pd.DataFrame(self._policy_accuracy_records)
+            for gen, group in acc.groupby("generation"):
+                last = group[group["epoch"] == group["epoch"].max()]
+                per_gen_payload.setdefault(int(gen), {}).update({
+                    "training_per_gen/network_top1_accuracy": float(last["top1_accuracy"].iloc[0]),
+                    "training_per_gen/network_top5_accuracy": float(last["top5_accuracy"].iloc[0]),
+                })
+
+        if self._value_calibration_records:
+            calib = pd.DataFrame(self._value_calibration_records)
+            for gen, group in calib.groupby("generation"):
+                last = group[group["epoch"] == group["epoch"].max()].dropna(subset=["bucket_mean_actual"])
+                if last.empty:
+                    continue
+                errs = (last["bucket_mean_actual"] - last["bucket_center"]).abs()
+                per_gen_payload.setdefault(int(gen), {}).update({
+                    "training_per_gen/value_calibration_error": float(errs.mean()),
+                })
+
+        # Publish one combined payload per generation, keyed by generation
+        # via the define_metric step_metric wiring set up in _init_wandb.
+        for gen, payload in sorted(per_gen_payload.items()):
+            payload["generation"] = gen
             self._wandb_run.log(payload)
 
     @staticmethod
