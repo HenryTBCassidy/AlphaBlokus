@@ -1,6 +1,7 @@
 import json
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import Literal
 
 from dataclass_wizard import fromdict
 
@@ -36,6 +37,21 @@ class NetConfig:
     num_filters: int  # Number of convolutional filters per layer (power of 2)
     num_residual_blocks: int  # Number of residual blocks in the network
     lr_scheduler: str | None = None  # LR schedule: None = constant, "cosine" = CosineAnnealingLR
+
+
+@dataclass(frozen=True)
+class WandbConfig:
+    """Configuration parameters for Weights & Biases logging.
+
+    Optional. When absent from ``RunConfig`` (or set to ``None``), no W&B run
+    is initialised and the training pipeline behaves exactly as before. When
+    present, ``MetricsCollector`` mirrors its existing ``log_*`` calls to W&B
+    in addition to the parquet writes used by the HTML report.
+    """
+    project: str  # W&B project name (e.g. "alphablokus-poc")
+    entity: str | None = None  # W&B team/user; None uses the default for the logged-in account
+    tags: list[str] = field(default_factory=list)  # Free-text tags surfaced in the W&B UI
+    mode: Literal["online", "offline", "disabled"] = "online"  # Network mode for the W&B client
 
 
 @dataclass(frozen=True)
@@ -75,6 +91,9 @@ class RunConfig:
     # Component configurations
     mcts_config: MCTSConfig  # Monte Carlo Tree Search parameters
     net_config: NetConfig  # Neural network parameters
+
+    # Optional reporting backends
+    wandb: WandbConfig | None = None  # If set, mirror metrics to Weights & Biases
 
     @property
     def run_directory(self) -> Path:

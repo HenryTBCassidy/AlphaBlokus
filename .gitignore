@@ -7,3 +7,5 @@ running_args
 **/__pycache__/
 .DS_Store
 local/
+wandb/
+

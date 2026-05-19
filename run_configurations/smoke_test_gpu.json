@@ -1,6 +1,6 @@
 {
   "game": "tictactoe",
-  "run_name": "smoke_test",
+  "run_name": "smoke_test_gpu",
   "num_generations": 3,
   "num_eps": 15,
   "temp_threshold": 10,
@@ -19,14 +19,14 @@
     "dropout": 0.3,
     "epochs": 5,
     "batch_size": 32,
-    "cuda": false,
+    "cuda": true,
     "num_filters": 64,
     "num_residual_blocks": 2
   },
   "wandb": {
     "project": "alphablokus-poc",
     "entity": null,
-    "tags": ["smoke", "ttt", "cpu"],
+    "tags": ["smoke", "ttt", "gpu"],
     "mode": "online"
   }
 }

@@ -91,7 +91,7 @@ class Coach:
         # Training state
         self.train_examples_history: TrainingHistory = []
         self.skip_first_self_play = False  # Can be set by load_train_examples()
-        self.metrics = MetricsCollector()
+        self.metrics = MetricsCollector(config=config)
         self._self_play_store = SelfPlayStore(config.self_play_history_directory)
 
     def execute_episode(self) -> list[ProcessedExample]:
@@ -164,6 +164,14 @@ class Coach:
             - Game data is saved after each generation
             - Timing information is collected for performance analysis
         """
+        try:
+            self._learn_loop()
+        finally:
+            # Ensure W&B (if active) is finalised even on crash/interrupt.
+            self.metrics.close()
+
+    def _learn_loop(self) -> None:
+        """Inner training loop. Separated so ``learn`` can wrap it in try/finally."""
         for generation in range(1, self.config.num_generations + 1):
             logger.info(f'Starting Generation #{generation} ...')
             generation_start = time.perf_counter()

@@ -96,7 +96,7 @@ Don't pad sections with filler. If a fix is "change `> 0` to `>= 0` in 4 places,
 ## Lifecycle
 
 1. **Draft:** Write the plan in `docs/plans/`, get agreement on scope.
-2. **Execute:** Work through the checklist, marking items done. If an item is intentionally skipped or deferred, mark it `Deferred` in the Done column and add a quoted note below the checklist explaining why.
+2. **Execute:** Work through the checklist *one row at a time*, marking items ✅ in the Done column **the moment that row's work lands in the working tree** (not at the end of a batch). If an item is intentionally skipped or deferred, mark it `Deferred` in the Done column and add a quoted note below the checklist explaining why.
 3. **Archive — do this the moment the plan is complete, not later.** When every checklist item is either ✅ or `Deferred`, move the file to `docs/plans/archive/` using `git mv` (preserves history). Fix any relative links between plans so cross-references still work after the move. Don't delete completed plans — they explain why the code looks the way it does.
 
 > **Invariant:** `docs/plans/` at the top level contains *only* plans that are in flight or not yet started. The archive contains everything else. If you finish a plan and don't archive it in the same commit (or the immediate follow-up), you're leaving the directory in a misleading state — a future reader can't tell what is still live work.
@@ -116,3 +116,4 @@ A plan is complete when every checklist item is either ✅ or marked `Deferred` 
 - **No effort estimates.** "This will take a while" is not a plan.
 - **Giant monolithic items.** If a checklist row says "Implement the entire game" it's not useful. Break it down.
 - **Leaving completed plans in `docs/plans/`.** As soon as the last checklist item lands (✅ or `Deferred`), `git mv` the file to `docs/plans/archive/` in the same commit. The active directory is a working surface, not a graveyard.
+- **Forgetting to tick the Done column as you go.** Tick each row ✅ the moment its work is in the working tree. Batch-ticking at the end (or worse, never) makes the plan useless as a progress tracker — anyone glancing at the file should see at a glance where you are.
