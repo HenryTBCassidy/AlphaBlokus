@@ -494,18 +494,17 @@ def _make_arena_replays_section(
 ) -> str:
     """Build the interactive arena-replays section.
 
-    Per generation, replays all arena games (the new-vs-previous-best matches
-    Coach runs at each gen) and emits an interactive HTML widget:
-
-    * a generation dropdown at the top,
-    * a colour-coded grid of game tiles below it (green=new won, red=lost,
-      grey=draw, from the new network's perspective),
-    * a replay panel that opens when you click a tile, with the current board,
-      the model's top-3 candidate moves at that step, and ← / → step controls.
+    Layout follows the look of the older move-count-analysis report: a
+    generation dropdown narrows the games to inspect, a game dropdown picks
+    one game whose options are labelled with its outcome ("G3 — Draw",
+    "G7 — P1 won"). The selected game's full move sequence is then rendered
+    inline as a flex-wrap row of turn cards — each card pairs the candidate
+    top-3 mirror board (what the model was considering) with the actual board
+    after that move (what it played). All moves visible at once, easy to scan.
 
     All replay data is embedded as JSON in the rendered HTML so the report
-    stays a single self-contained file you can email or `open` from the file
-    system — no JS frameworks, no external fetches.
+    stays a single self-contained file — no JS frameworks, no external
+    fetches.
     """
     import json
 
@@ -524,13 +523,7 @@ def _make_arena_replays_section(
         moves = group.sort_values("move_idx")
         board = game.initialise_board()
         cur_player = 1
-
-        boards_html: list[str] = [
-            renderer.render_board_html(
-                game.get_canonical_form(board, cur_player), annotation="Initial position",
-            ),
-        ]
-        top_k_html: list[str] = []
+        turns_html: list[str] = []
 
         for _, m in moves.iterrows():
             action = int(m["action"])
@@ -538,26 +531,51 @@ def _make_arena_replays_section(
             top_k_probs = [float(p) for p in m["top_k_probs"]]
 
             canonical_before = game.get_canonical_form(board, cur_player)
-            top_k_html.append(
-                renderer.render_top_k_moves_html(canonical_before, top_k_actions, top_k_probs)
+            top_k_html = renderer.render_top_k_moves_html(
+                canonical_before, top_k_actions, top_k_probs,
             )
 
             board, cur_player = game.get_next_state(board, cur_player, action)
-            move_label = f"Move {int(m['move_idx']) + 1}: player {int(m['player']):+d} → action {action}"
-            boards_html.append(
-                renderer.render_board_html(
-                    game.get_canonical_form(board, cur_player),
-                    last_action=action, annotation=move_label,
-                ),
+            move_label = (
+                f"Move {int(m['move_idx']) + 1} — player {int(m['player']):+d}, "
+                f"played action {action}"
             )
+            after_html = renderer.render_board_html(
+                game.get_canonical_form(board, cur_player),
+                last_action=action, annotation="After move",
+            )
+            turn_card = (
+                '<div class="replay-turn">'
+                f'<div class="replay-turn-header">{move_label}</div>'
+                '<div class="replay-turn-boards">'
+                '<div class="replay-turn-board">'
+                "<div class=\"replay-turn-board-label\">Model's top-3</div>"
+                f"{top_k_html}"
+                '</div>'
+                '<div class="replay-turn-board">'
+                '<div class="replay-turn-board-label">After move</div>'
+                f"{after_html}"
+                '</div>'
+                '</div>'
+                '</div>'
+            )
+            turns_html.append(turn_card)
 
         first = moves.iloc[0]
+        outcome = float(first["outcome"])
+        if outcome > 0.5:
+            outcome_label = "P1 (prev) won"
+        elif outcome < -0.5:
+            outcome_label = "P2 (new) won"
+        else:
+            outcome_label = "Draw"
+
         games_by_gen.setdefault(int(gen), []).append({
             "game_idx": int(game_idx),
-            "outcome": float(first["outcome"]),
+            "outcome": outcome,
+            "outcome_label": outcome_label,
             "player1_was_white": bool(first["player1_was_white"]),
-            "boards_html": boards_html,
-            "top_k_html": top_k_html,
+            "turns_html": turns_html,
         })
 
     payload = json.dumps(games_by_gen)
@@ -566,38 +584,22 @@ def _make_arena_replays_section(
         for g in sorted(games_by_gen)
     )
     first_gen = min(games_by_gen)
-    initial_tiles = _render_game_tiles(games_by_gen[first_gen], first_gen)
+    initial_game_options = _render_game_options(games_by_gen[first_gen])
 
     return _ARENA_REPLAYS_TEMPLATE.format(
         gen_options=gen_options,
-        initial_tiles=initial_tiles,
-        payload=payload,
+        initial_game_options=initial_game_options,
+    ) + _ARENA_REPLAYS_SCRIPT.format(payload=payload)
+
+
+def _render_game_options(games: list[dict]) -> str:
+    """Server-side game-dropdown options for the initial generation."""
+    return "\n".join(
+        f'<option value="{g["game_idx"]}">'
+        f'G{g["game_idx"] + 1} — {g["outcome_label"]}'
+        f"</option>"
+        for g in games
     )
-
-
-def _render_game_tiles(games: list[dict], gen: int) -> str:
-    """Server-side initial render of the game-tile grid for ``gen``."""
-    parts = []
-    for g in games:
-        outcome = g["outcome"]
-        if outcome > 0.5:
-            cls = "tile-loss"  # NEW (player2) won → for the player1=PREV perspective stored, p1 won
-            label = "P1 won"
-        elif outcome < -0.5:
-            cls = "tile-win"
-            label = "P2 (new) won"
-        else:
-            cls = "tile-draw"
-            label = "Draw"
-        parts.append(
-            f'<div class="game-tile {cls}" '
-            f'data-game="{g["game_idx"]}" '
-            f'onclick="alphaBlokus_showGame({gen}, {g["game_idx"]})">'
-            f'<div class="game-tile-num">G{g["game_idx"] + 1}</div>'
-            f'<div class="game-tile-label">{label}</div>'
-            f'</div>'
-        )
-    return "\n".join(parts)
 
 
 def _instantiate_game(game_name: str):
@@ -618,147 +620,107 @@ _ARENA_REPLAYS_TEMPLATE = """\
 <h2>Arena Game Replays</h2>
 <p class="section-desc">
 Recorded games from each generation's accept/reject arena. <em>Player 1</em>
-is the previous best network and <em>Player 2</em> is the candidate trained
-this gen — green tiles are wins for the new network, red are losses, grey are
-draws. Click a tile to step through the game and inspect the model's top-3
-candidate moves at each turn.
+is the previous best network and <em>Player 2</em> is the new candidate
+trained this gen. Pick a generation, then a game — the full sequence of
+moves appears below as a row of cards. Each card pairs the model's top-3
+considered moves (left) with the actual board state after the move was
+played (right), so you can scan visually for "did the model spot the obvious
+winning move?" / "did it miss the block?".
 </p>
 
 <div class="arena-replays">
     <div class="arena-controls">
-        <label for="alphaBlokus-gen-select"><strong>Generation:</strong></label>
-        <select id="alphaBlokus-gen-select" onchange="alphaBlokus_showGen(parseInt(this.value))">
+        <label><strong>Generation:</strong>
+            <select id="alphaBlokus-gen-select"
+                    onchange="alphaBlokus_onGenChange(parseInt(this.value))">
 {gen_options}
-        </select>
+            </select>
+        </label>
+        <label style="margin-left: 16px;"><strong>Game:</strong>
+            <select id="alphaBlokus-game-select"
+                    onchange="alphaBlokus_onGameChange(parseInt(this.value))">
+{initial_game_options}
+            </select>
+        </label>
     </div>
-    <div id="alphaBlokus-game-tiles" class="game-tiles">
-{initial_tiles}
-    </div>
-    <div id="alphaBlokus-replay-panel" class="replay-panel" hidden>
-        <div id="alphaBlokus-replay-header" class="replay-header"></div>
-        <div class="replay-controls">
-            <button onclick="alphaBlokus_step(-1)">← Prev</button>
-            <span id="alphaBlokus-step-indicator"></span>
-            <button onclick="alphaBlokus_step(1)">Next →</button>
-        </div>
-        <div class="replay-body">
-            <div>
-                <div class="replay-label">Board after this move</div>
-                <div id="alphaBlokus-current-board"></div>
-            </div>
-            <div>
-                <div class="replay-label">Top-3 candidates for next move</div>
-                <div id="alphaBlokus-topk-overlay"></div>
-            </div>
-        </div>
-    </div>
+    <div id="alphaBlokus-replay-body" class="replay-body"></div>
 </div>
 
 <style>
 .arena-replays {{ margin: 12px 0; }}
-.arena-controls {{ margin-bottom: 12px; font-size: 14px; }}
-.arena-controls select {{ padding: 4px 8px; font-size: 14px; }}
-.game-tiles {{
-    display: grid; grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
-    gap: 8px; margin-bottom: 16px;
+.arena-controls {{ margin-bottom: 16px; font-size: 14px; }}
+.arena-controls select {{ padding: 4px 8px; font-size: 14px; margin-left: 4px; }}
+.replay-body {{
+    display: flex; flex-wrap: wrap; gap: 16px; padding: 8px 0;
 }}
-.game-tile {{
-    padding: 8px; border-radius: 4px; text-align: center; cursor: pointer;
-    font-size: 12px; color: #1f2937; border: 1px solid #d1d5db;
-    transition: transform 0.05s ease-in-out;
+.replay-turn {{
+    flex: 0 0 auto; padding: 8px; border: 1px solid #e5e7eb;
+    border-radius: 6px; background: #fafafa;
 }}
-.game-tile:hover {{ transform: scale(1.05); }}
-.tile-win {{ background: #d1fae5; }}
-.tile-loss {{ background: #fee2e2; }}
-.tile-draw {{ background: #f3f4f6; }}
-.game-tile-num {{ font-weight: 600; font-size: 13px; }}
-.game-tile-label {{ font-size: 10px; color: #6b7280; }}
-.replay-panel {{
-    border: 1px solid #d1d5db; border-radius: 6px; padding: 16px; background: #fafafa;
+.replay-turn-header {{
+    font-size: 12px; font-weight: 600; color: #2a3f5f; margin-bottom: 8px;
 }}
-.replay-header {{ font-weight: 600; margin-bottom: 8px; font-size: 14px; }}
-.replay-controls {{ margin-bottom: 12px; display: flex; align-items: center; gap: 12px; }}
-.replay-controls button {{
-    padding: 4px 12px; cursor: pointer; border: 1px solid #d1d5db;
-    background: white; border-radius: 4px; font-size: 13px;
+.replay-turn-boards {{ display: flex; gap: 12px; }}
+.replay-turn-board {{ display: flex; flex-direction: column; align-items: center; }}
+.replay-turn-board-label {{
+    font-size: 10px; color: #6b7280; margin-bottom: 4px; text-transform: uppercase;
 }}
-.replay-controls button:hover {{ background: #f3f4f6; }}
-.replay-body {{ display: flex; gap: 24px; flex-wrap: wrap; }}
-.replay-label {{ font-size: 12px; color: #6b7280; margin-bottom: 4px; }}
 </style>
+</section>
+"""
 
+
+_ARENA_REPLAYS_SCRIPT = """\
 <script>
 (function() {{
     const REPLAYS = {payload};
-    let curGen = null;
-    let curGame = null;
-    let curStep = 0;
 
-    function showGen(gen) {{
-        curGen = gen;
-        curGame = null;
-        const games = REPLAYS[gen] || [];
-        const tilesHtml = games.map(g => {{
-            let cls, label;
-            if (g.outcome > 0.5) {{ cls = 'tile-loss'; label = 'P1 won'; }}
-            else if (g.outcome < -0.5) {{ cls = 'tile-win'; label = 'P2 (new) won'; }}
-            else {{ cls = 'tile-draw'; label = 'Draw'; }}
-            return '<div class="game-tile ' + cls + '" onclick="alphaBlokus_showGame(' + gen + ', ' + g.game_idx + ')">'
-                + '<div class="game-tile-num">G' + (g.game_idx + 1) + '</div>'
-                + '<div class="game-tile-label">' + label + '</div>'
-                + '</div>';
+    function genGames(gen) {{ return REPLAYS[gen] || []; }}
+
+    function onGenChange(gen) {{
+        const select = document.getElementById('alphaBlokus-game-select');
+        const games = genGames(gen);
+        select.innerHTML = games.map(g => {{
+            return '<option value="' + g.game_idx + '">G' + (g.game_idx + 1)
+                 + ' — ' + g.outcome_label + '</option>';
         }}).join('');
-        document.getElementById('alphaBlokus-game-tiles').innerHTML = tilesHtml;
-        document.getElementById('alphaBlokus-replay-panel').hidden = true;
-    }}
-
-    function showGame(gen, gameIdx) {{
-        const games = REPLAYS[gen] || [];
-        curGen = gen;
-        curGame = games.find(g => g.game_idx === gameIdx);
-        curStep = 0;
-        if (curGame) {{
-            document.getElementById('alphaBlokus-replay-panel').hidden = false;
-            render();
-        }}
-    }}
-
-    function step(delta) {{
-        if (!curGame) return;
-        const maxStep = curGame.boards_html.length - 1;
-        curStep = Math.max(0, Math.min(maxStep, curStep + delta));
-        render();
-    }}
-
-    function render() {{
-        if (!curGame) return;
-        let outcomeStr;
-        if (curGame.outcome > 0.5) outcomeStr = 'Player 1 (previous best) won';
-        else if (curGame.outcome < -0.5) outcomeStr = 'Player 2 (new candidate) won';
-        else outcomeStr = 'Draw';
-        document.getElementById('alphaBlokus-replay-header').textContent =
-            'Gen ' + curGen + ' · Game ' + (curGame.game_idx + 1) + ' — Outcome: ' + outcomeStr;
-        const maxStep = curGame.boards_html.length - 1;
-        document.getElementById('alphaBlokus-step-indicator').textContent =
-            'Step ' + curStep + ' / ' + maxStep;
-        document.getElementById('alphaBlokus-current-board').innerHTML =
-            curGame.boards_html[curStep];
-        if (curStep < curGame.top_k_html.length) {{
-            document.getElementById('alphaBlokus-topk-overlay').innerHTML =
-                curGame.top_k_html[curStep];
+        if (games.length > 0) {{
+            select.value = games[0].game_idx;
+            renderGame(gen, games[0].game_idx);
         }} else {{
-            document.getElementById('alphaBlokus-topk-overlay').innerHTML =
-                '<div style="color:#9ca3af; padding: 16px;">(Game ended)</div>';
+            document.getElementById('alphaBlokus-replay-body').innerHTML = '';
         }}
     }}
 
-    // Expose globally so onclick handlers can find them.
-    window.alphaBlokus_showGen = showGen;
-    window.alphaBlokus_showGame = showGame;
-    window.alphaBlokus_step = step;
+    function onGameChange(gameIdx) {{
+        const gen = parseInt(document.getElementById('alphaBlokus-gen-select').value);
+        renderGame(gen, gameIdx);
+    }}
+
+    function renderGame(gen, gameIdx) {{
+        const games = genGames(gen);
+        const game = games.find(g => g.game_idx === gameIdx);
+        if (!game) return;
+        document.getElementById('alphaBlokus-replay-body').innerHTML =
+            game.turns_html.join('');
+    }}
+
+    // Initial render: the first game of the first generation.
+    document.addEventListener('DOMContentLoaded', () => {{
+        const genSelect = document.getElementById('alphaBlokus-gen-select');
+        const gameSelect = document.getElementById('alphaBlokus-game-select');
+        if (!genSelect || !gameSelect) return;
+        const gen = parseInt(genSelect.value);
+        const games = genGames(gen);
+        if (games.length > 0) {{
+            renderGame(gen, games[0].game_idx);
+        }}
+    }});
+
+    window.alphaBlokus_onGenChange = onGenChange;
+    window.alphaBlokus_onGameChange = onGameChange;
 }})();
 </script>
-</section>
 """
 
 
