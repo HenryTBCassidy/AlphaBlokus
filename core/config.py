@@ -123,6 +123,13 @@ class RunConfig:
     # opponent. Only used when ``game == "tictactoe"``. 0 disables.
     minimax_games_per_gen: int = 20
 
+    # Global RNG seed for numpy, torch, MCTS tie-breaks and the eval-set
+    # sampler. Set to a fixed value to make a run bit-for-bit reproducible;
+    # ``None`` skips seeding entirely (non-deterministic — only useful if you
+    # want a single run to have stochastic warm-up). Two runs with the same
+    # seed + same config + same hardware will produce identical metrics.
+    seed: int | None = 42
+
     @property
     def run_directory(self) -> Path:
         """Base directory for all files related to this training run."""

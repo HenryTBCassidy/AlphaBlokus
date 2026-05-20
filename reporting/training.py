@@ -851,19 +851,33 @@ def _make_minimax_plot(minimax_data: pd.DataFrame) -> go.Figure:
     return _apply_defaults(fig)
 
 
-def _make_policy_accuracy_plot(accuracy_data: pd.DataFrame) -> go.Figure:
-    """Network top-1 / top-5 policy accuracy vs MCTS targets, per generation.
+def _make_policy_accuracy_plot(
+    accuracy_data: pd.DataFrame, game_name: str,
+) -> go.Figure:
+    """Per-generation top-K agreement between the network's raw policy and
+    the eval-set target. ``game_name`` switches the framing only — the
+    numbers come from the same diagnostic either way.
+
+    - **TTT**: target is *minimax-optimal*. A "hit" means the net picks an
+      action that is genuinely optimal under perfect play. Top-1 should
+      climb toward 100% as the net internalises perfect play.
+    - **Blokus / other**: target is the MCTS visit-count argmax recorded in
+      gen-1 self-play. Top-1 measures how often the raw net agrees with
+      what search arrived at — AlphaGo Zero's Figure 3b in spirit.
 
     Computed on the frozen eval set after every training epoch; one point
-    per generation is shown (mean across epochs). Top-1 should rise from
-    1/num_actions toward 1.0 as the network internalises MCTS preferences;
-    Top-5 typically saturates fast on small action spaces.
+    per generation is shown (mean across epochs).
     """
     df = accuracy_data.copy()
     agg = df.groupby("generation").agg(
         top1_mean=("top1_accuracy", "mean"),
         top5_mean=("top5_accuracy", "mean"),
     ).reset_index().sort_values("generation")
+
+    if game_name == "tictactoe":
+        title = "Policy Agreement vs Minimax Oracle (held-out set)"
+    else:
+        title = "Policy Agreement vs MCTS (held-out set)"
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -879,18 +893,29 @@ def _make_policy_accuracy_plot(accuracy_data: pd.DataFrame) -> go.Figure:
         hovertemplate="Gen %{x} — top-5: %{y:.1f}%<extra></extra>",
     ))
     fig.update_layout(
-        xaxis_title="Generation", yaxis_title="Accuracy (%)",
-        yaxis_range=[0, 105],
-        title="Policy Accuracy vs MCTS (held-out set)",
+        xaxis_title="Generation", yaxis_title="Agreement (%)",
+        yaxis_range=[0, 105], title=title,
         xaxis={"dtick": 1 if agg["generation"].max() < 40 else 5},
     )
     return _apply_defaults(fig)
 
 
-def _make_value_calibration_plot(calibration_data: pd.DataFrame) -> go.Figure:
-    """Reliability diagram for the value head, taken from the final epoch of
-    the latest generation. Buckets predicted v ∈ [-1, 1] and plots mean(actual
-    outcome) per bucket. Well-calibrated → points sit on the y=x diagonal.
+def _make_value_calibration_plot(
+    calibration_data: pd.DataFrame, game_name: str,
+) -> go.Figure:
+    """Reliability diagram for the value head, latest epoch.
+
+    Predicted v ∈ [-1, 1] is binned into 10 buckets; each marker is the mean
+    *target* value of positions whose predicted v fell in that bucket. The
+    y-axis target depends on the game:
+
+    - **TTT**: target is the position's true minimax value ∈ ``{-1, 0, +1}``.
+      Markers should hug the y=x diagonal — a winning position should be
+      predicted near +1, a losing one near -1, a drawn one near 0.
+    - **Blokus / other**: target is the actual game outcome ``z`` recorded
+      in the eval set's self-play games. y=x is still the well-calibrated
+      reference, but expect more noise since outcomes are post-hoc and
+      depend on both players' downstream play.
     """
     df = calibration_data.copy()
     last_gen = df["generation"].max()
@@ -898,35 +923,40 @@ def _make_value_calibration_plot(calibration_data: pd.DataFrame) -> go.Figure:
     latest = df[(df["generation"] == last_gen) & (df["epoch"] == last_epoch)]
     latest = latest.dropna(subset=["bucket_mean_actual"]).sort_values("bucket_center")
 
+    if game_name == "tictactoe":
+        y_label = "Mean true minimax value (-1 / 0 / +1)"
+        title = "Value-Head Reliability vs Minimax (latest epoch)"
+        hover_label = "minimax mean"
+    else:
+        y_label = "Mean actual game outcome"
+        title = "Value-Head Reliability (latest epoch)"
+        hover_label = "outcome mean"
+
     fig = go.Figure()
-    # Perfect-calibration diagonal
     fig.add_trace(go.Scatter(
         x=[-1, 1], y=[-1, 1],
-        mode="lines", name="Perfect calibration",
+        mode="lines", name="Perfect calibration (y=x)",
         line={"dash": "dash", "color": _COLORS["neutral"], "width": 1},
         hoverinfo="skip",
     ))
-    # Bucket means — marker size proportional to bucket count
     max_count = max(int(latest["bucket_count"].max()), 1)
     sizes = 6 + 24 * latest["bucket_count"] / max_count
     fig.add_trace(go.Scatter(
         x=latest["bucket_center"], y=latest["bucket_mean_actual"],
         mode="markers+lines", name=f"Gen {int(last_gen)} epoch {int(last_epoch)}",
         marker={
-            "size": sizes,
-            "color": _COLORS["accent"],
+            "size": sizes, "color": _COLORS["accent"],
             "line": {"width": 1, "color": _COLORS["accent"]},
         },
         customdata=latest["bucket_count"],
         hovertemplate=(
-            "Predicted ≈ %{x:.1f}, actual mean: %{y:.2f}"
+            "Predicted ≈ %{x:.1f}, " + hover_label + ": %{y:.2f}"
             " (%{customdata} positions)<extra></extra>"
         ),
     ))
     fig.update_layout(
         xaxis_title="Predicted value (bucket centre)",
-        yaxis_title="Mean actual outcome",
-        title="Value-Head Reliability (latest epoch)",
+        yaxis_title=y_label, title=title,
         xaxis_range=[-1.05, 1.05], yaxis_range=[-1.05, 1.05],
     )
     return _apply_defaults(fig)
@@ -1235,12 +1265,12 @@ def create_html_report(config: RunConfig) -> None:
         else None
     )
     fig_policy_accuracy = (
-        _make_policy_accuracy_plot(policy_accuracy_data)
+        _make_policy_accuracy_plot(policy_accuracy_data, config.game)
         if policy_accuracy_data is not None and not policy_accuracy_data.empty
         else None
     )
     fig_value_calibration = (
-        _make_value_calibration_plot(value_calibration_data)
+        _make_value_calibration_plot(value_calibration_data, config.game)
         if value_calibration_data is not None and not value_calibration_data.empty
         else None
     )

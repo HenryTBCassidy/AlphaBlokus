@@ -35,20 +35,43 @@ class MinimaxTicTacToePlayer:
 
     def __call__(self, board: IBoard) -> int:
         """Return the action with the highest minimax value from this state."""
+        return self.optimal_actions(board)[0]
+
+    def evaluate_position(self, board: IBoard) -> float:
+        """Return the game-theoretic value of ``board`` from side-to-move's
+        perspective: ``+1`` if the side-to-move can force a win, ``-1`` if they
+        will lose against perfect play, ``0`` for a draw.
+
+        Expects ``board`` in canonical form (side-to-move = ``+1``). For TTT
+        every reachable non-terminal position has true value ``0`` (forced
+        draw), so this is mostly useful on positions reached via random or
+        early-net play that already contain a forced win/loss.
+        """
+        return self._negamax(board)
+
+    def optimal_actions(self, board: IBoard) -> list[int]:
+        """Return *all* actions whose minimax value matches the best value.
+
+        Used by the TTT eval set so a network is credited for picking any
+        of several equally-optimal moves, rather than being arbitrarily
+        penalised when it picks a different one than the one we'd nominate.
+        Falls back to ``[legal[0]]`` if the position is somehow terminal,
+        which shouldn't happen in practice but keeps the API total.
+        """
         legal = np.flatnonzero(self._game.valid_move_masking(board, 1))
-        best_action = int(legal[0])
+        if len(legal) == 0:
+            return [0]
+
         best_value = -math.inf
+        action_values: list[tuple[int, float]] = []
         for action in legal:
             next_board, next_player = self._game.get_next_state(board, 1, int(action))
-            # Re-canonicalise for the opponent. Without this the recursion
-            # would interpret the board with the wrong sign convention.
             next_canonical = self._game.get_canonical_form(next_board, next_player)
-            # Opponent moves next; their best value, negated, is our value.
             value = -self._negamax(next_canonical)
+            action_values.append((int(action), value))
             if value > best_value:
                 best_value = value
-                best_action = int(action)
-        return best_action
+        return [a for a, v in action_values if v >= best_value - 1e-9]
 
     # -- internal --------------------------------------------------------------
 

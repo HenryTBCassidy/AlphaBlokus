@@ -101,6 +101,18 @@ class Coach:
             nnet: Neural network for policy and value predictions
             config: Configuration parameters for the training process
         """
+        # Seed everything FIRST — before any wrapper / MCTS instance is built,
+        # so weight init, replay shuffles, MCTS tie-breaks and the global
+        # ``np.random`` calls scattered through self-play all see the same
+        # generator state. Without this, runs at the same config drift and
+        # ablations can't be compared cleanly.
+        if config.seed is not None:
+            np.random.seed(config.seed)
+            torch.manual_seed(config.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(config.seed)
+            logger.info("Seeded numpy + torch with seed={}", config.seed)
+
         self.game = game
         self.nnet = nnet
         self.pnet = self.nnet.__class__(self.game, config)  # Previous best network
@@ -439,6 +451,19 @@ class Coach:
     def _ensure_eval_set(self, train_examples: list[ProcessedExample]) -> None:
         """Build (or load from disk) the frozen held-out eval set.
 
+        For TicTacToe we replace the self-play-derived targets with **minimax
+        oracle** targets: each position's ``target_policies`` row is uniform
+        over all game-theoretically optimal actions, and ``target_values`` is
+        the true minimax value of the position (∈ ``{-1, 0, +1}``). This makes
+        the per-generation top-K agreement plot answer the right question
+        ("does the net pick a truly optimal move?") rather than chasing
+        gen-1's noisy MCTS targets, which is what was making that curve dip
+        over training.
+
+        For other games we keep the original behaviour: the eval set targets
+        are MCTS visit distributions and final game outcomes recorded during
+        gen 1's self-play.
+
         Sampled once from gen 1's training examples and saved to
         ``config.eval_set_directory`` as three numpy files: ``boards.npy``,
         ``target_policies.npy``, ``target_values.npy``. If any of the three is
@@ -452,14 +477,23 @@ class Coach:
         boards_path = eval_dir / "boards.npy"
         policies_path = eval_dir / "target_policies.npy"
         values_path = eval_dir / "target_values.npy"
-        if boards_path.exists() and policies_path.exists() and values_path.exists():
+        # Marker file: tells us *how* the targets were generated. We refuse to
+        # reuse an on-disk eval set whose targets don't match the current
+        # scheme — otherwise an old "selfplay-targets" file would silently
+        # poison the metrics on a TTT run that now expects minimax targets.
+        marker_path = eval_dir / "targets_kind.txt"
+        expected_kind = "minimax_v1" if self.config.game == "tictactoe" else "selfplay_v1"
+        if (
+            boards_path.exists() and policies_path.exists() and values_path.exists()
+            and marker_path.exists() and marker_path.read_text().strip() == expected_kind
+        ):
             self._eval_set = EvalSet(
                 boards=np.load(boards_path),
                 target_policies=np.load(policies_path),
                 target_values=np.load(values_path),
             )
-            logger.info("Loaded eval set ({} positions) from {}",
-                        len(self._eval_set), eval_dir)
+            logger.info("Loaded eval set ({} positions, kind={}) from {}",
+                        len(self._eval_set), expected_kind, eval_dir)
             return
 
         if not train_examples:
@@ -470,19 +504,64 @@ class Coach:
         policies_all = np.array([ex[1] for ex in train_examples])
         values_all = np.array([ex[2] for ex in train_examples])
         n = min(self._eval_set_size, len(boards_all))
-        rng = np.random.default_rng(seed=0)
+        rng = np.random.default_rng(seed=self.config.seed or 0)
         idx = rng.choice(len(boards_all), size=n, replace=False)
+        sampled_boards = boards_all[idx]
+        target_policies = policies_all[idx]
+        target_values = values_all[idx]
+
+        if self.config.game == "tictactoe":
+            target_policies, target_values = self._minimax_targets_for_eval_set(
+                sampled_boards, action_size=target_policies.shape[1],
+            )
+
         self._eval_set = EvalSet(
-            boards=boards_all[idx],
-            target_policies=policies_all[idx],
-            target_values=values_all[idx],
+            boards=sampled_boards,
+            target_policies=target_policies,
+            target_values=target_values,
         )
 
         eval_dir.mkdir(parents=True, exist_ok=True)
         np.save(boards_path, self._eval_set.boards)
         np.save(policies_path, self._eval_set.target_policies)
         np.save(values_path, self._eval_set.target_values)
-        logger.info("Built eval set ({} positions) → {}", n, eval_dir)
+        marker_path.write_text(expected_kind)
+        logger.info("Built eval set ({} positions, kind={}) → {}",
+                    n, expected_kind, eval_dir)
+
+    def _minimax_targets_for_eval_set(
+        self, boards: NDArray, action_size: int,
+    ) -> tuple[NDArray, NDArray]:
+        """Overwrite eval-set targets with a perfect-play oracle (TTT only).
+
+        Each row of ``target_policies`` becomes a uniform distribution over
+        all minimax-optimal actions; each ``target_values`` entry becomes the
+        position's true game-theoretic value. Boards are decoded from the
+        2-channel canonical encoding back into a :class:`Board` so we can
+        query the minimax solver.
+        """
+        from games.tictactoe.board import Board
+        from games.tictactoe.minimax import MinimaxTicTacToePlayer
+
+        minimax = MinimaxTicTacToePlayer(self.game)
+        n = len(boards)
+        new_policies = np.zeros((n, action_size), dtype=np.float32)
+        new_values = np.zeros(n, dtype=np.float32)
+
+        for i, encoded in enumerate(boards):
+            # Decode canonical 2-channel encoding back into a canonical Board.
+            # encoded[0]: side-to-move stones (=+1), encoded[1]: opponent (=-1).
+            grid = (encoded[0] - encoded[1]).astype(int)
+            canonical_board = Board._from_pieces(grid.tolist())
+
+            new_values[i] = float(minimax.evaluate_position(canonical_board))
+            optimal = minimax.optimal_actions(canonical_board)
+            if optimal:
+                weight = 1.0 / len(optimal)
+                for action in optimal:
+                    new_policies[i, action] = weight
+
+        return new_policies, new_values
 
     def _generation_window_size(self, generation: int) -> int:
         """

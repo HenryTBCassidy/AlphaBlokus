@@ -222,7 +222,13 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         top5_hits = 0
         predicted_values: list[float] = []
 
-        target_argmaxes = eval_set.target_policies.argmax(axis=1)
+        # Treat any action with non-zero target probability as "credit-worthy".
+        # For MCTS-target eval sets this collapses to the single argmax (since
+        # the MCTS visit distribution is rarely exactly uniform). For minimax
+        # eval sets the target is uniform over all optimal actions, so the
+        # net is credited if it picks any of them — the right behaviour when
+        # several moves are equally optimal.
+        target_supports = eval_set.target_policies > 0
         target_values = eval_set.target_values
 
         with torch.no_grad():
@@ -239,12 +245,17 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 entropies = -(pi * log_pi).sum(dim=1).cpu().numpy()
                 per_position_entropies.extend(entropies.tolist())
 
-                # Top-1 / Top-5 accuracy vs MCTS targets.
+                # Top-1 / Top-5 agreement vs the target's *support set* (set of
+                # actions with non-zero target probability — the argmax for an
+                # MCTS target, or all optimal actions for a minimax target).
                 k = min(5, log_pi.shape[1])
                 topk = log_pi.topk(k, dim=1).indices.cpu().numpy()
-                chunk_targets = target_argmaxes[chunk_start:end]
-                top1_hits += int((topk[:, 0] == chunk_targets).sum())
-                top5_hits += int(np.isin(chunk_targets, topk).sum())  # broadcast row-wise
+                chunk_supports = target_supports[chunk_start:end]
+                # top1: did the net's top action hit any optimal target?
+                top1_hits += int(chunk_supports[np.arange(len(topk)), topk[:, 0]].sum())
+                # top5: did any of the net's top-5 actions hit an optimal target?
+                row_idx = np.arange(len(topk))[:, None]
+                top5_hits += int(chunk_supports[row_idx, topk].any(axis=1).sum())
 
                 # Value predictions, flattened to 1-D for calibration.
                 predicted_values.extend(v.view(-1).cpu().numpy().tolist())
