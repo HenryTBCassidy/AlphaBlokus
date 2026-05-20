@@ -521,43 +521,50 @@ def _make_arena_replays_section(
 
     for (gen, game_idx), group in df.groupby(["generation", "game_idx"]):
         moves = group.sort_values("move_idx")
-        board = game.initialise_board()
-        cur_player = 1
+        board = game.initialise_board()  # actual (non-canonical) board state
         turns_html: list[str] = []
+
+        # Turn 0 — initial empty board, no moves played yet.
+        if len(moves):
+            first_player = int(moves.iloc[0]["player"])
+            first_player_name = "White (X)" if first_player == 1 else "Black (O)"
+            turns_html.append(
+                '<div class="replay-turn">'
+                f'<div class="replay-turn-header">Turn 0 — initial position, '
+                f"{first_player_name} to move</div>"
+                '<div class="replay-turn-boards">'
+                f"{renderer.render_board_html(board, annotation='Start')}"
+                "</div></div>"
+            )
 
         for _, m in moves.iterrows():
             action = int(m["action"])
+            player = int(m["player"])
+            player_name = "White (X)" if player == 1 else "Black (O)"
+            turn_idx = int(m["move_idx"]) + 1
+
             top_k_actions = [int(a) for a in m["top_k_actions"]]
             top_k_probs = [float(p) for p in m["top_k_probs"]]
+            action_probs = dict(zip(top_k_actions, top_k_probs, strict=False))
 
-            canonical_before = game.get_canonical_form(board, cur_player)
-            top_k_html = renderer.render_top_k_moves_html(
-                canonical_before, top_k_actions, top_k_probs,
+            policy_html = renderer.render_policy_html(
+                board, action_probs,
+                annotation=f"{player_name}'s MCTS policy",
             )
-
-            board, cur_player = game.get_next_state(board, cur_player, action)
-            move_label = (
-                f"Move {int(m['move_idx']) + 1} — player {int(m['player']):+d}, "
-                f"played action {action}"
-            )
+            # Apply move and render the resulting state.
+            board, _ = game.get_next_state(board, player, action)
             after_html = renderer.render_board_html(
-                game.get_canonical_form(board, cur_player),
-                last_action=action, annotation="After move",
+                board, last_action=action,
+                annotation=f"{player_name} played action {action}",
             )
+
             turn_card = (
                 '<div class="replay-turn">'
-                f'<div class="replay-turn-header">{move_label}</div>'
+                f'<div class="replay-turn-header">Turn {turn_idx} — '
+                f"{player_name}'s move</div>"
                 '<div class="replay-turn-boards">'
-                '<div class="replay-turn-board">'
-                "<div class=\"replay-turn-board-label\">Model's top-3</div>"
-                f"{top_k_html}"
-                '</div>'
-                '<div class="replay-turn-board">'
-                '<div class="replay-turn-board-label">After move</div>'
-                f"{after_html}"
-                '</div>'
-                '</div>'
-                '</div>'
+                f"{policy_html}{after_html}"
+                "</div></div>"
             )
             turns_html.append(turn_card)
 
@@ -651,19 +658,33 @@ winning move?" / "did it miss the block?".
 .arena-controls {{ margin-bottom: 16px; font-size: 14px; }}
 .arena-controls select {{ padding: 4px 8px; font-size: 14px; margin-left: 4px; }}
 .replay-body {{
-    display: flex; flex-wrap: wrap; gap: 16px; padding: 8px 0;
+    display: flex; flex-direction: column; gap: 12px; padding: 8px 0;
 }}
 .replay-turn {{
-    flex: 0 0 auto; padding: 8px; border: 1px solid #e5e7eb;
+    padding: 12px 16px; border: 1px solid #e5e7eb;
     border-radius: 6px; background: #fafafa;
 }}
 .replay-turn-header {{
-    font-size: 12px; font-weight: 600; color: #2a3f5f; margin-bottom: 8px;
+    font-size: 13px; font-weight: 600; color: #2a3f5f; margin-bottom: 8px;
 }}
-.replay-turn-boards {{ display: flex; gap: 12px; }}
-.replay-turn-board {{ display: flex; flex-direction: column; align-items: center; }}
-.replay-turn-board-label {{
-    font-size: 10px; color: #6b7280; margin-bottom: 4px; text-transform: uppercase;
+.replay-turn-boards {{
+    display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap;
+}}
+
+/* Inlined TTT board styles — keep the policy / actual boards visually aligned. */
+.ttt-board {{ display: inline-block; margin: 0; }}
+.ttt-board table.ttt-grid {{ border-collapse: collapse; }}
+.ttt-board td {{ padding: 0; }}
+.ttt-board th {{
+    padding: 2px 6px; font-size: 10px; color: #9ca3af;
+    background: none; border: none; font-weight: normal; text-align: center;
+}}
+.ttt-board th.corner {{ width: 16px; }}
+.ttt-board th.row-label {{ text-align: right; padding-right: 6px; }}
+.ttt-board .board-annotation {{
+    font-size: 11px; color: #4b5563; text-align: center;
+    margin-bottom: 6px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px;
 }}
 </style>
 </section>

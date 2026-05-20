@@ -46,19 +46,40 @@ class IBoardRenderer(Protocol):
         """
         ...
 
+    def render_policy_html(
+        self,
+        board: IBoard,
+        action_probs: dict[int, float],
+        annotation: str = "",
+    ) -> str:
+        """Render the board with the player's policy probabilities overlaid.
+
+        The resulting HTML lines up cell-for-cell with the output of
+        :meth:`render_board_html` for the same board — they're designed to
+        sit side-by-side and look like the "same" board showing different
+        things (one the actual position, one the policy).
+
+        Args:
+            board: The board state at the moment the policy was produced
+                (i.e. before the move was played).
+            action_probs: Mapping action-index → probability. Cells whose
+                action is not in this dict are treated as 0%.
+            annotation: Caption text shown above the table.
+        """
+        ...
+
     def render_top_k_moves_html(
         self,
         board: IBoard,
         actions: list[int],
         probs: list[float],
     ) -> str:
-        """Render top-K candidate moves as a human-readable HTML fragment.
+        """[Deprecated] Render top-K candidate moves as a small HTML fragment.
 
-        Args:
-            board: The current board state — needed so previews know what's
-                already placed.
-            actions: Action indices (already in descending probability order).
-            probs: Aligned probabilities, all in [0, 1].
+        Older method, kept around so Blokus's stub implementation still
+        type-checks. New code should prefer :meth:`render_policy_html` which
+        takes the full action distribution and renders a board that lines up
+        with :meth:`render_board_html`.
         """
         ...
 

@@ -53,25 +53,40 @@ class BlokusDuoRenderer:
             num_moves_black=bm,
         )
 
+    def render_policy_html(
+        self,
+        board: BlokusDuoBoard,
+        action_probs: dict[int, float],
+        annotation: str = "",
+    ) -> str:
+        """Render Blokus policy distribution as a text-only top-N list.
+
+        Stub — Blokus's 17,837-action space doesn't map cleanly onto a single
+        board overlay (each cell can be played by many piece+orientation
+        combinations). Proper rendering would need per-piece thumbnails;
+        deferred. Until then we list the top-5 actions with their decoded
+        descriptions and probabilities so the protocol is satisfied.
+        """
+        if not action_probs:
+            return '<div class="board-annotation">No candidate moves.</div>'
+        top = sorted(action_probs.items(), key=lambda kv: -kv[1])[:5]
+        rank_glyphs = ["①", "②", "③", "④", "⑤"]
+        lines = [f'<div class="board-annotation">{annotation}</div>'] if annotation else []
+        for i, (action, prob) in enumerate(top):
+            glyph = rank_glyphs[i] if i < len(rank_glyphs) else f"{i + 1}."
+            lines.append(f"<div>{glyph} action {action} — {prob:.0%}</div>")
+        return '<div class="blokus-top-k">' + "".join(lines) + "</div>"
+
     def render_top_k_moves_html(
         self,
         board: BlokusDuoBoard,
         actions: list[int],
         probs: list[float],
     ) -> str:
-        """Render top-K candidate moves.
-
-        Stub — full thumbnail rendering is part of R25. Returns a text-only
-        listing so the interface is complete and the protocol type-checks.
-        """
-        if not actions:
-            return '<div class="board-annotation">No candidate moves.</div>'
-        rank_glyphs = ["①", "②", "③", "④", "⑤"]
-        lines = []
-        for i, (action, prob) in enumerate(zip(actions, probs, strict=False)):
-            glyph = rank_glyphs[i] if i < len(rank_glyphs) else f"{i + 1}."
-            lines.append(f"<div>{glyph} action {action} — {prob:.0%}</div>")
-        return '<div class="blokus-top-k">' + "".join(lines) + "</div>"
+        """Compatibility shim — translates to :meth:`render_policy_html`."""
+        return self.render_policy_html(
+            board, dict(zip(actions, probs, strict=False)),
+        )
 
 
 # -- ASCII rendering ----------------------------------------------------------
