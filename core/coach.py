@@ -326,7 +326,7 @@ class Coach:
             )
 
             arena_end = time.perf_counter()
-            accepted = self._should_accept_new_network(nwins, pwins)
+            accepted = self._should_accept_new_network(nwins, pwins, draws)
             self.metrics.log_arena(
                 generation, wins=nwins, losses=pwins, draws=draws, accepted=accepted,
             )
@@ -621,22 +621,38 @@ class Coach:
         shuffle(examples)
         return examples
 
-    def _should_accept_new_network(self, new_wins: int, prev_wins: int) -> bool:
+    def _should_accept_new_network(
+        self, new_wins: int, prev_wins: int, draws: int = 0,
+    ) -> bool:
         """
         Decide whether to accept the newly trained network.
+
+        Uses **score-based acceptance** (chess-style): draws count as 0.5
+        each in both numerator and denominator. The new net is accepted iff
+        its score ``(new_wins + 0.5 * draws) / total_games`` meets the
+        configured ``update_threshold``.
+
+        The older convention used only decisive games (``draws`` excluded
+        from the denominator), which silently broke acceptance for
+        forced-draw games like TTT: once both nets played competently every
+        arena would draw, ``new_wins`` and ``prev_wins`` would both be zero,
+        and the early-return-False kicked in. The score-based form matches
+        AlphaGo Zero's recipe and handles forced-draw games cleanly — the
+        new net must actually win games to be accepted.
 
         Args:
             new_wins: Number of games won by new network
             prev_wins: Number of games won by previous network
+            draws: Number of drawn games (counted as 0.5 each)
 
         Returns:
             bool: True if new network should replace previous one
         """
-        total_games = new_wins + prev_wins
+        total_games = new_wins + prev_wins + draws
         if total_games == 0:
             return False
-        win_rate = float(new_wins) / total_games
-        return win_rate >= self.config.update_threshold
+        score = (new_wins + 0.5 * draws) / total_games
+        return score >= self.config.update_threshold
 
     def save_self_play_history(self, generation: int) -> None:
         """Save the current generation's self-play data to a parquet file.
