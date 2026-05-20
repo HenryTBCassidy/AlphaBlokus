@@ -5,15 +5,11 @@ internalised optimal play (R14 of the reporting overhaul). With perfect play
 on both sides TicTacToe is a forced draw — so a "fully trained" model should
 **never lose** against this opponent and should draw essentially every game.
 
-Implementation notes:
-
-- Negamax with alpha-beta pruning. State space is tiny (~5,478 unique
-  positions reachable from the empty board), so even without caching this is
-  fast — well under 1 ms per move on a laptop CPU.
-- A board → optimal-value cache makes repeated calls within a game/arena
-  essentially free.
-- Players see canonical boards (current player encoded as ``+1``), so
-  ``get_game_ended(board, +1)`` is the natural terminal-return convention.
+Implementation: pure negamax with memoisation. **No alpha-beta** — caching
+α-β results is only sound if you also store the value's bound type (exact /
+upper / lower), which adds complexity for no real gain at TTT's ~5,400-state
+size. The unpruned implementation handles the full game tree in <1s and the
+memoisation makes repeated calls essentially free.
 """
 from __future__ import annotations
 
@@ -30,8 +26,7 @@ class MinimaxTicTacToePlayer:
 
     Each ``__call__`` returns the action with the highest minimax value for
     the side-to-move (always +1 in the canonical-board convention). The
-    underlying negamax search is memoised by board state key, so repeated
-    play (e.g. an arena of 20 games) reuses earlier work.
+    underlying negamax search is memoised by board state key.
     """
 
     def __init__(self, game: TicTacToeGame) -> None:
@@ -45,9 +40,8 @@ class MinimaxTicTacToePlayer:
         best_value = -math.inf
         for action in legal:
             next_board, next_player = self._game.get_next_state(board, 1, int(action))
-            # Re-canonicalise for the opponent (they're player +1 from their
-            # perspective). Without this, the recursion would interpret the
-            # board with the wrong sign convention.
+            # Re-canonicalise for the opponent. Without this the recursion
+            # would interpret the board with the wrong sign convention.
             next_canonical = self._game.get_canonical_form(next_board, next_player)
             # Opponent moves next; their best value, negated, is our value.
             value = -self._negamax(next_canonical)
@@ -58,22 +52,18 @@ class MinimaxTicTacToePlayer:
 
     # -- internal --------------------------------------------------------------
 
-    def _negamax(
-        self,
-        board: IBoard,
-        alpha: float = -math.inf,
-        beta: float = math.inf,
-    ) -> float:
+    def _negamax(self, board: IBoard) -> float:
         """Negamax value of ``board`` from the side-to-move's perspective.
 
-        ``board`` must be in canonical form: the side to move is ``+1``.
+        ``board`` must be in canonical form (side to move = ``+1``). Pure
+        unpruned minimax — values returned are always exact, so the cache
+        is sound.
         """
         key = self._game.state_key(board)
         cached = self._cache.get(key)
         if cached is not None:
             return cached
 
-        # Terminal — in canonical form, "player 1" is the side-to-move.
         terminal = self._game.get_game_ended(board, 1)
         if terminal != 0:
             self._cache[key] = float(terminal)
@@ -84,12 +74,9 @@ class MinimaxTicTacToePlayer:
         for action in legal:
             next_board, next_player = self._game.get_next_state(board, 1, int(action))
             next_canonical = self._game.get_canonical_form(next_board, next_player)
-            value = -self._negamax(next_canonical, -beta, -alpha)
+            value = -self._negamax(next_canonical)
             if value > best:
                 best = value
-            alpha = max(alpha, value)
-            if alpha >= beta:
-                break  # alpha-beta cutoff
 
         self._cache[key] = best
         return best
