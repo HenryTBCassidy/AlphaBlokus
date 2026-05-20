@@ -142,6 +142,21 @@ class MetricsCollector:
     _arena_replay_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _wandb_run: Any | None = field(default=None, init=False, repr=False)
 
+    # Cumulative counters used as W&B step_metric values for per-episode /
+    # per-batch metrics. Incrementing globally instead of resetting at gen
+    # boundaries gives W&B a monotonic x-axis — otherwise its auto-step would
+    # interpolate huge straight lines across the training+arena+elo phases
+    # where neither self_play nor training metrics are logged.
+    _global_episode: int = field(default=0, init=False, repr=False)
+    _global_batch: int = field(default=0, init=False, repr=False)
+    # Running acceptance counter for the arena dashboard. Accepted = the new
+    # net beat the previous net by ``update_threshold``.
+    _arena_accepts: int = field(default=0, init=False, repr=False)
+    _arena_attempts: int = field(default=0, init=False, repr=False)
+    # Run wall-clock anchor — every W&B publish includes elapsed seconds so
+    # the "Run progress" section can show time-axis charts and an ETA.
+    _run_start_perf: float = field(default_factory=time.perf_counter, init=False, repr=False)
+
     def __post_init__(self) -> None:
         if self.config is None or self.config.wandb is None:
             return
@@ -182,25 +197,74 @@ class MetricsCollector:
         else:
             logger.info("Initialised W&B run in {} mode", wandb_config.mode)
 
-        # Wire generation-indexed namespaces to use generation as their X axis.
-        # Without this, W&B uses its auto-incrementing step counter which
-        # makes per-gen aggregates plot against the cumulative log call count
-        # instead of against the generation they represent.
+        # ───── W&B metric registration ────────────────────────────────────
+        # The dashboard is laid out as: Run progress → Self-play → Training
+        # loss → Learning quality → Arena → Strength → Operational. Each
+        # namespace below is wired to the right step_metric so charts plot
+        # against meaningful x-axes (generation / global episode / global
+        # batch / wall-clock) instead of W&B's auto-incrementing internal
+        # step counter.
+
+        # Step metrics (the available x-axes). All monotonic.
         self._wandb_run.define_metric("generation")
+        self._wandb_run.define_metric("global_episode")
+        self._wandb_run.define_metric("global_batch")
+        self._wandb_run.define_metric("progress/wall_clock_seconds")
+
+        # Run progress — visible "where are we" panels, plotted against time.
+        # The bare ``epoch`` / ``episode`` / ``batch`` keys we used to log are
+        # mirrored into ``progress/*`` so they can be charted, while the
+        # originals are kept around as hidden step values only.
+        self._wandb_run.define_metric("progress/*", step_metric="progress/wall_clock_seconds")
+        self._wandb_run.define_metric("epoch", hidden=True)
+        self._wandb_run.define_metric("episode", hidden=True)
+        self._wandb_run.define_metric("batch", hidden=True)
+
+        # Self-play diagnostics — per-episode against the cumulative episode
+        # counter; per-gen aggregates against generation.
+        self._wandb_run.define_metric("self_play/*", step_metric="global_episode")
         self._wandb_run.define_metric("self_play_per_gen/*", step_metric="generation")
+
+        # Training — per-batch against cumulative batch counter; per-gen
+        # aggregates against generation.
+        self._wandb_run.define_metric("training/*", step_metric="global_batch")
         self._wandb_run.define_metric("training_per_gen/*", step_metric="generation")
+
+        # Arena, Elo, throughput, timing — all reported per generation.
+        self._wandb_run.define_metric("arena/*", step_metric="generation")
         self._wandb_run.define_metric("elo/*", step_metric="generation")
-        self._wandb_run.define_metric("minimax/*", step_metric="generation")
+        self._wandb_run.define_metric("throughput/*", step_metric="generation")
+        self._wandb_run.define_metric("timing/*", step_metric="generation")
+
+        # Minimax oracle only exists for TTT — register conditionally so
+        # Blokus dashboards aren't littered with empty panels.
+        if self.config.game == "tictactoe":
+            self._wandb_run.define_metric("minimax/*", step_metric="generation")
 
     def _publish(self, payload: dict) -> None:
         """Mirror a metrics payload to W&B if a run is active.
 
-        No-op when W&B is disabled. Keeps the log_* methods small and lets
-        W&B's own batching/throttling handle the network side.
+        Augments every payload with two things automatically:
+
+        1. ``progress/wall_clock_seconds`` — elapsed seconds since
+           ``MetricsCollector`` was constructed. Acts as the natural x-axis
+           for the "Run progress" panel.
+        2. ``progress/*`` mirrors of any bare counter keys (``generation``,
+           ``epoch``, ``episode``, ``batch``) the caller included. The bare
+           keys are registered as ``hidden=True`` so they don't auto-chart;
+           the ``progress/*`` mirrors are the visible panels.
+
+        No-op when W&B is disabled. Keeps the ``log_*`` methods small and
+        lets W&B's own batching/throttling handle the network side.
         """
         if self._wandb_run is None:
             return
-        self._wandb_run.log(payload)
+        augmented = dict(payload)
+        augmented["progress/wall_clock_seconds"] = time.perf_counter() - self._run_start_perf
+        for key in ("generation", "epoch", "episode", "batch"):
+            if key in payload:
+                augmented[f"progress/{key}"] = payload[key]
+        self._wandb_run.log(augmented)
 
     def close(self) -> None:
         """Finalise the W&B run if one is active. Safe to call multiple times."""
@@ -210,6 +274,32 @@ class MetricsCollector:
 
         wandb.finish()
         self._wandb_run = None
+
+    def log_progress(
+        self,
+        generation: int,
+        total_generations: int,
+    ) -> None:
+        """Publish "Run progress" headline metrics at a generation boundary.
+
+        Records the gen counter as a fraction of the total run plus an ETA
+        derived from elapsed wall-clock divided by completed generations.
+        Called once at the start of each generation, before self-play begins,
+        so the dashboard's progress panel updates as soon as a gen begins
+        rather than only when the first batch is logged.
+        """
+        elapsed = time.perf_counter() - self._run_start_perf
+        completed = max(generation - 1, 0)
+        if completed > 0:
+            per_gen_s = elapsed / completed
+            eta_s = per_gen_s * (total_generations - completed)
+        else:
+            eta_s = float("nan")  # unknown until gen 1 completes
+        self._publish({
+            "progress/generation_fraction": completed / max(total_generations, 1),
+            "progress/eta_seconds": eta_s,
+            "generation": generation,
+        })
 
     def log_training(
         self,
@@ -236,10 +326,12 @@ class MetricsCollector:
             "v_loss": v_loss,
             "total_loss": total_loss,
         })
+        self._global_batch += 1
         self._publish({
             "training/pi_loss": pi_loss,
             "training/v_loss": v_loss,
             "training/total_loss": total_loss,
+            "global_batch": self._global_batch,
             "generation": generation,
             "epoch": epoch,
             "batch": batch_number,
@@ -251,23 +343,40 @@ class MetricsCollector:
         wins: int,
         losses: int,
         draws: int,
+        accepted: bool | None = None,
     ) -> None:
-        """Record arena evaluation results for a generation."""
+        """Record arena evaluation results for a generation.
+
+        ``accepted`` reports whether the new network passed the
+        ``update_threshold`` acceptance test. When supplied we maintain a
+        running ``arena/acceptance_rate`` over the run — the most useful
+        "is training producing improvements?" headline.
+        """
         self._arena_records.append({
             "generation": generation,
             "wins": wins,
             "losses": losses,
             "draws": draws,
+            "accepted": accepted,
         })
         total = wins + losses + draws
         win_rate = wins / total if total > 0 else 0.0
-        self._publish({
+        payload = {
             "arena/wins": wins,
             "arena/losses": losses,
             "arena/draws": draws,
             "arena/win_rate": win_rate,
             "generation": generation,
-        })
+        }
+        if accepted is not None:
+            self._arena_attempts += 1
+            if accepted:
+                self._arena_accepts += 1
+            payload["arena/accepted"] = int(accepted)
+            payload["arena/acceptance_rate"] = (
+                self._arena_accepts / self._arena_attempts
+            )
+        self._publish(payload)
 
     def log_timing(
         self,
@@ -338,6 +447,7 @@ class MetricsCollector:
                 "valid_moves_fraction": valid_moves_fraction,
             })
         self._self_play_profiling_records.append(record)
+        self._global_episode += 1
         self._publish({
             "self_play/num_moves": num_moves,
             "self_play/total_sims": total_sims,
@@ -348,6 +458,7 @@ class MetricsCollector:
             "self_play/leaf_expansions": num_leaf_expansions,
             "self_play/tree_size": tree_size,
             "self_play/policy_entropy": mean_policy_entropy,
+            "global_episode": self._global_episode,
             "generation": generation,
             "episode": episode,
         })
@@ -563,16 +674,19 @@ class MetricsCollector:
         """
         draw_rate = draws / games if games > 0 else 0.0
         loss_rate = losses / games if games > 0 else 0.0
+        win_rate = wins / games if games > 0 else 0.0
         self._minimax_records.append({
             "generation": generation,
             "wins": wins,
             "losses": losses,
             "draws": draws,
             "games": games,
+            "win_rate": win_rate,
             "draw_rate": draw_rate,
             "loss_rate": loss_rate,
         })
         self._publish({
+            "minimax/win_rate": win_rate,
             "minimax/draw_rate": draw_rate,
             "minimax/loss_rate": loss_rate,
             "minimax/wins": wins,

@@ -224,6 +224,7 @@ class Coach:
         for generation in range(1, self.config.num_generations + 1):
             logger.info(f'Starting Generation #{generation} ...')
             generation_start = time.perf_counter()
+            self.metrics.log_progress(generation, self.config.num_generations)
 
             # PHASE 1: Generate new training data through self-play
             if not self.skip_first_self_play or generation > 1:
@@ -325,7 +326,10 @@ class Coach:
             )
 
             arena_end = time.perf_counter()
-            self.metrics.log_arena(generation, wins=nwins, losses=pwins, draws=draws)
+            accepted = self._should_accept_new_network(nwins, pwins)
+            self.metrics.log_arena(
+                generation, wins=nwins, losses=pwins, draws=draws, accepted=accepted,
+            )
             self.metrics.log_timing(generation, CycleStage.ARENA, arena_end - arena_start)
 
             # Persist arena game replays for offline inspection in the HTML
@@ -346,7 +350,7 @@ class Coach:
 
             # Accept or reject new network
             logger.info(f'NEW/PREV WINS : {nwins}/{pwins}; DRAWS : {draws}')
-            if self._should_accept_new_network(nwins, pwins):
+            if accepted:
                 logger.info('ACCEPTING NEW MODEL')
                 self.nnet.save_checkpoint(filename=f"accepted_{generation}.pth.tar")
                 self.nnet.save_checkpoint(filename='best.pth.tar')

@@ -250,18 +250,41 @@ W&B is an **additive** reporting layer — it does not replace any of the parque
 
 ### What gets logged to W&B
 
-Every `MetricsCollector.log_*` call has a corresponding `wandb.log` payload, namespaced by topic:
+Every `MetricsCollector.log_*` call has a corresponding `wandb.log` payload, namespaced by topic. Each namespace is registered with a `step_metric` so its panels plot against a meaningful x-axis (generation / cumulative episode / cumulative batch / wall-clock) instead of W&B's internal step counter.
 
-| Namespace | Source method | Granularity | Series |
-|-----------|---------------|-------------|--------|
-| `training/*` | `log_training` | Per training batch | `pi_loss`, `v_loss`, `total_loss`, `avg_pi_loss`, `avg_v_loss` |
-| `arena/*` | `log_arena` | Per generation | `wins`, `losses`, `draws`, `win_rate` |
-| `timing/*` | `log_timing` | Per phase per generation | `{SelfPlay,Training,Arena,WholeCycle}_s` |
-| `self_play/*` | `log_self_play_profiling` | Per self-play episode | `num_moves`, `total_sims`, `search_time_s`, `inference_time_s`, `sims_per_second`, `inference_fraction`, `leaf_expansions`, `tree_size` |
-| `resources/*` | `log_resource_usage` | Per phase per generation | `<phase>_rss_mb`, `<phase>_gpu_mb` (in MB, not bytes — easier to eyeball than the parquet's raw bytes) |
-| `throughput/*` | `log_training_throughput` | Per training epoch | `num_examples`, `epoch_time_s`, `samples_per_second` |
+| Namespace | Source method | Granularity | x-axis (step_metric) | Series |
+|-----------|---------------|-------------|----------------------|--------|
+| `progress/*` | `log_progress`, auto-augmented in `_publish` | Per log call | `progress/wall_clock_seconds` (self) | `generation`, `epoch`, `episode`, `batch`, `generation_fraction`, `eta_seconds`, `wall_clock_seconds` |
+| `self_play/*` | `log_self_play_profiling` | Per self-play episode | `global_episode` | `num_moves`, `total_sims`, `search_time_s`, `inference_time_s`, `sims_per_second`, `inference_fraction`, `leaf_expansions`, `tree_size`, `policy_entropy` |
+| `self_play_per_gen/*` | `_publish_self_play_per_gen` (flush) | Per generation | `generation` | aggregates: `policy_entropy_mean/std`, `num_moves_mean`, `tree_size_mean`, `sims_per_second_mean`, `inference_fraction_mean` |
+| `training/*` | `log_training` | Per training batch | `global_batch` | `pi_loss`, `v_loss`, `total_loss`, plus `network_policy_entropy`, `network_top1_accuracy`, `network_top5_accuracy`, `value_calibration_error` (per epoch) |
+| `training_per_gen/*` | `_publish_training_per_gen` (flush) | Per generation | `generation` | aggregates: `pi_loss`, `v_loss`, `total_loss`, `network_policy_entropy`, `network_top1_accuracy`, `network_top5_accuracy`, `value_calibration_error` |
+| `arena/*` | `log_arena` | Per generation | `generation` | `wins`, `losses`, `draws`, `win_rate`, `accepted`, `acceptance_rate` (running) |
+| `elo/*` | `log_elo` | Per generation | `generation` | `rating`, `diff_vs_baseline`, `baseline_rating`, `score_rate`, `wins`, `losses`, `draws` |
+| `minimax/*` | `log_minimax` (TTT only) | Per generation | `generation` | `win_rate`, `draw_rate`, `loss_rate`, `wins`, `losses`, `draws` |
+| `throughput/*` | `log_training_throughput` | Per training epoch | `generation` | `num_examples`, `epoch_time_s`, `samples_per_second` |
+| `timing/*` | `log_timing` | Per phase per generation | `generation` | `{SelfPlay,Training,Arena,WholeCycle}_s` |
+| `resources/*` | `log_resource_usage` | Per phase per generation | `generation` | `<phase>_rss_mb`, `<phase>_gpu_mb` (in MB) |
+
+The bare counter names (`generation`, `epoch`, `episode`, `batch`) are registered with `hidden=True` so they don't auto-chart as standalone panels; they're mirrored into `progress/*` in `_publish` for explicit display.
 
 Plus W&B captures the full `RunConfig` (flattened via a Path→str helper) at run init, so hyperparameters appear alongside the metrics in the dashboard's config panel.
+
+### Recommended workspace layout
+
+The dashboard reads top-to-bottom in the same order as a single training cycle, so a glance tells you both where you are and what's happening.
+
+| Order | Section | Headline panels | What it answers |
+|-------|---------|-----------------|-----------------|
+| 1 | **Run progress** | `progress/generation`, `progress/eta_seconds`, `progress/wall_clock_seconds`, plus sawtooth `progress/epoch` / `progress/episode` / `progress/batch` | Where am I, when will it finish? |
+| 2 | **Self-play** | `self_play_per_gen/*` (per-gen means up top), `self_play/*` (per-episode raw, collapsible) | Is MCTS exploring sensibly? Game length plausible? |
+| 3 | **Training loss** | `training_per_gen/{total,pi,v}_loss` combined on one panel, per-batch `training/*` collapsible | Is loss decreasing? |
+| 4 | **Learning quality** | `training_per_gen/network_top1_accuracy` (largest), then `top5_accuracy`, `value_calibration_error`, `network_policy_entropy` | Is the net internalising correct play? |
+| 5 | **Arena** | `arena/win_rate` (with 0.55 horizontal threshold), `arena/acceptance_rate`, stacked bar of wins/losses/draws | Did the new net win the head-to-head? |
+| 6 | **Strength** | `elo/rating` (largest, dashed baseline at 400), `elo/diff_vs_baseline`, `minimax/win_rate`/`draw_rate`/`loss_rate` (TTT only) | Is the model actually getting stronger? |
+| 7 | **Operational** | resource snapshots, sims/sec, GPU memory | Is the PC OK? |
+
+The W&B workspace itself (panel placement, chart types, axis ranges) is configured once per project in the UI: open the project, drag panels into sections, set chart type via gear icon, rename display titles. Persists across runs.
 
 ### Configuration
 
