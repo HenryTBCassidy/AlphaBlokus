@@ -58,6 +58,7 @@ class BlokusDuoRenderer:
         board: BlokusDuoBoard,
         action_probs: dict[int, float],
         annotation: str = "",
+        current_player: int = 1,  # noqa: ARG002  (stub doesn't tint yet)
     ) -> str:
         """Render Blokus policy distribution as a text-only top-N list.
 

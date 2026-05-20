@@ -521,26 +521,26 @@ def _make_arena_replays_section(
 
     for (gen, game_idx), group in df.groupby(["generation", "game_idx"]):
         moves = group.sort_values("move_idx")
+        first = moves.iloc[0]
+        player1_was_white = bool(first["player1_was_white"])
+
+        # Roles: Player 1 = previous best, Player 2 = new candidate (current).
+        # White = +1, Black = -1. Map each colour to its role for this game so
+        # the per-turn header can spell out "new net" / "previous net".
+        if player1_was_white:
+            role_by_player = {1: "previous net", -1: "new net (this gen)"}
+        else:
+            role_by_player = {1: "new net (this gen)", -1: "previous net"}
+
         board = game.initialise_board()  # actual (non-canonical) board state
         turns_html: list[str] = []
-
-        # Turn 0 — initial empty board, no moves played yet.
-        if len(moves):
-            first_player = int(moves.iloc[0]["player"])
-            first_player_name = "White (X)" if first_player == 1 else "Black (O)"
-            turns_html.append(
-                '<div class="replay-turn">'
-                f'<div class="replay-turn-header">Turn 0 — initial position, '
-                f"{first_player_name} to move</div>"
-                '<div class="replay-turn-boards">'
-                f"{renderer.render_board_html(board, annotation='Start')}"
-                "</div></div>"
-            )
 
         for _, m in moves.iterrows():
             action = int(m["action"])
             player = int(m["player"])
-            player_name = "White (X)" if player == 1 else "Black (O)"
+            colour_name = "White (X)" if player == 1 else "Black (O)"
+            role = role_by_player[player]
+            player_label = f"{colour_name} — {role}"
             turn_idx = int(m["move_idx"]) + 1
 
             top_k_actions = [int(a) for a in m["top_k_actions"]]
@@ -549,39 +549,54 @@ def _make_arena_replays_section(
 
             policy_html = renderer.render_policy_html(
                 board, action_probs,
-                annotation=f"{player_name}'s MCTS policy",
+                annotation=f"{colour_name}'s MCTS policy",
+                current_player=player,
             )
             # Apply move and render the resulting state.
             board, _ = game.get_next_state(board, player, action)
             after_html = renderer.render_board_html(
                 board, last_action=action,
-                annotation=f"{player_name} played action {action}",
+                annotation=f"{colour_name} played action {action}",
             )
 
             turn_card = (
                 '<div class="replay-turn">'
                 f'<div class="replay-turn-header">Turn {turn_idx} — '
-                f"{player_name}'s move</div>"
+                f"{player_label}'s move</div>"
                 '<div class="replay-turn-boards">'
                 f"{policy_html}{after_html}"
                 "</div></div>"
             )
             turns_html.append(turn_card)
 
-        first = moves.iloc[0]
+        # Outcome: stored from Player 1's POV (+1 = P1 won, -1 = P2 won).
+        # Translate into colour-based result text + dropdown CSS class.
         outcome = float(first["outcome"])
         if outcome > 0.5:
-            outcome_label = "P1 (prev) won"
+            winner_colour = "White" if player1_was_white else "Black"
+            outcome_label = f"{winner_colour} wins — previous net"
+            outcome_class = "result-prev"
         elif outcome < -0.5:
-            outcome_label = "P2 (new) won"
+            winner_colour = "Black" if player1_was_white else "White"
+            outcome_label = f"{winner_colour} wins — new net"
+            outcome_class = "result-new"
         else:
             outcome_label = "Draw"
+            outcome_class = "result-draw"
+
+        # Final "X wins" / "Draw" card at the bottom of the replay.
+        turns_html.append(
+            '<div class="replay-result">'
+            f"{outcome_label}"
+            "</div>"
+        )
 
         games_by_gen.setdefault(int(gen), []).append({
             "game_idx": int(game_idx),
             "outcome": outcome,
             "outcome_label": outcome_label,
-            "player1_was_white": bool(first["player1_was_white"]),
+            "outcome_class": outcome_class,
+            "player1_was_white": player1_was_white,
             "turns_html": turns_html,
         })
 
@@ -600,9 +615,16 @@ def _make_arena_replays_section(
 
 
 def _render_game_options(games: list[dict]) -> str:
-    """Server-side game-dropdown options for the initial generation."""
+    """Server-side game-dropdown options for the initial generation.
+
+    The ``class`` on each option drives the background colour — green when the
+    new (current) net won, red when the previous net won, plain for a draw.
+    Browsers vary in how willing they are to style ``<option>`` directly, but
+    Chromium/Firefox on desktop both honour it; falls back to no colour
+    elsewhere, which is harmless.
+    """
     return "\n".join(
-        f'<option value="{g["game_idx"]}">'
+        f'<option class="{g["outcome_class"]}" value="{g["game_idx"]}">'
         f'G{g["game_idx"] + 1} — {g["outcome_label"]}'
         f"</option>"
         for g in games
@@ -657,6 +679,17 @@ winning move?" / "did it miss the block?".
 .arena-replays {{ margin: 12px 0; }}
 .arena-controls {{ margin-bottom: 16px; font-size: 14px; }}
 .arena-controls select {{ padding: 4px 8px; font-size: 14px; margin-left: 4px; }}
+/* Coloured dropdown rows: green = new net won, red = previous net won. */
+#alphaBlokus-game-select option.result-new {{ background: #dcfce7; color: #14532d; }}
+#alphaBlokus-game-select option.result-prev {{ background: #fee2e2; color: #7f1d1d; }}
+#alphaBlokus-game-select option.result-draw {{ background: transparent; color: inherit; }}
+.replay-result {{
+    padding: 14px 16px; margin-top: 4px;
+    text-align: center; font-size: 16px; font-weight: 700;
+    color: #1f2937; background: #f3f4f6;
+    border: 1px solid #d1d5db; border-radius: 6px;
+    letter-spacing: 0.4px;
+}}
 .replay-body {{
     display: flex; flex-direction: column; gap: 12px; padding: 8px 0;
 }}
@@ -702,7 +735,8 @@ _ARENA_REPLAYS_SCRIPT = """\
         const select = document.getElementById('alphaBlokus-game-select');
         const games = genGames(gen);
         select.innerHTML = games.map(g => {{
-            return '<option value="' + g.game_idx + '">G' + (g.game_idx + 1)
+            return '<option class="' + g.outcome_class + '" value="'
+                 + g.game_idx + '">G' + (g.game_idx + 1)
                  + ' — ' + g.outcome_label + '</option>';
         }}).join('');
         if (games.length > 0) {{

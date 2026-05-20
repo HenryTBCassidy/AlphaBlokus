@@ -54,6 +54,7 @@ class TicTacToeRenderer:
         board: Board,
         action_probs: dict[int, float],
         annotation: str = "",
+        current_player: int = 1,
     ) -> str:
         """Render the board with policy percentages overlaid on empty cells.
 
@@ -65,6 +66,9 @@ class TicTacToeRenderer:
                 not in the dict is treated as 0%. Probabilities should sum to
                 ~1 over the legal actions but we don't strictly require it.
             annotation: header text shown above the table.
+            current_player: ``+1`` (White) tints empty-cell backgrounds blue,
+                ``-1`` (Black) tints them red. Makes it obvious at a glance
+                whose policy is being shown.
         """
         arr = board.as_2d
         cells = []
@@ -75,7 +79,7 @@ class TicTacToeRenderer:
                 cells.append(_actual_cell_html(v, is_last=False))
             else:
                 prob = float(action_probs.get(action, 0.0))
-                cells.append(_policy_cell_html(prob))
+                cells.append(_policy_cell_html(prob, current_player))
         return _wrap_table(cells, annotation)
 
 
@@ -97,11 +101,13 @@ def _actual_cell_html(value: int, is_last: bool) -> str:
     return _cell_html(glyph, bg=bg, fg=fg, extra=ring, font_size_px=22)
 
 
-def _policy_cell_html(prob: float) -> str:
+def _policy_cell_html(prob: float, current_player: int) -> str:
     """Render one cell of the policy view — % in empty cells, blank otherwise.
 
     Background opacity scales with probability so a quick glance shows which
-    cells the model favoured without having to read every number.
+    cells the model favoured without having to read every number. Tint matches
+    the player whose policy is being shown — blue for White (+1), red for
+    Black (-1) — so the colour alone tells you who's "thinking".
     """
     if prob <= 0.001:
         text = "0%"
@@ -109,7 +115,11 @@ def _policy_cell_html(prob: float) -> str:
     else:
         text = f"{prob * 100:.0f}%"
         intensity = max(0.08, min(0.55, prob))  # 8%-55% bg opacity range
-    bg = f"rgba(99, 110, 250, {intensity:.2f})"
+    # rgb of _X_BG = (99,110,250) blue; _O_BG = (239,85,59) red
+    if current_player == -1:
+        bg = f"rgba(239, 85, 59, {intensity:.2f})"
+    else:
+        bg = f"rgba(99, 110, 250, {intensity:.2f})"
     return _cell_html(text, bg=bg, fg="#1f2937", extra="", font_size_px=15)
 
 

@@ -51,6 +51,7 @@ class IBoardRenderer(Protocol):
         board: IBoard,
         action_probs: dict[int, float],
         annotation: str = "",
+        current_player: int = 1,
     ) -> str:
         """Render the board with the player's policy probabilities overlaid.
 
