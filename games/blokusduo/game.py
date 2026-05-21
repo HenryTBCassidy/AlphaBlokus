@@ -164,10 +164,17 @@ class BlokusDuoGame(IGame):
         Each call therefore returns exactly two tuples: identity and the
         transposed state. Self-play augmentation doubles the training data
         per position (vs TTT's 8× via the full D₄ group).
+
+        ``pi`` is coerced to an ``NDArray`` on the identity entry too so
+        downstream consumers (persistence, value-target assignment) can
+        rely on a uniform type — mirrors what
+        :class:`games.tictactoe.game.TicTacToeGame` does implicitly via
+        its ``np.rot90`` chain.
         """
+        pi_array = np.asarray(pi)
         return [
-            (board, pi),
-            (board.transposed(), self.transpose_policy(pi)),
+            (board, pi_array),
+            (board.transposed(), self.transpose_policy(pi_array)),
         ]
 
     def state_key(self, board: BlokusDuoBoard) -> bytes:
@@ -326,10 +333,15 @@ class BlokusDuoGame(IGame):
         index ``a``. Built once as a precomputed permutation array — at run
         time this is a single ``numpy`` fancy-index gather, fast enough for
         the self-play augmentation hot path.
+
+        Coerces ``pi`` to a numpy array first because MCTS hands back a
+        Python list (alpha-zero-general convention) and fancy-indexing only
+        works on NDArrays.
         """
         if self._action_transpose_permutation is None:
             self._action_transpose_permutation = self._build_action_transpose_permutation()
-        return pi[self._action_transpose_permutation]
+        pi_array = np.asarray(pi)
+        return pi_array[self._action_transpose_permutation]
 
     def _build_action_transpose_permutation(self) -> NDArray:
         """Precompute the action-space permutation induced by transposition."""
