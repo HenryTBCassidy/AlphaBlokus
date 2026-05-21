@@ -962,6 +962,63 @@ def _make_value_calibration_plot(
     return _apply_defaults(fig)
 
 
+def _make_symmetry_diagnostic_plot(symmetry_data: pd.DataFrame) -> go.Figure:
+    """Per-generation KL divergence between the network's raw policy and
+    its symmetric counterpart, averaged across reference positions.
+
+    Zero is the target — a perfectly equivariant network gives the same
+    distribution (modulo coordinate transformation) on a board and its
+    symmetric variants. Persistent non-zero values indicate the network
+    has internalised arbitrary directional biases that the symmetry-
+    augmentation training signal isn't fully averaging out (the "favourite
+    corner" effect Henry first spotted in the TTT report).
+
+    Per-position lines are overlaid on the mean to surface positions that
+    are particularly noisy.
+    """
+    df = symmetry_data.copy()
+    df = df.sort_values(["generation", "position_idx", "symmetry_idx"])
+    # Mean across symmetries for each (gen, position)
+    per_position = (
+        df.groupby(["generation", "position_idx"])
+        .agg(position_mean_kl=("kl_divergence", "mean"))
+        .reset_index()
+    )
+    overall = (
+        per_position.groupby("generation")
+        .agg(mean_kl=("position_mean_kl", "mean"),
+             max_kl=("position_mean_kl", "max"))
+        .reset_index()
+        .sort_values("generation")
+    )
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=overall["generation"], y=overall["mean_kl"],
+        mode="lines+markers", name="Mean across positions",
+        line={"width": 2.5, "color": _COLORS["primary"]},
+        hovertemplate="Gen %{x} — mean KL: %{y:.4f}<extra></extra>",
+    ))
+    for pos_idx, group in per_position.sort_values("position_idx").groupby("position_idx"):
+        fig.add_trace(go.Scatter(
+            x=group["generation"], y=group["position_mean_kl"],
+            mode="lines", name=f"Position {pos_idx}",
+            line={"width": 1, "dash": "dot", "color": _COLORS["neutral"]},
+            opacity=0.5, hoverinfo="skip", showlegend=True,
+        ))
+    fig.add_hline(
+        y=0.0, line_width=1, line_dash="dash", line_color=_COLORS["neutral"],
+        annotation_text="Perfect equivariance",
+        annotation_position="bottom right",
+    )
+    fig.update_layout(
+        xaxis_title="Generation", yaxis_title="KL divergence (lower = more symmetric)",
+        title="Network policy symmetry diagnostic",
+        xaxis={"dtick": 1 if overall["generation"].max() < 40 else 5},
+    )
+    return _apply_defaults(fig)
+
+
 def _make_resource_usage_plot(resource_data: pd.DataFrame) -> go.Figure:
     """Line chart of memory usage over generations — one line per phase.
 
@@ -1249,6 +1306,10 @@ def create_html_report(config: RunConfig) -> None:
         _load_metrics(config.minimax_results_directory)
         if config.minimax_results_directory.exists() else None
     )
+    symmetry_data = (
+        _load_metrics(config.symmetry_diagnostic_directory)
+        if config.symmetry_diagnostic_directory.exists() else None
+    )
 
     # Build figures
     fig_loss_gen = _make_loss_per_generation(loss_data)
@@ -1282,6 +1343,11 @@ def create_html_report(config: RunConfig) -> None:
     fig_minimax = (
         _make_minimax_plot(minimax_data)
         if minimax_data is not None and not minimax_data.empty
+        else None
+    )
+    fig_symmetry = (
+        _make_symmetry_diagnostic_plot(symmetry_data)
+        if symmetry_data is not None and not symmetry_data.empty
         else None
     )
     arena_replays_html = (
@@ -1328,6 +1394,7 @@ def create_html_report(config: RunConfig) -> None:
         fig_network_entropy is not None
         or fig_policy_accuracy is not None
         or fig_value_calibration is not None
+        or fig_symmetry is not None
     ):
         parts = [
             '<section>',
@@ -1345,6 +1412,8 @@ def create_html_report(config: RunConfig) -> None:
             parts.append(_chart(fig_policy_accuracy))
         if fig_value_calibration is not None:
             parts.append(_chart(fig_value_calibration))
+        if fig_symmetry is not None:
+            parts.append(_chart(fig_symmetry))
         parts.append('</section>')
         diagnostics_html = "\n".join(parts)
 
