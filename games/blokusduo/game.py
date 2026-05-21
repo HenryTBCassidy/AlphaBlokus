@@ -51,6 +51,10 @@ class BlokusDuoGame(IGame):
         self._coordinate_index_decoder = CoordinateIndexDecoder(self.board_size)
         self.action_codec = ActionCodec(self.board_size, self.piece_manager)
         self.initial_actions: ActionDict = self._calculate_and_cache_initial_actions()
+        # Lazily built integer permutation used by ``get_symmetries`` /
+        # ``transpose_policy`` — built on first call to avoid slowing
+        # ``__init__`` for users (e.g. tests) that don't need symmetry.
+        self._action_transpose_permutation: NDArray | None = None
 
     # -- Public methods (IGame protocol, in call order) -------------------------
 
@@ -260,6 +264,68 @@ class BlokusDuoGame(IGame):
                         piece_id, orientation, pi, pj,
                         board_2d=board_2d, side_danger=side_danger,
                     )
+
+    # -- Symmetry helpers (public) ----------------------------------------------
+
+    def transpose_action(self, action_id: int) -> int:
+        """Return the action_id corresponding to ``action_id`` on the board
+        reflected across the main diagonal.
+
+        Composed of two pieces:
+
+        1. **Anchor**: the (x, y) board coordinate of the piece's anchor is
+           converted to its array index ``(length_idx, width_idx)``, swapped,
+           and converted back. (Transposition is naturally defined in array-
+           index space; in board-coordinate space the same operation is the
+           anti-diagonal reflection.)
+        2. **Orientation**: looked up via
+           :meth:`PieceManager.orientation_transpose_id` — the precomputed
+           bijection on the 91 piece-orientations.
+
+        The pass action is its own transpose.
+        """
+        if self.action_codec.is_pass(action_id):
+            return action_id
+        action = self.action_codec.decode(action_id)
+        anchor_idx = self._coordinate_index_decoder.to_idx(
+            (action.x_coordinate, action.y_coordinate),
+        )
+        new_anchor_idx = (anchor_idx[1], anchor_idx[0])
+        new_x, new_y = self._coordinate_index_decoder.to_coordinate(new_anchor_idx)
+        o_id = self.piece_manager.get_piece_orientation_id(
+            (action.piece_id, action.orientation),
+        )
+        new_o_id = self.piece_manager.orientation_transpose_id(o_id)
+        new_piece_id, new_orientation = self.piece_manager.get_piece_orientation(new_o_id)
+        return self.action_codec.encode(
+            Action(
+                piece_id=new_piece_id,
+                orientation=new_orientation,
+                x_coordinate=new_x,
+                y_coordinate=new_y,
+            ),
+        )
+
+    def transpose_policy(self, pi: NDArray) -> NDArray:
+        """Return ``pi`` reindexed so it represents the same distribution on
+        the transposed board.
+
+        Concretely, ``new_pi[a] = pi[transpose_action(a)]`` for every action
+        index ``a``. Built once as a precomputed permutation array — at run
+        time this is a single ``numpy`` fancy-index gather, fast enough for
+        the self-play augmentation hot path.
+        """
+        if self._action_transpose_permutation is None:
+            self._action_transpose_permutation = self._build_action_transpose_permutation()
+        return pi[self._action_transpose_permutation]
+
+    def _build_action_transpose_permutation(self) -> NDArray:
+        """Precompute the action-space permutation induced by transposition."""
+        n = self.get_action_size()
+        perm = np.empty(n, dtype=np.int64)
+        for a in range(n):
+            perm[a] = self.transpose_action(a)
+        return perm
 
     def _has_valid_moves(self, board: BlokusDuoBoard, player: PlayerSide) -> bool:
         """Check if a player has at least one legal move. Short-circuits on first find."""

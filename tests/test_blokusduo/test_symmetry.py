@@ -235,6 +235,62 @@ def test_transposed_board_is_involution(positions: list[BlokusDuoBoard]) -> None
         )
 
 
+# ── S3: action transpose ────────────────────────────────────────────────────
+
+
+def test_pass_action_is_self_transpose(blokus_game: BlokusDuoGame) -> None:
+    pass_id = blokus_game.action_codec.pass_action_index
+    assert blokus_game.transpose_action(pass_id) == pass_id
+
+
+def test_transpose_action_is_involution_over_full_action_space(
+    blokus_game: BlokusDuoGame,
+) -> None:
+    """T7-style check at the action level: applying transpose twice returns
+    the original ID for *every* index in the 17,837-element action space.
+    """
+    n = blokus_game.get_action_size()
+    for a in range(n):
+        assert blokus_game.transpose_action(blokus_game.transpose_action(a)) == a
+
+
+def test_transpose_action_is_bijection_over_full_action_space(
+    blokus_game: BlokusDuoGame,
+) -> None:
+    n = blokus_game.get_action_size()
+    images = {blokus_game.transpose_action(a) for a in range(n)}
+    assert images == set(range(n))
+
+
+def test_transpose_action_geometry(blokus_game: BlokusDuoGame) -> None:
+    """Spot-check a specific action: place piece 1 (monomino, Identity) at
+    array index (4, 4) — i.e. board coord obtained via the decoder. Its
+    transpose should be the same monomino at the array-transposed anchor,
+    which for the diagonal cell (4, 4) is the same cell.
+    """
+    decoder = blokus_game._coordinate_index_decoder
+    x, y = decoder.to_coordinate((4, 4))
+    action_id = blokus_game.action_codec.encode(
+        _action(1, Orientation.Identity, x, y),
+    )
+    assert blokus_game.transpose_action(action_id) == action_id
+
+
+def test_transpose_policy_pairs_with_transpose_action(
+    blokus_game: BlokusDuoGame,
+) -> None:
+    """``transpose_policy(pi)[a]`` must equal ``pi[transpose_action(a)]`` for
+    every action — the defining property of the permutation gather.
+    """
+    rng = np.random.default_rng(seed=42)
+    n = blokus_game.get_action_size()
+    pi = rng.random(n).astype(np.float32)
+    new_pi = blokus_game.transpose_policy(pi)
+    sample_indices = rng.integers(0, n, size=200)
+    for a in sample_indices:
+        assert new_pi[a] == pi[blokus_game.transpose_action(int(a))]
+
+
 def test_diagonal_symmetric_position_is_self_transpose(
     blokus_game: BlokusDuoGame,
     empty_board: BlokusDuoBoard,
