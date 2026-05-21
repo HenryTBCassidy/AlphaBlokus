@@ -491,20 +491,25 @@ def _make_network_entropy_plot(entropy_data: pd.DataFrame) -> go.Figure:
 def _make_arena_replays_section(
     df: pd.DataFrame,
     config: RunConfig,
-) -> str:
-    """Build the interactive arena-replays section.
+) -> tuple[str, str]:
+    """Build the arena-replays UI as **two separate outputs**:
 
-    Layout follows the look of the older move-count-analysis report: a
-    generation dropdown narrows the games to inspect, a game dropdown picks
-    one game whose options are labelled with its outcome ("G3 — Draw",
-    "G7 — P1 won"). The selected game's full move sequence is then rendered
-    inline as a flex-wrap row of turn cards — each card pairs the candidate
-    top-3 mirror board (what the model was considering) with the actual board
-    after that move (what it played). All moves visible at once, easy to scan.
+    1. A small **link card** that lives in the main training report —
+       points the reader at the standalone replays page rather than
+       inlining hundreds of game-board fragments and bloating the report.
+    2. A **standalone HTML page** at ``Reporting/arena_replays.html`` with
+       the full interactive replay viewer. Each turn card defaults to
+       showing only the actual board after the move; clicking the turn
+       header expands the top-K candidate panel for that move (the
+       "hybrid" navigation Henry asked for — scroll the actuals, expand
+       on click for details).
 
-    All replay data is embedded as JSON in the rendered HTML so the report
-    stays a single self-contained file — no JS frameworks, no external
-    fetches.
+    Returns ``(link_card_html, standalone_html)``. The caller writes the
+    standalone HTML to disk and inserts ``link_card_html`` in the main
+    report body.
+
+    All replay data is embedded as JSON in the standalone HTML so the
+    file stays self-contained — no JS frameworks, no external fetches.
     """
     import json
 
@@ -525,8 +530,6 @@ def _make_arena_replays_section(
         player1_was_white = bool(first["player1_was_white"])
 
         # Roles: Player 1 = previous best, Player 2 = new candidate (current).
-        # White = +1, Black = -1. Map each colour to its role for this game so
-        # the per-turn header can spell out "new net" / "previous net".
         if player1_was_white:
             role_by_player = {1: "previous net", -1: "new net (this gen)"}
         else:
@@ -549,7 +552,7 @@ def _make_arena_replays_section(
 
             policy_html = renderer.render_policy_html(
                 board, action_probs,
-                annotation=f"{colour_name}'s MCTS policy",
+                annotation=f"{colour_name}'s top candidates",
                 current_player=player,
             )
             # Apply move and render the resulting state.
@@ -561,16 +564,20 @@ def _make_arena_replays_section(
 
             turn_card = (
                 '<div class="replay-turn">'
-                f'<div class="replay-turn-header">Turn {turn_idx} — '
-                f"{player_label}'s move</div>"
-                '<div class="replay-turn-boards">'
-                f"{policy_html}{after_html}"
-                "</div></div>"
+                f'<button class="replay-turn-toggle" type="button" '
+                f'onclick="alphaBlokus_toggleTurn(this)">'
+                f'<span class="replay-turn-label">'
+                f'Turn {turn_idx} — {player_label}'
+                f'</span>'
+                f'<span class="replay-turn-hint">↓ click to show top candidates</span>'
+                f'</button>'
+                f'<div class="replay-turn-actual">{after_html}</div>'
+                f'<div class="replay-turn-candidates" hidden>{policy_html}</div>'
+                "</div>"
             )
             turns_html.append(turn_card)
 
         # Outcome: stored from Player 1's POV (+1 = P1 won, -1 = P2 won).
-        # Translate into colour-based result text + dropdown CSS class.
         outcome = float(first["outcome"])
         if outcome > 0.5:
             winner_colour = "White" if player1_was_white else "Black"
@@ -584,11 +591,9 @@ def _make_arena_replays_section(
             outcome_label = "Draw"
             outcome_class = "result-draw"
 
-        # Final "X wins" / "Draw" card at the bottom of the replay.
+        # Final result banner at the bottom of the replay.
         turns_html.append(
-            '<div class="replay-result">'
-            f"{outcome_label}"
-            "</div>"
+            f'<div class="replay-result">{outcome_label}</div>'
         )
 
         games_by_gen.setdefault(int(gen), []).append({
@@ -608,10 +613,32 @@ def _make_arena_replays_section(
     first_gen = min(games_by_gen)
     initial_game_options = _render_game_options(games_by_gen[first_gen])
 
-    return _ARENA_REPLAYS_TEMPLATE.format(
+    total_games = sum(len(games) for games in games_by_gen.values())
+    standalone_html = _ARENA_REPLAYS_STANDALONE_TEMPLATE.format(
+        run_name=config.run_name,
+        total_games=total_games,
+        num_gens=len(games_by_gen),
+        board_css=_blokus_board_css(config),
         gen_options=gen_options,
         initial_game_options=initial_game_options,
-    ) + _ARENA_REPLAYS_SCRIPT.format(payload=payload)
+        payload=payload,
+    )
+
+    link_card = _ARENA_REPLAYS_LINK_CARD.format(
+        total_games=total_games,
+        num_gens=len(games_by_gen),
+    )
+    return link_card, standalone_html
+
+
+def _blokus_board_css(config: RunConfig) -> str:
+    """Inline the right per-game board CSS into the standalone page."""
+    if config.game == "blokusduo":
+        from reporting.display_blokusduo import BOARD_CSS
+        return BOARD_CSS
+    # TTT renders board styles inline via :func:`display_tictactoe`, so the
+    # standalone page only needs the shared replay layout CSS.
+    return ""
 
 
 def _render_game_options(games: list[dict]) -> str:
@@ -644,67 +671,95 @@ def _instantiate_game(game_name: str):
     raise ValueError(f"Unknown game: {game_name}")
 
 
-_ARENA_REPLAYS_TEMPLATE = """\
+_ARENA_REPLAYS_LINK_CARD = """\
 <section>
 <h2>Arena Game Replays</h2>
 <p class="section-desc">
-Recorded games from each generation's accept/reject arena. <em>Player 1</em>
-is the previous best network and <em>Player 2</em> is the new candidate
-trained this gen. Pick a generation, then a game — the full sequence of
-moves appears below as a row of cards. Each card pairs the model's top-3
-considered moves (left) with the actual board state after the move was
-played (right), so you can scan visually for "did the model spot the obvious
-winning move?" / "did it miss the block?".
+{total_games} recorded games across {num_gens} generations are available in
+the dedicated replay viewer — board-by-board playback with expand-on-click
+top-3 candidate previews per move. Pulled out of this report so the
+training-metrics view stays focused.
 </p>
-
-<div class="arena-replays">
-    <div class="arena-controls">
-        <label><strong>Generation:</strong>
-            <select id="alphaBlokus-gen-select"
-                    onchange="alphaBlokus_onGenChange(parseInt(this.value))">
-{gen_options}
-            </select>
-        </label>
-        <label style="margin-left: 16px;"><strong>Game:</strong>
-            <select id="alphaBlokus-game-select"
-                    onchange="alphaBlokus_onGameChange(parseInt(this.value))">
-{initial_game_options}
-            </select>
-        </label>
-    </div>
-    <div id="alphaBlokus-replay-body" class="replay-body"></div>
-</div>
-
+<a href="arena_replays.html" class="open-replays-button" target="_blank">
+  Open arena replay viewer →
+</a>
 <style>
-.arena-replays {{ margin: 12px 0; }}
-.arena-controls {{ margin-bottom: 16px; font-size: 14px; }}
-.arena-controls select {{ padding: 4px 8px; font-size: 14px; margin-left: 4px; }}
+.open-replays-button {{
+    display: inline-block; margin-top: 8px;
+    padding: 10px 18px; background: #636efa; color: white;
+    text-decoration: none; border-radius: 6px;
+    font-size: 14px; font-weight: 600;
+}}
+.open-replays-button:hover {{
+    background: #4a55d4;
+}}
+</style>
+</section>
+"""
+
+
+_ARENA_REPLAYS_STANDALONE_TEMPLATE = """\
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Arena Replays — {run_name}</title>
+<style>
+body {{
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    max-width: 1400px; margin: 0 auto; padding: 24px 32px; color: #2a3f5f;
+    background: #ffffff;
+}}
+h1 {{ border-bottom: 2px solid #636efa; padding-bottom: 8px; margin-bottom: 4px; }}
+.subtitle {{ color: #6b7280; font-size: 14px; margin-bottom: 24px; }}
+
+.arena-controls {{ margin: 16px 0 24px 0; font-size: 14px; }}
+.arena-controls select {{
+    padding: 6px 12px; font-size: 14px; margin-left: 4px;
+    border: 1px solid #e5e7eb; border-radius: 6px; background: #f8f9fb;
+    color: #2a3f5f; min-width: 220px;
+}}
+.arena-controls label {{ font-weight: 600; margin-right: 16px; }}
 /* Coloured dropdown rows: green = new net won, red = previous net won. */
 #alphaBlokus-game-select option.result-new {{ background: #dcfce7; color: #14532d; }}
 #alphaBlokus-game-select option.result-prev {{ background: #fee2e2; color: #7f1d1d; }}
 #alphaBlokus-game-select option.result-draw {{ background: transparent; color: inherit; }}
+
+.replay-body {{ display: flex; flex-direction: column; gap: 12px; }}
+
+.replay-turn {{
+    border: 1px solid #e5e7eb; border-radius: 6px; background: #fafafa;
+    overflow: hidden;
+}}
+.replay-turn-toggle {{
+    display: flex; align-items: center; justify-content: space-between;
+    width: 100%; padding: 10px 16px; border: 0;
+    background: none; cursor: pointer; font-family: inherit;
+    color: #2a3f5f; font-size: 13px; font-weight: 600;
+    text-align: left;
+}}
+.replay-turn-toggle:hover {{ background: #f3f4f6; }}
+.replay-turn-hint {{
+    font-size: 11px; font-weight: 400; color: #6b7280; letter-spacing: 0.3px;
+}}
+.replay-turn.expanded .replay-turn-hint::before {{ content: "↑ "; }}
+.replay-turn.expanded .replay-turn-hint {{ content: ""; }}
+
+.replay-turn-actual {{ padding: 0 16px 16px 16px; }}
+.replay-turn-candidates {{
+    padding: 12px 16px 16px 16px;
+    border-top: 1px dashed #e5e7eb; background: #ffffff;
+}}
+.replay-turn-candidates[hidden] {{ display: none; }}
+
 .replay-result {{
-    padding: 14px 16px; margin-top: 4px;
-    text-align: center; font-size: 16px; font-weight: 700;
+    padding: 16px 18px; text-align: center;
+    font-size: 17px; font-weight: 700; letter-spacing: 0.4px;
     color: #1f2937; background: #f3f4f6;
     border: 1px solid #d1d5db; border-radius: 6px;
-    letter-spacing: 0.4px;
-}}
-.replay-body {{
-    display: flex; flex-direction: column; gap: 12px; padding: 8px 0;
-}}
-.replay-turn {{
-    padding: 12px 16px; border: 1px solid #e5e7eb;
-    border-radius: 6px; background: #fafafa;
-}}
-.replay-turn-header {{
-    font-size: 13px; font-weight: 600; color: #2a3f5f; margin-bottom: 8px;
-}}
-.replay-turn-boards {{
-    display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap;
 }}
 
-/* Inlined TTT board styles — keep the policy / actual boards visually aligned. */
+/* Inlined TTT board styles — keep the policy / actual boards aligned. */
 .ttt-board {{ display: inline-block; margin: 0; }}
 .ttt-board table.ttt-grid {{ border-collapse: collapse; }}
 .ttt-board td {{ padding: 0; }}
@@ -719,12 +774,39 @@ winning move?" / "did it miss the block?".
     margin-bottom: 6px; font-weight: 600; text-transform: uppercase;
     letter-spacing: 0.5px;
 }}
+
+{board_css}
 </style>
-</section>
-"""
+</head>
+<body>
+<h1>Arena Game Replays — {run_name}</h1>
+<p class="subtitle">
+  {total_games} games across {num_gens} generations. Each replay shows the
+  actual board after every move by default; click a turn header to expand
+  the top-3 candidate previews the model was considering for that move.
+  Player 1 is the previous best network and Player 2 is the new candidate
+  trained this generation.
+</p>
 
+<div class="arena-controls">
+    <label>Generation:
+        <select id="alphaBlokus-gen-select"
+                onchange="alphaBlokus_onGenChange(parseInt(this.value))">
+{gen_options}
+        </select>
+    </label>
+    <label>Game:
+        <select id="alphaBlokus-game-select"
+                onchange="alphaBlokus_onGameChange(parseInt(this.value))">
+{initial_game_options}
+        </select>
+    </label>
+    <label>
+        <button type="button" onclick="alphaBlokus_toggleAll()">Expand / collapse all candidates</button>
+    </label>
+</div>
+<div id="alphaBlokus-replay-body" class="replay-body"></div>
 
-_ARENA_REPLAYS_SCRIPT = """\
 <script>
 (function() {{
     const REPLAYS = {payload};
@@ -760,11 +842,39 @@ _ARENA_REPLAYS_SCRIPT = """\
             game.turns_html.join('');
     }}
 
-    // Initial render: the first game of the first generation.
+    function toggleTurn(buttonEl) {{
+        const turn = buttonEl.parentElement;
+        const candidates = turn.querySelector('.replay-turn-candidates');
+        if (!candidates) return;
+        candidates.hidden = !candidates.hidden;
+        turn.classList.toggle('expanded', !candidates.hidden);
+        const hint = buttonEl.querySelector('.replay-turn-hint');
+        if (hint) hint.textContent = candidates.hidden
+            ? '↓ click to show top candidates'
+            : '↑ hide candidates';
+    }}
+
+    function toggleAll() {{
+        const turns = document.querySelectorAll('.replay-turn');
+        const allHidden = Array.from(turns).every(t => {{
+            const c = t.querySelector('.replay-turn-candidates');
+            return !c || c.hidden;
+        }});
+        turns.forEach(t => {{
+            const c = t.querySelector('.replay-turn-candidates');
+            if (!c) return;
+            c.hidden = !allHidden;
+            t.classList.toggle('expanded', allHidden);
+            const hint = t.querySelector('.replay-turn-hint');
+            if (hint) hint.textContent = allHidden
+                ? '↑ hide candidates'
+                : '↓ click to show top candidates';
+        }});
+    }}
+
     document.addEventListener('DOMContentLoaded', () => {{
         const genSelect = document.getElementById('alphaBlokus-gen-select');
-        const gameSelect = document.getElementById('alphaBlokus-game-select');
-        if (!genSelect || !gameSelect) return;
+        if (!genSelect) return;
         const gen = parseInt(genSelect.value);
         const games = genGames(gen);
         if (games.length > 0) {{
@@ -774,8 +884,12 @@ _ARENA_REPLAYS_SCRIPT = """\
 
     window.alphaBlokus_onGenChange = onGenChange;
     window.alphaBlokus_onGameChange = onGameChange;
+    window.alphaBlokus_toggleTurn = toggleTurn;
+    window.alphaBlokus_toggleAll = toggleAll;
 }})();
 </script>
+</body>
+</html>
 """
 
 
@@ -1350,15 +1464,23 @@ def create_html_report(config: RunConfig) -> None:
         if symmetry_data is not None and not symmetry_data.empty
         else None
     )
-    arena_replays_html = (
-        _make_arena_replays_section(arena_replays_data, config)
-        if arena_replays_data is not None and not arena_replays_data.empty
-        else ""
-    )
+    if arena_replays_data is not None and not arena_replays_data.empty:
+        arena_replays_html, arena_replays_standalone = _make_arena_replays_section(
+            arena_replays_data, config,
+        )
+    else:
+        arena_replays_html, arena_replays_standalone = "", ""
 
     # Write HTML
     filename = config.report_directory / "report.html"
     filename.parent.mkdir(exist_ok=True, parents=True)
+
+    # Standalone arena replays page lives alongside the main report. Linked
+    # from the main report via the `_ARENA_REPLAYS_LINK_CARD` button.
+    if arena_replays_standalone:
+        replays_path = config.report_directory / "arena_replays.html"
+        replays_path.write_text(arena_replays_standalone, encoding="utf-8")
+        logger.info("Wrote arena replay viewer to {}", replays_path)
 
     def _chart(fig: go.Figure) -> str:
         return fig.to_html(full_html=False, include_plotlyjs=False)

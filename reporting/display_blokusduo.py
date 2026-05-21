@@ -58,25 +58,43 @@ class BlokusDuoRenderer:
         board: BlokusDuoBoard,
         action_probs: dict[int, float],
         annotation: str = "",
-        current_player: int = 1,  # noqa: ARG002  (stub doesn't tint yet)
+        current_player: int = 1,
+        top_k: int = 3,
     ) -> str:
-        """Render Blokus policy distribution as a text-only top-N list.
+        """Render the model's top-K candidate moves as full-size boards.
 
-        Stub — Blokus's 17,837-action space doesn't map cleanly onto a single
-        board overlay (each cell can be played by many piece+orientation
-        combinations). Proper rendering would need per-piece thumbnails;
-        deferred. Until then we list the top-5 actions with their decoded
-        descriptions and probabilities so the protocol is satisfied.
+        Each candidate gets its own board with the current state plus a
+        striped "ghost" overlay showing where the candidate piece would
+        land. Below the board a textual caption decodes the move as
+        ``Piece N (Name, Orientation) at (x, y) — pp%``. Replaces the
+        old text-only listing that printed raw action indices.
         """
         if not action_probs:
             return '<div class="board-annotation">No candidate moves.</div>'
-        top = sorted(action_probs.items(), key=lambda kv: -kv[1])[:5]
-        rank_glyphs = ["①", "②", "③", "④", "⑤"]
-        lines = [f'<div class="board-annotation">{annotation}</div>'] if annotation else []
-        for i, (action, prob) in enumerate(top):
-            glyph = rank_glyphs[i] if i < len(rank_glyphs) else f"{i + 1}."
-            lines.append(f"<div>{glyph} action {action} — {prob:.0%}</div>")
-        return '<div class="blokus-top-k">' + "".join(lines) + "</div>"
+        top = sorted(action_probs.items(), key=lambda kv: -kv[1])[:top_k]
+
+        cards = []
+        for rank, (action_id, prob) in enumerate(top, start=1):
+            board_html = render_board_html(
+                board=board, game=self._game, current_player=current_player,
+                turn=-1,
+                action_desc=f"#{rank} — {prob:.0%}",
+                num_moves_white=len(self._game._valid_moves(board, 1)),
+                num_moves_black=len(self._game._valid_moves(board, -1)),
+                candidate_action=action_id,
+                candidate_player=current_player,
+            )
+            cards.append(f'<div class="candidate-card">{board_html}</div>')
+
+        annotation_html = (
+            f'<div class="board-annotation">{annotation}</div>' if annotation else ""
+        )
+        return (
+            f'<div class="candidate-policy">'
+            f'{annotation_html}'
+            f'<div class="candidate-cards">{"".join(cards)}</div>'
+            f'</div>'
+        )
 
     def render_top_k_moves_html(
         self,
@@ -204,46 +222,52 @@ def render_board_html(
     action_desc: str,
     num_moves_white: int,
     num_moves_black: int,
+    candidate_action: int | None = None,
+    candidate_player: int | None = None,
 ) -> str:
-    """Render a board state as an HTML table with coloured cells."""
+    """Render a board state as an HTML table.
+
+    Placed pieces fill their cells with the player colour and the piece-id
+    number. Empty cells stay blank \u2014 placement-point shading was removed
+    because those squares aren't part of the physical state and were
+    cluttering the visual.
+
+    ``candidate_action`` lets callers overlay a hypothetical move on top
+    of the rendered board. The piece's cells are drawn with a striped
+    "ghost" pattern in the candidate player's colour, distinct from real
+    placements. Used by the top-K policy preview.
+    """
     board_2d = board.as_2d
     n = BlokusDuoBoard.N
-    white_points = set(board.placement_points(1).keys())
-    black_points = set(board.placement_points(-1).keys())
+
+    ghost_cells: dict[tuple[int, int], int] = {}
+    candidate_caption: str | None = None
+    if candidate_action is not None:
+        ghost_cells, candidate_caption = _candidate_overlay_cells(
+            game, board, candidate_action,
+            player=candidate_player if candidate_player is not None else current_player,
+        )
 
     def cell_style(i: int, j: int) -> str:
         val = board_2d[i, j]
         if val > 0:
             return "background:#636efa;color:white;font-weight:700;"
-        elif val < 0:
+        if val < 0:
             return "background:#ef553b;color:white;font-weight:700;"
-
-        in_white = (i, j) in white_points
-        in_black = (i, j) in black_points
-        if in_white and in_black:
-            return "background:#ffd700;"
-        elif in_white:
-            return "background:#c5cae9;"
-        elif in_black:
-            return "background:#ffcdd2;"
+        if (i, j) in ghost_cells:
+            side = ghost_cells[(i, j)]
+            base = "#636efa" if side == 1 else "#ef553b"
+            return (
+                f"background:repeating-linear-gradient(135deg,"
+                f"{base}80 0 4px,{base}30 4px 8px);"
+            )
         return ""
 
     def cell_text(i: int, j: int) -> str:
         val = board_2d[i, j]
-        if val > 0:
+        if val != 0:
             return f"{abs(int(board._piece_placement_board[i, j]))}"
-        elif val < 0:
-            return f"{abs(int(board._piece_placement_board[i, j]))}"
-
-        in_white = (i, j) in white_points
-        in_black = (i, j) in black_points
-        if in_white and in_black:
-            return "*"
-        elif in_white:
-            return "\u25c7"
-        elif in_black:
-            return "\u25cb"
-        return "\u00b7"
+        return ""
 
     player_name = "White" if current_player == 1 else "Black"
 
@@ -261,20 +285,59 @@ def render_board_html(
             rows_html += f'<td style="{style}">{text}</td>'
         rows_html += "</tr>\n"
 
+    if turn == -1:
+        header = (
+            f"<strong>{player_name}</strong> — {action_desc}"
+            if action_desc else f"<strong>{player_name}</strong>"
+        )
+    else:
+        header = (
+            f"<strong>Turn {turn}</strong> — {player_name}'s move — {action_desc}"
+        )
+
+    caption_html = (
+        f'<div class="candidate-caption">{candidate_caption}</div>'
+        if candidate_caption else ""
+    )
+
     return f"""
     <div class="board-turn">
         <div class="turn-header">
-            <strong>Turn {turn}</strong> — {player_name}'s move — {action_desc}
+            {header}
             <span class="move-counts">W:{num_moves_white} moves | B:{num_moves_black} moves</span>
         </div>
         <table class="board-grid">{rows_html}</table>
-        <div class="board-legend">
-            <span style="background:#636efa;color:white;padding:2px 6px;">W</span> White
-            <span style="background:#ef553b;color:white;padding:2px 6px;">B</span> Black
-            <span style="background:#c5cae9;padding:2px 6px;">\u25c7</span> White point
-            <span style="background:#ffcdd2;padding:2px 6px;">\u25cb</span> Black point
-        </div>
+        {caption_html}
     </div>"""
+
+
+def _candidate_overlay_cells(
+    game: BlokusDuoGame, board: BlokusDuoBoard, action_id: int, player: int,
+) -> tuple[dict[tuple[int, int], int], str]:
+    """Return cells the candidate piece would occupy + a human-readable
+    caption. Pass actions yield an empty overlay and a "PASS" caption.
+    """
+    if game.action_codec.is_pass(action_id):
+        return {}, "PASS"
+    action = game.action_codec.decode(action_id)
+    piece_grid = game.piece_manager.get_piece_orientation_array(
+        action.piece_id, action.orientation,
+    )
+    anchor_idx = game._coordinate_index_decoder.to_idx(
+        (action.x_coordinate, action.y_coordinate),
+    )
+    cells: dict[tuple[int, int], int] = {}
+    p_len, p_wid = piece_grid.shape
+    for di in range(p_len):
+        for dj in range(p_wid):
+            if piece_grid[di, dj]:
+                cells[(anchor_idx[0] + di, anchor_idx[1] + dj)] = player
+    piece = game.piece_manager.pieces[action.piece_id]
+    caption = (
+        f"Piece {action.piece_id} ({piece.name}, {action.orientation.value}) "
+        f"at ({action.x_coordinate}, {action.y_coordinate})"
+    )
+    return cells, caption
 
 
 def build_game_replay_html(game: BlokusDuoGame, actions: list[dict], game_id: int) -> str:
@@ -344,4 +407,17 @@ BOARD_CSS = """
 }
 .board-legend { font-size: 11px; color: #6b7280; margin-top: 4px; }
 .board-legend span { border-radius: 2px; margin-right: 4px; font-size: 10px; }
+
+/* Top-K candidate-move preview boards */
+.candidate-policy { display: flex; flex-direction: column; gap: 8px; }
+.candidate-policy .board-annotation {
+    font-size: 12px; color: #4b5563; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+.candidate-cards { display: flex; flex-wrap: wrap; gap: 16px; }
+.candidate-card { flex: 0 0 auto; }
+.candidate-caption {
+    font-size: 11px; color: #4b5563; margin-top: 4px;
+    font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
 """
