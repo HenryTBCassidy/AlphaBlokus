@@ -235,6 +235,43 @@ def test_transposed_board_is_involution(positions: list[BlokusDuoBoard]) -> None
         )
 
 
+# ── S4: get_symmetries ──────────────────────────────────────────────────────
+
+
+def test_get_symmetries_returns_two_pairs(
+    blokus_game: BlokusDuoGame, mid_game_board: BlokusDuoBoard,
+) -> None:
+    """Blokus Duo's symmetry group has order 2 — identity plus the main-
+    diagonal reflection. ``get_symmetries`` must always return exactly two
+    tuples for any non-empty board.
+    """
+    n = blokus_game.get_action_size()
+    pi = np.ones(n, dtype=np.float32) / n
+    symmetries = blokus_game.get_symmetries(mid_game_board, pi)
+    assert len(symmetries) == 2
+    # First entry is identity
+    assert symmetries[0][0] is mid_game_board
+    assert symmetries[0][1] is pi
+    # Second entry is the transpose
+    assert np.array_equal(
+        symmetries[1][0]._piece_placement_board,
+        np.transpose(mid_game_board._piece_placement_board),
+    )
+
+
+def test_get_symmetries_policy_pairs_with_board(
+    blokus_game: BlokusDuoGame, mid_game_board: BlokusDuoBoard,
+) -> None:
+    """The policy entry of the second tuple must be the action-permutation
+    of the original — i.e. the policy correctly transposed.
+    """
+    rng = np.random.default_rng(seed=0)
+    pi = rng.random(blokus_game.get_action_size()).astype(np.float32)
+    _, (transposed_board, transposed_pi) = blokus_game.get_symmetries(mid_game_board, pi)
+    expected = blokus_game.transpose_policy(pi)
+    assert np.array_equal(transposed_pi, expected)
+
+
 # ── S3: action transpose ────────────────────────────────────────────────────
 
 

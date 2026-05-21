@@ -147,16 +147,28 @@ class BlokusDuoGame(IGame):
         """
         return board.canonical(player)
 
-    def get_symmetries(self, board: BlokusDuoBoard, pi: NDArray) -> list[tuple[BlokusDuoBoard, NDArray]]:
-        """Generate all symmetric forms of the current board state and policy vector.
+    def get_symmetries(
+        self, board: BlokusDuoBoard, pi: NDArray,
+    ) -> list[tuple[BlokusDuoBoard, NDArray]]:
+        """Return all geometric symmetries of ``(board, pi)`` as (board, pi)
+        pairs.
 
-        The board has the following symmetries:
-        1. Identity: No transformation
-        2. Rot180: 180-degree rotation (with player swap)
-        3. Flip90: Vertical flip + 90-degree rotation
-        4. Flip270: Vertical flip + 270-degree rotation (with player swap)
+        Blokus Duo's symmetry group is order 2: only the main-diagonal
+        reflection preserves the fixed starting-square assignments at array
+        indices (4, 4) and (9, 9). The other six rigid motions of a square
+        either move a starting square off the diagonal or swap the two
+        starting squares (which can't be rescued by a colour-swap because
+        Pentobi's rule fixes which colour moves first). See
+        ``docs/plans/archive/blokus-symmetries.md`` for the full derivation.
+
+        Each call therefore returns exactly two tuples: identity and the
+        transposed state. Self-play augmentation doubles the training data
+        per position (vs TTT's 8× via the full D₄ group).
         """
-        raise NotImplementedError()
+        return [
+            (board, pi),
+            (board.transposed(), self.transpose_policy(pi)),
+        ]
 
     def state_key(self, board: BlokusDuoBoard) -> bytes:
         """Return a hashable key that uniquely identifies the board state."""
