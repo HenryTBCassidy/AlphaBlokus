@@ -302,6 +302,55 @@ class BlokusDuoBoard(IBoard):
             coordinate_index_decoder=self._coordinate_index_decoder,
         )
 
+    # -- Symmetry (public, immutable) -------------------------------------------
+
+    def transposed(self) -> BlokusDuoBoard:
+        """Return a new board reflected across the main diagonal.
+
+        Geometrically: ``(row, col) → (col, row)``. Every placed piece keeps
+        its piece_id and sign; orientations transform via
+        :meth:`PieceManager.orientation_transpose_id` at action-encode time,
+        not here — the board's placement grid stores only piece_id, so
+        transposing the grid is sufficient at the board level.
+
+        The starting squares (4, 4) and (9, 9) both lie on the main diagonal
+        and so are fixed points of this transform. Initial-action sets are
+        therefore closed under transposition and the same
+        ``_initial_actions`` reference is shared with the new board.
+
+        All other per-player state — remaining pieces, last-piece-played,
+        placement-point caches, side-danger masks — gets transposed or
+        carried through as appropriate. See
+        ``docs/plans/archive/blokus-symmetries.md`` for the derivation and
+        the test suite in ``tests/test_blokusduo/test_symmetry.py`` for the
+        layered correctness checks.
+        """
+        new_ppb = np.transpose(self._piece_placement_board).astype(np.int8)
+        # Coordinates in placement_points are (length_idx, width_idx) array
+        # indices, so we transpose by swapping the two components of each
+        # key. Inner dicts are currently empty (move-generation cache slot);
+        # an empty-dict copy is fine.
+        new_white_points: PlacementDict = {
+            (j, i): {} for (i, j) in self._white_placement_points
+        }
+        new_black_points: PlacementDict = {
+            (j, i): {} for (i, j) in self._black_placement_points
+        }
+        return BlokusDuoBoard._from_state(
+            piece_placement_board=new_ppb,
+            white_remaining=self._white_piece_ids_remaining,
+            black_remaining=self._black_piece_ids_remaining,
+            white_last=self._white_last_piece_played,
+            black_last=self._black_last_piece_played,
+            white_points=new_white_points,
+            black_points=new_black_points,
+            white_side_danger=np.transpose(self._white_side_danger).copy(),
+            black_side_danger=np.transpose(self._black_side_danger).copy(),
+            piece_manager=self._piece_manager,
+            initial_actions=self._initial_actions,
+            coordinate_index_decoder=self._coordinate_index_decoder,
+        )
+
     # -- Game state queries (public) --------------------------------------------
 
     # -- Private helpers --------------------------------------------------------
