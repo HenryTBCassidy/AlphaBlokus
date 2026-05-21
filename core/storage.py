@@ -659,6 +659,7 @@ class MetricsCollector:
                 "action": move.action,
                 "top_k_actions": list(move.top_k_actions),
                 "top_k_probs": list(move.top_k_probs),
+                "played_prob": float(move.played_prob),
                 "outcome": outcome,
                 "player1_was_white": p1_white,
             })

@@ -68,9 +68,25 @@ class BlokusDuoRenderer:
         land. Below the board a textual caption decodes the move as
         ``Piece N (Name, Orientation) at (x, y) — pp%``. Replaces the
         old text-only listing that printed raw action indices.
+
+        When ``action_probs`` is empty (or only contained the played
+        action, which the caller is expected to have filtered out), we
+        emit a "no alternatives considered" notice so the panel doesn't
+        look broken.
         """
+        annotation_html = (
+            f'<div class="board-annotation">{annotation}</div>' if annotation else ""
+        )
         if not action_probs:
-            return '<div class="board-annotation">No candidate moves.</div>'
+            return (
+                '<div class="candidate-policy">'
+                f'{annotation_html}'
+                '<div class="candidate-empty">'
+                'No alternative moves considered — MCTS only visited the'
+                ' action that was played.'
+                '</div>'
+                '</div>'
+            )
         top = sorted(action_probs.items(), key=lambda kv: -kv[1])[:top_k]
 
         cards = []
@@ -78,7 +94,7 @@ class BlokusDuoRenderer:
             board_html = render_board_html(
                 board=board, game=self._game, current_player=current_player,
                 turn=-1,
-                action_desc=f"#{rank} — {prob:.0%}",
+                action_desc=f"#{rank} — {prob * 100:.1f}%",
                 num_moves_white=len(self._game._valid_moves(board, 1)),
                 num_moves_black=len(self._game._valid_moves(board, -1)),
                 candidate_action=action_id,
@@ -86,9 +102,6 @@ class BlokusDuoRenderer:
             )
             cards.append(f'<div class="candidate-card">{board_html}</div>')
 
-        annotation_html = (
-            f'<div class="board-annotation">{annotation}</div>' if annotation else ""
-        )
         return (
             f'<div class="candidate-policy">'
             f'{annotation_html}'
@@ -285,15 +298,26 @@ def render_board_html(
             rows_html += f'<td style="{style}">{text}</td>'
         rows_html += "</tr>\n"
 
+    # Header forms:
+    # * turn == -1, no annotation: just the player name (snapshot view)
+    # * turn == -1, with annotation: just the annotation (caller already has
+    #   the colour context — used by replay viewer's played/candidate cards
+    #   where wrapping every header with "White —" would be noise)
+    # * turn >= 0: full turn-N narration (legacy live-replay format)
     if turn == -1:
-        header = (
-            f"<strong>{player_name}</strong> — {action_desc}"
-            if action_desc else f"<strong>{player_name}</strong>"
-        )
+        header = action_desc if action_desc else f"<strong>{player_name}</strong>"
     else:
         header = (
             f"<strong>Turn {turn}</strong> — {player_name}'s move — {action_desc}"
         )
+
+    # Move counts only appear on the snapshot views where they're genuinely
+    # informative (the actual played board, post-move). Candidates show the
+    # same pre-move state across all 3 cards so the counts would just clutter.
+    move_counts_html = (
+        f'<span class="move-counts">W:{num_moves_white} moves | B:{num_moves_black} moves</span>'
+        if candidate_action is None else ""
+    )
 
     caption_html = (
         f'<div class="candidate-caption">{candidate_caption}</div>'
@@ -304,7 +328,7 @@ def render_board_html(
     <div class="board-turn">
         <div class="turn-header">
             {header}
-            <span class="move-counts">W:{num_moves_white} moves | B:{num_moves_black} moves</span>
+            {move_counts_html}
         </div>
         <table class="board-grid">{rows_html}</table>
         {caption_html}
@@ -419,5 +443,9 @@ BOARD_CSS = """
 .candidate-caption {
     font-size: 11px; color: #4b5563; margin-top: 4px;
     font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+.candidate-empty {
+    padding: 16px; background: #fffbeb; border: 1px solid #fde68a;
+    border-radius: 6px; color: #92400e; font-size: 13px;
 }
 """

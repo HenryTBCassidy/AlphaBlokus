@@ -538,35 +538,57 @@ def _make_arena_replays_section(
         board = game.initialise_board()  # actual (non-canonical) board state
         turns_html: list[str] = []
 
+        # Colour-name framing: TTT shows literal X/O glyphs on the board so
+        # the suffix is informative; Blokus shows piece numbers so it's just
+        # noise. Trim it for Blokus.
+        if config.game == "tictactoe":
+            colour_for_player = {1: "White (X)", -1: "Black (O)"}
+        else:
+            colour_for_player = {1: "White", -1: "Black"}
+
         for _, m in moves.iterrows():
             action = int(m["action"])
             player = int(m["player"])
-            colour_name = "White (X)" if player == 1 else "Black (O)"
+            colour_name = colour_for_player[player]
             role = role_by_player[player]
             player_label = f"{colour_name} — {role}"
             turn_idx = int(m["move_idx"]) + 1
 
             top_k_actions = [int(a) for a in m["top_k_actions"]]
             top_k_probs = [float(p) for p in m["top_k_probs"]]
-            # Defensive: skip any zero-probability entries that may have been
-            # persisted by older runs (pre-fix in core/arena._extract_top_k).
-            # Unvisited actions can be illegal for sparse-policy games like
-            # Blokus; we don't want them surfaced as candidates.
-            action_probs = {
+            # Defensive: drop any zero-probability entries that older runs
+            # may have persisted (pre-fix in core/arena._extract_top_k).
+            visited = {
                 a: p for a, p in zip(top_k_actions, top_k_probs, strict=False)
                 if p > 0
             }
+            # Played-action probability: prefer the explicitly-persisted
+            # column added in MoveRecord.played_prob; fall back to looking
+            # the played action up in the top-K for older parquets.
+            if "played_prob" in m and m["played_prob"] is not None:
+                played_prob = float(m["played_prob"])
+            else:
+                played_prob = visited.get(action, 0.0)
+            # Candidates panel shows the *alternatives* MCTS considered —
+            # the next-best moves the model thought about other than the one
+            # it actually played. Surfacing the played action via the
+            # caption below it (with its own probability) avoids the
+            # "the actual move isn't in the top-3" confusion that happens
+            # when many actions tie at the max visit count.
+            alternatives = {a: p for a, p in visited.items() if a != action}
 
+            played_caption = _format_played_action_caption(
+                game, action, played_prob, colour_name,
+            )
             policy_html = renderer.render_policy_html(
-                board, action_probs,
-                annotation=f"{colour_name}'s top candidates",
+                board, alternatives,
+                annotation=f"{colour_name}'s top alternatives",
                 current_player=player,
             )
             # Apply move and render the resulting state.
             board, _ = game.get_next_state(board, player, action)
             after_html = renderer.render_board_html(
-                board, last_action=action,
-                annotation=f"{colour_name} played action {action}",
+                board, last_action=action, annotation=played_caption,
             )
 
             turn_card = (
@@ -636,6 +658,39 @@ def _make_arena_replays_section(
         num_gens=len(games_by_gen),
     )
     return link_card, standalone_html
+
+
+def _format_played_action_caption(
+    game, action_id: int, played_prob: float, colour_name: str,  # noqa: ARG001
+) -> str:
+    """Build the annotation for the actual-board panel — describes the move
+    in human-readable terms and surfaces its raw MCTS visit probability.
+
+    ``played_prob`` is the share of MCTS visits this action received before
+    temperature sampling. With temp=0 the action played is one of the tied
+    top-visit options; the displayed probability is the raw visit fraction
+    so the reader can see how confident MCTS was relative to alternatives.
+
+    A ``played_prob`` of exactly 0.0 is treated as "unknown" — that's the
+    sentinel for older arena-replay parquets persisted before the explicit
+    ``MoveRecord.played_prob`` field landed, where the played action may
+    have fallen outside the captured top-K.
+    """
+    prob_suffix = (
+        f" — {played_prob * 100:.1f}% of visits"
+        if played_prob > 0 else " — visit % not recorded"
+    )
+    if game.__class__.__name__ == "BlokusDuoGame":
+        if game.action_codec.is_pass(action_id):
+            return f"Played: PASS{prob_suffix}"
+        decoded = game.action_codec.decode(action_id)
+        piece = game.piece_manager.pieces[decoded.piece_id]
+        return (
+            f"Played: Piece {decoded.piece_id} ({piece.name}, "
+            f"{decoded.orientation.value}) at "
+            f"({decoded.x_coordinate}, {decoded.y_coordinate}){prob_suffix}"
+        )
+    return f"Played action {action_id}{prob_suffix}"
 
 
 def _blokus_board_css(config: RunConfig) -> str:
@@ -749,8 +804,6 @@ h1 {{ border-bottom: 2px solid #636efa; padding-bottom: 8px; margin-bottom: 4px;
 .replay-turn-hint {{
     font-size: 11px; font-weight: 400; color: #6b7280; letter-spacing: 0.3px;
 }}
-.replay-turn.expanded .replay-turn-hint::before {{ content: "↑ "; }}
-.replay-turn.expanded .replay-turn-hint {{ content: ""; }}
 
 .replay-turn-actual {{ padding: 0 16px 16px 16px; }}
 .replay-turn-candidates {{
