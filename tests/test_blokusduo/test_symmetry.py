@@ -482,6 +482,40 @@ def test_board_transpose_involution_on_random_rollouts(
         ), f"transpose-twice ≠ identity on random rollout {rollout}"
 
 
+# ── S8: HTML snapshot for human-eye verification ────────────────────────────
+
+
+def test_html_snapshot_renders_both_panels(
+    blokus_game: BlokusDuoGame, mid_game_board: BlokusDuoBoard,
+) -> None:
+    """The visual-snapshot path: ``reporting.display_blokusduo.render_board_html``
+    successfully renders both the original and transposed board. Catches
+    breakage in the rendering pipeline that pure board-level tests would
+    miss (coordinate-convention conflicts at the renderer boundary, etc.).
+
+    For an actual visual review, run
+    ``uv run python -m scripts.render_symmetry_snapshot``.
+    """
+    from reporting.display_blokusduo import render_board_html
+
+    original_html = render_board_html(
+        board=mid_game_board, game=blokus_game, current_player=1, turn=-1,
+        action_desc="original",
+        num_moves_white=len(blokus_game._valid_moves(mid_game_board, 1)),
+        num_moves_black=len(blokus_game._valid_moves(mid_game_board, -1)),
+    )
+    transposed_board = mid_game_board.transposed()
+    transposed_html = render_board_html(
+        board=transposed_board, game=blokus_game, current_player=1, turn=-1,
+        action_desc="transposed",
+        num_moves_white=len(blokus_game._valid_moves(transposed_board, 1)),
+        num_moves_black=len(blokus_game._valid_moves(transposed_board, -1)),
+    )
+    assert original_html and transposed_html
+    # The two boards differ, so the rendered fragments must differ too.
+    assert original_html != transposed_html
+
+
 def test_diagonal_symmetric_position_is_self_transpose(
     blokus_game: BlokusDuoGame,
     empty_board: BlokusDuoBoard,
