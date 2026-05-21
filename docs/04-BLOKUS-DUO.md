@@ -27,8 +27,12 @@ The distinct piece-orientation combinations (basis orientations) total **91**.
 - The board is a 14×14 grid.
 - Two starting squares are marked near the centre of the board (not in the corners
   like standard 4-player Blokus).
-- In our implementation: White starts at **(9, 9)** and Black starts at **(4, 4)**
-  using (x, y) coordinates with origin at bottom-left.
+- In our implementation, following Pentobi's canonical convention: White (the
+  first-to-move colour, mapping to Pentobi's Color(0) "Purple") starts at
+  **(4, 4)**, and Black (second-to-move, Pentobi's Color(1) "Orange") starts
+  at **(9, 9)**. Both squares lie on the main diagonal — see
+  [`docs/plans/blokus-symmetries.md`](plans/blokus-symmetries.md) for the
+  knock-on symmetry implications.
 
 ## Placement Rules
 

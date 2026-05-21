@@ -23,11 +23,22 @@ class BlokusDuoGame(IGame):
     Rules engine and action space for Blokus Duo.
 
     The game is played on a 14x14 board where:
-    - White starts in the bottom-right corner
-    - Black starts in the top-left corner
+    - White (player ``+1``) moves first and must place their first piece
+      covering the **(4, 4)** starting square
+    - Black (player ``-1``) moves second and must place their first piece
+      covering the **(9, 9)** starting square
     - Players take turns placing pieces
     - Pieces must touch corners of friendly pieces
     - Pieces cannot touch sides of friendly pieces
+
+    Starting-square assignment follows Pentobi's canonical Blokus Duo
+    convention (``add_colored_starting_point`` in
+    ``libpentobi_base/StartingPoints.cpp``): Color(0) — the first-to-move
+    colour — sits at (4, 4). We map White (``+1``) onto Color(0) so the
+    first-mover starts at (4, 4), matching the standard "lower-coordinate
+    starting square for the first player" board-game convention. This
+    alignment makes future Pentobi benchmarking a direct game-record
+    comparison rather than a translated one.
     """
 
     def __init__(self, pieces_config_path: Path) -> None:
@@ -35,8 +46,8 @@ class BlokusDuoGame(IGame):
         self.piece_manager: PieceManager = pieces_loader(pieces_config_path)
         self.board_size: int = BlokusDuoBoard.N
         self.num_orientations: int = self.piece_manager.num_entries
-        self.white_start = (9, 9)
-        self.black_start = (4, 4)
+        self.white_start = (4, 4)
+        self.black_start = (9, 9)
         self._coordinate_index_decoder = CoordinateIndexDecoder(self.board_size)
         self.action_codec = ActionCodec(self.board_size, self.piece_manager)
         self.initial_actions: ActionDict = self._calculate_and_cache_initial_actions()
