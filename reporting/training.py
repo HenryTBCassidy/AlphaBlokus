@@ -548,7 +548,14 @@ def _make_arena_replays_section(
 
             top_k_actions = [int(a) for a in m["top_k_actions"]]
             top_k_probs = [float(p) for p in m["top_k_probs"]]
-            action_probs = dict(zip(top_k_actions, top_k_probs, strict=False))
+            # Defensive: skip any zero-probability entries that may have been
+            # persisted by older runs (pre-fix in core/arena._extract_top_k).
+            # Unvisited actions can be illegal for sparse-policy games like
+            # Blokus; we don't want them surfaced as candidates.
+            action_probs = {
+                a: p for a, p in zip(top_k_actions, top_k_probs, strict=False)
+                if p > 0
+            }
 
             policy_html = renderer.render_policy_html(
                 board, action_probs,

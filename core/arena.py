@@ -251,24 +251,34 @@ class Arena:
 
 
 def _extract_top_k(player: Player, k: int) -> tuple[list[int], list[float]]:
-    """Pull top-K actions + probs from a player's last policy, if exposed.
+    """Pull top-K **visited** actions + probs from a player's last policy.
 
-    Players that have ``get_last_policy()`` (i.e. NetworkPlayer) return their
-    full policy vector; we sort and take the K entries with highest probability.
-    Players that don't expose policy return ``([], [])`` — fine for random /
-    minimax opponents, where top-K isn't meaningful.
+    Players that have ``get_last_policy()`` (i.e. ``NetworkPlayer``) return
+    their full MCTS visit-count distribution; we sort and take the K
+    entries with highest probability — but only entries with ``prob > 0``.
+
+    The zero-probability filter matters for sparse policies. With (say)
+    50 MCTS sims over Blokus's 17,837-action space, only ~15-20 actions
+    get any visits at all. Without the filter, ``argpartition`` would
+    deterministically pad the top-K with arbitrary unvisited actions —
+    and those unvisited actions might not even be legal, which would
+    surface in the report as illegal "candidate" moves the model never
+    actually considered.
+
+    Players that don't expose a policy (random / minimax) return
+    ``([], [])``.
     """
     if not hasattr(player, "get_last_policy"):
         return [], []
     pi: NDArray | None = player.get_last_policy()
     if pi is None:
         return [], []
-    if k >= len(pi):
-        order = np.argsort(-pi)
-    else:
-        # argpartition + sort within the top slice for efficiency at huge action sizes.
-        partition = np.argpartition(-pi, k - 1)[:k]
-        order = partition[np.argsort(-pi[partition])]
-    top_actions = order.tolist()
-    top_probs = pi[order].tolist()
+    nonzero_idx = np.flatnonzero(pi > 0)
+    if len(nonzero_idx) == 0:
+        return [], []
+    # Order the non-zero entries by descending probability and take up to k.
+    nonzero_probs = pi[nonzero_idx]
+    order_within = np.argsort(-nonzero_probs)[:k]
+    top_actions = nonzero_idx[order_within].tolist()
+    top_probs = pi[top_actions].tolist()
     return top_actions, top_probs
