@@ -1,0 +1,211 @@
+# Reporting Overhaul
+
+Bring the AlphaBlokus reporting layer up to AlphaZero-grade quality. Three concerns in one branch:
+
+1. **Fix the bugs in the existing HTML report** — Accept Rate KPI is mathematically wrong, generation x-axis sorts alphabetically because of pandas `category` dtype, annotation overlaps, etc. The dashboard is currently lying about whether training worked.
+2. **Add the diagnostic metrics that `docs/05-EVALUATION.md` says we should be measuring** — policy entropy, policy accuracy (top-1, top-5), value calibration, Elo vs frozen gen-0 baseline, minimax-vs-network for TTT.
+3. **Make both reporting surfaces (live W&B + offline HTML) actually informative** — committed W&B Workspace layouts, new charts in the HTML report, ad-hoc CLI scripts (`play_ttt.py`, `arena_run.py`).
+
+This is the largest scope option from yesterday's discussion (Option C). Single PR, single branch (`feat/reporting-overhaul`), expected ~2000-2500 lines across ~15-20 files. The plan is intentionally a starting point — we extend it as we go.
+
+Companion docs: `docs/05-EVALUATION.md` (what to measure), `docs/07-DATA-STORAGE.md` (how parquet + W&B coexist), `docs/plans/archive/{report-modernization,report-redesign}.md` (prior reporting passes — completed; we build on that work).
+
+---
+
+## Checklist
+
+| # | Item | Phase | Effort | Priority | Done |
+|---|------|-------|--------|----------|------|
+| R1 | Fix Accept Rate KPI: use `wins / (wins+losses)` (matching `Coach._should_accept_new_network`) and `config.update_threshold` rather than hardcoded 0.5 | Bug fixes | 15 min | High | ✅ |
+| R2 | Fix Arena chart `is_accepted` annotations: same logic as R1 | Bug fixes | 10 min | High | ✅ |
+| R3 | Fix `generation` `category` dtype sort: cast to `int` at read time in `reporting/training.py` (or in a new `core/storage.py` reader helper) so all sorts are numeric | Bug fixes | 30 min | High | ✅ |
+| R4 | Fix profiling plot's explicit `astype(str)` cast (`training.py:357`); replace with proper numeric/sorted x-axis | Bug fixes | 15 min | High | ✅ |
+| R5 | Fix arena annotation overlap: only annotate accepted gens (more legible) or rotate/reposition labels | Bug fixes | 20 min | Medium | ✅ |
+| R6 | Replace Process Memory grouped-bar chart with a line chart over generations (3 stages = 3 lines), much easier to read | Bug fixes | 25 min | Medium | ✅ |
+| R7 | Re-render the `ttt_full` HTML report from existing parquets and visually confirm all 6 bugs are gone | Bug fixes | 10 min | High | ✅ |
+| R8 | Log **policy entropy** in two complementary ways: (a) per self-play episode, mean entropy of the MCTS visit distribution (joint MCTS+net signal); (b) per training epoch, mean entropy of the *network alone* on a frozen held-out eval set sampled from gen-1 self-play (clean isolated-net signal — the AlphaZero-paper headline curve) | New metrics | 2 hr | High | ✅ |
+| R9 | Add **policy top-1 / top-5 accuracy** logging: at the end of each training epoch, compare network's argmax / top-5 to MCTS's argmax on the frozen eval set. New parquet `PolicyAccuracy/`, W&B keys `training/network_top{1,5}_accuracy`, dedicated chart in Network Diagnostics section. | New metrics | 1.5 hr | High | ✅ |
+| R10 | Add **value calibration** metric: bin predicted v ∈ [-1,1] into 10 buckets, log mean(actual outcome) per bucket per epoch. New parquet `ValueCalibration/`, W&B scalar `training/value_calibration_error`, reliability-diagram chart in Network Diagnostics section. | New metrics | 1.5 hr | High | ✅ |
+| R11 | Drop the `average_pi_loss` / `average_v_loss` running-mean fields from `log_training` payloads — replaced by smoothed visualisations of raw losses | New metrics | 30 min | High | ✅ |
+| R12 | New `core/players.py` exposing `Player = Callable[[IBoard], int]` plus concrete `RandomPlayer` and `NetworkPlayer(game, nnet, mcts_config, temp)`. Existing `Arena` already takes lambdas; this just gives them names and adds reusable implementations. `MinimaxTicTacToePlayer` lives in `games/tictactoe/minimax.py` (R14). | Elo + scripts | 1 hr | High | ✅ |
+| R13 | Add **Elo vs frozen gen-0** tracking: save the random-init network as `Nets/elo_baseline.pth.tar` at training start. At end of each generation, play 50 games (25 as White, 25 as Black) of the *new* network this gen vs the baseline. Compute Elo as `400 · log10(score_rate / (1 − score_rate))` with chess-style scoring (draws = 0.5). Clamp score_rate ∈ [0.001, 0.999]. Log per gen whether or not the new net was accepted in arena — gives the real training noise floor. Always-on by default (`elo_games_per_gen: int = 50` in RunConfig; set to 0 to disable). New parquet `EloRatings/`, W&B keys `elo/rating`, `elo/score_rate`, etc. (indexed by generation via `define_metric`). HTML chart in new "Strength vs Fixed Baselines" section. | Elo + scripts | 1.5 hr | High | ✅ |
+| R14 | Add **TTT minimax baseline** (~80 lines, `games/tictactoe/minimax.py`, negamax with alpha-beta + memoisation). When the active game is TTT, also play 20 games per gen of current net vs minimax and log `minimax/draw_rate` and `minimax/loss_rate`. Smoke test confirmed: model converged to 100% draw rate by gen 2 — exactly the "internalised optimal play" signal. **Blokus doesn't get an analogous baseline in this PR**; perfect Blokus play is computationally infeasible. The canonical external benchmark there is Pentobi, deferred to its own future work (`docs/06-INTERFACES.md`). | Elo + scripts | 1.5 hr | Medium | ✅ |
+| R15 | Add `scripts/arena_run.py` CLI: `--player1 <ckpt\|random\|minimax> --player2 <...> --num-games <N>` — generic head-to-head runner using R12's Player abstraction. Used as a user-facing tool for ad-hoc evaluation: "is gen 11 stronger than gen 5?", "how does our trained model fare against random?", etc. | Elo + scripts | 1 hr | Medium | ✅ |
+| R16 | Add `scripts/play_ttt.py --checkpoint <path>`: human-vs-model TTT CLI. Renders 3×3 board with action indices on empty cells, reads moves 0-8 from stdin, model plays back via MCTS with temp=0. Includes `--model-first` flag if you want to play O. | Elo + scripts | 30 min | Medium | ✅ |
+| R17 | Configure a saved W&B Workspace via the SDK. Delivered as `scripts/setup_wandb_workspace.py` using the `wandb-workspaces` SDK rather than a static JSON file — re-runnable, parameterised by entity/project. Creates a single 7-section view (Run progress → Self-play → Training loss → Learning quality → Arena → Strength → Operational) which subsumes both originally-planned workspaces. | W&B + HTML | 1 hr | High | ✅ |
+| R18 | Merged into R17 — operational/perf metrics live in the "Operational" section of the same workspace (timing, throughput, inference fraction), collapsed by default. Skipped a separate workspace given how few perf-only panels there are. | W&B + HTML | 30 min | Medium | ✅ (merged into R17) |
+| R19 | All target charts shipped in `reporting/training.py`: policy entropy per-gen line, top-1 / top-5 agreement, value-head reliability diagram, Elo curve with baseline anchor, minimax draw / loss / win rates. | W&B + HTML | 2 hr | High | ✅ |
+| R20 | HTML report restructured around arena replays as the headline interactive feature — player-tinted policy boards using the Blokus colour palette, per-turn result banners, coloured outcome dropdown. Renderer protocol cleanly separates TTT and Blokus visualisations; palette consistent across W&B + HTML. | W&B + HTML | 1 hr | Medium | ✅ |
+| R21 | Verified twice — `ttt_pc_strong` (25 gens, 41 min on RTX 3060 Ti, 128f×2b, 200 sims) and `ttt_pc_64f3b` (10 gens, 4 min, 64f×3b, 25 sims). Both runs produced complete reports + W&B dashboards with all new metrics populating. Top-1 vs minimax climbed 88.5% → 96% on the ablation. | Verification | 30 min | High | ✅ |
+| R22 | Refactor `reporting/display.py` → game-specific renderers: renamed existing to `reporting/display_blokusduo.py`, added new `reporting/display_tictactoe.py`, introduced `IBoardRenderer` protocol in `reporting/display.py` with `get_renderer(game_name)` factory. Each renderer exposes `render_board_html` and `render_top_k_moves_html`. | Arena replays | 1.5 hr | High | ✅ |
+| R23 | Generalise `Arena.play_game` to optionally return a `GameRecord` with the full move sequence + top-K policies per move (`record=True` flag). `NetworkPlayer` now caches its last policy so the arena can pull top-K via a `get_last_policy()` duck-typed method. Default `top_k=5`. | Arena replays | 1.5 hr | High | ✅ |
+| R24 | Persist arena replays: new `MetricsCollector.log_arena_game(...)` method + parquet schema `ArenaReplays/generation=N/games.parquet` with one row per move: `(game_idx, move_idx, player, action, board_serialised, top_k_actions, top_k_probs, outcome_for_new_net)` | Arena replays | 1.5 hr | High | ✅ |
+| R25 | Render top-3 candidate moves as **concrete previews** per game state. Each renderer decides how — these are the kind of things a recruiter could read at a glance with no project background: <br>• **TTT** (`display_tictactoe.py`): a mirror 3×3 board where the top-3 cells are highlighted with rank badges `①②③` and MCTS probability percentages overlaid. Reader sees "model thought (1,1) was best at 47%, (0,2) second at 28%, (2,2) third at 11%" instantly. <br>• **Blokus** (`display_blokusduo.py`): three thumbnail board previews stacked vertically. Each thumbnail shows the actual piece (in its chosen orientation) overlaid on the 14×14 grid at the proposed anchor cell, with the move described as `Piece P5 (orientation 3) at (7,8) — 23%`. No "policy vector" exposed — only human-readable move descriptions. | Arena replays | 2.5 hr | High | ✅ |
+| R26 | Add interactive "Arena Replays" section to the HTML report: a) generation dropdown selector at the top, b) below it a grid of game tiles for the selected gen — green if new net won, grey if drawn, red if lost, c) clicking a tile lazy-loads that game's full move sequence into a replay panel below with current board + top-3 candidate-move previews (from R25) + ←/→ stepper showing per-move outcome metadata. All game data embedded as JSON in the single HTML file; interactivity via vanilla JS (no external deps). | Arena replays | 3 hr | High | ✅ |
+| R27 | Add `scripts/replay.py --run <name> --gen <N> --game <i>`: standalone CLI to play back any recorded arena game from any gen, terminal output with ASCII board + policy hints. Useful for digging into specific games beyond what fits in the HTML report. | Arena replays | 45 min | Medium | ✅ |
+| R28 | Re-run a TicTacToe training run *with arena replay recording on* and verify: a) arena replays parquet directory populates (✓, 25 gens × 14 games each), b) HTML report's new replays section loads correctly (✓, 14 MB self-contained file), c) top-3 candidate previews make visual sense with sane probabilities on legal moves (✓), d) standalone replay script works (✓). Wall-clock CPU time: 782s (~13 min) on Mac M-series. | Verification | 30 min | High | ✅ |
+| R29 | `git mv docs/plans/reporting-overhaul.md docs/plans/archive/reporting-overhaul.md` in the final commit before PR | Wrap-up | 2 min | Low | ✅ |
+| R30 | **Deferred follow-up** — parallelise arena + Elo + minimax evaluation across CPU cores using a worker pool over R12's `Player` abstraction. Big wall-clock win on Blokus (60s/game × 50 games × 30 gens = 25 hrs serial → ~3-4 hrs on a typical 8-core box). For TTT the per-game overhead dominates the gain. Not in this PR; documented here so it doesn't get lost. | Future | (2-3 hr followup) | Low | Deferred |
+
+Total effort estimate: ~15-18 hours of focused work. Spread across multiple sessions.
+
+---
+
+## Phase 1 — Bug fixes (R1-R7)
+
+Goal: existing HTML report stops lying. No new functionality, no new dependencies. Done in a single session.
+
+### R1. Accept Rate KPI math
+
+`reporting/training.py:82-86` currently:
+
+```python
+total_arena = arena_data["wins"] + arena_data["losses"] + arena_data["draws"]
+accepted = (arena_data["wins"] / total_arena) > 0.5
+```
+
+Two bugs: includes draws in denominator, and hardcodes 0.5 threshold. Fix:
+
+```python
+decided = arena_data["wins"] + arena_data["losses"]
+win_rate = arena_data["wins"].where(decided > 0, 0) / decided.where(decided > 0, 1)
+accepted = (decided > 0) & (win_rate >= config.update_threshold)
+```
+
+`config.update_threshold` needs to be threaded into `_make_kpi_cards`. Either pass `config` through or compute the boolean column upstream and pass that in.
+
+### R2. Arena chart `is_accepted`
+
+Same fix at `reporting/training.py:230`.
+
+### R3. Generation dtype
+
+Hive-partitioned parquet loads `generation` as `category`. Cast to `int` at the boundary. Cleanest: add a small `_load_metrics(directory: Path) -> DataFrame` helper that reads + casts. Centralises the conversion in one place. Apply to all 6 metric parquet directories.
+
+### R4. Drop the explicit `astype(str)` in profiling plot
+
+`training.py:357` deliberately strings the generation for the Box plot. Replace with proper int sort. If Plotly Box plot needs discrete x, use `xaxis_type="category"` with the categories explicitly sorted numerically.
+
+### R5. Arena annotation overlap
+
+Two options: (a) only annotate accepted gens, since rejected is the default expectation (cleaner; less visual noise), or (b) rotate annotations and stagger heights. Try (a) first.
+
+### R6. Process Memory chart
+
+Replace grouped bar chart (90 bars) with a line chart: x = generation, y = RSS MB, one line per stage (SelfPlay/Training/Arena). If GPU memory is present, overlay dashed lines for GPU per stage. Much easier to scan.
+
+### R7. Re-render
+
+```bash
+uv run python -c "
+from core.config import load_args
+from reporting.training import create_html_report
+cfg = load_args('run_configurations/ttt_full.json')
+create_html_report(cfg)
+"
+open temp/ttt_full/Reporting/report.html
+```
+
+Visually confirm: Accept Rate `2/30`, gens in numeric order on every chart, gens 2 and 11 labelled accepted, memory chart readable.
+
+---
+
+## Phase 2 — New metrics collection (R8-R11)
+
+Goal: log everything `docs/05-EVALUATION.md` asks for. New `wandb.log` keys; new parquet schemas; backward-compatibility maintained for existing run data.
+
+(Detail TBD when we start Phase 2.)
+
+---
+
+## Phase 3 — Elo + scripts (R12-R16)
+
+Goal: produce the monotonic Elo-over-time curve that's the headline chart in every AlphaZero paper. Plus the head-to-head CLI tools that the Elo work needs internally.
+
+(Detail TBD when we start Phase 3.)
+
+---
+
+## Phase 4 — W&B Workspaces + HTML polish (R17-R20)
+
+Goal: two committed, curated W&B Workspaces in the repo + corresponding HTML report layout. Reader (or recruiter) lands on either surface and immediately sees the "is this working?" signal.
+
+(Detail TBD when we start Phase 4.)
+
+---
+
+## Phase 5 — Verification (R21)
+
+Short TTT run end-to-end with new metrics live. Visual review of both W&B workspaces + HTML report.
+
+---
+
+## Phase 6 — Arena replays (R22-R27)
+
+Goal: make individual arena games inspectable in the HTML report. The reader (recruiter, future-you) selects a generation, sees a colour-coded grid of game outcomes for that gen, clicks a game, sees a step-through with the actual board next to a heatmap mirror board showing the MCTS policy over legal moves. Catches "did the model miss obvious wins?" with one click.
+
+### Renderer abstraction (R22)
+
+Each game gets its own `display_<game>.py` module exposing a small contract:
+
+```python
+class IBoardRenderer(Protocol):
+    def render_board_html(self, board: IBoard, last_move: int | None = None) -> str: ...
+    def render_top_k_moves_html(
+        self,
+        board: IBoard,
+        actions: list[int],
+        probs: list[float],
+    ) -> str:
+        """Render the top-K candidate moves as a human-readable HTML fragment.
+        TTT highlights the top cells on a mirror board with rank badges and %.
+        Blokus renders thumbnail boards with the piece in its orientation at
+        the proposed anchor cell, plus a textual "Piece P3 orientation 2 at (7,8)" caption.
+        """
+    def render_game_replay_html(self, game: ArenaGame) -> str: ...
+```
+
+`display.py` becomes a thin module exposing the protocol + a `get_renderer(game_name)` factory. Adding a future game = adding a `display_othello.py` with the protocol implementation.
+
+### Data shape (R23-R24)
+
+Per arena game, we now save:
+- Outcome for the candidate (new) net: +1, 0, -1
+- Per move: `(player, action, top_k_actions[5], top_k_probs[5], serialised_board)`
+
+Top-K default of 5 (showing 3 in the report, 2 extra recorded for tie-breaking and future drill-downs). Tiny storage for both games. **We never store a raw "policy vector" of 17,837 floats** — only the indexed top-K, decoded into human-readable previews at render time.
+
+### Lazy-loaded UI (R26)
+
+Self-contained HTML file with all replay data embedded as JSON. JavaScript:
+1. Generation dropdown changes the list of game tiles
+2. Tile colour reflects outcome (green=W, grey=D, red=L from candidate's perspective)
+3. Clicking a tile pulls that game's JSON from the embedded data, renders it into the replay panel
+4. Replay panel = real board (left), top-3 candidate move previews (right), step controls, per-move metadata
+
+Vanilla JS only — no React, no Vue, no fetch(). Keeps the file portable and `file://`-openable.
+
+---
+
+## Phase 7 — Verification + wrap-up (R28-R29)
+
+Final TTT run with arena replays on. Visual review. Archive plan.
+
+---
+
+## Scope additions beyond original plan
+
+Work that landed during execution but wasn't in the original row table. Captured here so the archived plan reflects everything that actually shipped.
+
+| Addition | Why it landed |
+|---|---|
+| **Run reproducibility — global seed plumbing** (`RunConfig.seed`, propagated to `np.random`, `torch.manual_seed`, `torch.cuda.manual_seed_all` at Coach init) | Discovered mid-run that training was fully non-deterministic — two identical configs produced different curves. Needed to make ablation comparisons cleanly attributable to the variable being changed. |
+| **Score-based acceptance** (`(wins + 0.5·draws) / total_games ≥ threshold`, chess-style) | Post-mortem of `ttt_pc_strong` revealed the old "decisive games only" criterion silently rejects every arena once both sides play competently — every TTT gen after gen 1 was a coin flip on a denominator of zero. New criterion matches AlphaGo Zero and handles forced-draw games cleanly. |
+| **Minimax-target eval set for TTT** | Henry's idea during the `ttt_pc_strong` post-mortem: the old eval set used noisy gen-1 MCTS targets, so `top-1 accuracy` was measuring agreement with arbitrary noise rather than truth. New eval set uses minimax-optimal action sets (with credit for hitting *any* optimal action when multiple tie), making the agreement metric finally mean "picks a genuinely optimal move". |
+| **W&B step_metric reorganisation** | Discovered that per-batch / per-episode metrics were plotting against W&B's auto-incrementing step counter, producing visually misleading sawtooths and gen-boundary discontinuities. Wired `self_play/*` against `global_episode`, `training/*` against `global_batch`, and all per-gen metrics against `generation`. Internal counters (`epoch`, `batch`, `episode`) marked `hidden=True` so they stop auto-charting. |
+| **`progress/*` namespace + wall-clock + ETA** | New visible "Run progress" section in the dashboard: `progress/generation`, `progress/eta_seconds`, `progress/generation_fraction`, `progress/wall_clock_seconds`, plus sawtooth `progress/{epoch,episode,batch}` panels for "where am I right now". Auto-augmented in `_publish` so every metric call updates wall-clock too. |
+| **`arena/accepted`, `arena/acceptance_rate`, `minimax/win_rate`** | Headline acceptance + strength signals missing from the original metric set. `arena/acceptance_rate` is a running fraction so a glance tells you whether training is genuinely producing improvements. `minimax/win_rate` rounds out the win/loss/draw triplet (TTT only). |
+| **Workspace SDK setup script** (`scripts/setup_wandb_workspace.py`) | Programmatic dashboard configuration via the `wandb-workspaces` package — re-runnable, idempotent (upserts by view name), and trivially adaptable for future projects (e.g. the eventual Blokus W&B project). Replaces R17's planned static JSON file. |
+| **TTT minimax bug fix** (removed unsound alpha-beta + memoisation interaction in `games/tictactoe/minimax.py`) | Stress-testing for the new minimax-target eval set surfaced that the minimax player was losing ~1/200 games to random — cached α-β cutoff values were being reused across different windows, which is unsound. Switched to pure negamax + memoisation. 1000-game stress test confirms zero losses. New tests in `tests/test_games/test_tictactoe_minimax.py`. |
+| **WSL2 linger requirement + systemd-user remote training** | The systemd-run launch pattern (`systemd-run --user --unit=...`) and the underlying `loginctl enable-linger henry` requirement were figured out during the first PC kickoff after `tmux`, `nohup`, `setsid`, and PowerShell `Start-Process` all failed to keep training alive across SSH disconnects. Documented in Claude memory + the existing `docs/guides/REMOTE-TRAINING.md`. |
+| **TTT board renderer UI redesign** (`reporting/display_tictactoe.py`) | Refactor pass after the initial arena-replay implementation: Blokus-style colour palette (blue X / red O), edge-labelled row/column headers, no clutter in empty cells, player-tinted policy backgrounds, end-of-game result banners, dropdown-option colouring by outcome. The visual quality bar is now set for the eventual Blokus renderer. |

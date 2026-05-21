@@ -1,3 +1,4 @@
+import math
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -15,12 +16,30 @@ from core.arena import Arena
 from core.config import RunConfig
 from core.interfaces import IBoard, INeuralNetWrapper, IGame
 from core.mcts import MCTS
+from core.players import NetworkPlayer
 from core.storage import (
     CycleStage,
+    EvalSet,
     MetricsCollector,
     ProcessedExample,
     SelfPlayStore,
 )
+
+
+def _compute_elo(wins: int, losses: int, draws: int) -> tuple[float, float]:
+    """Chess-style Elo difference vs an anchor opponent.
+
+    Score rate = (wins + 0.5·draws) / total_games, clamped to [0.001, 0.999]
+    to avoid log(0). Elo difference = 400 · log₁₀(score_rate / (1−score_rate)).
+    Returns ``(elo_diff, score_rate)``.
+    """
+    total = wins + losses + draws
+    if total == 0:
+        return 0.0, 0.0
+    raw = (wins + 0.5 * draws) / total
+    score_rate = max(0.001, min(0.999, raw))
+    elo = 400 * math.log10(score_rate / (1 - score_rate))
+    return elo, raw
 
 # Type aliases for improved readability
 TrainingExample: TypeAlias = tuple[IBoard, int, NDArray, float | None]  # (board, player, policy, value)
@@ -82,6 +101,18 @@ class Coach:
             nnet: Neural network for policy and value predictions
             config: Configuration parameters for the training process
         """
+        # Seed everything FIRST — before any wrapper / MCTS instance is built,
+        # so weight init, replay shuffles, MCTS tie-breaks and the global
+        # ``np.random`` calls scattered through self-play all see the same
+        # generator state. Without this, runs at the same config drift and
+        # ablations can't be compared cleanly.
+        if config.seed is not None:
+            np.random.seed(config.seed)
+            torch.manual_seed(config.seed)
+            if torch.cuda.is_available():
+                torch.cuda.manual_seed_all(config.seed)
+            logger.info("Seeded numpy + torch with seed={}", config.seed)
+
         self.game = game
         self.nnet = nnet
         self.pnet = self.nnet.__class__(self.game, config)  # Previous best network
@@ -93,6 +124,24 @@ class Coach:
         self.skip_first_self_play = False  # Can be set by load_train_examples()
         self.metrics = MetricsCollector(config=config)
         self._self_play_store = SelfPlayStore(config.self_play_history_directory)
+
+        # Frozen held-out positions for per-epoch network diagnostics (policy
+        # entropy, top-K accuracy, value calibration). Built lazily from gen
+        # 1's self-play examples; saved to disk so resumed runs use the same set.
+        self._eval_set: EvalSet | None = None
+        self._eval_set_size: int = 200
+
+        # Elo evaluation: freeze the random-init network as the anchor opponent.
+        # ``elo_baseline_net`` is a separate wrapper instance with that frozen
+        # state so the current ``self.nnet`` can train without disturbing it.
+        # Saved to disk under ``Nets/elo_baseline.pth.tar`` so resumed runs use
+        # the same baseline.
+        if self.config.elo_games_per_gen > 0:
+            self.nnet.save_checkpoint(filename="elo_baseline.pth.tar")
+            self.elo_baseline_net: INeuralNetWrapper | None = self.nnet.__class__(self.game, config)
+            self.elo_baseline_net.load_checkpoint(filename="elo_baseline.pth.tar")
+        else:
+            self.elo_baseline_net = None
 
     def execute_episode(self) -> list[ProcessedExample]:
         """
@@ -175,6 +224,7 @@ class Coach:
         for generation in range(1, self.config.num_generations + 1):
             logger.info(f'Starting Generation #{generation} ...')
             generation_start = time.perf_counter()
+            self.metrics.log_progress(generation, self.config.num_generations)
 
             # PHASE 1: Generate new training data through self-play
             if not self.skip_first_self_play or generation > 1:
@@ -198,6 +248,7 @@ class Coach:
                         total_inference_time_s=stats.total_inference_time_s,
                         num_leaf_expansions=stats.num_leaf_expansions,
                         tree_size=stats.tree_size,
+                        mean_policy_entropy=stats.mean_policy_entropy,
                         total_valid_moves_time_s=stats.total_valid_moves_time_s,
                         total_game_ended_time_s=stats.total_game_ended_time_s,
                         num_valid_moves_calls=stats.num_valid_moves_calls,
@@ -222,7 +273,11 @@ class Coach:
 
             # PHASE 2: Train neural network
             train_examples = self._prepare_training_data()
-            
+
+            # Build/load the frozen eval set used for per-epoch network
+            # entropy logging. First gen's self-play is the source.
+            self._ensure_eval_set(train_examples)
+
             # Preserve current best network
             self.nnet.save_checkpoint(filename='temp.pth.tar')
             self.pnet.load_checkpoint(filename='temp.pth.tar')
@@ -231,7 +286,10 @@ class Coach:
             # Train network on accumulated data
             logger.info(f'Starting Training For Generation #{generation} ...')
             training_start = time.perf_counter()
-            self.nnet.train(train_examples, generation, metrics=self.metrics)
+            self.nnet.train(
+                train_examples, generation,
+                metrics=self.metrics, eval_set=self._eval_set,
+            )
             training_end = time.perf_counter()
             self.metrics.log_timing(generation, CycleStage.TRAINING, training_end - training_start)
 
@@ -243,22 +301,45 @@ class Coach:
             )
 
             # PHASE 3: Evaluate new network
-            nmcts = MCTS(self.game, self.nnet, self.config.mcts_config)
-            
             logger.info(f'Evaluating Against Previous Version For Generation #{generation} ...')
             arena_start = time.perf_counter()
 
-            arena = Arena(
-                lambda x: np.argmax(pmcts.get_action_prob(x, temp=0)),
-                lambda x: np.argmax(nmcts.get_action_prob(x, temp=0)),
-                self.game
+            # Use NetworkPlayer instances (not bare lambdas) so the arena can
+            # record each move's top-K policy for replay inspection later.
+            prev_player = NetworkPlayer(
+                game=self.game, nnet=self.pnet,
+                mcts_config=self.config.mcts_config, temp=0.0,
+            )
+            new_player = NetworkPlayer(
+                game=self.game, nnet=self.nnet,
+                mcts_config=self.config.mcts_config, temp=0.0,
+            )
+            arena = Arena(prev_player, new_player, self.game)
+            # ``top_k`` capped at the action-space size (TTT only has 10
+            # actions; for Blokus's 17,837 actions 20 is plenty to capture
+            # the meaningful head). Recording at least 20 also guarantees
+            # the played action is in the recorded list even when MCTS is
+            # uniform across many tied actions.
+            top_k_to_record = min(self.game.get_action_size(), 20)
+            pwins, nwins, draws, game_records = arena.play_games(
+                self.config.num_arena_matches, record=True, top_k=top_k_to_record,
             )
 
-            pwins, nwins, draws = arena.play_games(self.config.num_arena_matches)
-
             arena_end = time.perf_counter()
-            self.metrics.log_arena(generation, wins=nwins, losses=pwins, draws=draws)
+            accepted = self._should_accept_new_network(nwins, pwins, draws)
+            self.metrics.log_arena(
+                generation, wins=nwins, losses=pwins, draws=draws, accepted=accepted,
+            )
             self.metrics.log_timing(generation, CycleStage.ARENA, arena_end - arena_start)
+
+            # Persist arena game replays for offline inspection in the HTML
+            # report and via `scripts/replay.py`. Recorded for every gen.
+            for game_idx, record in enumerate(game_records):
+                self.metrics.log_arena_game(
+                    generation=generation,
+                    game_idx=game_idx,
+                    record=record,
+                )
 
             # Memory snapshot after arena phase
             snapshot = _get_memory_snapshot()
@@ -269,7 +350,7 @@ class Coach:
 
             # Accept or reject new network
             logger.info(f'NEW/PREV WINS : {nwins}/{pwins}; DRAWS : {draws}')
-            if self._should_accept_new_network(nwins, pwins):
+            if accepted:
                 logger.info('ACCEPTING NEW MODEL')
                 self.nnet.save_checkpoint(filename=f"accepted_{generation}.pth.tar")
                 self.nnet.save_checkpoint(filename='best.pth.tar')
@@ -278,10 +359,213 @@ class Coach:
                 self.nnet.save_checkpoint(filename=f'rejected_{generation}.pth.tar')
                 self.nnet.load_checkpoint(filename='temp.pth.tar')
 
+            # PHASE 4: Strength evaluation against fixed baselines.
+            # The new network this gen is measured against the frozen gen-0
+            # baseline (Elo) and, for TTT, a perfect-play minimax opponent.
+            # Logged whether or not the new network was accepted in arena.
+            self._evaluate_strength_vs_baselines(generation)
+
             # Record total generation time and flush metrics
             generation_end = time.perf_counter()
             self.metrics.log_timing(generation, CycleStage.WHOLE_CYCLE, generation_end - generation_start)
             self.metrics.flush(self.config, generation)
+
+    def _evaluate_strength_vs_baselines(self, generation: int) -> None:
+        """Play the new network this gen against fixed baselines, log results.
+
+        Two baselines:
+
+        1. **Elo vs gen-0** (always, when ``elo_games_per_gen > 0``): the
+           frozen random-init network from training start. Score rate +
+           Elo diff are computed via :func:`_compute_elo` and logged via
+           :meth:`MetricsCollector.log_elo`.
+        2. **TTT minimax** (only when the game is TicTacToe and
+           ``minimax_games_per_gen > 0``): perfect-play opponent. Draw rate
+           rising to 1.0 with loss rate falling to 0 means the model has
+           internalised optimal play.
+
+        Both arenas use the same MCTS sim count as the regular accept/reject
+        arena, for consistent comparison. The new network's MCTS tree is
+        reset between games via the :class:`NetworkPlayer.startGame` hook.
+        """
+        if self.elo_baseline_net is not None and self.config.elo_games_per_gen > 0:
+            self._evaluate_elo_vs_baseline(generation)
+        if (
+            self.config.game == "tictactoe"
+            and self.config.minimax_games_per_gen > 0
+        ):
+            self._evaluate_minimax_tictactoe(generation)
+
+    def _evaluate_elo_vs_baseline(self, generation: int) -> None:
+        assert self.elo_baseline_net is not None
+        n = self.config.elo_games_per_gen
+        baseline_rating = self.config.elo_baseline_rating
+        logger.info(f"Evaluating Elo vs frozen gen-0 baseline ({n} games) ...")
+        elo_start = time.perf_counter()
+
+        new_player = NetworkPlayer(
+            game=self.game, nnet=self.nnet,
+            mcts_config=self.config.mcts_config, temp=0.0,
+        )
+        baseline_player = NetworkPlayer(
+            game=self.game, nnet=self.elo_baseline_net,
+            mcts_config=self.config.mcts_config, temp=0.0,
+        )
+        arena = Arena(new_player, baseline_player, self.game)
+        wins, losses, draws, _ = arena.play_games(n)
+        elo_diff, score_rate = _compute_elo(wins, losses, draws)
+        absolute = baseline_rating + elo_diff
+        elapsed = time.perf_counter() - elo_start
+        logger.info(
+            "Gen {} Elo: {:.0f} ({:+.0f} vs baseline) — W{} L{} D{}, score rate {:.3f}, {:.1f}s",
+            generation, absolute, elo_diff, wins, losses, draws, score_rate, elapsed,
+        )
+        self.metrics.log_elo(
+            generation=generation, elo_diff=elo_diff, baseline_rating=baseline_rating,
+            score_rate=score_rate, wins=wins, losses=losses, draws=draws,
+            games=wins + losses + draws,
+        )
+
+    def _evaluate_minimax_tictactoe(self, generation: int) -> None:
+        from core.players import NetworkPlayer
+        from games.tictactoe.minimax import MinimaxTicTacToePlayer
+
+        n = self.config.minimax_games_per_gen
+        logger.info(f"Evaluating vs TTT minimax perfect-play ({n} games) ...")
+        mm_start = time.perf_counter()
+
+        new_player = NetworkPlayer(
+            game=self.game, nnet=self.nnet,
+            mcts_config=self.config.mcts_config, temp=0.0,
+        )
+        minimax_player = MinimaxTicTacToePlayer(self.game)
+        arena = Arena(new_player, minimax_player, self.game)
+        wins, losses, draws, _ = arena.play_games(n)
+        elapsed = time.perf_counter() - mm_start
+        logger.info(
+            "Gen {} vs minimax: W{} L{} D{} (draw_rate {:.2f}, {:.1f}s)",
+            generation, wins, losses, draws,
+            draws / max(wins + losses + draws, 1), elapsed,
+        )
+        self.metrics.log_minimax(
+            generation=generation, wins=wins, losses=losses, draws=draws,
+            games=wins + losses + draws,
+        )
+
+    def _ensure_eval_set(self, train_examples: list[ProcessedExample]) -> None:
+        """Build (or load from disk) the frozen held-out eval set.
+
+        For TicTacToe we replace the self-play-derived targets with **minimax
+        oracle** targets: each position's ``target_policies`` row is uniform
+        over all game-theoretically optimal actions, and ``target_values`` is
+        the true minimax value of the position (∈ ``{-1, 0, +1}``). This makes
+        the per-generation top-K agreement plot answer the right question
+        ("does the net pick a truly optimal move?") rather than chasing
+        gen-1's noisy MCTS targets, which is what was making that curve dip
+        over training.
+
+        For other games we keep the original behaviour: the eval set targets
+        are MCTS visit distributions and final game outcomes recorded during
+        gen 1's self-play.
+
+        Sampled once from gen 1's training examples and saved to
+        ``config.eval_set_directory`` as three numpy files: ``boards.npy``,
+        ``target_policies.npy``, ``target_values.npy``. If any of the three is
+        missing on disk we re-sample (which keeps things consistent between
+        old runs and current ones).
+        """
+        if self._eval_set is not None:
+            return
+
+        eval_dir = self.config.eval_set_directory
+        boards_path = eval_dir / "boards.npy"
+        policies_path = eval_dir / "target_policies.npy"
+        values_path = eval_dir / "target_values.npy"
+        # Marker file: tells us *how* the targets were generated. We refuse to
+        # reuse an on-disk eval set whose targets don't match the current
+        # scheme — otherwise an old "selfplay-targets" file would silently
+        # poison the metrics on a TTT run that now expects minimax targets.
+        marker_path = eval_dir / "targets_kind.txt"
+        expected_kind = "minimax_v1" if self.config.game == "tictactoe" else "selfplay_v1"
+        if (
+            boards_path.exists() and policies_path.exists() and values_path.exists()
+            and marker_path.exists() and marker_path.read_text().strip() == expected_kind
+        ):
+            self._eval_set = EvalSet(
+                boards=np.load(boards_path),
+                target_policies=np.load(policies_path),
+                target_values=np.load(values_path),
+            )
+            logger.info("Loaded eval set ({} positions, kind={}) from {}",
+                        len(self._eval_set), expected_kind, eval_dir)
+            return
+
+        if not train_examples:
+            return
+
+        # Sample positions from the training examples (capped to actual size).
+        boards_all = np.array([ex[0] for ex in train_examples])
+        policies_all = np.array([ex[1] for ex in train_examples])
+        values_all = np.array([ex[2] for ex in train_examples])
+        n = min(self._eval_set_size, len(boards_all))
+        rng = np.random.default_rng(seed=self.config.seed or 0)
+        idx = rng.choice(len(boards_all), size=n, replace=False)
+        sampled_boards = boards_all[idx]
+        target_policies = policies_all[idx]
+        target_values = values_all[idx]
+
+        if self.config.game == "tictactoe":
+            target_policies, target_values = self._minimax_targets_for_eval_set(
+                sampled_boards, action_size=target_policies.shape[1],
+            )
+
+        self._eval_set = EvalSet(
+            boards=sampled_boards,
+            target_policies=target_policies,
+            target_values=target_values,
+        )
+
+        eval_dir.mkdir(parents=True, exist_ok=True)
+        np.save(boards_path, self._eval_set.boards)
+        np.save(policies_path, self._eval_set.target_policies)
+        np.save(values_path, self._eval_set.target_values)
+        marker_path.write_text(expected_kind)
+        logger.info("Built eval set ({} positions, kind={}) → {}",
+                    n, expected_kind, eval_dir)
+
+    def _minimax_targets_for_eval_set(
+        self, boards: NDArray, action_size: int,
+    ) -> tuple[NDArray, NDArray]:
+        """Overwrite eval-set targets with a perfect-play oracle (TTT only).
+
+        Each row of ``target_policies`` becomes a uniform distribution over
+        all minimax-optimal actions; each ``target_values`` entry becomes the
+        position's true game-theoretic value. Boards are decoded from the
+        2-channel canonical encoding back into a :class:`Board` so we can
+        query the minimax solver.
+        """
+        from games.tictactoe.board import Board
+        from games.tictactoe.minimax import MinimaxTicTacToePlayer
+
+        minimax = MinimaxTicTacToePlayer(self.game)
+        n = len(boards)
+        new_policies = np.zeros((n, action_size), dtype=np.float32)
+        new_values = np.zeros(n, dtype=np.float32)
+
+        for i, encoded in enumerate(boards):
+            # Decode canonical 2-channel encoding back into a canonical Board.
+            # encoded[0]: side-to-move stones (=+1), encoded[1]: opponent (=-1).
+            grid = (encoded[0] - encoded[1]).astype(int)
+            canonical_board = Board._from_pieces(grid.tolist())
+
+            new_values[i] = float(minimax.evaluate_position(canonical_board))
+            optimal = minimax.optimal_actions(canonical_board)
+            if optimal:
+                weight = 1.0 / len(optimal)
+                for action in optimal:
+                    new_policies[i, action] = weight
+
+        return new_policies, new_values
 
     def _generation_window_size(self, generation: int) -> int:
         """
@@ -337,22 +621,38 @@ class Coach:
         shuffle(examples)
         return examples
 
-    def _should_accept_new_network(self, new_wins: int, prev_wins: int) -> bool:
+    def _should_accept_new_network(
+        self, new_wins: int, prev_wins: int, draws: int = 0,
+    ) -> bool:
         """
         Decide whether to accept the newly trained network.
+
+        Uses **score-based acceptance** (chess-style): draws count as 0.5
+        each in both numerator and denominator. The new net is accepted iff
+        its score ``(new_wins + 0.5 * draws) / total_games`` meets the
+        configured ``update_threshold``.
+
+        The older convention used only decisive games (``draws`` excluded
+        from the denominator), which silently broke acceptance for
+        forced-draw games like TTT: once both nets played competently every
+        arena would draw, ``new_wins`` and ``prev_wins`` would both be zero,
+        and the early-return-False kicked in. The score-based form matches
+        AlphaGo Zero's recipe and handles forced-draw games cleanly — the
+        new net must actually win games to be accepted.
 
         Args:
             new_wins: Number of games won by new network
             prev_wins: Number of games won by previous network
+            draws: Number of drawn games (counted as 0.5 each)
 
         Returns:
             bool: True if new network should replace previous one
         """
-        total_games = new_wins + prev_wins
+        total_games = new_wins + prev_wins + draws
         if total_games == 0:
             return False
-        win_rate = float(new_wins) / total_games
-        return win_rate >= self.config.update_threshold
+        score = (new_wins + 0.5 * draws) / total_games
+        return score >= self.config.update_threshold
 
     def save_self_play_history(self, generation: int) -> None:
         """Save the current generation's self-play data to a parquet file.

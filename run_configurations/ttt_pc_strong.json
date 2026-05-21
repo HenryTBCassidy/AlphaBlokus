@@ -1,0 +1,34 @@
+{
+  "game": "tictactoe",
+  "run_name": "ttt_pc_strong",
+  "seed": 42,
+  "num_generations": 25,
+  "num_eps": 100,
+  "temp_threshold": 3,
+  "update_threshold": 0.55,
+  "max_queue_length": 1000,
+  "num_arena_matches": 50,
+  "root_directory": "./temp/",
+  "load_model": false,
+  "max_generations_lookback": 15,
+  "minimax_games_per_gen": 30,
+  "mcts_config": {
+    "num_mcts_sims": 200,
+    "cpuct": 1.0
+  },
+  "net_config": {
+    "learning_rate": 0.001,
+    "dropout": 0.3,
+    "epochs": 10,
+    "batch_size": 64,
+    "cuda": true,
+    "num_filters": 128,
+    "num_residual_blocks": 2
+  },
+  "wandb": {
+    "project": "alphablokus-poc",
+    "entity": null,
+    "tags": ["ttt", "pc", "strong", "seed42", "minimax-eval"],
+    "mode": "online"
+  }
+}

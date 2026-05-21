@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import datetime
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -11,6 +12,20 @@ from plotly.subplots import make_subplots
 
 if TYPE_CHECKING:
     from core.config import RunConfig
+
+
+def _load_metrics(directory: Path) -> pd.DataFrame:
+    """Read a hive-partitioned metrics directory and normalise the generation column.
+
+    Pandas/PyArrow infer hive-partition keys as ``category`` dtype, which sorts
+    by the order categories were inserted (effectively alphabetical: 1, 10, 11,
+    ..., 2, 20). Casting to ``int`` here means every downstream ``sort_values``
+    and groupby produces numerically correct results.
+    """
+    df = pd.read_parquet(directory)
+    if "generation" in df.columns:
+        df["generation"] = df["generation"].astype(int)
+    return df
 
 # ---------------------------------------------------------------------------
 # D1: Consistent color palette and chart defaults
@@ -64,24 +79,42 @@ def _format_duration(seconds: float) -> str:
     return f"{minutes / 60:.1f}h"
 
 
+def _accepted_mask(arena_data: pd.DataFrame, update_threshold: float) -> pd.Series:
+    """Return a boolean Series marking generations whose new net was accepted.
+
+    Matches ``Coach._should_accept_new_network``: draws are excluded from the
+    denominator, the win rate uses ``wins / (wins + losses)``, and the
+    comparison is ``>= update_threshold`` (not a hardcoded 0.5).
+    """
+    decided = arena_data["wins"] + arena_data["losses"]
+    win_rate = arena_data["wins"].astype(float) / decided.where(decided > 0, 1)
+    return (decided > 0) & (win_rate >= update_threshold)
+
+
 def _make_kpi_cards(
     loss_data: pd.DataFrame,
     arena_data: pd.DataFrame,
     timings_data: pd.DataFrame,
     profiling_data: pd.DataFrame,
     throughput_data: pd.DataFrame,
+    update_threshold: float,
 ) -> str:
     """D2: Build HTML for the KPI card row."""
-    # Final loss + delta
+    # Final loss + delta — mean of each generation's last epoch (the
+    # epoch where the network is most trained). Avoids the noise of a
+    # single trailing batch and the artefact of running-mean resets.
     sorted_loss = loss_data.sort_values(["generation", "epoch", "batch_number"])
-    by_gen = sorted_loss.groupby("generation")["average_loss"].last()
+    last_epoch_per_gen = sorted_loss.groupby("generation")["epoch"].max()
+    by_gen = sorted_loss[
+        sorted_loss["epoch"] == sorted_loss["generation"].map(last_epoch_per_gen)
+    ].groupby("generation")["total_loss"].mean()
     final_loss = by_gen.iloc[-1]
     first_loss = by_gen.iloc[0]
     loss_delta_pct = ((final_loss - first_loss) / first_loss) * 100
 
-    # Accept rate
-    total_arena = arena_data["wins"] + arena_data["losses"] + arena_data["draws"]
-    accepted = (arena_data["wins"] / total_arena) > 0.5
+    # Accept rate — matches Coach._should_accept_new_network (draws excluded,
+    # configured threshold used, not a hardcoded 0.5).
+    accepted = _accepted_mask(arena_data, update_threshold)
     accept_count = int(accepted.sum())
     total_gens = len(arena_data)
 
@@ -123,13 +156,23 @@ def _make_kpi_cards(
 # ---------------------------------------------------------------------------
 
 def _make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
-    """Line chart with pi_loss, v_loss, and total loss per generation."""
+    """Line chart with mean pi_loss, v_loss, and total_loss per generation.
+
+    Each generation's value is the mean of its **last epoch's** per-batch
+    losses — i.e. where the network is most trained for that gen. Aggregating
+    raw per-batch values avoids the running-mean reset spikes that used to
+    appear at epoch boundaries.
+    """
     sorted_df = df.sort_values(["generation", "epoch", "batch_number"])
-    agg = sorted_df.groupby("generation").agg(
-        pi_loss=("average_pi_loss", "last"),
-        v_loss=("average_v_loss", "last"),
-        total_loss=("average_loss", "last"),
-    ).reset_index()
+    last_epoch = sorted_df.groupby("generation")["epoch"].max()
+    last_epoch_df = sorted_df[
+        sorted_df["epoch"] == sorted_df["generation"].map(last_epoch)
+    ]
+    agg = last_epoch_df.groupby("generation").agg(
+        pi_loss=("pi_loss", "mean"),
+        v_loss=("v_loss", "mean"),
+        total_loss=("total_loss", "mean"),
+    ).reset_index().sort_values("generation")
 
     fig = go.Figure()
     fig.add_trace(go.Scatter(
@@ -169,25 +212,33 @@ def _make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 def _make_loss_timeline(df: pd.DataFrame) -> go.Figure:
-    """Smoothed loss over the full training timeline with generation boundaries."""
+    """Smoothed loss over the full training timeline with generation boundaries.
+
+    Convention follows W&B / TensorBoard: raw per-batch values plotted as
+    semi-transparent dots, EWM-smoothed line on top in full saturation.
+    A Linear/Log button lets the reader switch the y-axis scale — useful for
+    long runs where loss drops by multiple orders of magnitude.
+    """
     sorted_df = df.sort_values(["generation", "epoch", "batch_number"]).reset_index(drop=True)
     sorted_df["step"] = range(len(sorted_df))
 
     span = max(5, len(sorted_df) // 15)
 
+    # Raw dots at opacity 0.4 (not 0.15) so the reader can see the noise
+    # underneath the smoothing — not a hidden detail, an explicit one.
     series = [
-        ("average_loss", "Total", _COLORS["primary"]),
-        ("average_pi_loss", "Policy", _COLORS["secondary"]),
-        ("average_v_loss", "Value", _COLORS["tertiary"]),
+        ("total_loss", "Total", _COLORS["primary"]),
+        ("pi_loss", "Policy", _COLORS["secondary"]),
+        ("v_loss", "Value", _COLORS["tertiary"]),
     ]
 
     fig = go.Figure()
 
     for col, name, color in series:
-        # Raw data (faint)
+        # Raw data — visible context, secondary to the smoothed line.
         fig.add_trace(go.Scatter(
             x=sorted_df["step"], y=sorted_df[col],
-            mode="markers", marker={"size": 2, "color": color, "opacity": 0.15},
+            mode="markers", marker={"size": 3, "color": color, "opacity": 0.25},
             showlegend=False, hoverinfo="skip",
         ))
         # Smoothed line
@@ -212,6 +263,99 @@ def _make_loss_timeline(df: pd.DataFrame) -> go.Figure:
     fig.update_layout(
         xaxis_title="Training Step (sequential)", yaxis_title="Loss",
         title="Per-Batch Loss (smoothed)",
+        updatemenus=[{
+            "type": "buttons",
+            "direction": "right",
+            "x": 1.0, "y": 1.15, "xanchor": "right", "yanchor": "top",
+            "buttons": [
+                {"label": "Linear", "method": "relayout",
+                 "args": [{"yaxis.type": "linear"}]},
+                {"label": "Log", "method": "relayout",
+                 "args": [{"yaxis.type": "log"}]},
+            ],
+        }],
+    )
+    return _apply_defaults(fig)
+
+
+def _make_per_gen_loss_curves(df: pd.DataFrame) -> go.Figure:
+    """One smoothed total-loss curve per generation, coloured by generation.
+
+    Reads at a glance: are later generations starting at lower loss? Reaching
+    convergence faster? Is the curve shape consistent across gens? These are
+    questions the per-batch timeline and the per-gen summary chart don't
+    directly answer — this overlay does.
+
+    X axis: training step within a generation (sequential batch index across
+    that gen's epochs). Y axis: total loss (smoothed lightly with EWM).
+    Colour: viridis gradient from earliest gen (deep purple) to latest gen
+    (bright yellow). Colorbar on the right labels the gradient.
+    """
+    import plotly.colors as pc  # local import — only used here
+
+    sorted_df = df.sort_values(["generation", "epoch", "batch_number"]).copy()
+    sorted_df["step_in_gen"] = sorted_df.groupby("generation").cumcount()
+
+    gens = sorted(sorted_df["generation"].unique())
+    n_gens = len(gens)
+
+    # Sample the Viridis colorscale at n_gens evenly-spaced points.
+    sample_positions = (
+        [i / max(n_gens - 1, 1) for i in range(n_gens)] if n_gens > 1 else [0.5]
+    )
+    palette = pc.sample_colorscale("Viridis", sample_positions)
+
+    fig = go.Figure()
+    for gen, colour in zip(gens, palette, strict=True):
+        gen_df = sorted_df[sorted_df["generation"] == gen]
+        if len(gen_df) < 2:
+            continue
+        # Light per-gen smoothing — short span so we don't over-flatten the
+        # within-gen learning curve we're trying to see.
+        span = max(3, len(gen_df) // 10)
+        smoothed = gen_df["total_loss"].ewm(span=span, adjust=False).mean()
+        fig.add_trace(go.Scatter(
+            x=gen_df["step_in_gen"], y=smoothed,
+            mode="lines",
+            line={"width": 1.5, "color": colour},
+            name=f"Gen {gen}",
+            showlegend=False,
+            hovertemplate=f"Gen {gen}, step %{{x}}: loss %{{y:.3f}}<extra></extra>",
+        ))
+
+    # Invisible scatter trace just to carry the colorbar.
+    fig.add_trace(go.Scatter(
+        x=[None], y=[None],
+        mode="markers",
+        marker={
+            "size": 0.1,
+            "colorscale": "Viridis",
+            "cmin": min(gens), "cmax": max(gens),
+            "color": [min(gens)],
+            "showscale": True,
+            "colorbar": {
+                "title": {"text": "Generation"},
+                "thickness": 12, "len": 0.85,
+            },
+        },
+        showlegend=False, hoverinfo="skip",
+    ))
+
+    fig.update_layout(
+        xaxis_title="Batch within generation",
+        yaxis_title="Total loss",
+        title="Loss Curves by Generation (overlaid)",
+        updatemenus=[{
+            "type": "buttons",
+            "direction": "right",
+            "x": 1.0, "y": 1.15, "xanchor": "right", "yanchor": "top",
+            "buttons": [
+                {"label": "Linear", "method": "relayout",
+                 "args": [{"yaxis.type": "linear"}]},
+                {"label": "Log", "method": "relayout",
+                 "args": [{"yaxis.type": "log"}]},
+            ],
+        }],
     )
     return _apply_defaults(fig)
 
@@ -227,7 +371,7 @@ def _make_arena_plot(arena_data: pd.DataFrame, update_threshold: float) -> go.Fi
     df["pct_wins"] = 100 * df["wins"] / total
     df["pct_draws"] = 100 * df["draws"] / total
     df["pct_losses"] = 100 * df["losses"] / total
-    df["is_accepted"] = (df["wins"] / total) > update_threshold
+    df["is_accepted"] = _accepted_mask(df, update_threshold).values
 
     fig = go.Figure()
     fig.add_trace(go.Bar(
@@ -255,17 +399,19 @@ def _make_arena_plot(arena_data: pd.DataFrame, update_threshold: float) -> go.Fi
         annotation_position="top left",
     )
 
-    for _, row in df.iterrows():
-        label = "Accepted" if row["is_accepted"] else "Rejected"
-        color = _COLORS["positive"] if row["is_accepted"] else _COLORS["negative"]
+    # Only annotate ACCEPTED generations — rejected is the default expectation
+    # and labelling every bar caused overlap with 30+ generations.
+    for _, row in df[df["is_accepted"]].iterrows():
         fig.add_annotation(
-            x=row["generation"], y=102, text=label, showarrow=False,
-            font={"size": 11, "color": color},
+            x=row["generation"], y=108, text="✓ Accepted", showarrow=False,
+            font={"size": 11, "color": _COLORS["positive"], "family": "monospace"},
         )
 
     fig.update_layout(
         barmode="stack",
-        xaxis_title="Generation", yaxis_title="Percentage", yaxis_range=[0, 115],
+        xaxis_title="Generation", yaxis_title="Percentage", yaxis_range=[0, 120],
+        xaxis={"type": "category", "categoryorder": "array",
+               "categoryarray": [str(g) for g in df["generation"]]},
         title="Arena: New Net vs Predecessor",
     )
     return _apply_defaults(fig)
@@ -312,26 +458,519 @@ def _make_throughput_plot(throughput_data: pd.DataFrame) -> go.Figure:
     return _apply_defaults(fig, width=_HALF_WIDTH, height=_GRID_HEIGHT)
 
 
-def _make_resource_usage_plot(resource_data: pd.DataFrame) -> go.Figure:
-    """Grouped bar of process RSS (MB) per stage per generation."""
-    df = resource_data.copy()
-    df["rss_mb"] = df["process_rss_bytes"] / (1024 ** 2)
+def _make_network_entropy_plot(entropy_data: pd.DataFrame) -> go.Figure:
+    """Network policy entropy on the held-out eval set, per generation.
+
+    Each generation contributes one point: the mean entropy across all
+    training epochs in that generation. Lower entropy means the network is
+    more confident in its move choices on a fixed reference set of positions.
+    This is the cleanest "is the network itself learning?" signal because it
+    isolates the network from MCTS noise.
+    """
+    df = entropy_data.copy()
+    agg = df.groupby("generation").agg(
+        mean=("mean_entropy", "mean"),
+        std=("mean_entropy", "std"),
+    ).reset_index().sort_values("generation")
+    agg["std"] = agg["std"].fillna(0.0)
 
     fig = go.Figure()
-    for stage in ["SelfPlay", "Training", "Arena"]:
-        stage_df = df[df["cycle_stage"] == stage]
-        if stage_df.empty:
-            continue
-        fig.add_trace(go.Bar(
-            x=stage_df["generation"], y=stage_df["rss_mb"],
-            name=stage, marker_color=_PHASE_COLORS.get(stage, _COLORS["neutral"]),
-        ))
-
-    fig.update_layout(
-        barmode="group",
-        xaxis_title="Generation", yaxis_title="RSS (MB)",
-        title="Process Memory",
+    _mean_band_trace(
+        fig, agg["generation"], agg["mean"], agg["std"],
+        color=_COLORS["accent"], name="Network Entropy",
+        unit="nats",
     )
+    fig.update_layout(
+        xaxis_title="Generation", yaxis_title="Mean entropy (nats)",
+        title="Network Policy Entropy on Held-Out Set",
+        xaxis={"dtick": 1 if agg["generation"].max() < 40 else 5},
+    )
+    return _apply_defaults(fig)
+
+
+def _make_arena_replays_section(
+    df: pd.DataFrame,
+    config: RunConfig,
+) -> str:
+    """Build the interactive arena-replays section.
+
+    Layout follows the look of the older move-count-analysis report: a
+    generation dropdown narrows the games to inspect, a game dropdown picks
+    one game whose options are labelled with its outcome ("G3 — Draw",
+    "G7 — P1 won"). The selected game's full move sequence is then rendered
+    inline as a flex-wrap row of turn cards — each card pairs the candidate
+    top-3 mirror board (what the model was considering) with the actual board
+    after that move (what it played). All moves visible at once, easy to scan.
+
+    All replay data is embedded as JSON in the rendered HTML so the report
+    stays a single self-contained file — no JS frameworks, no external
+    fetches.
+    """
+    import json
+
+    from reporting.display import get_renderer
+
+    renderer = get_renderer(config.game)
+    game = _instantiate_game(config.game)
+
+    df = df.copy()
+    df["generation"] = df["generation"].astype(int)
+    df = df.sort_values(["generation", "game_idx", "move_idx"])
+
+    games_by_gen: dict[int, list[dict]] = {}
+
+    for (gen, game_idx), group in df.groupby(["generation", "game_idx"]):
+        moves = group.sort_values("move_idx")
+        first = moves.iloc[0]
+        player1_was_white = bool(first["player1_was_white"])
+
+        # Roles: Player 1 = previous best, Player 2 = new candidate (current).
+        # White = +1, Black = -1. Map each colour to its role for this game so
+        # the per-turn header can spell out "new net" / "previous net".
+        if player1_was_white:
+            role_by_player = {1: "previous net", -1: "new net (this gen)"}
+        else:
+            role_by_player = {1: "new net (this gen)", -1: "previous net"}
+
+        board = game.initialise_board()  # actual (non-canonical) board state
+        turns_html: list[str] = []
+
+        for _, m in moves.iterrows():
+            action = int(m["action"])
+            player = int(m["player"])
+            colour_name = "White (X)" if player == 1 else "Black (O)"
+            role = role_by_player[player]
+            player_label = f"{colour_name} — {role}"
+            turn_idx = int(m["move_idx"]) + 1
+
+            top_k_actions = [int(a) for a in m["top_k_actions"]]
+            top_k_probs = [float(p) for p in m["top_k_probs"]]
+            action_probs = dict(zip(top_k_actions, top_k_probs, strict=False))
+
+            policy_html = renderer.render_policy_html(
+                board, action_probs,
+                annotation=f"{colour_name}'s MCTS policy",
+                current_player=player,
+            )
+            # Apply move and render the resulting state.
+            board, _ = game.get_next_state(board, player, action)
+            after_html = renderer.render_board_html(
+                board, last_action=action,
+                annotation=f"{colour_name} played action {action}",
+            )
+
+            turn_card = (
+                '<div class="replay-turn">'
+                f'<div class="replay-turn-header">Turn {turn_idx} — '
+                f"{player_label}'s move</div>"
+                '<div class="replay-turn-boards">'
+                f"{policy_html}{after_html}"
+                "</div></div>"
+            )
+            turns_html.append(turn_card)
+
+        # Outcome: stored from Player 1's POV (+1 = P1 won, -1 = P2 won).
+        # Translate into colour-based result text + dropdown CSS class.
+        outcome = float(first["outcome"])
+        if outcome > 0.5:
+            winner_colour = "White" if player1_was_white else "Black"
+            outcome_label = f"{winner_colour} wins — previous net"
+            outcome_class = "result-prev"
+        elif outcome < -0.5:
+            winner_colour = "Black" if player1_was_white else "White"
+            outcome_label = f"{winner_colour} wins — new net"
+            outcome_class = "result-new"
+        else:
+            outcome_label = "Draw"
+            outcome_class = "result-draw"
+
+        # Final "X wins" / "Draw" card at the bottom of the replay.
+        turns_html.append(
+            '<div class="replay-result">'
+            f"{outcome_label}"
+            "</div>"
+        )
+
+        games_by_gen.setdefault(int(gen), []).append({
+            "game_idx": int(game_idx),
+            "outcome": outcome,
+            "outcome_label": outcome_label,
+            "outcome_class": outcome_class,
+            "player1_was_white": player1_was_white,
+            "turns_html": turns_html,
+        })
+
+    payload = json.dumps(games_by_gen)
+    gen_options = "\n".join(
+        f'<option value="{g}">Generation {g}</option>'
+        for g in sorted(games_by_gen)
+    )
+    first_gen = min(games_by_gen)
+    initial_game_options = _render_game_options(games_by_gen[first_gen])
+
+    return _ARENA_REPLAYS_TEMPLATE.format(
+        gen_options=gen_options,
+        initial_game_options=initial_game_options,
+    ) + _ARENA_REPLAYS_SCRIPT.format(payload=payload)
+
+
+def _render_game_options(games: list[dict]) -> str:
+    """Server-side game-dropdown options for the initial generation.
+
+    The ``class`` on each option drives the background colour — green when the
+    new (current) net won, red when the previous net won, plain for a draw.
+    Browsers vary in how willing they are to style ``<option>`` directly, but
+    Chromium/Firefox on desktop both honour it; falls back to no colour
+    elsewhere, which is harmless.
+    """
+    return "\n".join(
+        f'<option class="{g["outcome_class"]}" value="{g["game_idx"]}">'
+        f'G{g["game_idx"] + 1} — {g["outcome_label"]}'
+        f"</option>"
+        for g in games
+    )
+
+
+def _instantiate_game(game_name: str):
+    """Match main.py's mapping — needed for arena-replay board reconstruction."""
+    if game_name == "tictactoe":
+        from games.tictactoe.game import TicTacToeGame
+        return TicTacToeGame()
+    if game_name == "blokusduo":
+        from pathlib import Path
+
+        from games.blokusduo.game import BlokusDuoGame
+        return BlokusDuoGame(Path("games/blokusduo/pieces.json"))
+    raise ValueError(f"Unknown game: {game_name}")
+
+
+_ARENA_REPLAYS_TEMPLATE = """\
+<section>
+<h2>Arena Game Replays</h2>
+<p class="section-desc">
+Recorded games from each generation's accept/reject arena. <em>Player 1</em>
+is the previous best network and <em>Player 2</em> is the new candidate
+trained this gen. Pick a generation, then a game — the full sequence of
+moves appears below as a row of cards. Each card pairs the model's top-3
+considered moves (left) with the actual board state after the move was
+played (right), so you can scan visually for "did the model spot the obvious
+winning move?" / "did it miss the block?".
+</p>
+
+<div class="arena-replays">
+    <div class="arena-controls">
+        <label><strong>Generation:</strong>
+            <select id="alphaBlokus-gen-select"
+                    onchange="alphaBlokus_onGenChange(parseInt(this.value))">
+{gen_options}
+            </select>
+        </label>
+        <label style="margin-left: 16px;"><strong>Game:</strong>
+            <select id="alphaBlokus-game-select"
+                    onchange="alphaBlokus_onGameChange(parseInt(this.value))">
+{initial_game_options}
+            </select>
+        </label>
+    </div>
+    <div id="alphaBlokus-replay-body" class="replay-body"></div>
+</div>
+
+<style>
+.arena-replays {{ margin: 12px 0; }}
+.arena-controls {{ margin-bottom: 16px; font-size: 14px; }}
+.arena-controls select {{ padding: 4px 8px; font-size: 14px; margin-left: 4px; }}
+/* Coloured dropdown rows: green = new net won, red = previous net won. */
+#alphaBlokus-game-select option.result-new {{ background: #dcfce7; color: #14532d; }}
+#alphaBlokus-game-select option.result-prev {{ background: #fee2e2; color: #7f1d1d; }}
+#alphaBlokus-game-select option.result-draw {{ background: transparent; color: inherit; }}
+.replay-result {{
+    padding: 14px 16px; margin-top: 4px;
+    text-align: center; font-size: 16px; font-weight: 700;
+    color: #1f2937; background: #f3f4f6;
+    border: 1px solid #d1d5db; border-radius: 6px;
+    letter-spacing: 0.4px;
+}}
+.replay-body {{
+    display: flex; flex-direction: column; gap: 12px; padding: 8px 0;
+}}
+.replay-turn {{
+    padding: 12px 16px; border: 1px solid #e5e7eb;
+    border-radius: 6px; background: #fafafa;
+}}
+.replay-turn-header {{
+    font-size: 13px; font-weight: 600; color: #2a3f5f; margin-bottom: 8px;
+}}
+.replay-turn-boards {{
+    display: flex; gap: 24px; align-items: flex-start; flex-wrap: wrap;
+}}
+
+/* Inlined TTT board styles — keep the policy / actual boards visually aligned. */
+.ttt-board {{ display: inline-block; margin: 0; }}
+.ttt-board table.ttt-grid {{ border-collapse: collapse; }}
+.ttt-board td {{ padding: 0; }}
+.ttt-board th {{
+    padding: 2px 6px; font-size: 10px; color: #9ca3af;
+    background: none; border: none; font-weight: normal; text-align: center;
+}}
+.ttt-board th.corner {{ width: 16px; }}
+.ttt-board th.row-label {{ text-align: right; padding-right: 6px; }}
+.ttt-board .board-annotation {{
+    font-size: 11px; color: #4b5563; text-align: center;
+    margin-bottom: 6px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: 0.5px;
+}}
+</style>
+</section>
+"""
+
+
+_ARENA_REPLAYS_SCRIPT = """\
+<script>
+(function() {{
+    const REPLAYS = {payload};
+
+    function genGames(gen) {{ return REPLAYS[gen] || []; }}
+
+    function onGenChange(gen) {{
+        const select = document.getElementById('alphaBlokus-game-select');
+        const games = genGames(gen);
+        select.innerHTML = games.map(g => {{
+            return '<option class="' + g.outcome_class + '" value="'
+                 + g.game_idx + '">G' + (g.game_idx + 1)
+                 + ' — ' + g.outcome_label + '</option>';
+        }}).join('');
+        if (games.length > 0) {{
+            select.value = games[0].game_idx;
+            renderGame(gen, games[0].game_idx);
+        }} else {{
+            document.getElementById('alphaBlokus-replay-body').innerHTML = '';
+        }}
+    }}
+
+    function onGameChange(gameIdx) {{
+        const gen = parseInt(document.getElementById('alphaBlokus-gen-select').value);
+        renderGame(gen, gameIdx);
+    }}
+
+    function renderGame(gen, gameIdx) {{
+        const games = genGames(gen);
+        const game = games.find(g => g.game_idx === gameIdx);
+        if (!game) return;
+        document.getElementById('alphaBlokus-replay-body').innerHTML =
+            game.turns_html.join('');
+    }}
+
+    // Initial render: the first game of the first generation.
+    document.addEventListener('DOMContentLoaded', () => {{
+        const genSelect = document.getElementById('alphaBlokus-gen-select');
+        const gameSelect = document.getElementById('alphaBlokus-game-select');
+        if (!genSelect || !gameSelect) return;
+        const gen = parseInt(genSelect.value);
+        const games = genGames(gen);
+        if (games.length > 0) {{
+            renderGame(gen, games[0].game_idx);
+        }}
+    }});
+
+    window.alphaBlokus_onGenChange = onGenChange;
+    window.alphaBlokus_onGameChange = onGameChange;
+}})();
+</script>
+"""
+
+
+def _make_elo_plot(elo_data: pd.DataFrame) -> go.Figure:
+    """Absolute Elo rating over generations, with the gen-0 baseline anchored.
+
+    The headline strength curve, following AlphaZero-paper convention: the
+    random-init network is anchored at ``baseline_rating`` (default 1000) and
+    every other generation is shown relative to that as an absolute rating.
+    A dashed horizontal line marks the baseline. The dip below the baseline
+    that you sometimes see in early gens (training noise floor) is preserved
+    — it just sits below the dashed line rather than at a negative number.
+    """
+    df = elo_data.sort_values("generation").copy()
+    baseline = int(df["baseline_rating"].iloc[0])
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df["generation"], y=df["elo_rating"],
+        mode="lines+markers", name="Model Elo",
+        line={"width": 2.5, "color": _COLORS["accent"]},
+        marker={"size": 6},
+        customdata=df[["elo_diff", "score_rate", "wins", "losses", "draws"]].values,
+        hovertemplate=(
+            "Gen %{x} — Elo: %{y:.0f} "
+            "(%{customdata[0]:+.0f} vs baseline)<br>"
+            "Score rate: %{customdata[1]:.3f} "
+            "(W%{customdata[2]} L%{customdata[3]} D%{customdata[4]})"
+            "<extra></extra>"
+        ),
+    ))
+    fig.add_hline(
+        y=baseline, line_dash="dash", line_color=_COLORS["neutral"], line_width=1,
+        annotation_text=f"Baseline (gen 0) = {baseline}",
+        annotation_position="bottom right",
+        annotation_font_size=10, annotation_font_color=_COLORS["neutral"],
+    )
+    fig.update_layout(
+        xaxis_title="Generation", yaxis_title="Elo rating",
+        title="Elo Rating vs Frozen Gen-0 Baseline",
+        xaxis={"dtick": 1 if df["generation"].max() < 40 else 5},
+    )
+    return _apply_defaults(fig)
+
+
+def _make_minimax_plot(minimax_data: pd.DataFrame) -> go.Figure:
+    """Vs perfect-play minimax (TTT only): draw rate and loss rate per gen.
+
+    Against perfect play, TTT is a forced draw — so an optimal model should
+    have ``draw_rate → 1.0`` and ``loss_rate → 0`` over training. Loss rate
+    falling first, then draw rate rising as remaining wins disappear, is the
+    canonical learning signature for a solved game.
+    """
+    df = minimax_data.sort_values("generation").copy()
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=df["generation"], y=100 * df["draw_rate"],
+        mode="lines+markers", name="Draw rate (target: 100%)",
+        line={"width": 2.5, "color": _COLORS["tertiary"]},
+        hovertemplate="Gen %{x} — draws: %{y:.0f}%<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=df["generation"], y=100 * df["loss_rate"],
+        mode="lines+markers", name="Loss rate (target: 0%)",
+        line={"width": 2.5, "color": _COLORS["negative"], "dash": "dot"},
+        hovertemplate="Gen %{x} — losses: %{y:.0f}%<extra></extra>",
+    ))
+    fig.update_layout(
+        xaxis_title="Generation", yaxis_title="Rate (%)",
+        yaxis_range=[-2, 102],
+        title="Vs Perfect-Play Minimax (TTT)",
+        xaxis={"dtick": 1 if df["generation"].max() < 40 else 5},
+    )
+    return _apply_defaults(fig)
+
+
+def _make_policy_accuracy_plot(
+    accuracy_data: pd.DataFrame, game_name: str,
+) -> go.Figure:
+    """Per-generation top-K agreement between the network's raw policy and
+    the eval-set target. ``game_name`` switches the framing only — the
+    numbers come from the same diagnostic either way.
+
+    - **TTT**: target is *minimax-optimal*. A "hit" means the net picks an
+      action that is genuinely optimal under perfect play. Top-1 should
+      climb toward 100% as the net internalises perfect play.
+    - **Blokus / other**: target is the MCTS visit-count argmax recorded in
+      gen-1 self-play. Top-1 measures how often the raw net agrees with
+      what search arrived at — AlphaGo Zero's Figure 3b in spirit.
+
+    Computed on the frozen eval set after every training epoch; one point
+    per generation is shown (mean across epochs).
+    """
+    df = accuracy_data.copy()
+    agg = df.groupby("generation").agg(
+        top1_mean=("top1_accuracy", "mean"),
+        top5_mean=("top5_accuracy", "mean"),
+    ).reset_index().sort_values("generation")
+
+    if game_name == "tictactoe":
+        title = "Policy Agreement vs Minimax Oracle (held-out set)"
+    else:
+        title = "Policy Agreement vs MCTS (held-out set)"
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=agg["generation"], y=100 * agg["top1_mean"],
+        mode="lines+markers", name="Top-1",
+        line={"width": 2.5, "color": _COLORS["primary"]},
+        hovertemplate="Gen %{x} — top-1: %{y:.1f}%<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=agg["generation"], y=100 * agg["top5_mean"],
+        mode="lines+markers", name="Top-5",
+        line={"width": 2.5, "color": _COLORS["tertiary"], "dash": "dot"},
+        hovertemplate="Gen %{x} — top-5: %{y:.1f}%<extra></extra>",
+    ))
+    fig.update_layout(
+        xaxis_title="Generation", yaxis_title="Agreement (%)",
+        yaxis_range=[0, 105], title=title,
+        xaxis={"dtick": 1 if agg["generation"].max() < 40 else 5},
+    )
+    return _apply_defaults(fig)
+
+
+def _make_value_calibration_plot(
+    calibration_data: pd.DataFrame, game_name: str,
+) -> go.Figure:
+    """Reliability diagram for the value head, latest epoch.
+
+    Predicted v ∈ [-1, 1] is binned into 10 buckets; each marker is the mean
+    *target* value of positions whose predicted v fell in that bucket. The
+    y-axis target depends on the game:
+
+    - **TTT**: target is the position's true minimax value ∈ ``{-1, 0, +1}``.
+      Markers should hug the y=x diagonal — a winning position should be
+      predicted near +1, a losing one near -1, a drawn one near 0.
+    - **Blokus / other**: target is the actual game outcome ``z`` recorded
+      in the eval set's self-play games. y=x is still the well-calibrated
+      reference, but expect more noise since outcomes are post-hoc and
+      depend on both players' downstream play.
+    """
+    df = calibration_data.copy()
+    last_gen = df["generation"].max()
+    last_epoch = df[df["generation"] == last_gen]["epoch"].max()
+    latest = df[(df["generation"] == last_gen) & (df["epoch"] == last_epoch)]
+    latest = latest.dropna(subset=["bucket_mean_actual"]).sort_values("bucket_center")
+
+    if game_name == "tictactoe":
+        y_label = "Mean true minimax value (-1 / 0 / +1)"
+        title = "Value-Head Reliability vs Minimax (latest epoch)"
+        hover_label = "minimax mean"
+    else:
+        y_label = "Mean actual game outcome"
+        title = "Value-Head Reliability (latest epoch)"
+        hover_label = "outcome mean"
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=[-1, 1], y=[-1, 1],
+        mode="lines", name="Perfect calibration (y=x)",
+        line={"dash": "dash", "color": _COLORS["neutral"], "width": 1},
+        hoverinfo="skip",
+    ))
+    max_count = max(int(latest["bucket_count"].max()), 1)
+    sizes = 6 + 24 * latest["bucket_count"] / max_count
+    fig.add_trace(go.Scatter(
+        x=latest["bucket_center"], y=latest["bucket_mean_actual"],
+        mode="markers+lines", name=f"Gen {int(last_gen)} epoch {int(last_epoch)}",
+        marker={
+            "size": sizes, "color": _COLORS["accent"],
+            "line": {"width": 1, "color": _COLORS["accent"]},
+        },
+        customdata=latest["bucket_count"],
+        hovertemplate=(
+            "Predicted ≈ %{x:.1f}, " + hover_label + ": %{y:.2f}"
+            " (%{customdata} positions)<extra></extra>"
+        ),
+    ))
+    fig.update_layout(
+        xaxis_title="Predicted value (bucket centre)",
+        yaxis_title=y_label, title=title,
+        xaxis_range=[-1.05, 1.05], yaxis_range=[-1.05, 1.05],
+    )
+    return _apply_defaults(fig)
+
+
+def _make_resource_usage_plot(resource_data: pd.DataFrame) -> go.Figure:
+    """Line chart of memory usage over generations — one line per phase.
+
+    Replaces the previous 90-bar grouped chart, which was unreadable for runs
+    with more than a few generations.
+    """
+    df = resource_data.copy()
+    df["rss_mb"] = df["process_rss_bytes"] / (1024 ** 2)
+    df = df.sort_values("generation")
 
     has_gpu = (
         "gpu_memory_bytes" in df.columns
@@ -340,47 +979,149 @@ def _make_resource_usage_plot(resource_data: pd.DataFrame) -> go.Figure:
     )
     if has_gpu:
         df["gpu_mb"] = df["gpu_memory_bytes"] / (1024 ** 2)
-        for stage in df["cycle_stage"].unique():
-            stage_df = df[df["cycle_stage"] == stage]
-            fig.add_trace(go.Bar(
+
+    fig = go.Figure()
+    for stage in ["SelfPlay", "Training", "Arena"]:
+        stage_df = df[df["cycle_stage"] == stage]
+        if stage_df.empty:
+            continue
+        fig.add_trace(go.Scatter(
+            x=stage_df["generation"], y=stage_df["rss_mb"],
+            mode="lines+markers", name=f"{stage} (RSS)",
+            line={"width": 2, "color": _PHASE_COLORS.get(stage, _COLORS["neutral"])},
+        ))
+        if has_gpu:
+            fig.add_trace(go.Scatter(
                 x=stage_df["generation"], y=stage_df["gpu_mb"],
-                name=f"{stage} (GPU)", marker_color=_PHASE_COLORS.get(stage),
-                marker_pattern_shape="/",
+                mode="lines+markers", name=f"{stage} (GPU)",
+                line={"width": 2, "dash": "dot",
+                      "color": _PHASE_COLORS.get(stage, _COLORS["neutral"])},
+                showlegend=True,
             ))
 
+    fig.update_layout(
+        xaxis_title="Generation", yaxis_title="Memory (MB)",
+        title="Memory Usage" if has_gpu else "Process Memory (RSS)",
+    )
     return _apply_defaults(fig, width=_HALF_WIDTH, height=_GRID_HEIGHT)
 
 
 def _make_profiling_plot(profiling_data: pd.DataFrame) -> go.Figure:
-    """Simplified profiling: game length and MCTS throughput box plots."""
+    """Self-play profiling — mean line + std band per generation for three diagnostics.
+
+    For each metric the headline signal is the *trend across generations*, not
+    the per-gen distribution shape. Mean line + one-sigma shaded band reads at
+    a glance and avoids the blocky look violins produce on near-discrete data
+    (e.g. TTT game lengths only take values 5-9).
+
+    Three rows:
+    1. Game length (moves per game).
+    2. MCTS throughput (sims/s).
+    3. MCTS policy entropy (nats, on the pre-temperature visit distribution).
+       Should drop over training as the model becomes more confident.
+    """
     df = profiling_data.copy()
-    df["generation"] = df["generation"].astype(str)
+    if "mean_policy_entropy" not in df.columns:
+        df["mean_policy_entropy"] = 0.0  # backward compat with pre-R8 runs
+    agg = df.groupby("generation").agg(
+        moves_mean=("num_moves", "mean"),
+        moves_std=("num_moves", "std"),
+        sims_mean=("sims_per_second", "mean"),
+        sims_std=("sims_per_second", "std"),
+        entropy_mean=("mean_policy_entropy", "mean"),
+        entropy_std=("mean_policy_entropy", "std"),
+    ).reset_index().sort_values("generation")
+    for col in ("moves_std", "sims_std", "entropy_std"):
+        agg[col] = agg[col].fillna(0.0)
 
     fig = make_subplots(
-        rows=2, cols=1,
-        subplot_titles=["Game Length (moves)", "MCTS Throughput (sims/s)"],
-        vertical_spacing=0.18,
+        rows=3, cols=1,
+        subplot_titles=[
+            "Game Length (moves)",
+            "MCTS Throughput (sims/s)",
+            "MCTS Policy Entropy (nats)",
+        ],
+        vertical_spacing=0.12,
     )
 
-    fig.add_trace(
-        go.Box(
-            x=df["generation"], y=df["num_moves"],
-            name="Game Length", showlegend=False,
-            marker_color=_COLORS["primary"],
-        ),
-        row=1, col=1,
+    _mean_band_trace(
+        fig, agg["generation"], agg["moves_mean"], agg["moves_std"],
+        color=_COLORS["primary"], name="Game Length",
+        unit="moves", row=1, col=1,
     )
-    fig.add_trace(
-        go.Box(
-            x=df["generation"], y=df["sims_per_second"],
-            name="Sims/s", showlegend=False,
-            marker_color=_COLORS["secondary"],
-        ),
-        row=2, col=1,
+    _mean_band_trace(
+        fig, agg["generation"], agg["sims_mean"], agg["sims_std"],
+        color=_COLORS["secondary"], name="Sims/s",
+        unit="sims/s", row=2, col=1,
     )
-    fig.update_xaxes(title_text="Generation", row=2, col=1)
-    fig.update_layout(title="Self-Play Profiling")
-    return _apply_defaults(fig, width=_HALF_WIDTH, height=_GRID_HEIGHT)
+    _mean_band_trace(
+        fig, agg["generation"], agg["entropy_mean"], agg["entropy_std"],
+        color=_COLORS["accent"], name="Policy Entropy",
+        unit="nats", row=3, col=1,
+    )
+
+    fig.update_xaxes(title_text="Generation", row=3, col=1)
+    for r in (1, 2, 3):
+        fig.update_xaxes(
+            row=r, col=1, dtick=1 if agg["generation"].max() < 40 else 5,
+        )
+    fig.update_layout(title="Self-Play Profiling", showlegend=False)
+    return _apply_defaults(fig, width=_HALF_WIDTH, height=int(_GRID_HEIGHT * 1.4))
+
+
+def _mean_band_trace(
+    fig: go.Figure,
+    x: pd.Series,
+    mean: pd.Series,
+    std: pd.Series,
+    *,
+    color: str,
+    name: str,
+    unit: str,
+    row: int | None = None,
+    col: int | None = None,
+) -> None:
+    """Add a mean line + one-sigma shaded band to a figure.
+
+    Pass ``row`` and ``col`` to target a subplot cell; omit them for a
+    single-plot figure (no ``make_subplots`` grid).
+
+    Hover shows ``Gen N — mean: X (unit), ± std`` for the active point.
+    """
+    upper = mean + std
+    lower = mean - std
+
+    target = {"row": row, "col": col} if row is not None and col is not None else {}
+
+    # Band (drawn first so the mean line sits on top)
+    fig.add_trace(
+        go.Scatter(
+            x=pd.concat([x, x[::-1]]),
+            y=pd.concat([upper, lower[::-1]]),
+            fill="toself",
+            fillcolor=color,
+            opacity=0.18,
+            line={"width": 0},
+            hoverinfo="skip",
+            showlegend=False,
+        ),
+        **target,
+    )
+    # Mean line
+    fig.add_trace(
+        go.Scatter(
+            x=x, y=mean,
+            mode="lines+markers", name=name,
+            line={"width": 2.5, "color": color},
+            marker={"size": 5},
+            customdata=std,
+            hovertemplate=(
+                f"Gen %{{x}} — mean: %{{y:.2f}} {unit}, "
+                f"± %{{customdata:.2f}}<extra></extra>"
+            ),
+        ),
+        **target,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -475,22 +1216,79 @@ def create_html_report(config: RunConfig) -> None:
     logger.info("Writing report...")
     start = time.perf_counter()
 
-    # Read all data sources
-    loss_data = pd.read_parquet(config.training_data_directory)
-    arena_data = pd.read_parquet(config.arena_data_directory)
-    timings_data = pd.read_parquet(config.timings_directory)
-    resource_data = pd.read_parquet(config.resource_usage_directory)
-    profiling_data = pd.read_parquet(config.self_play_profiling_directory)
-    throughput_data = pd.read_parquet(config.training_throughput_directory)
+    # Read all data sources — _load_metrics casts the hive-partitioned
+    # `generation` column from category dtype to int so sorts are numeric.
+    loss_data = _load_metrics(config.training_data_directory)
+    arena_data = _load_metrics(config.arena_data_directory)
+    timings_data = _load_metrics(config.timings_directory)
+    resource_data = _load_metrics(config.resource_usage_directory)
+    profiling_data = _load_metrics(config.self_play_profiling_directory)
+    throughput_data = _load_metrics(config.training_throughput_directory)
+    # Optional — only populated when an eval set was built (i.e. recent runs).
+    network_entropy_data = (
+        _load_metrics(config.training_entropy_directory)
+        if config.training_entropy_directory.exists() else None
+    )
+    arena_replays_data = (
+        _load_metrics(config.arena_replays_directory)
+        if config.arena_replays_directory.exists() else None
+    )
+    policy_accuracy_data = (
+        _load_metrics(config.policy_accuracy_directory)
+        if config.policy_accuracy_directory.exists() else None
+    )
+    value_calibration_data = (
+        _load_metrics(config.value_calibration_directory)
+        if config.value_calibration_directory.exists() else None
+    )
+    elo_data = (
+        _load_metrics(config.elo_ratings_directory)
+        if config.elo_ratings_directory.exists() else None
+    )
+    minimax_data = (
+        _load_metrics(config.minimax_results_directory)
+        if config.minimax_results_directory.exists() else None
+    )
 
     # Build figures
     fig_loss_gen = _make_loss_per_generation(loss_data)
     fig_loss_timeline = _make_loss_timeline(loss_data)
+    fig_per_gen_curves = _make_per_gen_loss_curves(loss_data)
     fig_arena = _make_arena_plot(arena_data, config.update_threshold)
     fig_timing = _make_timing_plot(timings_data)
     fig_throughput = _make_throughput_plot(throughput_data)
     fig_resources = _make_resource_usage_plot(resource_data)
     fig_profiling = _make_profiling_plot(profiling_data)
+    fig_network_entropy = (
+        _make_network_entropy_plot(network_entropy_data)
+        if network_entropy_data is not None and not network_entropy_data.empty
+        else None
+    )
+    fig_policy_accuracy = (
+        _make_policy_accuracy_plot(policy_accuracy_data, config.game)
+        if policy_accuracy_data is not None and not policy_accuracy_data.empty
+        else None
+    )
+    fig_value_calibration = (
+        _make_value_calibration_plot(value_calibration_data, config.game)
+        if value_calibration_data is not None and not value_calibration_data.empty
+        else None
+    )
+    fig_elo = (
+        _make_elo_plot(elo_data)
+        if elo_data is not None and not elo_data.empty
+        else None
+    )
+    fig_minimax = (
+        _make_minimax_plot(minimax_data)
+        if minimax_data is not None and not minimax_data.empty
+        else None
+    )
+    arena_replays_html = (
+        _make_arena_replays_section(arena_replays_data, config)
+        if arena_replays_data is not None and not arena_replays_data.empty
+        else ""
+    )
 
     # Write HTML
     filename = config.report_directory / "report.html"
@@ -500,8 +1298,57 @@ def create_html_report(config: RunConfig) -> None:
         return fig.to_html(full_html=False, include_plotlyjs=False)
 
     today = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d")
-    kpi_html = _make_kpi_cards(loss_data, arena_data, timings_data, profiling_data, throughput_data)
+    kpi_html = _make_kpi_cards(
+        loss_data, arena_data, timings_data, profiling_data, throughput_data,
+        update_threshold=config.update_threshold,
+    )
     config_html = _make_config_table(config)
+
+    strength_html = ""
+    if fig_elo is not None or fig_minimax is not None:
+        parts = [
+            '<section>',
+            '<h2>Strength vs Fixed Baselines</h2>',
+            '<p class="section-desc">'
+            'External strength measurements: how does the new network this '
+            'generation compare to fixed opponents, regardless of whether it '
+            'was accepted in arena? Elo is the headline progress curve; '
+            'minimax (TTT only) is the absolute "is this optimal?" signal.'
+            '</p>',
+        ]
+        if fig_elo is not None:
+            parts.append(_chart(fig_elo))
+        if fig_minimax is not None:
+            parts.append(_chart(fig_minimax))
+        parts.append('</section>')
+        strength_html = "\n".join(parts)
+
+    diagnostics_html = ""
+    if (
+        fig_network_entropy is not None
+        or fig_policy_accuracy is not None
+        or fig_value_calibration is not None
+    ):
+        parts = [
+            '<section>',
+            '<h2>Network Diagnostics</h2>',
+            '<p class="section-desc">'
+            'Per-epoch evaluation of the network alone (no MCTS) on a frozen '
+            'held-out set of positions sampled from generation 1\'s self-play. '
+            'These are the AlphaZero-style training health curves — they '
+            'isolate the network\'s learning from MCTS noise.'
+            '</p>',
+        ]
+        if fig_network_entropy is not None:
+            parts.append(_chart(fig_network_entropy))
+        if fig_policy_accuracy is not None:
+            parts.append(_chart(fig_policy_accuracy))
+        if fig_value_calibration is not None:
+            parts.append(_chart(fig_value_calibration))
+        parts.append('</section>')
+        diagnostics_html = "\n".join(parts)
+
+    network_entropy_html = ""  # rolled into diagnostics_html above
 
     with open(filename, "w") as f:
         f.write(f"""<!DOCTYPE html>
@@ -530,8 +1377,18 @@ def create_html_report(config: RunConfig) -> None:
 <details>
     <summary>Per-Batch Detail</summary>
     {_chart(fig_loss_timeline)}
+    <p class="section-desc" style="margin-top:18px;">
+        Overlay of each generation's smoothed training curve. Colours run from
+        earliest gen (purple) to latest (yellow). If later generations start
+        at lower loss or converge faster, the curves drift down and steepen
+        with colour — direct visual answer to "is the network getting better
+        at learning the task itself over time?"
+    </p>
+    {_chart(fig_per_gen_curves)}
 </details>
 </section>
+
+{diagnostics_html}
 
 <section>
 <h2>Arena</h2>
@@ -541,6 +1398,10 @@ def create_html_report(config: RunConfig) -> None:
 </p>
 {_chart(fig_arena)}
 </section>
+
+{strength_html}
+
+{arena_replays_html}
 
 <section>
 <h2>Performance</h2>

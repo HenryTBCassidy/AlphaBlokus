@@ -60,6 +60,12 @@ class MCTSEpisodeStats:
     tree_memory_bytes: int = 0  # Approximate memory used by MCTS tree dictionaries
     move_stats: tuple[MCTSMoveStats, ...] = ()
 
+    # Diagnostic — mean entropy (nats) of the raw MCTS visit-count distribution
+    # across moves in this episode. Computed on the pre-temperature
+    # ``visit_counts / sum(visit_counts)`` so it reflects search confidence,
+    # not how the temperature sampled.
+    mean_policy_entropy: float = 0.0
+
 
 class MCTS:
     """
@@ -111,6 +117,7 @@ class MCTS:
         self._num_valid_moves_calls: int = 0
         self._num_game_ended_calls: int = 0
         self._move_stats: list[MCTSMoveStats] = []
+        self._policy_entropies: list[float] = []
 
     # -- Public methods --------------------------------------------------------
 
@@ -159,6 +166,15 @@ class MCTS:
         # Extract visit counts for all actions
         s = self.game.state_key(canonical_board)
         counts = [self.visit_counts.get((s, a), 0) for a in range(self.game.get_action_size())]
+
+        # Record search-confidence entropy on the *raw* visit distribution
+        # (before temperature sampling). Temperature controls how we *sample*
+        # from this distribution; the distribution itself is what MCTS settled on.
+        raw_total = float(sum(counts))
+        if raw_total > 0:
+            raw_probs = np.array(counts, dtype=float) / raw_total
+            nonzero = raw_probs[raw_probs > 0]
+            self._policy_entropies.append(float(-np.sum(nonzero * np.log(nonzero))))
 
         # Handle temperature=0 case (deterministic best action)
         if temp == 0:
@@ -281,6 +297,7 @@ class MCTS:
 
     def get_episode_stats(self) -> MCTSEpisodeStats:
         """Return accumulated profiling statistics for this MCTS instance."""
+        mean_entropy = float(np.mean(self._policy_entropies)) if self._policy_entropies else 0.0
         return MCTSEpisodeStats(
             num_moves=self._num_moves,
             total_sims=self._total_sims,
@@ -294,4 +311,5 @@ class MCTS:
             num_game_ended_calls=self._num_game_ended_calls,
             tree_memory_bytes=self._estimate_tree_memory_bytes(),
             move_stats=tuple(self._move_stats),
+            mean_policy_entropy=mean_entropy,
         )

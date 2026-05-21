@@ -26,7 +26,7 @@ def _random_player(board: IBoard) -> int:
 def test_play_game_returns_valid_result(ttt_game: TicTacToeGame):
     """play_game should return a result in {-1, 1} or a small draw value."""
     arena = Arena(_random_player, _random_player, ttt_game)
-    result = arena.play_game()
+    result, _ = arena.play_game()
     # Result should be non-zero (game ended)
     assert result != 0
     # Should be one of: 1 (p1 wins), -1 (p2 wins), or small float (draw)
@@ -38,7 +38,7 @@ def test_play_game_random_vs_random(ttt_game: TicTacToeGame):
     arena = Arena(_random_player, _random_player, ttt_game)
     # Play 10 games — none should raise
     for _ in range(10):
-        result = arena.play_game()
+        result, _ = arena.play_game()
         assert result != 0
 
 
@@ -46,7 +46,7 @@ def test_play_games_counts_add_up(ttt_game: TicTacToeGame):
     """wins + losses + draws should equal num // 2 * 2."""
     num = 6
     arena = Arena(_random_player, _random_player, ttt_game)
-    wins, losses, draws = arena.play_games(num)
+    wins, losses, draws, _ = arena.play_games(num)
 
     # Total games = num // 2 * 2 = 6
     assert wins + losses + draws == (num // 2) * 2

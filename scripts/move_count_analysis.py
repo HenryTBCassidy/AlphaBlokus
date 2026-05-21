@@ -21,7 +21,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from games.blokusduo.game import BlokusDuoGame
-from reporting.display import BOARD_CSS, build_game_replay_html
+from reporting.display_blokusduo import BOARD_CSS, build_game_replay_html
 
 OUTPUT_DIR = Path("temp/move_count_analysis")
 PIECES_PATH = Path("games/blokusduo/pieces.json")

@@ -95,6 +95,41 @@ class RunConfig:
     # Optional reporting backends
     wandb: WandbConfig | None = None  # If set, mirror metrics to Weights & Biases
 
+    # Elo evaluation: number of games per generation to play vs the frozen
+    # gen-0 baseline. 0 disables Elo tracking entirely. The default of 50 is
+    # always-on by intention — Elo vs gen-0 is the headline "is the model
+    # actually getting stronger?" curve for AlphaZero-style work.
+    elo_games_per_gen: int = 50
+
+    # Anchor rating shown for the gen-0 baseline. Display-only — the
+    # underlying Elo difference math is unchanged. There's no universal
+    # convention here:
+    #
+    # - AlphaGo Zero / AlphaZero papers anchor random nets at 0 Elo and let
+    #   the curve climb monotonically. Works for them because at their scale
+    #   it never dips below.
+    # - USCF / Chess.com default unrated players to 1200; Lichess uses 1500.
+    #   These imply "random plays at average human" which is misleading.
+    #
+    # 400 sits in the middle: above 0 (so a trained net that briefly learns
+    # something worse-than-random has room to dip without going negative —
+    # this can happen with early-gen overfitting on noisy MCTS targets),
+    # but low enough to read as "weak baseline." Matches the scholastic /
+    # kids'-tournament starting range; gives the converged model room to
+    # climb to ~800-1200+ at full training.
+    elo_baseline_rating: int = 400
+
+    # TTT-specific: games per generation to play vs a perfect-play minimax
+    # opponent. Only used when ``game == "tictactoe"``. 0 disables.
+    minimax_games_per_gen: int = 20
+
+    # Global RNG seed for numpy, torch, MCTS tie-breaks and the eval-set
+    # sampler. Set to a fixed value to make a run bit-for-bit reproducible;
+    # ``None`` skips seeding entirely (non-deterministic — only useful if you
+    # want a single run to have stochastic warm-up). Two runs with the same
+    # seed + same config + same hardware will produce identical metrics.
+    seed: int | None = 42
+
     @property
     def run_directory(self) -> Path:
         """Base directory for all files related to this training run."""
@@ -149,6 +184,43 @@ class RunConfig:
     def training_throughput_directory(self) -> Path:
         """Directory for per-epoch training throughput metrics."""
         return self.run_directory / "TrainingThroughput"
+
+    @property
+    def eval_set_directory(self) -> Path:
+        """Directory holding the frozen held-out positions used for per-epoch
+        network-entropy evaluation. Built once after the first generation's
+        self-play and reused for every subsequent epoch."""
+        return self.run_directory / "EvalSet"
+
+    @property
+    def training_entropy_directory(self) -> Path:
+        """Directory for per-epoch network policy entropy on the held-out eval set."""
+        return self.run_directory / "TrainingEntropy"
+
+    @property
+    def policy_accuracy_directory(self) -> Path:
+        """Directory for per-epoch network top-1 / top-5 policy accuracy on the eval set."""
+        return self.run_directory / "PolicyAccuracy"
+
+    @property
+    def value_calibration_directory(self) -> Path:
+        """Directory for per-epoch network value-head reliability buckets on the eval set."""
+        return self.run_directory / "ValueCalibration"
+
+    @property
+    def elo_ratings_directory(self) -> Path:
+        """Directory for per-generation Elo rating measured against the frozen gen-0 baseline."""
+        return self.run_directory / "EloRatings"
+
+    @property
+    def minimax_results_directory(self) -> Path:
+        """Directory for per-generation results vs a perfect-play minimax opponent (TTT only)."""
+        return self.run_directory / "MinimaxResults"
+
+    @property
+    def arena_replays_directory(self) -> Path:
+        """Directory for recorded arena games (move sequences + top-K policies per move)."""
+        return self.run_directory / "ArenaReplays"
 
 
 def load_args(config_path: str | Path) -> RunConfig:

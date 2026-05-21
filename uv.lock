@@ -36,6 +36,11 @@ dev = [
     { name = "ruff" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "wandb-workspaces" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "dataclass-wizard", specifier = ">=0.22.0" },
@@ -52,6 +57,9 @@ requires-dist = [
     { name = "wandb", specifier = ">=0.27.0" },
 ]
 provides-extras = ["dev"]
+
+[package.metadata.requires-dev]
+dev = [{ name = "wandb-workspaces", specifier = ">=0.3.9" }]
 
 [[package]]
 name = "annotated-types"
@@ -1267,6 +1275,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/5f/40/bf510c8758727df020f83b717ebc1fcc1739ed7f6ae1796ebef60bf6f592/wandb-0.27.0-py3-none-win32.whl", hash = "sha256:0bd5659417e386bf6538b5e2ffe6885774c6197f0e4853bfed517d5b0db457f1", size = 25036164, upload-time = "2026-05-14T03:43:54.839Z" },
     { url = "https://files.pythonhosted.org/packages/54/ff/69f88e7d90c22b79bcb911143c13e59742ee192080b21015ff83a5a1f60a/wandb-0.27.0-py3-none-win_amd64.whl", hash = "sha256:89d584b73166eecee96fb446f18d0e45b1aa45aba6a3696296f3f06d7454516b", size = 25036170, upload-time = "2026-05-14T03:43:59.227Z" },
     { url = "https://files.pythonhosted.org/packages/f6/38/f7efd7a87297a55c7e9a331a1dbb5b19e54aeacc11fe6f43f8636a73987c/wandb-0.27.0-py3-none-win_arm64.whl", hash = "sha256:a6c129c311edf210a2b4f2f4acc557eff522628125f5f28ed27df19c16c07079", size = 22972710, upload-time = "2026-05-14T03:44:03.275Z" },
+]
+
+[[package]]
+name = "wandb-workspaces"
+version = "0.3.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "pydantic" },
+    { name = "wandb" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/13/d3/3a5ebc8b969ec8d2391bb43e4a3d76ceaee2bfc11c9e9dc96b61577a9092/wandb_workspaces-0.3.9.tar.gz", hash = "sha256:d186faa7b0c4e6c33aecfea833e81ca0256d117b26f7e428f002c14cbf30601c", size = 210169, upload-time = "2026-03-31T15:23:20.337Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c4/46/112522e555b1fef7129e85065348d20dcb8761171b07614b5d3e95f86759/wandb_workspaces-0.3.9-py3-none-any.whl", hash = "sha256:79fbb9e899e5457f18446fd6a8c066a05709562ad9fe31b3d215ca4749a65f25", size = 100710, upload-time = "2026-03-31T15:23:18.934Z" },
 ]
 
 [[package]]
