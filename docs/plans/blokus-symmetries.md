@@ -32,7 +32,7 @@ A "perspective flip" (swap the canonical-form +1/-1 channels) would be a further
 | S4 | Wire `BlokusDuoGame.get_symmetries(board, pi)` to return `[(board, pi), (board.transposed(), transpose_pi(pi))]`. Replace the `NotImplementedError`. | 30 min | High | ✅ |
 | S5 | **Equivariance tests**: for a hand-built mid-game position, verify `transpose(get_next_state(b, p, a)) == get_next_state(transpose(b), p, transpose_action(a))` across all legal `a`. | 1.5 hr | High | ✅ |
 | S6 | **Invariance tests**: `valid_move_masking(transpose(b), p)` has the same legal-action count as `valid_move_masking(b, p)`, and the legal-action set transposes cleanly. | 30 min | High | ✅ |
-| S7 | **Round-trip tests**: `transpose(transpose(b)) == b`, `transpose_action(transpose_action(a)) == a` on a random sample of states + actions. | 30 min | Medium | |
+| S7 | **Round-trip tests**: `transpose(transpose(b)) == b`, `transpose_action(transpose_action(a)) == a` on a random sample of states + actions. | 30 min | Medium | ✅ |
 | S7.5 | **Property-based fuzz** (optional, hypothesis-style): random move sequences of varying length × random transpose-insertion points. Validates T2.b/T5.b hold for any rollout, not just hand-built ones. | 1 hr | Low | |
 | S8 | **Visual sanity check**: render a mid-game board via the Blokus renderer, transpose it, render again — confirm pieces flip across the main diagonal by eye. Single test, snapshot HTML. | 30 min | Medium | |
 | S9 | **Position-symmetry diagnostic** for the post-run report. Given a trained net + a fixed pair of symmetric positions, print the raw NN policy on both and a "symmetry KL divergence" score. New row in HTML report's diagnostics section. Same code works for TTT too (different reference position). | 2 hr | Medium | |
