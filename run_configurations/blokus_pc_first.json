@@ -1,0 +1,36 @@
+{
+  "game": "blokusduo",
+  "run_name": "blokus_pc_first",
+  "seed": 42,
+  "num_generations": 2,
+  "num_eps": 25,
+  "temp_threshold": 6,
+  "update_threshold": 0.55,
+  "max_queue_length": 2000,
+  "num_arena_matches": 20,
+  "root_directory": "./temp/",
+  "load_model": false,
+  "max_generations_lookback": 5,
+  "elo_games_per_gen": 10,
+  "minimax_games_per_gen": 0,
+  "symmetry_diagnostic_positions": 3,
+  "mcts_config": {
+    "num_mcts_sims": 200,
+    "cpuct": 2.5
+  },
+  "net_config": {
+    "learning_rate": 0.001,
+    "dropout": 0.3,
+    "epochs": 5,
+    "batch_size": 64,
+    "cuda": true,
+    "num_filters": 64,
+    "num_residual_blocks": 4
+  },
+  "wandb": {
+    "project": "alphablokus-poc",
+    "entity": null,
+    "tags": ["blokus", "pc", "first-real", "cpuct-2.5"],
+    "mode": "online"
+  }
+}
