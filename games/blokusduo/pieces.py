@@ -138,6 +138,12 @@ class PieceManager:
     def __init__(self, pieces: list[Piece]) -> None:
         self.pieces: dict[int, Piece] = {p.id: p for p in pieces}
         self._orientation_codec: OrientationCodec = OrientationCodec(pieces)
+        # Lazily computed table mapping each ``orientation_id`` to the
+        # ``orientation_id`` representing the *transposed* (main-diagonal-
+        # reflected) shape. Built on first call to
+        # :meth:`orientation_transpose_id`. See
+        # ``docs/plans/archive/blokus-symmetries.md`` for derivation.
+        self._orientation_transpose_table: NDArray | None = None
 
         # Pre-compute all orientation arrays and filled cell indices.
         # Keyed by (piece_id, orientation) for O(1) lookup.
@@ -217,6 +223,60 @@ class PieceManager:
     def num_entries(self) -> int:
         """Number of unique piece-orientation combinations."""
         return len(self._orientation_codec)
+
+    def orientation_transpose_id(self, orientation_id: int) -> int:
+        """Return the orientation_id whose piece-grid is the main-diagonal
+        transpose of the grid for ``orientation_id``.
+
+        Used by the Blokus symmetry augmentation: when we reflect a board
+        across the main diagonal, each placed piece's *position* transposes
+        (``(r, c) -> (c, r)``) AND its *orientation* must change to whichever
+        of the same piece's basis orientations represents the transposed
+        shape. This method is the orientation half of that mapping.
+
+        Computed once on first call and cached as a length-91 integer table
+        — at run time this is a single array lookup, fast enough for the
+        MCTS hot path.
+
+        Raises:
+            ValueError: if a piece's ``basis_orientations`` is incomplete
+                (i.e. there's no basis orientation matching the transposed
+                grid). Indicates a piece-definition bug, not a usage bug.
+        """
+        if self._orientation_transpose_table is None:
+            self._orientation_transpose_table = self._build_orientation_transpose_table()
+        return int(self._orientation_transpose_table[orientation_id])
+
+    def _build_orientation_transpose_table(self) -> NDArray:
+        """Construct the orientation_id → transposed orientation_id table.
+
+        For each orientation_id we compute the transpose of the piece-grid
+        in that orientation, then search the same piece's basis orientations
+        for one whose grid matches. Every basis orientation must have a
+        matching basis orientation under transpose — if not, the piece
+        definition's ``basis_orientations`` list is missing an entry.
+        """
+        n = self.num_entries
+        table = np.full(n, -1, dtype=np.int32)
+        for orientation_id in range(n):
+            piece_id, orientation = self._orientation_codec.decode(orientation_id)
+            grid = self._cached_arrays[(piece_id, orientation)]
+            transposed_grid = np.transpose(grid)
+            piece = self.pieces[piece_id]
+            for candidate in piece.basis_orientations:
+                candidate_grid = self._cached_arrays[(piece_id, candidate)]
+                if np.array_equal(candidate_grid, transposed_grid):
+                    table[orientation_id] = self._orientation_codec.encode(
+                        (piece_id, candidate),
+                    )
+                    break
+            else:
+                raise ValueError(
+                    f"Piece {piece_id} ({piece.name}) has no basis orientation "
+                    f"matching the transpose of {orientation.value}. "
+                    f"basis_orientations is incomplete."
+                )
+        return table
 
 
 def pieces_loader(filename: Path) -> PieceManager:
