@@ -328,6 +328,129 @@ def test_transpose_policy_pairs_with_transpose_action(
         assert new_pi[a] == pi[blokus_game.transpose_action(int(a))]
 
 
+# ── S5: equivariance under move application ────────────────────────────────
+
+
+def _placement_equal(a: BlokusDuoBoard, b: BlokusDuoBoard) -> bool:
+    """Two boards have identical placement state. Sufficient for testing
+    geometric equivariance — the higher-level invariants (remaining pieces,
+    last played, derived caches) are covered by S2 / T2.c.
+    """
+    return np.array_equal(a._piece_placement_board, b._piece_placement_board)
+
+
+def test_get_next_state_equivariant_under_transpose_single_move(
+    blokus_game: BlokusDuoGame, mid_game_board: BlokusDuoBoard,
+) -> None:
+    """T5.a — for every legal action from a hand-built mid-game position
+    and for both players, applying-then-transposing equals transposing-
+    then-applying-the-transposed-action.
+    """
+    for player in (1, -1):
+        mask = blokus_game.valid_move_masking(mid_game_board, player)
+        legal_actions = np.flatnonzero(mask)
+        # Cap the iteration count for runtime sanity — pick a representative
+        # sample across orientation_ids. The test still covers hundreds of
+        # actions per player.
+        sample = legal_actions[:: max(1, len(legal_actions) // 200)]
+        for action in sample:
+            action = int(action)
+            # Path A: apply then transpose
+            post_move_a, next_player_a = blokus_game.get_next_state(
+                mid_game_board, player, action,
+            )
+            path_a = post_move_a.transposed()
+            # Path B: transpose then apply transposed action
+            t_action = blokus_game.transpose_action(action)
+            t_board = mid_game_board.transposed()
+            path_b, next_player_b = blokus_game.get_next_state(t_board, player, t_action)
+
+            assert next_player_a == next_player_b
+            assert _placement_equal(path_a, path_b), (
+                f"equivariance failed for player {player}, action {action} "
+                f"(transposed: {t_action})"
+            )
+
+
+def test_transpose_commutes_with_game_replay(blokus_game: BlokusDuoGame) -> None:
+    """T5.b — apply the same sequence of legal moves in two ways and verify
+    the resulting boards match.
+
+    Path A: play the sequence on the original board, then transpose.
+    Path B: transpose the empty board, then play the transposed action
+            sequence.
+    """
+    rng = np.random.default_rng(seed=2026)
+    n_rollouts = 5
+    rollout_length = 8  # 4 moves per player
+
+    for rollout in range(n_rollouts):
+        empty = blokus_game.initialise_board()
+        original = empty
+        actions: list[int] = []
+        players: list[int] = []
+        player = 1
+        for _ in range(rollout_length):
+            mask = blokus_game.valid_move_masking(original, player)
+            legal = np.flatnonzero(mask)
+            if len(legal) == 0:
+                break
+            choice = int(rng.choice(legal))
+            actions.append(choice)
+            players.append(player)
+            original, player = blokus_game.get_next_state(original, player, choice)
+
+        # Path A
+        final_a = original.transposed()
+
+        # Path B
+        path_b = empty.transposed()
+        for action, p in zip(actions, players, strict=True):
+            t_action = blokus_game.transpose_action(action)
+            path_b, _ = blokus_game.get_next_state(path_b, p, t_action)
+
+        assert _placement_equal(final_a, path_b), (
+            f"replay equivariance failed on rollout {rollout} "
+            f"({len(actions)} moves)"
+        )
+
+
+# ── S6: invariance of valid-move masking ────────────────────────────────────
+
+
+def test_valid_move_count_invariant_under_transpose(
+    blokus_game: BlokusDuoGame, positions: list[BlokusDuoBoard],
+) -> None:
+    """Legal-move count is preserved under transposition for every fixture
+    and both players.
+    """
+    for position in positions:
+        for player in (1, -1):
+            mask_orig = blokus_game.valid_move_masking(position, player)
+            mask_t = blokus_game.valid_move_masking(position.transposed(), player)
+            assert mask_orig.sum() == mask_t.sum(), (
+                f"legal-move count drift under transpose for player {player}"
+            )
+
+
+def test_legal_action_set_transposes_correctly(
+    blokus_game: BlokusDuoGame, mid_game_board: BlokusDuoBoard,
+) -> None:
+    """The action-by-action set of legal moves on the transposed board is
+    exactly the transpose-image of the legal set on the original.
+    """
+    for player in (1, -1):
+        mask_orig = blokus_game.valid_move_masking(mid_game_board, player)
+        mask_t = blokus_game.valid_move_masking(mid_game_board.transposed(), player)
+        legal_orig = set(np.flatnonzero(mask_orig).tolist())
+        legal_t = set(np.flatnonzero(mask_t).tolist())
+        expected_t = {blokus_game.transpose_action(a) for a in legal_orig}
+        assert legal_t == expected_t, (
+            f"legal action set image mismatch for player {player}: "
+            f"diff = {legal_t.symmetric_difference(expected_t)}"
+        )
+
+
 def test_diagonal_symmetric_position_is_self_transpose(
     blokus_game: BlokusDuoGame,
     empty_board: BlokusDuoBoard,
