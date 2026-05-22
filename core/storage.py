@@ -140,6 +140,7 @@ class MetricsCollector:
     _elo_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _minimax_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _arena_replay_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _symmetry_diagnostic_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _wandb_run: Any | None = field(default=None, init=False, repr=False)
 
     # Cumulative counters used as W&B step_metric values for per-episode /
@@ -240,6 +241,11 @@ class MetricsCollector:
         # Blokus dashboards aren't littered with empty panels.
         if self.config.game == "tictactoe":
             self._wandb_run.define_metric("minimax/*", step_metric="generation")
+
+        # Symmetry diagnostic — logged per (gen, reference position) tuple.
+        # Headline scalar ``learning_quality/symmetry_kl_mean`` is the mean
+        # across all reference positions for that generation.
+        self._wandb_run.define_metric("learning_quality/*", step_metric="generation")
 
     def _publish(self, payload: dict) -> None:
         """Mirror a metrics payload to W&B if a run is active.
@@ -653,6 +659,7 @@ class MetricsCollector:
                 "action": move.action,
                 "top_k_actions": list(move.top_k_actions),
                 "top_k_probs": list(move.top_k_probs),
+                "played_prob": float(move.played_prob),
                 "outcome": outcome,
                 "player1_was_white": p1_white,
             })
@@ -692,6 +699,47 @@ class MetricsCollector:
             "minimax/wins": wins,
             "minimax/losses": losses,
             "minimax/draws": draws,
+            "generation": generation,
+        })
+
+    def log_symmetry_diagnostic(
+        self,
+        generation: int,
+        position_results: list[tuple[int, float, list[float], list[bool]]],
+    ) -> None:
+        """Record raw NN-policy symmetry diagnostic for one generation.
+
+        Each entry of ``position_results`` is
+        ``(position_index, mean_kl, kl_divergences, top1_matches)`` — one
+        per reference position. Per-position KLs are stored individually
+        (one row per (gen, position, symmetry-idx) so we can plot per-
+        position lines later) and the mean across positions is published as
+        the headline W&B scalar ``learning_quality/symmetry_kl_mean``.
+
+        Zero is the target; larger values mean the network has internalised
+        asymmetric biases that aren't averaged out by augmentation.
+        """
+        if not position_results:
+            return
+        overall_kls: list[float] = []
+        overall_matches: list[bool] = []
+        for pos_idx, mean_kl, kls, matches in position_results:
+            overall_kls.append(mean_kl)
+            overall_matches.extend(matches)
+            for sym_idx, kl in enumerate(kls):
+                self._symmetry_diagnostic_records.append({
+                    "generation": generation,
+                    "position_idx": pos_idx,
+                    "symmetry_idx": sym_idx,
+                    "kl_divergence": float(kl),
+                    "top1_match": bool(matches[sym_idx]) if sym_idx < len(matches) else False,
+                })
+        self._publish({
+            "learning_quality/symmetry_kl_mean": float(np.mean(overall_kls)),
+            "learning_quality/symmetry_kl_max": float(np.max(overall_kls)),
+            "learning_quality/symmetry_top1_match_rate": (
+                float(np.mean(overall_matches)) if overall_matches else 0.0
+            ),
             "generation": generation,
         })
 
@@ -849,6 +897,16 @@ class MetricsCollector:
             )
             count += len(self._minimax_records)
             self._minimax_records.clear()
+
+        if self._symmetry_diagnostic_records:
+            self._write_partition(
+                pd.DataFrame(self._symmetry_diagnostic_records),
+                config.symmetry_diagnostic_directory,
+                generation,
+                "symmetry.parquet",
+            )
+            count += len(self._symmetry_diagnostic_records)
+            self._symmetry_diagnostic_records.clear()
 
         if self._arena_replay_records:
             self._write_partition(

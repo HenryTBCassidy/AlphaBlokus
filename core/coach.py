@@ -131,6 +131,11 @@ class Coach:
         self._eval_set: EvalSet | None = None
         self._eval_set_size: int = 200
 
+        # Reference positions for the post-training symmetry diagnostic.
+        # Lazily built on first call to ``_evaluate_symmetry_diagnostic`` and
+        # reused across generations so the per-gen KL trend is comparable.
+        self._symmetry_diagnostic_positions: list[IBoard] | None = None
+
         # Elo evaluation: freeze the random-init network as the anchor opponent.
         # ``elo_baseline_net`` is a separate wrapper instance with that frozen
         # state so the current ``self.nnet`` can train without disturbing it.
@@ -395,6 +400,8 @@ class Coach:
             and self.config.minimax_games_per_gen > 0
         ):
             self._evaluate_minimax_tictactoe(generation)
+        if self.config.symmetry_diagnostic_positions > 0:
+            self._evaluate_symmetry_diagnostic(generation)
 
     def _evaluate_elo_vs_baseline(self, generation: int) -> None:
         assert self.elo_baseline_net is not None
@@ -451,6 +458,43 @@ class Coach:
             generation=generation, wins=wins, losses=losses, draws=draws,
             games=wins + losses + draws,
         )
+
+    def _evaluate_symmetry_diagnostic(self, generation: int) -> None:
+        """Measure whether the trained network plays equivariantly under
+        the game's symmetry group.
+
+        For each of ``config.symmetry_diagnostic_positions`` deterministic
+        reference positions, compute the KL divergence between
+        ``nnet.predict(s(board))`` and ``s(nnet.predict(board))`` across
+        all non-identity symmetries. Zero is the target. Lazily-built
+        reference positions are stable across generations so the per-gen
+        metric is directly comparable.
+        """
+        from core.symmetry_diagnostic import (
+            build_diagnostic_positions, compute_symmetry_diagnostic,
+        )
+
+        if self._symmetry_diagnostic_positions is None:
+            self._symmetry_diagnostic_positions = build_diagnostic_positions(
+                self.game, n=self.config.symmetry_diagnostic_positions,
+            )
+
+        start = time.perf_counter()
+        position_results: list[tuple[int, float, list[float], list[bool]]] = []
+        for idx, board in enumerate(self._symmetry_diagnostic_positions):
+            result = compute_symmetry_diagnostic(self.nnet, self.game, board, idx)
+            position_results.append(
+                (idx, result.mean_kl, result.kl_divergences, result.top1_matches),
+            )
+
+        if position_results:
+            mean_of_means = float(np.mean([m for _, m, _, _ in position_results]))
+            logger.info(
+                "Gen {} symmetry diagnostic: mean KL = {:.4f} across {} positions ({:.2f}s)",
+                generation, mean_of_means, len(position_results),
+                time.perf_counter() - start,
+            )
+        self.metrics.log_symmetry_diagnostic(generation, position_results)
 
     def _ensure_eval_set(self, train_examples: list[ProcessedExample]) -> None:
         """Build (or load from disk) the frozen held-out eval set.

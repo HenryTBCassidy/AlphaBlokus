@@ -23,11 +23,22 @@ class BlokusDuoGame(IGame):
     Rules engine and action space for Blokus Duo.
 
     The game is played on a 14x14 board where:
-    - White starts in the bottom-right corner
-    - Black starts in the top-left corner
+    - White (player ``+1``) moves first and must place their first piece
+      covering the **(4, 4)** starting square
+    - Black (player ``-1``) moves second and must place their first piece
+      covering the **(9, 9)** starting square
     - Players take turns placing pieces
     - Pieces must touch corners of friendly pieces
     - Pieces cannot touch sides of friendly pieces
+
+    Starting-square assignment follows Pentobi's canonical Blokus Duo
+    convention (``add_colored_starting_point`` in
+    ``libpentobi_base/StartingPoints.cpp``): Color(0) — the first-to-move
+    colour — sits at (4, 4). We map White (``+1``) onto Color(0) so the
+    first-mover starts at (4, 4), matching the standard "lower-coordinate
+    starting square for the first player" board-game convention. This
+    alignment makes future Pentobi benchmarking a direct game-record
+    comparison rather than a translated one.
     """
 
     def __init__(self, pieces_config_path: Path) -> None:
@@ -35,11 +46,15 @@ class BlokusDuoGame(IGame):
         self.piece_manager: PieceManager = pieces_loader(pieces_config_path)
         self.board_size: int = BlokusDuoBoard.N
         self.num_orientations: int = self.piece_manager.num_entries
-        self.white_start = (9, 9)
-        self.black_start = (4, 4)
+        self.white_start = (4, 4)
+        self.black_start = (9, 9)
         self._coordinate_index_decoder = CoordinateIndexDecoder(self.board_size)
         self.action_codec = ActionCodec(self.board_size, self.piece_manager)
         self.initial_actions: ActionDict = self._calculate_and_cache_initial_actions()
+        # Lazily built integer permutation used by ``get_symmetries`` /
+        # ``transpose_policy`` — built on first call to avoid slowing
+        # ``__init__`` for users (e.g. tests) that don't need symmetry.
+        self._action_transpose_permutation: NDArray | None = None
 
     # -- Public methods (IGame protocol, in call order) -------------------------
 
@@ -132,16 +147,35 @@ class BlokusDuoGame(IGame):
         """
         return board.canonical(player)
 
-    def get_symmetries(self, board: BlokusDuoBoard, pi: NDArray) -> list[tuple[BlokusDuoBoard, NDArray]]:
-        """Generate all symmetric forms of the current board state and policy vector.
+    def get_symmetries(
+        self, board: BlokusDuoBoard, pi: NDArray,
+    ) -> list[tuple[BlokusDuoBoard, NDArray]]:
+        """Return all geometric symmetries of ``(board, pi)`` as (board, pi)
+        pairs.
 
-        The board has the following symmetries:
-        1. Identity: No transformation
-        2. Rot180: 180-degree rotation (with player swap)
-        3. Flip90: Vertical flip + 90-degree rotation
-        4. Flip270: Vertical flip + 270-degree rotation (with player swap)
+        Blokus Duo's symmetry group is order 2: only the main-diagonal
+        reflection preserves the fixed starting-square assignments at array
+        indices (4, 4) and (9, 9). The other six rigid motions of a square
+        either move a starting square off the diagonal or swap the two
+        starting squares (which can't be rescued by a colour-swap because
+        Pentobi's rule fixes which colour moves first). See
+        ``docs/plans/archive/blokus-symmetries.md`` for the full derivation.
+
+        Each call therefore returns exactly two tuples: identity and the
+        transposed state. Self-play augmentation doubles the training data
+        per position (vs TTT's 8× via the full D₄ group).
+
+        ``pi`` is coerced to an ``NDArray`` on the identity entry too so
+        downstream consumers (persistence, value-target assignment) can
+        rely on a uniform type — mirrors what
+        :class:`games.tictactoe.game.TicTacToeGame` does implicitly via
+        its ``np.rot90`` chain.
         """
-        raise NotImplementedError()
+        pi_array = np.asarray(pi)
+        return [
+            (board, pi_array),
+            (board.transposed(), self.transpose_policy(pi_array)),
+        ]
 
     def state_key(self, board: BlokusDuoBoard) -> bytes:
         """Return a hashable key that uniquely identifies the board state."""
@@ -249,6 +283,73 @@ class BlokusDuoGame(IGame):
                         piece_id, orientation, pi, pj,
                         board_2d=board_2d, side_danger=side_danger,
                     )
+
+    # -- Symmetry helpers (public) ----------------------------------------------
+
+    def transpose_action(self, action_id: int) -> int:
+        """Return the action_id corresponding to ``action_id`` on the board
+        reflected across the main diagonal.
+
+        Composed of two pieces:
+
+        1. **Anchor**: the (x, y) board coordinate of the piece's anchor is
+           converted to its array index ``(length_idx, width_idx)``, swapped,
+           and converted back. (Transposition is naturally defined in array-
+           index space; in board-coordinate space the same operation is the
+           anti-diagonal reflection.)
+        2. **Orientation**: looked up via
+           :meth:`PieceManager.orientation_transpose_id` — the precomputed
+           bijection on the 91 piece-orientations.
+
+        The pass action is its own transpose.
+        """
+        if self.action_codec.is_pass(action_id):
+            return action_id
+        action = self.action_codec.decode(action_id)
+        anchor_idx = self._coordinate_index_decoder.to_idx(
+            (action.x_coordinate, action.y_coordinate),
+        )
+        new_anchor_idx = (anchor_idx[1], anchor_idx[0])
+        new_x, new_y = self._coordinate_index_decoder.to_coordinate(new_anchor_idx)
+        o_id = self.piece_manager.get_piece_orientation_id(
+            (action.piece_id, action.orientation),
+        )
+        new_o_id = self.piece_manager.orientation_transpose_id(o_id)
+        new_piece_id, new_orientation = self.piece_manager.get_piece_orientation(new_o_id)
+        return self.action_codec.encode(
+            Action(
+                piece_id=new_piece_id,
+                orientation=new_orientation,
+                x_coordinate=new_x,
+                y_coordinate=new_y,
+            ),
+        )
+
+    def transpose_policy(self, pi: NDArray) -> NDArray:
+        """Return ``pi`` reindexed so it represents the same distribution on
+        the transposed board.
+
+        Concretely, ``new_pi[a] = pi[transpose_action(a)]`` for every action
+        index ``a``. Built once as a precomputed permutation array — at run
+        time this is a single ``numpy`` fancy-index gather, fast enough for
+        the self-play augmentation hot path.
+
+        Coerces ``pi`` to a numpy array first because MCTS hands back a
+        Python list (alpha-zero-general convention) and fancy-indexing only
+        works on NDArrays.
+        """
+        if self._action_transpose_permutation is None:
+            self._action_transpose_permutation = self._build_action_transpose_permutation()
+        pi_array = np.asarray(pi)
+        return pi_array[self._action_transpose_permutation]
+
+    def _build_action_transpose_permutation(self) -> NDArray:
+        """Precompute the action-space permutation induced by transposition."""
+        n = self.get_action_size()
+        perm = np.empty(n, dtype=np.int64)
+        for a in range(n):
+            perm[a] = self.transpose_action(a)
+        return perm
 
     def _has_valid_moves(self, board: BlokusDuoBoard, player: PlayerSide) -> bool:
         """Check if a player has at least one legal move. Short-circuits on first find."""

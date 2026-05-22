@@ -199,7 +199,7 @@ Layer 3: Aggregate Valid Moves
 
 ### Initial Move Pre-computation
 
-First moves for both players are **pre-computed and cached** at game initialisation. Since the first move must cover a specific starting square (White: (9,9), Black: (4,4)), the set of valid first moves is fixed and can be computed once.
+First moves for both players are **pre-computed and cached** at game initialisation. Since the first move must cover a specific starting square (White: (4,4), Black: (9,9) — Pentobi convention), the set of valid first moves is fixed and can be computed once.
 
 ### Transposition Table
 

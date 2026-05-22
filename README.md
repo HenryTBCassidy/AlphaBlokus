@@ -238,6 +238,7 @@ Detailed documentation lives in the [`docs/`](docs/) folder.
 | [06 — Interfaces](docs/06-INTERFACES.md) | Pentobi GTP adapter, human-playable UI, translation layer |
 | [07 — Data Storage](docs/07-DATA-STORAGE.md) | Parquet format, metrics tables, W&B integration, dashboard layout |
 | [08 — Training Estimates](docs/08-TRAINING-ESTIMATES.md) | Wall-clock estimates for different configs and hardware |
+| [09 — Compute Options](docs/09-COMPUTE-OPTIONS.md) | Local + cloud hardware comparison, hourly rates, estimated cost per training run, phasing recommendation |
 
 ### Guides (`docs/guides/`)
 
@@ -255,7 +256,6 @@ Active plans live at the top of `docs/plans/`; completed plans are archived unde
 | Document | Description |
 |----------|-------------|
 | [Move generation further optimisation](docs/plans/move-gen-further-optimisation.md) | Deferred work on Cython / bitboard rewrites of valid move generation |
-| [Training infrastructure](docs/plans/training-infrastructure.md) | SSH / GPU / cloud compute options |
 | [archive/Reporting overhaul](docs/plans/archive/reporting-overhaul.md) | The full reporting + W&B + arena-replay + Elo + minimax push that brought the project to its current state |
 | [archive/Valid move algorithm](docs/plans/archive/blokus-valid-move-algorithm.md) | Blokus Duo move generation |
 | [archive/Remote training setup](docs/plans/archive/remote-training-setup.md) | Original Tailscale + WSL2 + SSH setup work |

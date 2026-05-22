@@ -37,7 +37,7 @@ def test_black_first_move_returns_initial_actions(blokus_game: BlokusDuoGame, bl
 def test_every_initial_action_covers_start_position(blokus_game: BlokusDuoGame):
     """Every initial white action, when placed, should have a filled cell at the white start."""
     board = blokus_game.initialise_board()
-    white_start_idx = blokus_game.white_start  # (9, 9) in array indices
+    white_start_idx = blokus_game.white_start  # (4, 4) in array indices — Pentobi convention
 
     for action in blokus_game.initial_actions[1]:
         new_board = board.with_piece(action, player_side=1)
@@ -351,25 +351,25 @@ def test_multi_move_progression(blokus_game: BlokusDuoGame, blokus_board: Blokus
 def test_known_legal_placement_is_in_moves(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
     """After placing monomino at white start, placing piece 2 (domino) at a known
     diagonal should be in the valid moves list."""
-    # White monomino at start (9,9) in array coords
+    # White monomino at start (4,4) in array coords (Pentobi convention)
     board = blokus_board.with_piece(
-        _action_at_idx(1, Orientation.Identity, 9, 9), player_side=1)
+        _action_at_idx(1, Orientation.Identity, 4, 4), player_side=1)
 
-    # Domino (piece 2, Identity = [[1],[1]]) at (10,10) — diagonal of (9,9)
-    # This places cells at (10,10) and (11,10)
-    expected = _action_at_idx(2, Orientation.Identity, 10, 10)
+    # Domino (piece 2, Identity = [[1],[1]]) at (5,5) — diagonal of (4,4).
+    # This places cells at (5,5) and (6,5).
+    expected = _action_at_idx(2, Orientation.Identity, 5, 5)
     moves = blokus_game._valid_moves(board, 1)
     assert expected in moves, f"Expected {expected} to be a valid move"
 
 
 def test_known_illegal_placement_not_in_moves(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
     """A piece placed side-adjacent to a friendly piece should NOT be in valid moves."""
-    # White monomino at (9,9)
+    # White monomino at start (4,4)
     board = blokus_board.with_piece(
-        _action_at_idx(1, Orientation.Identity, 9, 9), player_side=1)
+        _action_at_idx(1, Orientation.Identity, 4, 4), player_side=1)
 
-    # Domino (piece 2, Identity) at (10,9) — directly below (9,9), side adjacent
-    illegal = _action_at_idx(2, Orientation.Identity, 10, 9)
+    # Domino (piece 2, Identity) at (5,4) — directly below (4,4), side adjacent
+    illegal = _action_at_idx(2, Orientation.Identity, 5, 4)
     moves = blokus_game._valid_moves(board, 1)
     assert illegal not in moves, f"Expected {illegal} to NOT be a valid move (side adjacent)"
 

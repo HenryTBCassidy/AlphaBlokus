@@ -123,6 +123,18 @@ class RunConfig:
     # opponent. Only used when ``game == "tictactoe"``. 0 disables.
     minimax_games_per_gen: int = 20
 
+    # Per-generation symmetry diagnostic: i.e. the number of randomly-
+    # generated reference board positions on which we test the network's
+    # asymmetric-preference (whether mirroring the board flips its raw
+    # policy in the equivalent way). 0 disables the diagnostic. Same
+    # seeded set of positions is used every generation so the metric is
+    # cross-gen comparable. See ``core/symmetry_diagnostic.py`` for the
+    # phase-distribution (heavy on early/mid game, lighter on late game).
+    # Default 100 is essentially free in compute terms (~200 forward
+    # passes per gen on Blokus, sub-second) while giving a stable point
+    # estimate that isn't dominated by single-position variance.
+    symmetry_diagnostic_positions: int = 100
+
     # Global RNG seed for numpy, torch, MCTS tie-breaks and the eval-set
     # sampler. Set to a fixed value to make a run bit-for-bit reproducible;
     # ``None`` skips seeding entirely (non-deterministic — only useful if you
@@ -221,6 +233,17 @@ class RunConfig:
     def arena_replays_directory(self) -> Path:
         """Directory for recorded arena games (move sequences + top-K policies per move)."""
         return self.run_directory / "ArenaReplays"
+
+    @property
+    def symmetry_diagnostic_directory(self) -> Path:
+        """Directory for per-generation policy-symmetry diagnostic results.
+
+        Stores KL divergences between the network's raw policy on reference
+        positions and the same policy reconstructed from the symmetric
+        variant via ``game.get_symmetries``. See
+        ``core/symmetry_diagnostic.py``.
+        """
+        return self.run_directory / "SymmetryDiagnostic"
 
 
 def load_args(config_path: str | Path) -> RunConfig:

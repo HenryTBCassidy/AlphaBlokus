@@ -20,13 +20,22 @@ class MoveRecord:
     """One move within a recorded arena game.
 
     ``top_k_actions`` and ``top_k_probs`` are populated when the player
-    exposes a ``get_last_policy()`` method (i.e. it's a NetworkPlayer); for
-    Random / Minimax / etc they are empty lists.
+    exposes a ``get_last_policy()`` method (i.e. it's a NetworkPlayer);
+    for Random / Minimax / etc they are empty lists.
+
+    ``played_prob`` is the action's *raw MCTS visit fraction* — what share
+    of total MCTS visits the played action received. Stored explicitly
+    because with sparse policies (e.g. Blokus with 50 sims over 17k
+    actions) the played action may be tied with many others and fall
+    outside the top-K storage window even though it was the one MCTS
+    selected. Defaults to 0.0 for non-NetworkPlayer moves where no policy
+    was exposed.
     """
     player: int          # +1 or -1 — who moved
     action: int          # action index chosen
     top_k_actions: tuple[int, ...]  # in descending probability order
     top_k_probs: tuple[float, ...]  # aligned with top_k_actions
+    played_prob: float = 0.0  # raw visit fraction for the played action
 
 
 @dataclass(frozen=True)
@@ -139,12 +148,15 @@ class Arena:
             valids = self.game.valid_move_masking(canonical_board, 1)
 
             if record:
-                top_actions, top_probs = _extract_top_k(current_player, top_k)
+                top_actions, top_probs, played_prob = _extract_top_k(
+                    current_player, top_k, played_action=int(action),
+                )
                 recorded_moves.append(MoveRecord(
                     player=cur_player,
                     action=int(action),
                     top_k_actions=tuple(top_actions),
                     top_k_probs=tuple(top_probs),
+                    played_prob=played_prob,
                 ))
 
             if valids[action] == 0:
@@ -250,25 +262,46 @@ class Arena:
         return one_won, two_won, draws, records
 
 
-def _extract_top_k(player: Player, k: int) -> tuple[list[int], list[float]]:
-    """Pull top-K actions + probs from a player's last policy, if exposed.
+def _extract_top_k(
+    player: Player, k: int, played_action: int | None = None,
+) -> tuple[list[int], list[float], float]:
+    """Pull top-K **visited** actions + probs + the played action's prob.
 
-    Players that have ``get_last_policy()`` (i.e. NetworkPlayer) return their
-    full policy vector; we sort and take the K entries with highest probability.
-    Players that don't expose policy return ``([], [])`` — fine for random /
-    minimax opponents, where top-K isn't meaningful.
+    Players with ``get_last_policy()`` (i.e. ``NetworkPlayer``) return
+    their full MCTS visit-count distribution; we sort and take the K
+    entries with highest probability — but only entries with ``prob > 0``.
+
+    The zero-probability filter matters for sparse policies: with (say)
+    50 MCTS sims over Blokus's 17,837-action space, only ~15-20 actions
+    get any visits at all. Without the filter, ``argpartition`` would
+    deterministically pad the top-K with arbitrary unvisited actions —
+    and those unvisited actions might not even be legal.
+
+    The played action's probability is returned separately so it can be
+    surfaced in the replay viewer even when the played action ties with
+    many others on visit count and falls outside the top-K window —
+    which happens often with low sim counts on Blokus.
+
+    Returns ``(top_actions, top_probs, played_prob)``. For
+    non-NetworkPlayer moves where no policy is exposed, returns
+    ``([], [], 0.0)``.
     """
     if not hasattr(player, "get_last_policy"):
-        return [], []
+        return [], [], 0.0
     pi: NDArray | None = player.get_last_policy()
     if pi is None:
-        return [], []
-    if k >= len(pi):
-        order = np.argsort(-pi)
-    else:
-        # argpartition + sort within the top slice for efficiency at huge action sizes.
-        partition = np.argpartition(-pi, k - 1)[:k]
-        order = partition[np.argsort(-pi[partition])]
-    top_actions = order.tolist()
-    top_probs = pi[order].tolist()
-    return top_actions, top_probs
+        return [], [], 0.0
+    nonzero_idx = np.flatnonzero(pi > 0)
+    if len(nonzero_idx) == 0:
+        played_prob = (
+            float(pi[played_action]) if played_action is not None else 0.0
+        )
+        return [], [], played_prob
+    nonzero_probs = pi[nonzero_idx]
+    order_within = np.argsort(-nonzero_probs)[:k]
+    top_actions = nonzero_idx[order_within].tolist()
+    top_probs = pi[top_actions].tolist()
+    played_prob = (
+        float(pi[played_action]) if played_action is not None else 0.0
+    )
+    return top_actions, top_probs, played_prob
