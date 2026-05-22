@@ -1,0 +1,36 @@
+{
+  "game": "blokusduo",
+  "run_name": "blokus_pc_second",
+  "seed": 42,
+  "num_generations": 5,
+  "num_eps": 80,
+  "temp_threshold": 6,
+  "update_threshold": 0.55,
+  "max_queue_length": 5000,
+  "num_arena_matches": 50,
+  "root_directory": "./temp/",
+  "load_model": false,
+  "max_generations_lookback": 10,
+  "elo_games_per_gen": 20,
+  "minimax_games_per_gen": 0,
+  "symmetry_diagnostic_positions": 3,
+  "mcts_config": {
+    "num_mcts_sims": 300,
+    "cpuct": 2.5
+  },
+  "net_config": {
+    "learning_rate": 0.001,
+    "dropout": 0.3,
+    "epochs": 5,
+    "batch_size": 64,
+    "cuda": true,
+    "num_filters": 64,
+    "num_residual_blocks": 4
+  },
+  "wandb": {
+    "project": "alphablokus-poc",
+    "entity": null,
+    "tags": ["blokus", "pc", "second", "300-sims", "80-eps", "5-gens"],
+    "mode": "online"
+  }
+}
