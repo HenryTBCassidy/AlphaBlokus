@@ -78,7 +78,7 @@ Optimisations in the menu below have rough speedup estimates that compound, so M
 
 | # | Optimisation | Expected speedup | Effort | Sub-plan | Status |
 |---|--------------|------------------|--------|----------|--------|
-| F1 | **Parallel self-play & arena across CPU cores** — N concurrent games per phase, using a worker pool over the `Player` abstraction | **5–7×** (linear in core count, up to ~num_eps) | Medium (~1 day) | `parallel-self-play.md` | Pending |
+| F1 | **Parallel self-play & arena across CPU cores** — N concurrent games per phase, using a worker pool over the `Player` abstraction | **5–7×** (linear in core count, up to ~num_eps) | Medium (~1 day) | [`parallel-self-play.md`](parallel-self-play.md) | **Planned** |
 | F2 | **Move-gen — bitboard representation** — 14×14 board as a 196-bit integer; validation becomes 2 bitwise ANDs vs ~20 Python ops | **3–5×** overall | Big (~3–4 days) | `move-gen-bitboard.md` | Pending |
 | F3 | **MCTS tree reuse between moves** — re-root the search tree after each ply instead of rebuilding from scratch | **1.5–2×** | Small-medium (~1 day) | `mcts-tree-reuse.md` | Pending |
 | F4 | **Batched neural-net inference in MCTS** — collect leaf evals into batches, single GPU call per batch with virtual-loss to keep MCTS correct | **2–5×** on the inference slice → **~1.2–1.5×** overall (more impact when net is bigger) | Medium-big (~2 days) | `batched-inference.md` | Pending |
