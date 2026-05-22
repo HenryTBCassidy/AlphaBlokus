@@ -1,93 +1,147 @@
-# Prompt to paste into PC-side Claude Code
+# Launching the Blokus PC run — step-by-step
 
-Hand this whole thing (everything between the `---` markers) verbatim to the Claude Code running on the home PC. It's self-contained — sets up a persistent WSL keep-alive then launches the Blokus training in a way that survives Claude / shell sessions ending.
+Read top to bottom. Each step says what to do, where to do it, and what success looks like. Total time: ~5 minutes setup, then training runs for ~1.5 hours on its own.
 
-Delete this file once the run is launched (it's a one-time ops note, not source).
+You're doing two things:
+
+1. **One-time setup**: register a Windows scheduled task that keeps WSL alive forever (so detached training doesn't die when WSL2 reaps the idle VM). Future PC runs won't need this part again.
+2. **Launch the run**: spawn the training as a `systemd-run --user` service inside WSL.
 
 ---
 
-I need to set up a persistent WSL keep-alive so detached training runs don't die when WSL2 power-cycles the VM, then launch a training run that survives across Claude / shell session shutdowns.
+## Step 1 — Open PowerShell as Administrator
 
-**Step 1 — Verify environment.** Confirm:
+Press `Windows`, type `PowerShell`, right-click → **Run as administrator**. Click Yes on the UAC prompt.
 
-- WSL Ubuntu is installed (`wsl --list`)
-- The `~/AlphaBlokus` repo exists inside WSL, on branch `feat/blokus-symmetries`, latest commit pulled
-- `loginctl show-user henry` shows `Linger=yes`
-- `nvidia-smi` from inside WSL shows the RTX 3060 Ti
+You should see a blue window with `PS C:\WINDOWS\system32>`.
 
-**Step 2 — Install a WSL keep-alive Windows scheduled task.** From an elevated PowerShell on Windows:
+> **Why admin:** Registering a scheduled task that runs at logon needs elevated rights.
+
+---
+
+## Step 2 — Force WSL to reload its config
+
+Paste this into the PowerShell window and press Enter:
 
 ```powershell
-# Force WSL to reload .wslconfig (in case vmIdleTimeout=-1 hasn't taken effect)
 wsl --shutdown
 Start-Sleep -Seconds 4
+```
 
-# Register a Windows scheduled task that fires at every login and runs
-# `wsl sleep` inside Ubuntu indefinitely. This is what keeps the VM up —
-# systemd-user --linger only keeps the user manager alive *inside* WSL,
-# not WSL itself.
+Nothing prints. That's fine — it just shuts down all running WSL distros so the next `wsl` command starts fresh with the latest `.wslconfig`.
+
+---
+
+## Step 3 — Register the WSL keep-alive task
+
+Paste this whole block into PowerShell and press Enter:
+
+```powershell
 $action = New-ScheduledTaskAction -Execute "wsl.exe" `
   -Argument "-d Ubuntu -- sleep 99999999"
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $env:USERNAME
-$settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Days 365) `
+$settings = New-ScheduledTaskSettingsSet `
+  -ExecutionTimeLimit (New-TimeSpan -Days 365) `
   -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable
 $principal = New-ScheduledTaskPrincipal -UserId $env:USERNAME -RunLevel Highest
 
 Register-ScheduledTask -TaskName "WSL Keepalive" -Action $action `
   -Trigger $trigger -Settings $settings -Principal $principal -Force
-
-# Fire it once now so we don't have to log out / in
-Start-ScheduledTask -TaskName "WSL Keepalive"
-Start-Sleep -Seconds 5
-
-# Verify the keepalive sleep is running inside WSL
-wsl -d Ubuntu -- pgrep -af "sleep 99999999"
 ```
 
-Expected output: one line showing `sleep 99999999` running with a PID.
-
-**Step 3 — Verify the keepalive holds across a fresh `wsl` invocation.** Wait 30 seconds, then run `wsl -d Ubuntu -- uptime` from PowerShell. The uptime should be at least 30 seconds (proving WSL didn't reboot in between).
-
-**Step 4 — Launch the Blokus training.** Inside WSL (`wsl -d Ubuntu`), from `~/AlphaBlokus`:
-
-```bash
-# Make sure the runner script is there and executable
-ls -la scripts/run_blokus_pc_first.sh
-
-# Clean any prior service + temp data for this run
-systemctl --user stop alphablokus_blokus_first.service 2>/dev/null || true
-systemctl --user reset-failed alphablokus_blokus_first.service 2>/dev/null || true
-rm -rf temp/blokus_pc_first temp/blokus_pc_first.log
-
-# Launch detached. systemd-user + linger + the Windows keepalive task
-# together make this survive everything except a Windows reboot.
-systemd-run --user --unit=alphablokus_blokus_first \
-  --working-directory=/home/henry/AlphaBlokus \
-  --setenv=PYTHONUNBUFFERED=1 \
-  bash -lc "/home/henry/AlphaBlokus/scripts/run_blokus_pc_first.sh > /home/henry/AlphaBlokus/temp/blokus_pc_first.log 2>&1 < /dev/null"
-
-sleep 5
-systemctl --user is-active alphablokus_blokus_first.service
-systemctl --user status alphablokus_blokus_first.service --no-pager | head -10
-```
-
-**Step 5 — Confirm it's still running after a session-ending check.** Wait 90 seconds (this is when previous attempts died — WSL's idle reaper would have fired by now). Then:
-
-```bash
-wsl -d Ubuntu -- systemctl --user is-active alphablokus_blokus_first.service
-wsl -d Ubuntu -- pgrep -af "python.*blokus_pc_first" | head -3
-wsl -d Ubuntu -- tail -c 800 /home/henry/AlphaBlokus/temp/blokus_pc_first.log | tr '\r' '\n' | tail -5
-```
-
-Service should still be `active`, python should be running, log should show self-play progress past the first game.
-
-**Step 6 — Report back.** Tell me: (a) which steps passed/failed, (b) the W&B run URL (grep for it in the log), (c) what the log's last line looks like 90 seconds in. If anything fails at Step 5, dump `journalctl --user -u alphablokus_blokus_first.service --no-pager | tail -30` and `dmesg | tail -20`.
+**Expected output:** a table showing the task with `State: Ready`. If you see a red error mentioning `Access is denied`, you didn't open PowerShell as admin — go back to Step 1.
 
 ---
 
-## Notes for Henry
+## Step 4 — Fire the task once now
 
-- **Why this needs to happen on the PC and not over SSH:** WSL2 power-cycles the VM ~30 seconds after the last active session disconnects, regardless of linger or `vmIdleTimeout=-1`. The scheduled task spawns a process via Windows itself, which keeps WSL alive permanently. SSH-launched processes can't establish that anchor reliably.
-- **After this setup is done once,** every future PC run uses the existing `systemd-run --user` pattern directly — no extra ceremony needed.
-- **If anything goes sideways,** screenshot the PC-Claude's response and paste it back to me here. The most likely failure is the scheduled task creation needing admin privileges — open PowerShell with "Run as administrator."
-- **W&B is the easy way to watch the run from your laptop** once it's launched — open https://wandb.ai/henrycassidy/alphablokus-poc and find the `blokus_pc_first_*` run.
+Still in PowerShell:
+
+```powershell
+Start-ScheduledTask -TaskName "WSL Keepalive"
+Start-Sleep -Seconds 5
+wsl -d Ubuntu -- pgrep -af "sleep 99999999"
+```
+
+**Expected output:** one line like `1234 sleep 99999999`. The number is the process ID — anything works. If you see no output, the task didn't fire. Open `taskschd.msc`, find "WSL Keepalive" in the task list, right-click → Run, then retry the `pgrep` check.
+
+---
+
+## Step 5 — Sanity check: WSL really is staying up
+
+Wait 30 seconds (count to 30, sip coffee), then paste:
+
+```powershell
+wsl -d Ubuntu -- uptime
+```
+
+**Expected output:** something like `09:42:11 up 0:01, 0 users, load average: 0.05, 0.03, 0.00`. The `up 0:01` (one minute or more) confirms WSL didn't reboot. If `uptime` says `up 0:00` or some single-digit seconds value, the keepalive isn't holding — paste the output back to me.
+
+---
+
+## Step 6 — Pull the latest code inside WSL
+
+In PowerShell (still):
+
+```powershell
+wsl -d Ubuntu -- bash -lc "cd ~/AlphaBlokus && git fetch origin && git checkout feat/blokus-symmetries && git pull --ff-only && git log --oneline -1"
+```
+
+**Expected output:** the last line should be `f4f9da5` or newer commit on `feat/blokus-symmetries`. If git complains, paste back what it said.
+
+---
+
+## Step 7 — Launch the training
+
+Still in PowerShell. This is one long command — paste exactly:
+
+```powershell
+wsl -d Ubuntu -- bash -lc "cd ~/AlphaBlokus && systemctl --user stop alphablokus_blokus_first.service 2>/dev/null; systemctl --user reset-failed alphablokus_blokus_first.service 2>/dev/null; rm -rf temp/blokus_pc_first temp/blokus_pc_first.log; systemd-run --user --unit=alphablokus_blokus_first --working-directory=/home/henry/AlphaBlokus --setenv=PYTHONUNBUFFERED=1 bash -lc './scripts/run_blokus_pc_first.sh > temp/blokus_pc_first.log 2>&1 < /dev/null'; sleep 5; systemctl --user is-active alphablokus_blokus_first.service"
+```
+
+**Expected output:** the last line should be `active`. If it says `inactive` or `failed`, something broke at startup — paste back the full output.
+
+---
+
+## Step 8 — The crucial check: still running after WSL would've timed out
+
+The previous attempts died at 30 seconds because WSL was reaping the VM. The keepalive should now prevent that. Wait **120 seconds** (give it plenty), then paste:
+
+```powershell
+wsl -d Ubuntu -- bash -lc "systemctl --user is-active alphablokus_blokus_first.service; pgrep -af 'python.*blokus_pc_first' | head -3; tail -c 400 temp/blokus_pc_first.log | tr '\r' '\n' | tail -5"
+```
+
+**Expected output:** roughly
+
+```
+active
+12345 uv run python main.py --config run_configurations/blokus_pc_first.json
+12348 /home/henry/AlphaBlokus/.venv/bin/python3 main.py --config run_configurations/blokus_pc_first.json
+Self Play:   4%|▍         | 1/25 [00:36<14:00, 35.00s/it]
+Self Play:   8%|▊         | 2/25 [01:11<...]
+```
+
+If you see `active` plus python processes plus a non-zero `Self Play: N/25` line, **you've won**. The run is detached and going. You can close PowerShell, close your laptop, whatever — it keeps going until done.
+
+If you see `inactive` or no python processes, that's the same failure as before. Paste back the output and I'll dig.
+
+---
+
+## Step 9 — Find the W&B URL
+
+```powershell
+wsl -d Ubuntu -- grep "View run" temp/blokus_pc_first.log | head -1
+```
+
+You'll get a line like `wandb: 🚀 View run at https://wandb.ai/henrycassidy/alphablokus-poc/runs/...`. Click that URL — that's your live dashboard.
+
+---
+
+## What to expect from here
+
+- The run takes about 1–1.5 hours on the 3060 Ti.
+- W&B updates live, refresh whenever.
+- When done, the service goes to `inactive (dead)` cleanly.
+- Pull the data back to your Mac with `rsync`, then re-render the HTML report locally (commands at the end of `docs/guides/REMOTE-TRAINING.md`).
+
+Once everything's running, **paste me back the W&B URL** and I'll pick it up from there.
