@@ -2,7 +2,7 @@
 
 Master plan for making AlphaBlokus training meaningfully faster — both single-thread (per-game) and parallel (across games). Acts as the umbrella index for smaller sub-plans that get spun off when each optimisation is actually attempted.
 
-The goal isn't "make it fast for fast's sake" — it's to make Blokus training **practical at the scale needed to beat Pentobi**. AlphaGo Zero needed ~5M self-play games to reach superhuman Go. At our current pace (~55s per game on the 3060 Ti, single-threaded), even modest training scales of ~100k games would take weeks. A 10-25× wall-clock reduction makes the project viable.
+The goal isn't "make it fast for fast's sake" — it's to make Blokus training **practical at the scale needed to beat Pentobi**. AlphaGo Zero needed ~ 5M self-play games to reach superhuman Go. At our current pace (~55s per game on the 3060 Ti, single-threaded), even modest training scales of ~100k games would take weeks. A 10-25× wall-clock reduction makes the project viable.
 
 Companion docs:
 - [`docs/08-TRAINING-ESTIMATES.md`](../08-TRAINING-ESTIMATES.md) — measured wall-clock per config and the move-gen-as-bottleneck finding this whole plan is built on.
