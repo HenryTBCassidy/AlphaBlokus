@@ -45,20 +45,68 @@ class SymmetryDiagnosticResult:
 
 
 def build_diagnostic_positions(
-    game: IGame, *, n: int = 3, seed: int = 2026, rollout_length: int = 6,
+    game: IGame, *, n: int = 100, seed: int = 2026,
 ) -> list[IBoard]:
-    """Generate a small reproducible set of reference positions.
+    """Generate ``n`` reproducible reference board positions for the
+    symmetry diagnostic.
 
-    Each position is reached by a seeded random legal-move rollout from
-    the initial board. Same `seed` + same `game` always produces the same
-    list — important for cross-generation comparison.
+    These are the boards on which the network's asymmetric-preference is
+    measured each generation — i.e. for each one we ask "does the net's
+    raw policy look the same after we mirror the board?". The same
+    ``seed`` always produces the same ``n`` positions, which is what
+    makes the per-gen KL metric comparable across generations.
+
+    **What's in the set:**
+
+    - Index 0 is always the **empty starting board** (no moves played).
+      Acts as a sanity check — the starting position is its own
+      transpose, so a correctly-implemented diagnostic must score KL ≈ 0
+      regardless of how the net behaves.
+    - The remaining ``n - 1`` positions are reached by playing a random
+      number of legal moves from the empty board, alternating players.
+
+    **Distribution of game phase** is deliberately weighted toward
+    early/mid-game positions because late-game Blokus often leaves only
+    1–2 legal placements, so any reasonable net will look "asymmetric"
+    on those purely by virtue of having one dominant move — that would
+    skew the metric without telling us anything useful about learned
+    bias. A small slice of late-game positions is still included to
+    confirm the net still chooses the strong move when one stands out.
+
+    Concretely, of the ``n - 1`` non-start positions:
+
+    - ~80% have rollout length sampled uniformly from ``[3, 22]`` —
+      opening through mid-game, where strategy is most interesting and
+      the legal-move set is broad enough that genuine policy asymmetry
+      is detectable.
+    - ~20% have rollout length sampled uniformly from ``[23, 32]`` —
+      late-game, where the board is more constrained.
+
+    Args:
+        game: any :class:`IGame` implementation; method only needs
+            ``initialise_board``, ``valid_move_masking``, and
+            ``get_next_state``.
+        n: number of reference positions to return. Default 100.
+        seed: deterministic seed for both the rollout-length sampler and
+            the per-rollout move sampler.
     """
+    if n <= 0:
+        return []
+
     rng = np.random.default_rng(seed)
-    positions: list[IBoard] = []
-    for _ in range(n):
+    positions: list[IBoard] = [game.initialise_board()]
+
+    remaining = n - 1
+    n_early_mid = round(remaining * 0.8)
+    n_late = remaining - n_early_mid
+    rollout_lengths = list(rng.integers(3, 23, size=n_early_mid)) + list(
+        rng.integers(23, 33, size=n_late),
+    )
+
+    for length in rollout_lengths:
         board = game.initialise_board()
         player = 1
-        for _ in range(rollout_length):
+        for _ in range(int(length)):
             mask = game.valid_move_masking(board, player)
             legal = np.flatnonzero(mask)
             if len(legal) == 0:

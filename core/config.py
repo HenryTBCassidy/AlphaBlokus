@@ -123,12 +123,17 @@ class RunConfig:
     # opponent. Only used when ``game == "tictactoe"``. 0 disables.
     minimax_games_per_gen: int = 20
 
-    # Per-generation symmetry diagnostic: number of reference positions on
-    # which to measure whether the network's raw policy is equivariant
-    # under the game's symmetry group. 0 disables. Default 3 is a balanced
-    # signal vs cost choice — each position adds a handful of forward
-    # passes per gen, negligible compared to self-play or arena.
-    symmetry_diagnostic_positions: int = 3
+    # Per-generation symmetry diagnostic: i.e. the number of randomly-
+    # generated reference board positions on which we test the network's
+    # asymmetric-preference (whether mirroring the board flips its raw
+    # policy in the equivalent way). 0 disables the diagnostic. Same
+    # seeded set of positions is used every generation so the metric is
+    # cross-gen comparable. See ``core/symmetry_diagnostic.py`` for the
+    # phase-distribution (heavy on early/mid game, lighter on late game).
+    # Default 100 is essentially free in compute terms (~200 forward
+    # passes per gen on Blokus, sub-second) while giving a stable point
+    # estimate that isn't dominated by single-position variance.
+    symmetry_diagnostic_positions: int = 100
 
     # Global RNG seed for numpy, torch, MCTS tie-breaks and the eval-set
     # sampler. Set to a fixed value to make a run bit-for-bit reproducible;
