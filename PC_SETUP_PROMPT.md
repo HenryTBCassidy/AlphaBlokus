@@ -19,9 +19,25 @@ You should see a blue window with `PS C:\WINDOWS\system32>`.
 
 ---
 
-## Step 2 — Force WSL to reload its config
+## Step 2a — Stop Windows from sleeping
 
-Paste this into the PowerShell window and press Enter:
+If the PC sleeps mid-training the GPU loses power and the run dies. Disable sleep/hibernate when plugged in:
+
+```powershell
+powercfg /change standby-timeout-ac 0
+powercfg /change hibernate-timeout-ac 0
+powercfg /change monitor-timeout-ac 0
+```
+
+`0` = never. Nothing prints — silent success. (Re-enable later with non-zero minute values if you want.)
+
+> **Heads-up:** lock-screen is fine, training keeps running. *Signing out* will kill it (don't do that). The display also turns off when idle but the machine stays awake.
+
+---
+
+## Step 2b — Force WSL to reload its config
+
+Paste this and press Enter:
 
 ```powershell
 wsl --shutdown
