@@ -25,7 +25,7 @@ A "perspective flip" (swap the canonical-form +1/-1 channels) would be a further
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| S0 | Swap starting-square convention to match Pentobi (Purple/White → (4,4); Orange/Black → (9,9)) | 30 min | High | |
+| S0 | Swap starting-square convention to match Pentobi (Purple/White → (4,4); Orange/Black → (9,9)) | 30 min | High | ✅ |
 | S1 | Build the orientation-transpose lookup table: for each of the 91 `orientation_id`s, compute the transposed shape and find the matching `orientation_id`. Verify round-trip for all 91. | 2 hr | High | ✅ |
 | S2 | Implement `BlokusDuoBoard.transposed()` returning a board whose placement grid and internal caches reflect a main-diagonal transpose | 1.5 hr | High | ✅ |
 | S3 | Implement `transpose_action(action_id: int) -> int` that decodes (cell, orientation), transposes both, re-encodes. Pass stays as itself. | 1 hr | High | ✅ |
@@ -37,7 +37,7 @@ A "perspective flip" (swap the canonical-form +1/-1 channels) would be a further
 | S8 | **Visual sanity check**: render a mid-game board via the Blokus renderer, transpose it, render again — confirm pieces flip across the main diagonal by eye. Single test, snapshot HTML. | 30 min | Medium | ✅ |
 | S9 | **Position-symmetry diagnostic** for the post-run report. Given a trained net + a fixed pair of symmetric positions, print the raw NN policy on both and a "symmetry KL divergence" score. New row in HTML report's diagnostics section. Same code works for TTT too (different reference position). | 2 hr | Medium | ✅ |
 | S10 | **End-to-end Blokus test run**: small config (2 gens × 10 episodes × 50 sims, 64f×4b), executed on the PC via systemd-user. Verifies `get_symmetries()` is wired correctly into the self-play augmentation path. Not for training quality — just for breakage. | 1 hr | High | ✅ (Mac, 6 min) |
-| S11 | `git mv docs/plans/blokus-symmetries.md docs/plans/archive/` in the final commit before PR. Add a "Scope additions" section first if anything landed beyond the row table. | 5 min | Low | |
+| S11 | `git mv docs/plans/blokus-symmetries.md docs/plans/archive/` in the final commit before PR. Add a "Scope additions" section first if anything landed beyond the row table. | 5 min | Low | ✅ |
 
 Total: ~13 hours focused work (12 without the optional fuzz layer). Mappable to 12 reviewable commits.
 
@@ -451,3 +451,21 @@ Wall-clock expectation: ~10-15 minutes on the 3060 Ti given the small config.
 
 - **Perspective flip augmentation** (swap +1/-1 canonical channels + invert value sign + reinterpret policy). Adds another 2× data, total 4× with the geometric symmetry. Skipped because it's a different *kind* of augmentation that requires inverting target values and reconstructing policies from the opposite player's POV — meaningful complexity. Worth revisiting if Blokus training stalls on data quantity.
 - **Profiling impact of symmetry augmentation on self-play wall-clock.** The augmentation roughly doubles the training data per gen, so training time is now non-trivial relative to self-play. We may want to revisit batch_size / epochs after a few real Blokus runs.
+
+---
+
+## Scope additions beyond original plan
+
+Work that landed during execution but wasn't in the row table above. Captured here so the archived plan reflects everything that actually shipped.
+
+| Addition | Why it landed |
+|---|---|
+| **Arena replays split into a separate HTML page** (`Reporting/arena_replays.html`) with a link card on the main report | The replays were inflating the main report to >50 MB and cluttering the metrics view. Pulling them out kept the training-metrics report focused and made the replay viewer its own first-class artifact. |
+| **Per-turn top-K candidate boards rendered as ghost-overlaid mini-boards** with decoded piece captions (`Piece N (Name, Orientation) at (x, y)`) | The original Blokus replay viewer printed raw action indices ("action 11719 — 23%") which were uninterpretable. Henry asked for visual previews; now each candidate shows the actual piece placement on the board with a translucent striped overlay. |
+| **Hybrid expand-on-click navigation** in the replay viewer (actual board always visible; click turn header to expand top-3 candidates) | Blokus games have ~30 turns; rendering all turns + candidates at once was overwhelming. Click-to-expand keeps the page scannable. |
+| **Played-action probability explicit persistence** (`MoveRecord.played_prob` field + storage column) | Bug surfaced during real Blokus runs: with sparse policies, the played action's MCTS visit fraction could fall outside the persisted top-K window, making it invisible in the replay viewer. Now stored explicitly with a render-side fallback for older parquets. |
+| **Zero-probability filter in `_extract_top_k`** | Same bug, different angle: `np.argpartition` was deterministically padding the top-K with unvisited (potentially illegal) actions when only ~15-20 of 17k actions had any visits. Filtering to `prob > 0` fixes this. |
+| **Placement-point shading removed from the Blokus board renderer** | The pastel-shaded ◇/○/* placement-point glyphs were debugging-era visual noise. Real game cells now show only placed pieces; empty cells stay genuinely empty. |
+| **WSL keep-alive Windows scheduled task** (`PC_SETUP_PROMPT.md` walkthrough at repo root) | Real PC runs kept dying after ~30 seconds because WSL2 power-cycles the VM when SSH sessions disconnect, regardless of `vmIdleTimeout=-1` or systemd-user linger. The fix is a Windows scheduled task that runs `wsl -- sleep infinity` at every logon, holding the VM open permanently. One-time PC setup; documented in `PC_SETUP_PROMPT.md` (to be deleted from repo root after merge; the runbook content should migrate to `docs/guides/REMOTE-TRAINING.md` as a follow-up). |
+| **Multiple end-to-end Blokus runs** (`blokus_mac_test`, `blokus_pc_first`, `blokus_pc_second`) | Verified `get_symmetries()` is wired into self-play, training, arena, and reporting correctly. Surfaced the played-prob and zero-prob bugs above. Each run added its config under `run_configurations/`. |
+| **Sleep-disable as part of the PC setup** (`powercfg /change standby-timeout-ac 0`, etc) | Without this, the PC would sleep mid-training and lose GPU access. Included in the keep-alive setup walkthrough. |
