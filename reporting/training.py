@@ -82,13 +82,21 @@ def _format_duration(seconds: float) -> str:
 def _accepted_mask(arena_data: pd.DataFrame, update_threshold: float) -> pd.Series:
     """Return a boolean Series marking generations whose new net was accepted.
 
-    Matches ``Coach._should_accept_new_network``: draws are excluded from the
-    denominator, the win rate uses ``wins / (wins + losses)``, and the
-    comparison is ``>= update_threshold`` (not a hardcoded 0.5).
+    Prefers the per-row ``accepted`` column persisted by
+    :meth:`MetricsCollector.log_arena` — that's the ground truth direct from
+    :meth:`Coach._should_accept_new_network`. If the column is missing
+    (older runs persisted before the column existed) we fall back to
+    recomputing using the **score-based** rule the coach now uses
+    ((wins + 0.5·draws) / total ≥ threshold). The previous version of this
+    function recomputed with a draws-excluded rule that's no longer what
+    the training code does — that produced misleading "Accepted" labels
+    in the arena chart.
     """
-    decided = arena_data["wins"] + arena_data["losses"]
-    win_rate = arena_data["wins"].astype(float) / decided.where(decided > 0, 1)
-    return (decided > 0) & (win_rate >= update_threshold)
+    if "accepted" in arena_data.columns:
+        return arena_data["accepted"].fillna(False).astype(bool)
+    total = arena_data["wins"] + arena_data["losses"] + arena_data["draws"]
+    score = (arena_data["wins"] + 0.5 * arena_data["draws"]).astype(float) / total.where(total > 0, 1)
+    return (total > 0) & (score >= update_threshold)
 
 
 def _make_kpi_cards(
@@ -401,9 +409,16 @@ def _make_arena_plot(arena_data: pd.DataFrame, update_threshold: float) -> go.Fi
 
     # Only annotate ACCEPTED generations — rejected is the default expectation
     # and labelling every bar caused overlap with 30+ generations.
+    #
+    # The x-axis is a categorical axis (categoryarray = stringified gens)
+    # because numerically-typed generation values used to sort
+    # alphabetically due to pandas category dtype. With type="category",
+    # annotations need their x value as a string matching a category —
+    # passing an int would put labels at the *index* (off-by-one from the
+    # generation number) instead of the bar position. Hence ``str(...)``.
     for _, row in df[df["is_accepted"]].iterrows():
         fig.add_annotation(
-            x=row["generation"], y=108, text="✓ Accepted", showarrow=False,
+            x=str(row["generation"]), y=108, text="✓ Accepted", showarrow=False,
             font={"size": 11, "color": _COLORS["positive"], "family": "monospace"},
         )
 
