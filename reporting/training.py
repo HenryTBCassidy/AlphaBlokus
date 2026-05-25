@@ -83,20 +83,24 @@ def _accepted_mask(arena_data: pd.DataFrame, update_threshold: float) -> pd.Seri
     """Return a boolean Series marking generations whose new net was accepted.
 
     Prefers the per-row ``accepted`` column persisted by
-    :meth:`MetricsCollector.log_arena` — that's the ground truth direct from
-    :meth:`Coach._should_accept_new_network`. If the column is missing
-    (older runs persisted before the column existed) we fall back to
-    recomputing using the **score-based** rule the coach now uses
-    ((wins + 0.5·draws) / total ≥ threshold). The previous version of this
-    function recomputed with a draws-excluded rule that's no longer what
-    the training code does — that produced misleading "Accepted" labels
-    in the arena chart.
+    :meth:`MetricsCollector.log_arena` — that's the ground truth direct
+    from the training decision. If the column is missing (older runs
+    persisted before the column existed) we fall back to recomputing via
+    :func:`core.acceptance.is_accepted_score_rule`, which is the **same
+    function** the coach uses, so reporting can never diverge.
     """
+    from core.acceptance import is_accepted_score_rule
     if "accepted" in arena_data.columns:
         return arena_data["accepted"].fillna(False).astype(bool)
-    total = arena_data["wins"] + arena_data["losses"] + arena_data["draws"]
-    score = (arena_data["wins"] + 0.5 * arena_data["draws"]).astype(float) / total.where(total > 0, 1)
-    return (total > 0) & (score >= update_threshold)
+    return arena_data.apply(
+        lambda row: is_accepted_score_rule(
+            new_wins=int(row["wins"]),
+            prev_wins=int(row["losses"]),
+            draws=int(row["draws"]),
+            threshold=update_threshold,
+        ),
+        axis=1,
+    )
 
 
 def _make_kpi_cards(

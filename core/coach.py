@@ -668,35 +668,18 @@ class Coach:
     def _should_accept_new_network(
         self, new_wins: int, prev_wins: int, draws: int = 0,
     ) -> bool:
+        """Decide whether to accept the newly trained network.
+
+        Thin wrapper around :func:`core.acceptance.is_accepted_score_rule`.
+        Single source of truth lives there so reporting code can never
+        diverge from the training-time decision — see ``core/acceptance.py``
+        for the full rationale.
         """
-        Decide whether to accept the newly trained network.
-
-        Uses **score-based acceptance** (chess-style): draws count as 0.5
-        each in both numerator and denominator. The new net is accepted iff
-        its score ``(new_wins + 0.5 * draws) / total_games`` meets the
-        configured ``update_threshold``.
-
-        The older convention used only decisive games (``draws`` excluded
-        from the denominator), which silently broke acceptance for
-        forced-draw games like TTT: once both nets played competently every
-        arena would draw, ``new_wins`` and ``prev_wins`` would both be zero,
-        and the early-return-False kicked in. The score-based form matches
-        AlphaGo Zero's recipe and handles forced-draw games cleanly — the
-        new net must actually win games to be accepted.
-
-        Args:
-            new_wins: Number of games won by new network
-            prev_wins: Number of games won by previous network
-            draws: Number of drawn games (counted as 0.5 each)
-
-        Returns:
-            bool: True if new network should replace previous one
-        """
-        total_games = new_wins + prev_wins + draws
-        if total_games == 0:
-            return False
-        score = (new_wins + 0.5 * draws) / total_games
-        return score >= self.config.update_threshold
+        from core.acceptance import is_accepted_score_rule
+        return is_accepted_score_rule(
+            new_wins=new_wins, prev_wins=prev_wins, draws=draws,
+            threshold=self.config.update_threshold,
+        )
 
     def save_self_play_history(self, generation: int) -> None:
         """Save the current generation's self-play data to a parquet file.
