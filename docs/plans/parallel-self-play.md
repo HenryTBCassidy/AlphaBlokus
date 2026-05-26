@@ -86,8 +86,9 @@ After it runs:
    [progress tracker](full-cycle-optimisation.md#progress-tracker) row
    for F1 — that becomes the "Measured before" entry.
 2. Spot-check the drill-down report; confirm the move-gen vs inference
-   split still looks like 65–72% vs 17–27% (per
-   `docs/08-TRAINING-ESTIMATES.md`).
+   split is roughly **43% move-gen / 50% inference** at production net
+   size (`docs/08-TRAINING-ESTIMATES.md` — the older "65–72% move-gen"
+   numbers were from a small profiling net and don't apply here).
 3. Tick this row.
 
 The same script is re-run at P7 (after parallelism lands) with
@@ -101,7 +102,7 @@ Decision: **process pool (`multiprocessing` / `concurrent.futures.ProcessPoolExe
 
 Rationale:
 
-- **Move generation is pure Python and GIL-bound.** A thread pool wouldn't help — threads would serialise on the GIL exactly the way a single-threaded loop already does. Move-gen is documented as 65–72% of self-play time (see `docs/08-TRAINING-ESTIMATES.md`), so we need true OS-level parallelism, not threads.
+- **Move generation is pure Python and GIL-bound.** A thread pool wouldn't help — threads would serialise on the GIL exactly the way a single-threaded loop already does. Move-gen is ~43% of self-play time at production net size (see `docs/08-TRAINING-ESTIMATES.md`) — smaller than originally believed but still big enough that parallelising it across cores is worthwhile. We need true OS-level parallelism, not threads.
 - **Each self-play game is independent** so the cross-process IPC cost (pickle workers' return values back to the main process) is paid once per game, not per move. 80 games × ~50 KB of training examples ≈ 4 MB of IPC traffic — negligible.
 - **PyTorch handles process-level parallelism cleanly.** Each worker can load its own copy of the network weights into its own process's memory. CPU inference is fine for small nets (we're at 64f×4b); GPU inference per process is also viable on the 3060 Ti's 8 GB if needed (8 × ~50 MB net ≈ 400 MB).
 
