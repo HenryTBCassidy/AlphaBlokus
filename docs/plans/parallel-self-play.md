@@ -59,9 +59,15 @@ script runs end-to-end.
 
 ```bash
 # On the PC, from the repo root
-uv run python -m scripts.benchmark_phases \
-    --config run_configurations/profile_baseline.json
+./scripts/run_benchmark.sh --config run_configurations/profile_baseline.json
 ```
+
+The wrapper sets `PYTHONUNBUFFERED=1`, tees combined stdout/stderr to
+`temp/<run_name>_benchmark/run.log`, and forwards args to
+`scripts.benchmark_phases`. To check progress mid-run from another
+shell session: `tail -f temp/profile_baseline_benchmark/run.log` —
+each per-game heartbeat line shows progress, average per-game time, and
+ETA.
 
 Output lands at `temp/profile_baseline_benchmark/`:
 

@@ -22,6 +22,7 @@ Output lands at ``temp/<run_name>_benchmark/``.
 from __future__ import annotations
 
 import argparse
+import sys
 import time
 from collections import deque
 from dataclasses import replace
@@ -45,6 +46,67 @@ if TYPE_CHECKING:
     from core.interfaces import IGame, INeuralNetWrapper
 
 GAMES_DIR = Path(__file__).resolve().parent.parent / "games"
+
+# Force line-buffered stdout regardless of TTY. Benchmark runs detached
+# under systemd-run/journald and the default block-buffered stdout would
+# stall all the per-game progress lines until the process exited — turning
+# "is the run healthy?" into a 30-minute blind wait. Pair this with
+# ``PYTHONUNBUFFERED=1`` in the launch script for belt-and-braces.
+sys.stdout.reconfigure(line_buffering=True)
+
+
+def _fmt_mmss(seconds: float) -> str:
+    """Compact m:ss / h:mm:ss formatter for log lines."""
+    seconds = max(0.0, seconds)
+    if seconds < 60:
+        return f"{seconds:.1f}s"
+    minutes = seconds / 60
+    if minutes < 60:
+        return f"{int(minutes)}m {int(seconds % 60):02d}s"
+    hours = minutes / 60
+    return f"{int(hours)}h {int(minutes % 60):02d}m"
+
+
+class _PhaseHeartbeat:
+    """Rolling per-game progress printer with ETA.
+
+    The first game has no rate to extrapolate from, so it prints
+    ``ETA estimating...``. From game 2 onward, ETA = mean per-game ×
+    games remaining, using a simple cumulative mean — robust against the
+    occasional outlier game without needing a windowed average.
+
+    Every line ends with ``flush=True`` so it lands in journald
+    immediately even when stdout is not a TTY.
+    """
+
+    def __init__(self, phase_name: str, total: int) -> None:
+        self._phase = phase_name
+        self._total = total
+        self._start = time.perf_counter()
+        self._game_times: list[float] = []
+        self._last_game_start = self._start
+        print(f"[{phase_name}] {total} games — starting", flush=True)
+
+    def tick(self, *, moves: int, search_time_s: float) -> None:
+        now = time.perf_counter()
+        this_game = now - self._last_game_start
+        self._game_times.append(this_game)
+        self._last_game_start = now
+
+        done = len(self._game_times)
+        elapsed = now - self._start
+        avg = elapsed / done
+        remaining = self._total - done
+        eta_s = avg * remaining if done >= 1 else None
+        eta_str = _fmt_mmss(eta_s) if eta_s is not None else "estimating..."
+
+        print(
+            f"  [{self._phase}] {done}/{self._total} | "
+            f"{moves} moves, {search_time_s:.1f}s search | "
+            f"elapsed {_fmt_mmss(elapsed)} | "
+            f"avg {avg:.1f}s/game | ETA {eta_str}",
+            flush=True,
+        )
 
 
 def _initialise_game_and_network(config: RunConfig) -> tuple[IGame, INeuralNetWrapper]:
@@ -77,19 +139,18 @@ def _run_self_play_phase(
     """One self-play episode at a time, sequentially. Same MCTS-creation
     pattern as ``Coach._learn_loop``: fresh tree per episode.
     """
-    print(f"[Self-Play] {config.num_eps} episodes...")
+    heartbeat = _PhaseHeartbeat("Self-Play", config.num_eps)
     per_game_stats: list[MCTSEpisodeStats] = []
     phase_start = time.perf_counter()
 
     iteration_examples: deque = deque([], maxlen=config.max_queue_length)
-    for ep in range(config.num_eps):
+    for _ep in range(config.num_eps):
         mcts = MCTS(game, nnet, config.mcts_config)
         examples_count = _play_one_self_play_episode(game, mcts, config)
         iteration_examples.extend([None] * examples_count)  # only the count matters here
         stats = mcts.get_episode_stats()
         per_game_stats.append(stats)
-        print(f"  ep {ep + 1}/{config.num_eps}: {stats.num_moves} moves, "
-              f"{stats.total_search_time_s:.1f}s search")
+        heartbeat.tick(moves=stats.num_moves, search_time_s=stats.total_search_time_s)
 
     wall_clock = time.perf_counter() - phase_start
     return PhaseResult(name="Self-Play", wall_clock_s=wall_clock, stats=per_game_stats)
@@ -161,7 +222,7 @@ def _run_two_player_phase(
     game: IGame, nnet_a: INeuralNetWrapper, nnet_b: INeuralNetWrapper,
 ) -> PhaseResult:
     """Shared engine for arena and Elo phases. Two-player game, swapped halfway."""
-    print(f"[{phase_name}] {num_games} games...")
+    heartbeat = _PhaseHeartbeat(phase_name, num_games)
     per_game_stats: list[MCTSEpisodeStats] = []
     phase_start = time.perf_counter()
 
@@ -189,8 +250,7 @@ def _run_two_player_phase(
             net_player_b._mcts.get_episode_stats(),
         ])
         per_game_stats.append(combined)
-        print(f"  game {game_idx + 1}/{num_games}: {combined.num_moves} moves, "
-              f"{combined.total_search_time_s:.1f}s search")
+        heartbeat.tick(moves=combined.num_moves, search_time_s=combined.total_search_time_s)
 
     wall_clock = time.perf_counter() - phase_start
     return PhaseResult(name=phase_name, wall_clock_s=wall_clock, stats=per_game_stats)
