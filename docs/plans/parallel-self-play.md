@@ -27,7 +27,7 @@ Estimated speedup factor is roughly `min(num_workers, num_eps)` — capped by th
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| P0 | Establish baseline: run `scripts/mcts_profiling.py` on a fixed `profile_baseline.json` config; record numbers in the master plan's progress tracker | 30 min | High | |
+| P0 | Establish baseline: run `scripts/benchmark_phases.py --config run_configurations/profile_baseline.json` on the PC; record numbers in the master plan's progress tracker. See [P0 detail](#p0-baseline-benchmark) | 30 min | High | partial — script + config landed; PC run pending |
 | P1 | Decide worker model: process pool (chosen — see [P1 detail](#p1-worker-model)) vs thread pool. Document the decision and trade-offs in this plan. | 30 min | High | |
 | P2 | Design per-worker setup: how each worker gets its own game instance, nnet, MCTS, and seed | 1 hr | High | |
 | P3 | Implement `core/coach.py` parallel-aware self-play loop, gated by `num_parallel_workers` config field | 2-3 hr | High | |
@@ -41,6 +41,57 @@ Estimated speedup factor is roughly `min(num_workers, num_eps)` — capped by th
 | P11 | Archive this plan: `git mv` to `docs/plans/archive/`. Append a Scope additions section if anything landed beyond this row table. Update master plan F1 status to "Done". | 5 min | Low | |
 
 Total: ~10–12 hours focused work.
+
+---
+
+## P0. Baseline benchmark
+
+The benchmark lives at `scripts/benchmark_phases.py`, with the fixed
+config at `run_configurations/profile_baseline.json` (16 self-play eps,
+10 arena games, 10 Elo games, 300 sims, 64f×4b net, `cuda: true`).
+Validated on the Mac with TTT (`/tmp/benchmark_ttt_test.json`) and with a
+reduced-shape Blokus config (`/tmp/profile_baseline_mac_quick.json`,
+50 sims, 6 games) — both produced clean parquets and a working HTML
+report. Numbers on the Mac aren't useful for F1; they only confirm the
+script runs end-to-end.
+
+**To capture the real baseline, run on the PC over SSH:**
+
+```bash
+# On the PC, from the repo root
+uv run python -m scripts.benchmark_phases \
+    --config run_configurations/profile_baseline.json
+```
+
+Output lands at `temp/profile_baseline_benchmark/`:
+
+- `report.html` — top: wall-clock summary + bar chart, run-time
+  estimator table for 4 scale points. Bottom: per-phase MCTS
+  drill-down (component pie, per-move timing, search characteristics
+  — same drill-down `scripts/mcts_profiling.py` produces, but one
+  section per phase).
+- `phase_summary.parquet` — one row per phase (wall-clock + mean/game).
+- `per_game.parquet` — every game's MCTS stats.
+- `<phase>_episode_stats.csv` / `<phase>_move_stats.csv` — ad-hoc
+  inspection.
+
+Expected wall-clock on the 3060 Ti: roughly **15–20 minutes** total
+(`profile_baseline.json` is sized to be cheap enough for a coffee break
+but representative — 16 self-play games at ~55s each ≈ 15 min for that
+phase, with arena/Elo adding a bit on top).
+
+After it runs:
+
+1. Copy the key numbers from `phase_summary.parquet` into the
+   [progress tracker](full-cycle-optimisation.md#progress-tracker) row
+   for F1 — that becomes the "Measured before" entry.
+2. Spot-check the drill-down report; confirm the move-gen vs inference
+   split still looks like 65–72% vs 17–27% (per
+   `docs/08-TRAINING-ESTIMATES.md`).
+3. Tick this row.
+
+The same script is re-run at P7 (after parallelism lands) with
+`--num-workers 8` to capture the "Measured after" number.
 
 ---
 
