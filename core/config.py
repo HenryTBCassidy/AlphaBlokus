@@ -142,6 +142,17 @@ class RunConfig:
     # seed + same config + same hardware will produce identical metrics.
     seed: int | None = 42
 
+    # F1 (parallel self-play): number of worker processes used for the
+    # self-play / arena / Elo phases. ``1`` (default) keeps the existing
+    # single-process behaviour bit-for-bit identical to before F1 landed —
+    # the parallel codepath is not taken at all. Values > 1 spawn a
+    # ``ProcessPoolExecutor`` with that many workers; each holds its own
+    # copy of the network in its own CUDA context. Determinism is
+    # preserved per-episode via a seed derived from
+    # ``(seed, generation, episode_idx)``, so set membership of training
+    # examples matches the serial path regardless of worker count.
+    num_parallel_workers: int = 1
+
     @property
     def run_directory(self) -> Path:
         """Base directory for all files related to this training run."""

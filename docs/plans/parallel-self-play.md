@@ -28,7 +28,7 @@ Estimated speedup factor is roughly `min(num_workers, num_eps)` — capped by th
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
 | P0 | Establish baseline: run `scripts/benchmark_phases.py --config run_configurations/profile_baseline.json` on the PC; record numbers in the master plan's progress tracker. See [P0 detail](#p0-baseline-benchmark) | 30 min | High | partial — script + config landed; PC run pending |
-| P1 | Decide worker model: process pool (chosen — see [P1 detail](#p1-worker-model)) vs thread pool. Document the decision and trade-offs in this plan. | 30 min | High | |
+| P1 | Decide worker model: process pool (chosen — see [P1 detail](#p1-worker-model)) vs thread pool. Document the decision and trade-offs in this plan. | 30 min | High | ✓ |
 | P2 | Design per-worker setup: how each worker gets its own game instance, nnet, MCTS, and seed | 1 hr | High | |
 | P3 | Implement `core/coach.py` parallel-aware self-play loop, gated by `num_parallel_workers` config field | 2-3 hr | High | |
 | P4 | Determinism tests: parallel run with seed=K and serial run with seed=K must produce **the same set of training examples** (up to ordering) | 1.5 hr | High | |
@@ -117,6 +117,12 @@ What we explicitly rule out:
 - **Thread pool**: GIL-bound on move gen → no real speedup.
 - **`asyncio` workers**: same GIL constraint plus higher cognitive overhead.
 - **Shared inference server** (one nnet on GPU, workers send positions for evaluation): more complex, defers naturally to F4 (batched inference) where it'll be needed. Out of scope here.
+
+**Reconfirmed 2026-05-26** after the production-net benchmark showed inference is ~50% of search time (not ~17%). Decision still holds:
+
+- Threads are still wrong — the 43% move-gen slice is still GIL-bound, so threads still can't parallelise it. The bigger inference slice doesn't change that.
+- Processes are still right — each worker holds its own net copy in its own GPU context (memory pressure is fine: 8 × ~50 MB ≈ 400 MB on the 8 GB 3060 Ti).
+- The downside the new finding *did* surface is GPU contention between workers on the 50% inference slice — that caps F1's single-axis speedup at ~1.8× (instead of the original 5–7× estimate). The fix is F4 (batched inference server) in the master plan, not a worker-model change here.
 
 ---
 

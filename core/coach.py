@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from core.arena import Arena
 from core.config import RunConfig
-from core.interfaces import IBoard, INeuralNetWrapper, IGame
+from core.interfaces import IBoard, IGame, INeuralNetWrapper
 from core.mcts import MCTS
 from core.players import NetworkPlayer
 from core.storage import (
@@ -149,57 +149,19 @@ class Coach:
             self.elo_baseline_net = None
 
     def execute_episode(self) -> list[ProcessedExample]:
+        """Execute one complete self-play game to generate training data.
+
+        Thin wrapper around :func:`core.self_play.play_self_play_episode`,
+        which is the single source of truth for the episode loop. Both
+        this serial entry point and the parallel worker module in
+        :mod:`core.parallel_self_play` call into that function — keeping
+        them bit-for-bit equivalent at the same seed (basis of the F1
+        determinism test).
         """
-        Execute one complete self-play game to generate training data.
-
-        The game is played using MCTS + current neural network, with moves chosen
-        according to:
-        - Temperature=1 for first temp_threshold moves (exploration)
-        - Temperature≈0 afterwards (exploitation)
-
-        For each game state encountered, we store:
-        - Board position
-        - MCTS policy (improved by tree search)
-        - Game outcome from this position
-
-        Additionally, we augment the data by adding symmetric positions
-        to prevent the network from developing arbitrary directional preferences.
-
-        Returns:
-            List[ProcessedExample]: Training examples of the form (board, policy, value)
-                                  where value is +1 for winning positions, -1 for losing
-        """
-        train_examples: list[TrainingExample] = []
-        board = self.game.initialise_board()
-        current_player = 1
-        move_count = 0
-
-        while True:
-            move_count += 1
-            canonical_board = self.game.get_canonical_form(board, current_player)
-            temperature = int(move_count < self.config.temp_threshold)
-
-            # Get improved policy from MCTS
-            pi = self.mcts.get_action_prob(canonical_board, temp=temperature)
-            
-            # Add symmetric positions to training data
-            symmetries = self.game.get_symmetries(canonical_board, pi)
-            for symmetric_board, symmetric_pi in symmetries:
-                train_examples.append((symmetric_board, current_player, symmetric_pi, None))
-
-            # Choose and execute move
-            action = np.random.choice(len(pi), p=pi)
-            board, current_player = self.game.get_next_state(board, current_player, action)
-
-            # Check if game has ended
-            game_result = self.game.get_game_ended(board, current_player)
-            if game_result != 0:
-                # Assign values to all positions based on final outcome.
-                # Convert canonical board objects → NDArrays for training.
-                return [
-                    (x[0].as_multi_channel(1), x[2], game_result * ((-1) ** (x[1] != current_player)))
-                    for x in train_examples
-                ]
+        from core.self_play import play_self_play_episode
+        return play_self_play_episode(
+            self.game, self.mcts, self.config.temp_threshold,
+        )
 
     def learn(self) -> None:
         """
@@ -238,27 +200,10 @@ class Coach:
                 logger.info(f'Starting Self-Play For Generation #{generation} ...')
                 self_play_start = time.perf_counter()
 
-                for episode_idx in tqdm(range(self.config.num_eps), desc="Self Play"):
-                    self.mcts = MCTS(self.game, self.nnet, self.config.mcts_config)
-                    iteration_examples.extend(self.execute_episode())
-
-                    # Log per-episode MCTS profiling data
-                    stats = self.mcts.get_episode_stats()
-                    self.metrics.log_self_play_profiling(
-                        generation=generation,
-                        episode=episode_idx,
-                        num_moves=stats.num_moves,
-                        total_sims=stats.total_sims,
-                        total_search_time_s=stats.total_search_time_s,
-                        total_inference_time_s=stats.total_inference_time_s,
-                        num_leaf_expansions=stats.num_leaf_expansions,
-                        tree_size=stats.tree_size,
-                        mean_policy_entropy=stats.mean_policy_entropy,
-                        total_valid_moves_time_s=stats.total_valid_moves_time_s,
-                        total_game_ended_time_s=stats.total_game_ended_time_s,
-                        num_valid_moves_calls=stats.num_valid_moves_calls,
-                        num_game_ended_calls=stats.num_game_ended_calls,
-                    )
+                if self.config.num_parallel_workers > 1:
+                    self._run_self_play_parallel(generation, iteration_examples)
+                else:
+                    self._run_self_play_serial(generation, iteration_examples)
 
                 self_play_end = time.perf_counter()
                 self.metrics.log_timing(generation, CycleStage.SELF_PLAY, self_play_end - self_play_start)
@@ -286,7 +231,7 @@ class Coach:
             # Preserve current best network
             self.nnet.save_checkpoint(filename='temp.pth.tar')
             self.pnet.load_checkpoint(filename='temp.pth.tar')
-            pmcts = MCTS(self.game, self.pnet, self.config.mcts_config)
+            MCTS(self.game, self.pnet, self.config.mcts_config)
 
             # Train network on accumulated data
             logger.info(f'Starting Training For Generation #{generation} ...')
@@ -374,6 +319,78 @@ class Coach:
             generation_end = time.perf_counter()
             self.metrics.log_timing(generation, CycleStage.WHOLE_CYCLE, generation_end - generation_start)
             self.metrics.flush(self.config, generation)
+
+    def _run_self_play_serial(
+        self, generation: int, iteration_examples: deque,
+    ) -> None:
+        """Original sequential self-play loop. Kept bit-for-bit identical
+        to the pre-F1 behaviour: same MCTS instance lifecycle, same
+        per-episode logging, same tqdm. The parallel codepath is opt-in
+        via ``config.num_parallel_workers > 1``.
+        """
+        for episode_idx in tqdm(range(self.config.num_eps), desc="Self Play"):
+            self.mcts = MCTS(self.game, self.nnet, self.config.mcts_config)
+            iteration_examples.extend(self.execute_episode())
+
+            stats = self.mcts.get_episode_stats()
+            self.metrics.log_self_play_profiling(
+                generation=generation,
+                episode=episode_idx,
+                num_moves=stats.num_moves,
+                total_sims=stats.total_sims,
+                total_search_time_s=stats.total_search_time_s,
+                total_inference_time_s=stats.total_inference_time_s,
+                num_leaf_expansions=stats.num_leaf_expansions,
+                tree_size=stats.tree_size,
+                mean_policy_entropy=stats.mean_policy_entropy,
+                total_valid_moves_time_s=stats.total_valid_moves_time_s,
+                total_game_ended_time_s=stats.total_game_ended_time_s,
+                num_valid_moves_calls=stats.num_valid_moves_calls,
+                num_game_ended_calls=stats.num_game_ended_calls,
+            )
+
+    def _run_self_play_parallel(
+        self, generation: int, iteration_examples: deque,
+    ) -> None:
+        """Parallel self-play across a process pool (F1).
+
+        Saves the current ``self.nnet`` to a fixed checkpoint workers
+        load at pool startup, dispatches ``num_eps`` per-episode tasks,
+        then extends ``iteration_examples`` with the returned examples
+        in submission order. Per-episode MCTS stats are logged via
+        ``metrics.log_self_play_profiling`` to match the serial
+        codepath's schema — downstream reports don't care which path
+        produced the data.
+        """
+        from core.parallel_self_play import run_self_play_episodes_parallel
+
+        worker_init_checkpoint = "parallel_worker_init.pth.tar"
+        self.nnet.save_checkpoint(filename=worker_init_checkpoint)
+
+        per_ep_examples, per_ep_stats = run_self_play_episodes_parallel(
+            config=self.config,
+            generation=generation,
+            checkpoint_path=worker_init_checkpoint,
+            num_workers=self.config.num_parallel_workers,
+        )
+
+        for episode_idx, (examples, stats) in enumerate(zip(per_ep_examples, per_ep_stats, strict=False)):
+            iteration_examples.extend(examples)
+            self.metrics.log_self_play_profiling(
+                generation=generation,
+                episode=episode_idx,
+                num_moves=stats.num_moves,
+                total_sims=stats.total_sims,
+                total_search_time_s=stats.total_search_time_s,
+                total_inference_time_s=stats.total_inference_time_s,
+                num_leaf_expansions=stats.num_leaf_expansions,
+                tree_size=stats.tree_size,
+                mean_policy_entropy=stats.mean_policy_entropy,
+                total_valid_moves_time_s=stats.total_valid_moves_time_s,
+                total_game_ended_time_s=stats.total_game_ended_time_s,
+                num_valid_moves_calls=stats.num_valid_moves_calls,
+                num_game_ended_calls=stats.num_game_ended_calls,
+            )
 
     def _evaluate_strength_vs_baselines(self, generation: int) -> None:
         """Play the new network this gen against fixed baselines, log results.
@@ -471,7 +488,8 @@ class Coach:
         metric is directly comparable.
         """
         from core.symmetry_diagnostic import (
-            build_diagnostic_positions, compute_symmetry_diagnostic,
+            build_diagnostic_positions,
+            compute_symmetry_diagnostic,
         )
 
         if self._symmetry_diagnostic_positions is None:

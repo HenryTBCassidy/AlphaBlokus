@@ -34,18 +34,13 @@ import pandas as pd
 
 from core.arena import Arena
 from core.config import RunConfig, load_args
+from core.game_factory import instantiate_game_and_network
 from core.mcts import MCTS, MCTSEpisodeStats
 from core.players import NetworkPlayer
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.neuralnets.wrapper import NNetWrapper as BlokusDuoNNetWrapper
-from games.tictactoe.game import TicTacToeGame
-from games.tictactoe.neuralnets.wrapper import NNetWrapper as TicTacToeNNetWrapper
 from reporting.mcts_profiling import PhaseResult, build_multi_phase_report
 
 if TYPE_CHECKING:
     from core.interfaces import IGame, INeuralNetWrapper
-
-GAMES_DIR = Path(__file__).resolve().parent.parent / "games"
 
 # Force line-buffered stdout regardless of TTY. Benchmark runs detached
 # under systemd-run/journald and the default block-buffered stdout would
@@ -109,22 +104,6 @@ class _PhaseHeartbeat:
         )
 
 
-def _initialise_game_and_network(config: RunConfig) -> tuple[IGame, INeuralNetWrapper]:
-    """Same shape as ``main.initialise_game_and_network``, kept local to
-    avoid pulling the training-loop module into this benchmark.
-    """
-    match config.game:
-        case "tictactoe":
-            game = TicTacToeGame()
-            nnet = TicTacToeNNetWrapper(game, config)
-        case "blokusduo":
-            game = BlokusDuoGame(pieces_config_path=GAMES_DIR / "blokusduo" / "pieces.json")
-            nnet = BlokusDuoNNetWrapper(game, config)
-        case unknown:
-            raise ValueError(f"Unknown game: {unknown!r}")
-    return game, nnet
-
-
 def _force_detailed_profiling(config: RunConfig) -> RunConfig:
     """Benchmark needs per-move stats so the drill-down report is meaningful."""
     return replace(
@@ -134,11 +113,25 @@ def _force_detailed_profiling(config: RunConfig) -> RunConfig:
 
 
 def _run_self_play_phase(
+    config: RunConfig, game: IGame, nnet: INeuralNetWrapper, num_workers: int,
+) -> PhaseResult:
+    """Self-play phase, sequential or process-pool-parallel based on
+    ``num_workers``.
+
+    Serial path (``num_workers == 1``) keeps the existing MCTS-per-episode
+    pattern. Parallel path delegates to
+    :func:`core.parallel_self_play.run_self_play_episodes_parallel` —
+    the same orchestrator ``Coach._run_self_play_parallel`` uses. We
+    save ``nnet``'s weights to a checkpoint workers load at pool init.
+    """
+    if num_workers > 1:
+        return _run_self_play_phase_parallel(config, nnet, num_workers)
+    return _run_self_play_phase_serial(config, game, nnet)
+
+
+def _run_self_play_phase_serial(
     config: RunConfig, game: IGame, nnet: INeuralNetWrapper,
 ) -> PhaseResult:
-    """One self-play episode at a time, sequentially. Same MCTS-creation
-    pattern as ``Coach._learn_loop``: fresh tree per episode.
-    """
     heartbeat = _PhaseHeartbeat("Self-Play", config.num_eps)
     per_game_stats: list[MCTSEpisodeStats] = []
     phase_start = time.perf_counter()
@@ -154,6 +147,31 @@ def _run_self_play_phase(
 
     wall_clock = time.perf_counter() - phase_start
     return PhaseResult(name="Self-Play", wall_clock_s=wall_clock, stats=per_game_stats)
+
+
+def _run_self_play_phase_parallel(
+    config: RunConfig, nnet: INeuralNetWrapper, num_workers: int,
+) -> PhaseResult:
+    """Dispatch self-play across ``num_workers`` worker processes via the
+    F1 orchestrator. Saves the current ``nnet`` to a fixed-name
+    checkpoint workers load at pool init.
+    """
+    from core.parallel_self_play import run_self_play_episodes_parallel
+
+    print(f"[Self-Play] {config.num_eps} games across {num_workers} workers — starting",
+          flush=True)
+    checkpoint = "benchmark_worker_init.pth.tar"
+    nnet.save_checkpoint(filename=checkpoint)
+
+    phase_start = time.perf_counter()
+    _per_ep_examples, per_ep_stats = run_self_play_episodes_parallel(
+        config=config,
+        generation=0,  # standalone benchmark has no real generation index
+        checkpoint_path=checkpoint,
+        num_workers=num_workers,
+    )
+    wall_clock = time.perf_counter() - phase_start
+    return PhaseResult(name="Self-Play", wall_clock_s=wall_clock, stats=list(per_ep_stats))
 
 
 def _play_one_self_play_episode(
@@ -379,12 +397,12 @@ def main() -> None:
     if config.seed is not None:
         np.random.seed(config.seed)
 
-    game, nnet = _initialise_game_and_network(config)
+    game, nnet = instantiate_game_and_network(config)
     nnet_opponent = nnet.__class__(game, config)  # second random-init for arena/Elo
 
     overall_start = time.perf_counter()
     phases: dict[str, PhaseResult] = {}
-    phases["Self-Play"] = _run_self_play_phase(config, game, nnet)
+    phases["Self-Play"] = _run_self_play_phase(config, game, nnet, args.num_workers)
     phases["Arena"] = _run_two_player_phase(
         phase_name="Arena", num_games=config.num_arena_matches, config=config,
         game=game, nnet_a=nnet, nnet_b=nnet_opponent,
