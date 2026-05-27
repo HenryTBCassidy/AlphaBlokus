@@ -239,6 +239,81 @@ def test_two_player_one_worker_matches_four_workers(
 
 
 @pytest.mark.slow
+def test_two_player_records_use_a_perspective(
+    parallel_test_config: RunConfig,
+) -> None:
+    """The orchestrator's ``GameRecord``s are written from A's
+    perspective, with ``player1_was_white`` tracking whether A went
+    first that game.
+
+    This contract is what callers rely on to map A/B to roles like
+    "previous net" / "new net". Getting it wrong would silently flip
+    winner labels in arena replay rendering — see
+    ``Coach._run_arena_parallel`` which deliberately picks A = prev so
+    the records match the existing reporting convention.
+
+    Verifies three things in one test:
+
+    1. Outcome signs are consistent with the returned win counts.
+    2. ``player1_was_white`` is ``True`` for the first half of games
+       (A-first) and ``False`` for the second half.
+    3. Each record's move-player IDs line up with arena's
+       player1/player2 convention (player1 = whoever went first).
+    """
+    checkpoint_a = _save_fixed_checkpoint(parallel_test_config, "two_player_a.pth.tar")
+    checkpoint_b = _save_fixed_checkpoint(parallel_test_config, "two_player_b.pth.tar")
+
+    a_wins, b_wins, draws, records = run_two_player_games_parallel(
+        config=parallel_test_config,
+        generation=1,
+        checkpoint_a_path=checkpoint_a,
+        checkpoint_b_path=checkpoint_b,
+        num_games=4,
+        num_workers=2,
+        phase=PHASE_ARENA,
+        record=True,
+        top_k=3,
+        desc="Arena (test)",
+    )
+
+    assert len(records) == 4
+
+    # 1. Outcome signs consistent with the count totals.
+    a_wins_from_records = sum(1 for r in records if r.outcome > 0.5)
+    b_wins_from_records = sum(1 for r in records if r.outcome < -0.5)
+    draws_from_records = sum(1 for r in records if abs(r.outcome) < 0.5)
+    assert (a_wins_from_records, b_wins_from_records, draws_from_records) == (
+        a_wins, b_wins, draws,
+    ), (
+        f"Per-record outcomes don't match aggregate counts. "
+        f"From records: A={a_wins_from_records} B={b_wins_from_records} D={draws_from_records}; "
+        f"aggregate: A={a_wins} B={b_wins} D={draws}."
+    )
+
+    # 2. player1_was_white tracks A-first ordering (first half True,
+    # second half False — matches Arena.play_games swap convention).
+    half = 4 // 2
+    for i in range(half):
+        assert records[i].player1_was_white is True, (
+            f"Game {i} (first half) should have A first → player1_was_white=True"
+        )
+    for i in range(half, 4):
+        assert records[i].player1_was_white is False, (
+            f"Game {i} (second half) should have B first → player1_was_white=False"
+        )
+
+    # 3. First move in each game is by arena's player1 (= whoever went
+    # first), i.e. MoveRecord.player == 1.
+    for i, rec in enumerate(records):
+        if not rec.moves:
+            continue
+        assert rec.moves[0].player == 1, (
+            f"Game {i}: first move's player should be +1 (arena player1), "
+            f"got {rec.moves[0].player}"
+        )
+
+
+@pytest.mark.slow
 def test_episode_count_matches_config(
     parallel_test_config: RunConfig,
 ) -> None:

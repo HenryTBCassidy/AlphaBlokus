@@ -192,6 +192,96 @@ For shell scripts longer than one line: write to a file locally, `scp` to PC, ru
 | `An expression was expected after '('` | PowerShell parsed `()` in your Python | Base64-encode the Python |
 | nvidia-smi from Windows shows no python process | Windows nvidia-smi only sees Windows processes | Query inside WSL: `wsl -- bash -lc "nvidia-smi"` |
 | Two W&B runs with the same name | `wandb.init(name=config.run_name)` collides on re-runs | We now append a UTC timestamp suffix — see `core/storage.py` `_init_wandb` |
+| `ssh: Operation timed out` to `<gpu-host>` | PC dropped off the tailnet (sleep, Tailscale service stopped, VPN interference) — `tailscale status` shows `offline, last seen Xh ago` | See [Tailscale connectivity recovery](#tailscale-connectivity-recovery) below |
+| PC `active` in `tailscale status` but `tailscale ping` and SSH both time out | Mac-side Tailscale system extension stuck — typically a `MagicSock function ReceiveIPv4 is not running` health warning | Force-kill **both** `Tailscale` and `IPNExtension` on the Mac, then relaunch — see recovery section below |
+
+---
+
+## Tailscale connectivity recovery
+
+The Tailscale tunnel between Mac and PC has two failure modes that look superficially the same (SSH times out) but need very different fixes.
+
+### Read the health check first
+
+Always start with:
+
+```bash
+/Applications/Tailscale.app/Contents/MacOS/Tailscale status
+```
+
+The line for `desktop-5nut9e9` (the PC) tells you which side is broken:
+
+| Status line for PC | Meaning | Where to fix |
+|--------------------|---------|--------------|
+| `offline, last seen Xh ago` | PC is not talking to the control plane at all | **PC side** — see "PC-side recovery" below |
+| `active; relay "lhr"` *(or similar)* with a `# Health check:` warning about MagicSock | Control plane sees both nodes but Mac-side Tailscale internals are wedged | **Mac side** — see "Mac-side recovery" below |
+| `active` with no warnings, but `tailscale ping` still times out | Usually a VPN or firewall blocking UDP between the two | Disable VPN, check OS firewall |
+
+Also run `/Applications/Tailscale.app/Contents/MacOS/Tailscale netcheck` to confirm UDP works at all and which DERP relays are reachable. If `UDP: false`, no Tailscale path will work — it's a local network issue, not a Tailscale issue.
+
+### PC-side recovery (PC offline in tailscale status)
+
+Most common cause is PC sleep + Tailscale tray icon dropping its connection.
+
+1. Wake the PC manually (move mouse / open lid).
+2. Check Windows system tray — Tailscale icon should be green. If red/missing, right-click → "Connect" (or restart the service).
+3. If still offline 30s after waking, RDP/console into the PC and from admin PowerShell:
+   ```powershell
+   Restart-Service Tailscale
+   ```
+4. Verify from the Mac: `tailscale status | grep desktop` should now show `active`.
+
+### Mac-side recovery (PC active but no traffic)
+
+This is the harder one. Symptoms: PC shows `active` in `tailscale status`, but `tailscale ping` to the PC times out, SSH times out, and there's a Mac-side health warning like:
+
+```
+# Health check:
+#     - The MagicSock function ReceiveIPv4 is not running.
+```
+
+**Why the menu-bar "Quit" doesn't fix it:** the macOS Tailscale app is two processes — the GUI app *and* a separately-launched system extension (`IPNExtension`). Quitting from the menu only kills the GUI. The extension keeps running with its broken state, and when you re-open the app it inherits that state. You have to kill **both**.
+
+```bash
+# Kill the GUI and the system extension
+killall Tailscale IPNExtension
+
+# Wait a moment, confirm gone
+sleep 2
+ps aux | grep -iE "tailscale|ipnextension" | grep -v grep
+# Should be empty
+
+# Relaunch
+open /Applications/Tailscale.app
+```
+
+When the app comes back up it has no in-memory auth token, so a fresh login flow opens in the default browser. Click **Connect** to re-authorise — within ~5s `tailscale status` should show `active` with no health warning. Confirm with:
+
+```bash
+/Applications/Tailscale.app/Contents/MacOS/Tailscale ping -c 2 100.109.47.123
+```
+
+If you see `pong from desktop-5nut9e9` (with or without "via DERP"), the tunnel is back. SSH should work immediately.
+
+**If even `killall` doesn't fix it** (rare): the system extension can occasionally hang in a state only `sudo killall IPNExtension` can clear, or only a reboot can clear. Reboot is the universal fix when nothing else works.
+
+### A note on VPNs
+
+Several Tailscale connectivity issues we've hit have traced back to a corporate / always-on VPN being silently re-enabled after a network change or schedule. If `tailscale netcheck` shows `UDP: false` or the DERP relays all have high latency / fail, check whether a VPN client decided to re-engage. Tailscale and most corporate VPNs fight over the routing table.
+
+### What the symptoms looked like the first time we hit this
+
+(Documenting for future-us so the next person doesn't have to re-derive the diagnosis.)
+
+- Mac tailscale status showed PC `active; relay "lhr"`, no `offline` flag.
+- `tailscale ping` to PC: `ping ... timed out` (no reply).
+- `tailscale status` had health warning: `The MagicSock function ReceiveIPv4 is not running. You might experience connectivity issues.`
+- `curl https://controlplane.tailscale.com/health` returned a clean HTTP 404 in 60 ms (TLS verified OK) — proves Tailscale's infrastructure was reachable, so the issue was local-Mac, not network.
+- `scutil --proxy` showed default config, no env proxy variables — ruling out a transparent proxy.
+- The Mac had two Tailscale processes: main app + `IPNExtension`. Quitting via the menu killed the main app but left the extension stuck.
+- `killall Tailscale IPNExtension && open /Applications/Tailscale.app` triggered a fresh browser login. Clicking Connect restored everything within seconds.
+
+Total time spent debugging this the first time: ~30 minutes. With this section, hopefully under 2 next time.
 
 ---
 

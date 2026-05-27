@@ -27,18 +27,18 @@ Estimated speedup factor is roughly `min(num_workers, num_eps)` — capped by th
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| P0 | Establish baseline: run `scripts/benchmark_phases.py --config run_configurations/profile_baseline.json` on the PC; record numbers in the master plan's progress tracker. See [P0 detail](#p0-baseline-benchmark) | 30 min | High | partial — script + config landed; PC run pending |
+| P0 | Establish baseline: run `scripts/benchmark_phases.py --config run_configurations/profile_baseline.json` on the PC; record numbers in the master plan's progress tracker. See [P0 detail](#p0-baseline-benchmark) | 30 min | High | ✓ |
 | P1 | Decide worker model: process pool (chosen — see [P1 detail](#p1-worker-model)) vs thread pool. Document the decision and trade-offs in this plan. | 30 min | High | ✓ |
-| P2 | Design per-worker setup: how each worker gets its own game instance, nnet, MCTS, and seed | 1 hr | High | |
-| P3 | Implement `core/coach.py` parallel-aware self-play loop, gated by `num_parallel_workers` config field | 2-3 hr | High | |
-| P4 | Determinism tests: parallel run with seed=K and serial run with seed=K must produce **the same set of training examples** (up to ordering) | 1.5 hr | High | |
-| P5 | Aggregate per-worker profiling stats (sims/sec, search time) back into the metrics collector — currently per-process, needs to be summed/averaged | 1 hr | Medium | |
-| P6 | Replace per-episode `tqdm` with a coordinator that shows overall progress across workers | 30 min | Medium | |
-| P7 | First measurement: re-run the baseline profile with parallelism on, on the PC; expect ~5–7× wall-clock improvement | 30 min | High | |
-| P8 | Apply the same worker-pool pattern to arena games (currently 50/gen, sequential) | 1-2 hr | High | |
-| P9 | Apply the same worker-pool pattern to Elo eval games (currently 20/gen, sequential) | 1 hr | Medium | |
-| P10 | End-to-end test run on PC with parallel self-play + arena + Elo, comparing wall-clock to baseline. Update master plan progress tracker. | 1 hr | High | |
-| P11 | Archive this plan: `git mv` to `docs/plans/archive/`. Append a Scope additions section if anything landed beyond this row table. Update master plan F1 status to "Done". | 5 min | Low | |
+| P2 | Design per-worker setup: how each worker gets its own game instance, nnet, MCTS, and seed | 1 hr | High | ✓ |
+| P3 | Implement `core/coach.py` parallel-aware self-play loop, gated by `num_parallel_workers` config field | 2-3 hr | High | ✓ |
+| P4 | Determinism tests: parallel run with seed=K and serial run with seed=K must produce **the same set of training examples** (up to ordering) | 1.5 hr | High | ✓ |
+| P5 | Aggregate per-worker profiling stats (sims/sec, search time) back into the metrics collector — currently per-process, needs to be summed/averaged | 1 hr | Medium | ✓ |
+| P6 | Replace per-episode `tqdm` with a coordinator that shows overall progress across workers | 30 min | Medium | ✓ |
+| P7 | First measurement: re-run the baseline profile with parallelism on, on the PC; expect ~5–7× wall-clock improvement | 30 min | High | ✓ (4.13× at 4 workers; 8 workers OOM'd WSL) |
+| P8 | Apply the same worker-pool pattern to arena games (currently 50/gen, sequential) | 1-2 hr | High | ✓ |
+| P9 | Apply the same worker-pool pattern to Elo eval games (currently 20/gen, sequential) | 1 hr | Medium | ✓ |
+| P10 | End-to-end test run on PC with parallel self-play + arena + Elo, comparing wall-clock to baseline. Update master plan progress tracker. | 1 hr | High | ✓ |
+| P11 | Archive this plan: `git mv` to `docs/plans/archive/`. Append a Scope additions section if anything landed beyond this row table. Update master plan F1 status to "Done". | 5 min | Low | ✓ |
 
 Total: ~10–12 hours focused work.
 
@@ -312,6 +312,22 @@ If results look broken (e.g. acceptance rate drops, loss curves diverge from ser
 `git mv docs/plans/parallel-self-play.md docs/plans/archive/`. Append a "Scope additions" section to this file first if anything landed outside the row table.
 
 Tick the F1 row in [`full-cycle-optimisation.md`](full-cycle-optimisation.md) and update its progress tracker with the final measured speedup.
+
+---
+
+## Scope additions
+
+Landed during implementation but not in the original P0-P11 row table:
+
+- **`core/game_factory.py`** — extracted `instantiate_game_and_network` from `main.py` because the worker module needs the same dispatch. Also tidied `scripts/benchmark_phases.py` to import it instead of duplicating the logic.
+- **`core/self_play.py`** — extracted `play_self_play_episode` as a free function. Coach's `execute_episode` is now a thin wrapper. Worker module calls the same function. This is what makes the determinism test possible — both call sites are literally the same code path.
+- **`scripts/run_benchmark.sh`** — bash wrapper around `scripts.benchmark_phases` that sets `PYTHONUNBUFFERED=1` and tees combined stdout/stderr to a stable log path. Added after the first PC benchmark run had a 30-minute blind spot due to Python stdout buffering.
+- **Per-game heartbeat in `scripts/benchmark_phases.py`** — emits `elapsed / avg / ETA` per game so remote runs are checkable via `tail -f`. The `_PhaseHeartbeat` class is the implementation.
+- **`reporting/mcts_profiling.py`** — extracted the report builder from `scripts/mcts_profiling.py` into a reusable module. `scripts/benchmark_phases.py` reuses `build_multi_phase_report` to render a phase summary + estimator table + per-phase MCTS drill-down in one HTML.
+- **`run_configurations/profile_baseline.json`** — fixed config for repeatable before/after measurement. 16 self-play eps + 10 arena + 10 Elo at production net + 300 sims. Lives alongside training configs.
+- **Tailscale connectivity recovery section** in `docs/guides/REMOTE-TRAINING.md` — added after spending ~30 minutes debugging a wedged Mac-side Tailscale state during P7. The fix is `killall Tailscale IPNExtension` because the menu-bar Quit doesn't kill the system extension. Documented so we don't lose time again.
+- **Phase 1 inference-server pre-thinking surfaced in the master plan** — measurement found the GPU has more headroom than the Amdahl projection assumed (got 4.13× at 4 workers vs the 1.8× ceiling). Updated the master plan's F1 row + sequencing rationale to reflect this rather than the original projection.
+- **Convention-bug audit + fix (P10 follow-up)** — the parallel arena initially wrote `GameRecord` fields from the new-net perspective; serial arena writes them from the prev-net perspective (player1 convention). Caught during the pre-archive audit; fixed in `Coach._run_arena_parallel` (swapped A/B mapping) and pinned by a unit test. No bad data on disk — only the benchmark ran in parallel up to that point and it uses `record=False`.
 
 ---
 

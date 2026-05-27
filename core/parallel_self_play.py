@@ -349,6 +349,20 @@ def run_two_player_games_parallel(
     **Elo** (``phase=PHASE_ELO``, ``record=False``). Each worker loads
     both checkpoints once at pool init and plays one game per task.
 
+    **Caller-defined role convention**: the orchestrator is agnostic
+    about which network is "the new net" vs "the opponent" — it just
+    plays games between two checkpoints. *The caller must pick A/B to
+    match the downstream consumer's convention.* Specifically:
+
+    - For **arena**, ``Coach._run_arena_parallel`` passes A = prev,
+      B = new so the resulting records' ``outcome`` and
+      ``player1_was_white`` line up with
+      ``Coach._run_arena_serial``'s ``Arena(prev, new)`` convention
+      that ``reporting/training._render_arena_replays`` reads.
+    - For **Elo**, ``Coach._run_elo_parallel`` passes A = new,
+      B = baseline so ``a_wins`` flows naturally into the ``wins``
+      slot of ``_compute_elo``.
+
     Args:
         config: Run config — ``config.seed`` seeds episode derivation,
             ``config.mcts_config`` parameterises both players' MCTS.
@@ -356,9 +370,9 @@ def run_two_player_games_parallel(
             seeds so different generations replay different games at the
             same episode index.
         checkpoint_a_path: Filename (relative to ``config.net_directory``)
-            workers load into network A — the net being evaluated.
-        checkpoint_b_path: Filename for network B — the opponent
-            (previous-best for arena, frozen baseline for Elo).
+            workers load into network A. Half the games run with A
+            going first; the other half with B first.
+        checkpoint_b_path: Filename for network B.
         num_games: Total games to play. Halved so half the games have A
             going first and half have B going first, matching the
             existing :meth:`Arena.play_games` swap convention.
@@ -371,7 +385,10 @@ def run_two_player_games_parallel(
     Returns:
         ``(a_wins, b_wins, draws, records)`` — outcomes counted from
         network A's perspective regardless of who went first per game.
-        ``records`` is empty when ``record`` is False.
+        Each :class:`GameRecord` in ``records`` carries ``outcome``
+        from A's perspective and ``player1_was_white`` = whether A
+        went first that game. ``records`` is empty when ``record`` is
+        False.
     """
     if num_workers < 1:
         raise ValueError(f"num_workers must be >= 1, got {num_workers}")

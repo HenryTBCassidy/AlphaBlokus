@@ -411,12 +411,24 @@ class Coach:
     ) -> tuple[int, int, int, list]:
         """Parallel arena across the F1 worker pool.
 
-        Saves the new and previous-best network weights to checkpoints
-        the workers load at pool init, then dispatches each arena game
-        as a task. Returns the same shape the serial path does:
-        ``(new_wins, prev_wins, draws, game_records)``. ``game_records``
-        is keyed from the new network's perspective (matches the serial
-        path's convention where player1_was_white tracks the new net).
+        Returns ``(new_wins, prev_wins, draws, game_records)`` —
+        identical shape to ``_run_arena_serial``.
+
+        **Convention** (matters for record fields): the orchestrator's
+        ``A`` is mapped to ``self.pnet`` (the previous-best network)
+        and ``B`` to ``self.nnet`` (the new candidate). This matches
+        the serial path which constructs ``Arena(prev_player,
+        new_player)`` with player1 = prev. The resulting GameRecords
+        carry ``outcome`` from prev's perspective (so ``+1`` =
+        previous net won) and ``player1_was_white`` tracking whether
+        prev was white — which is what
+        :func:`reporting.training._render_arena_replays` expects when
+        it labels winners.
+
+        Getting this wrong would silently flip the "new net wins" /
+        "previous net wins" labels in the HTML report. The convention
+        is enforced by a unit test in
+        ``tests/test_core/test_parallel_self_play.py``.
         """
         from core.parallel_self_play import (
             PHASE_ARENA,
@@ -428,11 +440,11 @@ class Coach:
         self.nnet.save_checkpoint(filename=new_checkpoint)
         self.pnet.save_checkpoint(filename=prev_checkpoint)
 
-        a_wins, b_wins, draws, records = run_two_player_games_parallel(
+        prev_wins, new_wins, draws, records = run_two_player_games_parallel(
             config=self.config,
             generation=generation,
-            checkpoint_a_path=new_checkpoint,
-            checkpoint_b_path=prev_checkpoint,
+            checkpoint_a_path=prev_checkpoint,  # A = prev (matches serial player1)
+            checkpoint_b_path=new_checkpoint,   # B = new
             num_games=self.config.num_arena_matches,
             num_workers=self.config.num_parallel_workers,
             phase=PHASE_ARENA,
@@ -440,8 +452,7 @@ class Coach:
             top_k=top_k_to_record,
             desc="Arena",
         )
-        # ``a`` = new net by convention in run_two_player_games_parallel.
-        return a_wins, b_wins, draws, records
+        return new_wins, prev_wins, draws, records
 
     def _evaluate_strength_vs_baselines(self, generation: int) -> None:
         """Play the new network this gen against fixed baselines, log results.
