@@ -253,27 +253,21 @@ class Coach:
             # PHASE 3: Evaluate new network
             logger.info(f'Evaluating Against Previous Version For Generation #{generation} ...')
             arena_start = time.perf_counter()
-
-            # Use NetworkPlayer instances (not bare lambdas) so the arena can
-            # record each move's top-K policy for replay inspection later.
-            prev_player = NetworkPlayer(
-                game=self.game, nnet=self.pnet,
-                mcts_config=self.config.mcts_config, temp=0.0,
-            )
-            new_player = NetworkPlayer(
-                game=self.game, nnet=self.nnet,
-                mcts_config=self.config.mcts_config, temp=0.0,
-            )
-            arena = Arena(prev_player, new_player, self.game)
             # ``top_k`` capped at the action-space size (TTT only has 10
             # actions; for Blokus's 17,837 actions 20 is plenty to capture
             # the meaningful head). Recording at least 20 also guarantees
             # the played action is in the recorded list even when MCTS is
             # uniform across many tied actions.
             top_k_to_record = min(self.game.get_action_size(), 20)
-            pwins, nwins, draws, game_records = arena.play_games(
-                self.config.num_arena_matches, record=True, top_k=top_k_to_record,
-            )
+
+            if self.config.num_parallel_workers > 1:
+                nwins, pwins, draws, game_records = self._run_arena_parallel(
+                    generation, top_k_to_record,
+                )
+            else:
+                nwins, pwins, draws, game_records = self._run_arena_serial(
+                    top_k_to_record,
+                )
 
             arena_end = time.perf_counter()
             accepted = self._should_accept_new_network(nwins, pwins, draws)
@@ -392,6 +386,63 @@ class Coach:
                 num_game_ended_calls=stats.num_game_ended_calls,
             )
 
+    def _run_arena_serial(
+        self, top_k_to_record: int,
+    ) -> tuple[int, int, int, list]:
+        """Original sequential arena loop. Returns
+        ``(new_wins, prev_wins, draws, game_records)``.
+        """
+        prev_player = NetworkPlayer(
+            game=self.game, nnet=self.pnet,
+            mcts_config=self.config.mcts_config, temp=0.0,
+        )
+        new_player = NetworkPlayer(
+            game=self.game, nnet=self.nnet,
+            mcts_config=self.config.mcts_config, temp=0.0,
+        )
+        arena = Arena(prev_player, new_player, self.game)
+        pwins, nwins, draws, records = arena.play_games(
+            self.config.num_arena_matches, record=True, top_k=top_k_to_record,
+        )
+        return nwins, pwins, draws, records
+
+    def _run_arena_parallel(
+        self, generation: int, top_k_to_record: int,
+    ) -> tuple[int, int, int, list]:
+        """Parallel arena across the F1 worker pool.
+
+        Saves the new and previous-best network weights to checkpoints
+        the workers load at pool init, then dispatches each arena game
+        as a task. Returns the same shape the serial path does:
+        ``(new_wins, prev_wins, draws, game_records)``. ``game_records``
+        is keyed from the new network's perspective (matches the serial
+        path's convention where player1_was_white tracks the new net).
+        """
+        from core.parallel_self_play import (
+            PHASE_ARENA,
+            run_two_player_games_parallel,
+        )
+
+        new_checkpoint = "parallel_arena_new.pth.tar"
+        prev_checkpoint = "parallel_arena_prev.pth.tar"
+        self.nnet.save_checkpoint(filename=new_checkpoint)
+        self.pnet.save_checkpoint(filename=prev_checkpoint)
+
+        a_wins, b_wins, draws, records = run_two_player_games_parallel(
+            config=self.config,
+            generation=generation,
+            checkpoint_a_path=new_checkpoint,
+            checkpoint_b_path=prev_checkpoint,
+            num_games=self.config.num_arena_matches,
+            num_workers=self.config.num_parallel_workers,
+            phase=PHASE_ARENA,
+            record=True,
+            top_k=top_k_to_record,
+            desc="Arena",
+        )
+        # ``a`` = new net by convention in run_two_player_games_parallel.
+        return a_wins, b_wins, draws, records
+
     def _evaluate_strength_vs_baselines(self, generation: int) -> None:
         """Play the new network this gen against fixed baselines, log results.
 
@@ -427,16 +478,11 @@ class Coach:
         logger.info(f"Evaluating Elo vs frozen gen-0 baseline ({n} games) ...")
         elo_start = time.perf_counter()
 
-        new_player = NetworkPlayer(
-            game=self.game, nnet=self.nnet,
-            mcts_config=self.config.mcts_config, temp=0.0,
-        )
-        baseline_player = NetworkPlayer(
-            game=self.game, nnet=self.elo_baseline_net,
-            mcts_config=self.config.mcts_config, temp=0.0,
-        )
-        arena = Arena(new_player, baseline_player, self.game)
-        wins, losses, draws, _ = arena.play_games(n)
+        if self.config.num_parallel_workers > 1:
+            wins, losses, draws = self._run_elo_parallel(generation, n)
+        else:
+            wins, losses, draws = self._run_elo_serial(n)
+
         elo_diff, score_rate = _compute_elo(wins, losses, draws)
         absolute = baseline_rating + elo_diff
         elapsed = time.perf_counter() - elo_start
@@ -449,6 +495,52 @@ class Coach:
             score_rate=score_rate, wins=wins, losses=losses, draws=draws,
             games=wins + losses + draws,
         )
+
+    def _run_elo_serial(self, n: int) -> tuple[int, int, int]:
+        """Original sequential Elo loop. Returns ``(new_wins, baseline_wins, draws)``."""
+        assert self.elo_baseline_net is not None
+        new_player = NetworkPlayer(
+            game=self.game, nnet=self.nnet,
+            mcts_config=self.config.mcts_config, temp=0.0,
+        )
+        baseline_player = NetworkPlayer(
+            game=self.game, nnet=self.elo_baseline_net,
+            mcts_config=self.config.mcts_config, temp=0.0,
+        )
+        arena = Arena(new_player, baseline_player, self.game)
+        wins, losses, draws, _ = arena.play_games(n)
+        return wins, losses, draws
+
+    def _run_elo_parallel(self, generation: int, n: int) -> tuple[int, int, int]:
+        """Parallel Elo across the F1 worker pool.
+
+        The baseline checkpoint (``elo_baseline.pth.tar``) is written
+        once in ``Coach.__init__`` and never changes, so workers can
+        load it directly. The new net's weights get a fresh per-gen
+        checkpoint so the right network is being evaluated.
+        Returns ``(new_wins, baseline_wins, draws)``.
+        """
+        from core.parallel_self_play import (
+            PHASE_ELO,
+            run_two_player_games_parallel,
+        )
+
+        new_checkpoint = "parallel_elo_new.pth.tar"
+        self.nnet.save_checkpoint(filename=new_checkpoint)
+
+        a_wins, b_wins, draws, _ = run_two_player_games_parallel(
+            config=self.config,
+            generation=generation,
+            checkpoint_a_path=new_checkpoint,
+            checkpoint_b_path="elo_baseline.pth.tar",
+            num_games=n,
+            num_workers=self.config.num_parallel_workers,
+            phase=PHASE_ELO,
+            record=False,
+            top_k=0,
+            desc="Elo",
+        )
+        return a_wins, b_wins, draws
 
     def _evaluate_minimax_tictactoe(self, generation: int) -> None:
         from core.players import NetworkPlayer

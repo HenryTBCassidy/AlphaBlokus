@@ -268,7 +268,7 @@ def load_args(config_path: str | Path) -> RunConfig:
         RunConfig: Configuration object for the run
     """
     config_path = Path(config_path)
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         args_json = json.load(f)
 
     return fromdict(RunConfig, args_json)

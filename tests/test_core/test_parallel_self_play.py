@@ -25,8 +25,10 @@ import pytest
 from core.config import MCTSConfig, NetConfig, RunConfig
 from core.game_factory import instantiate_game_and_network
 from core.parallel_self_play import (
+    PHASE_ARENA,
     derive_episode_seed,
     run_self_play_episodes_parallel,
+    run_two_player_games_parallel,
 )
 
 if TYPE_CHECKING:
@@ -175,6 +177,65 @@ def test_parallel_one_worker_matches_four_workers(
         "Parallel run with 4 workers produced different training data than "
         "the same run with 1 worker — determinism is broken."
     )
+
+
+@pytest.mark.slow
+def test_two_player_one_worker_matches_four_workers(
+    parallel_test_config: RunConfig,
+) -> None:
+    """Determinism test for the two-net orchestrator (arena + Elo).
+
+    Same idea as the self-play test: same checkpoints + same seed +
+    different worker counts must yield identical outcome counts and
+    identical per-game records. Game records compare exactly because
+    ``Arena.play_game`` is deterministic at temp=0 once RNGs are
+    pinned, and our worker seeds the RNGs from
+    ``(base, gen, ep, phase)``.
+    """
+    checkpoint_a = _save_fixed_checkpoint(parallel_test_config, "two_player_a.pth.tar")
+    checkpoint_b = _save_fixed_checkpoint(parallel_test_config, "two_player_b.pth.tar")
+
+    a1, b1, d1, r1 = run_two_player_games_parallel(
+        config=parallel_test_config,
+        generation=1,
+        checkpoint_a_path=checkpoint_a,
+        checkpoint_b_path=checkpoint_b,
+        num_games=4,
+        num_workers=1,
+        phase=PHASE_ARENA,
+        record=True,
+        top_k=3,
+        desc="Arena (test)",
+    )
+    a4, b4, d4, r4 = run_two_player_games_parallel(
+        config=replace(parallel_test_config, num_parallel_workers=4),
+        generation=1,
+        checkpoint_a_path=checkpoint_a,
+        checkpoint_b_path=checkpoint_b,
+        num_games=4,
+        num_workers=4,
+        phase=PHASE_ARENA,
+        record=True,
+        top_k=3,
+        desc="Arena (test)",
+    )
+
+    assert (a1, b1, d1) == (a4, b4, d4), (
+        f"Outcome counts diverged between 1-worker and 4-worker arena "
+        f"runs: 1-worker={(a1, b1, d1)}, 4-worker={(a4, b4, d4)}."
+    )
+    assert len(r1) == len(r4) == 4
+    # Move sequences should match game-for-game when seeds match.
+    for game_idx, (rec1, rec4) in enumerate(zip(r1, r4, strict=False)):
+        assert rec1.outcome == rec4.outcome, (
+            f"Game {game_idx} outcome differs: {rec1.outcome} vs {rec4.outcome}"
+        )
+        assert rec1.player1_was_white == rec4.player1_was_white
+        actions_1 = tuple(m.action for m in rec1.moves)
+        actions_4 = tuple(m.action for m in rec4.moves)
+        assert actions_1 == actions_4, (
+            f"Game {game_idx} move sequence differs between worker counts"
+        )
 
 
 @pytest.mark.slow

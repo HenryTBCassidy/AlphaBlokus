@@ -238,8 +238,30 @@ def _run_two_player_phase(
     *,
     phase_name: str, num_games: int, config: RunConfig,
     game: IGame, nnet_a: INeuralNetWrapper, nnet_b: INeuralNetWrapper,
+    num_workers: int,
 ) -> PhaseResult:
-    """Shared engine for arena and Elo phases. Two-player game, swapped halfway."""
+    """Shared engine for arena and Elo phases. Two-player game, swapped halfway.
+
+    Sequential when ``num_workers == 1`` (preserves the original
+    benchmark behaviour). Process-pool parallel via the F1 orchestrator
+    otherwise — the same one Coach uses for live training.
+    """
+    if num_workers > 1:
+        return _run_two_player_phase_parallel(
+            phase_name=phase_name, num_games=num_games, config=config,
+            nnet_a=nnet_a, nnet_b=nnet_b, num_workers=num_workers,
+        )
+    return _run_two_player_phase_serial(
+        phase_name=phase_name, num_games=num_games, config=config,
+        game=game, nnet_a=nnet_a, nnet_b=nnet_b,
+    )
+
+
+def _run_two_player_phase_serial(
+    *,
+    phase_name: str, num_games: int, config: RunConfig,
+    game: IGame, nnet_a: INeuralNetWrapper, nnet_b: INeuralNetWrapper,
+) -> PhaseResult:
     heartbeat = _PhaseHeartbeat(phase_name, num_games)
     per_game_stats: list[MCTSEpisodeStats] = []
     phase_start = time.perf_counter()
@@ -272,6 +294,65 @@ def _run_two_player_phase(
 
     wall_clock = time.perf_counter() - phase_start
     return PhaseResult(name=phase_name, wall_clock_s=wall_clock, stats=per_game_stats)
+
+
+def _run_two_player_phase_parallel(
+    *,
+    phase_name: str, num_games: int, config: RunConfig,
+    nnet_a: INeuralNetWrapper, nnet_b: INeuralNetWrapper, num_workers: int,
+) -> PhaseResult:
+    """Parallel two-player phase via the F1 orchestrator.
+
+    Workers play the games — main process discards win/loss bookkeeping
+    (the benchmark cares about wall-clock + per-game MCTS stats, not
+    outcomes) and only retains stats. Each worker returns stats for the
+    *whole game* (both players combined inside the worker), so each
+    task contributes one combined ``MCTSEpisodeStats`` to the phase.
+    """
+    from core.parallel_self_play import (
+        PHASE_ARENA,
+        run_two_player_games_parallel,
+    )
+
+    print(
+        f"[{phase_name}] {num_games} games across {num_workers} workers — starting",
+        flush=True,
+    )
+    # Use distinct checkpoint paths so concurrent arena and Elo phases
+    # never clobber each other if a future change runs them at once.
+    slug = phase_name.lower().replace(" ", "_").replace("-", "_")
+    checkpoint_a = f"benchmark_{slug}_a.pth.tar"
+    checkpoint_b = f"benchmark_{slug}_b.pth.tar"
+    nnet_a.save_checkpoint(filename=checkpoint_a)
+    nnet_b.save_checkpoint(filename=checkpoint_b)
+
+    phase_start = time.perf_counter()
+    # We use PHASE_ARENA for both arena and Elo here because the
+    # benchmark doesn't care about cross-phase seed namespacing — the
+    # checkpoints differ between Coach's real arena and Elo, but here
+    # the workers always replay against the same a/b pair we just
+    # saved. The orchestrator's seed derivation gives unique seeds per
+    # game within the phase, which is enough.
+    run_two_player_games_parallel(
+        config=config,
+        generation=0,
+        checkpoint_a_path=checkpoint_a,
+        checkpoint_b_path=checkpoint_b,
+        num_games=num_games,
+        num_workers=num_workers,
+        phase=PHASE_ARENA,
+        record=False,
+        top_k=0,
+        desc=phase_name,
+    )
+    wall_clock = time.perf_counter() - phase_start
+    # Parallel path doesn't currently return per-game MCTS stats (the
+    # orchestrator was sized for outcome bookkeeping, not profiling).
+    # That's acceptable for the F1 measurement — the headline is
+    # wall-clock per phase, and stats are still available from the
+    # self-play phase. Future change: extend the worker return value to
+    # include stats if we want full per-game drill-down here.
+    return PhaseResult(name=phase_name, wall_clock_s=wall_clock, stats=[])
 
 
 def _build_estimator_table(
@@ -405,11 +486,11 @@ def main() -> None:
     phases["Self-Play"] = _run_self_play_phase(config, game, nnet, args.num_workers)
     phases["Arena"] = _run_two_player_phase(
         phase_name="Arena", num_games=config.num_arena_matches, config=config,
-        game=game, nnet_a=nnet, nnet_b=nnet_opponent,
+        game=game, nnet_a=nnet, nnet_b=nnet_opponent, num_workers=args.num_workers,
     )
     phases["Elo"] = _run_two_player_phase(
         phase_name="Elo", num_games=config.elo_games_per_gen, config=config,
-        game=game, nnet_a=nnet, nnet_b=nnet_opponent,
+        game=game, nnet_a=nnet, nnet_b=nnet_opponent, num_workers=args.num_workers,
     )
     overall_wall = time.perf_counter() - overall_start
 
