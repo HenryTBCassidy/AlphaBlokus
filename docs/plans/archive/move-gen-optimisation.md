@@ -66,7 +66,7 @@ Three reasons:
 | P7 | Cache the precomputed tables to disk (`games/blokusduo/precomputed/move_tables.npz` or similar). Workers in `core/parallel_self_play.py` load from disk rather than rebuild, so spawn-based pool start stays sub-second | 1 hr | High | **Deferred** — 200ms build is already fast enough. Revisit if profiling shows worker spawn dominated by it. |
 | P8 | Switch over. Once the equivalence test passes on the **full gauntlet of 50,000+ stratified positions** (see P2), flip the default to the new implementation. Old code stays available behind a config flag for one generation of runs, then removed | 30 min | Medium | **Deferred** — 5K dev cache passes. Build the 50K gauntlet + flip the default before any real training. |
 | P9 | Measurement. Two parts: **(a)** wall-clock benchmark with the new impl using `scripts/run_benchmark.sh --num-workers 4 --output-dir temp/profile_baseline_f2_w4_<date>` — capture before/after numbers and component split. **(b)** Training-determinism check: short self-play run with old impl + same with new impl at the same seed; assert the produced training-example arrays are bit-identical. Catches RNG-state drift that the position-level equivalence test (P3) can't see | 1-2 hr | High | ✓ **9.06× per-call speedup** via `scripts/benchmark_movegen.py`. Determinism check: 5 seeds × 30 moves each, F2 produces bit-identical trajectories to current impl. Full-pipeline benchmark not yet run on PC. |
-| P10 | Archive plan. `git mv` to `docs/plans/archive/`. Append a Scope additions section if anything landed beyond this checklist. Update master plan F2 row to **Done** ✓ | 5 min | Low | |
+| P10 | Archive plan. `git mv` to `docs/plans/archive/`. Append a Scope additions section if anything landed beyond this checklist. Update master plan F2 row to **Done** ✓ | 5 min | Low | ✓ |
 
 Total: ~15-19 focused hours.
 
@@ -465,6 +465,20 @@ Record both P9.a and P9.b results into the master plan progress tracker as the F
 ## P10. Archive
 
 `git mv docs/plans/move-gen-optimisation.md docs/plans/archive/`. Append a "Scope additions" section first if anything landed outside the P0-P10 checklist. Update [`full-cycle-optimisation.md`](full-cycle-optimisation.md)'s F2 row to **Done ✓** with measured speedup.
+
+---
+
+## Scope additions
+
+Landed during implementation, not in the original P0-P10 row table:
+
+- **`tests/test_blokusduo/test_movegen_tables.py`** (~250 lines) — 21 unit tests pinning the geometry-table and lookup-table invariants. The MoveTables half was straightforward; the LookupTable half caught a real bug during P6 (see below).
+- **`tests/test_blokusduo/test_movegen_determinism.py`** — 5-seed parametrised test verifying that `BlokusDuoGame.valid_move_masking` produces bit-identical training trajectories when F2 is enabled vs disabled. Stronger than the position-level equivalence test in P3 — catches RNG-state drift that a per-position comparison can't see.
+- **`scripts/benchmark_movegen.py`** — microbenchmark for per-call timing (vs the full-pipeline benchmark which dilutes the move-gen share). This was the cleaner way to characterise F2's intrinsic speedup (9.06×) independent of the rest of the system.
+- **`run_configurations/profile_baseline_f2.json`** — config variant with `use_optimised_movegen: true`. Same shape as `profile_baseline.json` otherwise; pairs cleanly with `--num-workers 8` for the P9 measurement.
+- **Bug found and fixed during P6**: the initial lookup-table design indexed moves by their bounding-box top-left corner. But `placement_points` (attach points) can be **any cell the piece occupies** (one of its 5 footprint cells, not just the corner). The lookup needed to be re-keyed by every footprint cell, and the runtime needed a dedup set ("seen") to prevent double-emitting moves reachable from multiple attach points. Caught immediately by the equivalence test failing — the test infrastructure (P2/P3) earned its keep.
+- **Second bug found and fixed during P6**: `incompat_mask` was originally computed once per move using the stored bounding-box anchor. After the fix above (multiple anchors per move), the mask depended on which anchor the move was being looked up from. Fix: compute `incompat_mask` per `(move, anchor)` pair during table construction.
+- **F2 wiring via config flag**: added `use_optimised_movegen: bool = False` to `RunConfig` plus a `_maybe_enable_f2()` helper called by both self-play and two-player worker initialisers in `core/parallel_self_play.py`. This is what made the full-pipeline benchmark possible — workers honour the flag without any per-worker setup hassle.
 
 ---
 
