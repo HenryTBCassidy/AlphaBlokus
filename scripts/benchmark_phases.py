@@ -468,9 +468,18 @@ def main() -> None:
         help="Parallelism level (placeholder for F1 — sequential for now, "
         "labelled in the report so before/after comparisons are clear).",
     )
+    parser.add_argument(
+        "--use-f2", action="store_true",
+        help="Enable the F2 precomputed-move-list move generator (Blokus only). "
+        "Overrides ``use_optimised_movegen`` in the config JSON. Effective in "
+        "both the main process and any spawned workers.",
+    )
     args = parser.parse_args()
 
     config = _force_detailed_profiling(load_args(args.config))
+    if args.use_f2:
+        from dataclasses import replace as dc_replace
+        config = dc_replace(config, use_optimised_movegen=True)
     output_dir = Path(args.output_dir) if args.output_dir else config.root_directory / f"{config.run_name}_benchmark"
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output → {output_dir}")
@@ -480,6 +489,14 @@ def main() -> None:
 
     game, nnet = instantiate_game_and_network(config)
     nnet_opponent = nnet.__class__(game, config)  # second random-init for arena/Elo
+
+    # Enable F2 in the main-process game if requested. Workers handle
+    # this themselves via ``core.parallel_self_play._maybe_enable_f2``.
+    if getattr(config, "use_optimised_movegen", False) and (
+        enable := getattr(game, "enable_optimised_movegen", None)
+    ) is not None:
+        print("[F2] Enabling optimised move generator on main game", flush=True)
+        enable()
 
     overall_start = time.perf_counter()
     phases: dict[str, PhaseResult] = {}

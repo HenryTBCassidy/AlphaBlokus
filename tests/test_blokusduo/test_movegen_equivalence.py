@@ -64,14 +64,18 @@ def current_valid_moves(game: BlokusDuoGame, board: BlokusDuoBoard, player: int)
 
 
 def new_valid_moves(game: BlokusDuoGame, board: BlokusDuoBoard, player: int) -> NDArray:
-    """Placeholder for the post-F2 implementation.
+    """The F2 implementation — precomputed-table-driven move generator.
 
-    Until F2 P6 lands, this returns the *current* output so the test is
-    trivially passing. When the new implementation exists, swap this
-    body for a call into it. **Do not change the test machinery itself**
-    when wiring in the new implementation — only this function changes.
+    Returns a bool mask of legal actions (shape ``(17837,)``). When this
+    test passes, it means the new implementation agrees with the old
+    one on every position in the cache. When it fails, the helper
+    :func:`_describe_mismatch` formats the discrepancy.
     """
-    return game.valid_move_masking(board, player)
+    from games.blokusduo.movegen_runtime import get_default_generator
+    mask_bool = get_default_generator().valid_move_mask(game, board, player)
+    # Coerce to numerical mask matching the current impl's output dtype
+    # (game.valid_move_masking returns float for historical reasons).
+    return mask_bool.astype(np.float64)
 
 
 # ---------------------------------------------------------------------------

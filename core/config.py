@@ -153,6 +153,15 @@ class RunConfig:
     # examples matches the serial path regardless of worker count.
     num_parallel_workers: int = 1
 
+    # F2 (precomputed-move-list move generator): if True, BlokusDuoGame
+    # routes ``valid_move_masking`` through the F2 implementation in
+    # :mod:`games.blokusduo.movegen_runtime`. Default False to preserve
+    # the existing array-based path. Produces bit-identical training
+    # trajectories at the same seed (verified by
+    # ``tests/test_blokusduo/test_movegen_determinism.py``). Only
+    # ``BlokusDuoGame`` consults this flag; TTT ignores it.
+    use_optimised_movegen: bool = False
+
     @property
     def run_directory(self) -> Path:
         """Base directory for all files related to this training run."""

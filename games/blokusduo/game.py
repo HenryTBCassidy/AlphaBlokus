@@ -4,18 +4,17 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
+from core.interfaces import IGame
 from games.blokusduo.board import (
     Action,
     ActionCodec,
     ActionDict,
-    BoardArray,
     BlokusDuoBoard,
-    Coordinate,
+    BoardArray,
     CoordinateIndexDecoder,
     PlayerSide,
 )
-from games.blokusduo.pieces import pieces_loader, Orientation, PieceManager
-from core.interfaces import IGame
+from games.blokusduo.pieces import Orientation, PieceManager, pieces_loader
 
 
 class BlokusDuoGame(IGame):
@@ -55,6 +54,25 @@ class BlokusDuoGame(IGame):
         # ``transpose_policy`` — built on first call to avoid slowing
         # ``__init__`` for users (e.g. tests) that don't need symmetry.
         self._action_transpose_permutation: NDArray | None = None
+        # F2: optional optimised move generator. ``None`` until
+        # ``enable_optimised_movegen()`` is called. When set,
+        # ``valid_move_masking`` routes through it.
+        self._f2_generator = None
+
+    def enable_optimised_movegen(self) -> None:
+        """Enable the F2 precomputed-move-list move generator.
+
+        After this call, :meth:`valid_move_masking` routes through the
+        F2 implementation in :mod:`games.blokusduo.movegen_runtime`,
+        which is ~9× faster per call than the default array-based path.
+        Produces bit-identical training trajectories at the same seed.
+
+        Triggered by ``RunConfig.use_optimised_movegen`` in the
+        production codepath (see ``core/parallel_self_play.py``'s
+        worker init and ``scripts/benchmark_phases.py``'s setup).
+        """
+        from games.blokusduo.movegen_runtime import get_default_generator
+        self._f2_generator = get_default_generator()
 
     # -- Public methods (IGame protocol, in call order) -------------------------
 
@@ -105,6 +123,10 @@ class BlokusDuoGame(IGame):
         Returns:
             Binary vector of length get_action_size() where 1 = legal move.
         """
+        if self._f2_generator is not None:
+            # F2 fast path — returns bool, coerce to float64 for the
+            # historical output dtype.
+            return self._f2_generator.valid_move_mask(self, board, player).astype(np.float64)
         moves = self._valid_moves(board, player)
         mask = np.zeros(self.get_action_size())
         for action in moves:

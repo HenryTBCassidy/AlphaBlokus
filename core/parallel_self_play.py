@@ -127,6 +127,19 @@ def _worker_init_self_play(config: RunConfig, checkpoint_path: str | None) -> No
     _WORKER_GAME, _WORKER_NNET_A = instantiate_game_and_network(config)
     if checkpoint_path is not None:
         _WORKER_NNET_A.load_checkpoint(filename=checkpoint_path)
+    _maybe_enable_f2(config, _WORKER_GAME)
+
+
+def _maybe_enable_f2(config: RunConfig, game: IGame) -> None:
+    """Enable F2 move generator on ``game`` if config asks for it.
+
+    Only effective for BlokusDuoGame — TTT ignores the flag (its move
+    generator is already trivially fast).
+    """
+    if not getattr(config, "use_optimised_movegen", False):
+        return
+    if (enable := getattr(game, "enable_optimised_movegen", None)) is not None:
+        enable()
 
 
 def _worker_init_two_nets(
@@ -149,6 +162,7 @@ def _worker_init_two_nets(
     # itself is rebuilt with fresh weights.
     _WORKER_NNET_B = _WORKER_NNET_A.__class__(_WORKER_GAME, config)
     _WORKER_NNET_B.load_checkpoint(filename=checkpoint_b_path)
+    _maybe_enable_f2(config, _WORKER_GAME)
 
 
 def _worker_play_self_play_episode(
