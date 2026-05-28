@@ -80,7 +80,7 @@ Optimisations in the menu below have rough speedup estimates that compound, so M
 | # | Optimisation | Expected speedup | Effort | Sub-plan | Status |
 |---|--------------|------------------|--------|----------|--------|
 | F1 | **Parallel self-play & arena across CPU cores** — N concurrent games per phase, using a worker pool over the `Player` abstraction | Projected ~1.8× alone, measured **4.13× at 4 workers** on the PC (GPU has more headroom than the Amdahl projection assumed) | Medium (landed in ~1.5 days) | [`archive/parallel-self-play.md`](archive/parallel-self-play.md) | **Done** ✓ |
-| F2 | **Move-gen — bitboard representation** — 14×14 board as a 196-bit integer; validation becomes 2 bitwise ANDs vs ~20 Python ops | **3–5×** overall | Big (~3–4 days) | `move-gen-bitboard.md` | Pending |
+| F2 | **Move-gen — precomputed move-list table** — Pentobi-style; runtime is byte-array reads + a 4D lookup `(anchor, adj_status, piece) → candidate move IDs` + a 5-cell unrolled OR per candidate. *Not* a bitboard implementation despite the original menu wording — see the F2 sub-plan for the design decision. | **~1.5× overall** (Amdahl on the ~43% move-gen slice; compounds with F1) | Medium (~3-4 days) | [`move-gen-optimisation.md`](move-gen-optimisation.md) | **Planned** |
 | F3 | **MCTS tree reuse between moves** — re-root the search tree after each ply instead of rebuilding from scratch | **1.5–2×** | Small-medium (~1 day) | `mcts-tree-reuse.md` | Pending |
 | F4 | **Batched neural-net inference in MCTS** — collect leaf evals into batches, single GPU call per batch with virtual-loss to keep MCTS correct | **2–5×** on the inference slice → **~1.2–1.5×** overall (more impact when net is bigger) | Medium-big (~2 days) | `batched-inference.md` | Pending |
 | F5 | **Move-gen — Cython** — recompile existing logic with C type annotations. Alternative to F2; lower ceiling but lower risk. | **2–3×** overall | Medium (~1 day) | (none yet — only spawn if F2 is rejected for risk) | Pending |
@@ -91,7 +91,7 @@ Optimisations in the menu below have rough speedup estimates that compound, so M
 Recommended order is **F1 → F2 → F4 → F3**, with F5 / F6 as fallbacks. Updated 2026-05-26 after the production-net benchmark showed inference is ~50% of search time (not the 17–27% the small-net profiling suggested).
 
 - **F1 first** — still the right first move. Even with the lower ceiling (Amdahl's law caps single-axis CPU parallelism at ~1.8× when inference is half the cost), it remains the prerequisite for F4 (workers need to exist before an inference server has anything to batch) and it's the most contained change. Touches `Coach` / `Arena` / `Player` plumbing but doesn't perturb the game-logic core.
-- **F2 second** — biggest single-process CPU win on the remaining 43% move-gen slice. With F1 already in place, the dev loop is fast enough to test the bitboard rewrite confidently. Standalone ceiling ~1.7× from move-gen alone, compounds with F1.
+- **F2 second** — biggest single-process CPU win on the remaining 43% move-gen slice. With F1 already in place, the dev loop is fast enough to test the precomputed-move-list rewrite confidently. Standalone ceiling ~1.5× from move-gen alone, compounds with F1. *Originally framed as a bitboard rewrite; the Pentobi research surfaced that the leading Blokus engine deliberately doesn't use bitboards, so the design changed — see [`move-gen-optimisation.md`](move-gen-optimisation.md).*
 - **F4 third (promoted from last)** — now genuinely important rather than an optional polish. With inference at ~50% of cost it's the largest remaining slice, and combined with F1's worker pool the gain is real: batched leaf inference inside MCTS (3–5× on the inference component per game) AND cross-worker batching to eliminate GPU contention. Together with F1 this is what gets us to the 5–7× wall-clock the original plan attributed to F1 alone.
 - **F3 last** — tree reuse halves MCTS work per move regardless of search backend, so it compounds. Less urgent than F4 now that F4 is doing more work.
 
@@ -100,7 +100,7 @@ Recommended order is **F1 → F2 → F4 → F3**, with F5 / F6 as fallbacks. Upd
 | | F1 | F2 | F3 | F4 |
 |---|---|---|---|---|
 | F1 (parallel) | — | ✓ | ✓ | Tricky (each worker needs own GPU/CPU inference queue) |
-| F2 (bitboard) | ✓ | — | ✓ | ✓ |
+| F2 (move-list table) | ✓ | — | ✓ | ✓ |
 | F3 (tree reuse) | ✓ | ✓ | — | ✓ |
 | F4 (batched inference) | Tricky | ✓ | ✓ | — |
 
@@ -129,7 +129,7 @@ Filled in as each section completes. Empty until the first run.
 | Baseline (full run) | 2026-05-22 | — | 55s/game, 2h 20min/gen | — | `blokus_pc_second`, 300 sims, 80 eps, 50 arena. Headline measurement at production scale; preserved as immutable reference. |
 | Baseline (benchmark) | 2026-05-26 | — | Self-play 54.1s/game, Arena 53.9s/game, Elo 55.2s/game, total 32.6min for 16+10+10 games | — | `scripts/benchmark_phases.py --config run_configurations/profile_baseline.json` on RTX 3060 Ti. Component split: 49.7% NN inference, 42.6% move-gen, 6.0% other, 1.7% game-ended. Re-run this exact benchmark after each F-step for clean before/after deltas. |
 | F1 — Parallel self-play | 2026-05-27 | Self-play 54.1s/game; Arena 53.9s/game; Elo 55.2s/game; **total 32.6 min** | Self-play 12.0s/game (4.5×); Arena ~14.6s/game (3.75×); Elo ~14.6s/game (3.83×); **total 7.9 min** | **4.13×** at 4 workers | Bested the ~1.8× Amdahl projection by 2.3× — GPU has more headroom than the inference-fraction model predicted. 8 workers OOM'd WSL (15 GB peak); revisit if `.wslconfig` memory is raised. |
-| F2 — Move-gen bitboard | | | | | |
+| F2 — Move-gen precomputed table | | | | | |
 | F3 — MCTS tree reuse | | | | | |
 | F4 — Batched inference | | | | | |
 
@@ -147,7 +147,7 @@ Filled in as each section completes. Empty until the first run.
 
 ## Notes for whoever picks this up next
 
-- The bitboard rewrite (F2) is the highest-risk piece because it touches `BlokusDuoBoard` internals that the existing test suite covers. Don't skip the existing tests — make them pass before merging.
+- The move-gen rewrite (F2) is a touchy piece because it changes `BlokusDuoBoard` internals that the existing test suite covers. The F2 plan explicitly requires equivalence tests on 10,000+ random positions before switch-over — don't skip them. Make the full test suite pass before merging.
 - Parallel self-play (F1) needs careful handling of the `nnet` state. Easiest path: each worker re-loads the latest checkpoint at start. Memory pressure on the 8GB 3060 Ti will be the deciding factor — 8 workers × ~50MB net = 400MB, fine.
 - Tree reuse (F3) sounds simple but has subtle correctness traps around canonical-form transitions between turns. Will need targeted equivariance tests, similar to the symmetry work.
 - Always measure before claiming a speedup. The move-gen plan (now absorbed here) initially proposed 5 different micro-optimisations of which **the benchmarked low-hanging-fruit ones (O5-O8) were ultimately rejected for not actually helping**. Trust the profiler.
