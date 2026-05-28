@@ -82,13 +82,25 @@ def _format_duration(seconds: float) -> str:
 def _accepted_mask(arena_data: pd.DataFrame, update_threshold: float) -> pd.Series:
     """Return a boolean Series marking generations whose new net was accepted.
 
-    Matches ``Coach._should_accept_new_network``: draws are excluded from the
-    denominator, the win rate uses ``wins / (wins + losses)``, and the
-    comparison is ``>= update_threshold`` (not a hardcoded 0.5).
+    Prefers the per-row ``accepted`` column persisted by
+    :meth:`MetricsCollector.log_arena` — that's the ground truth direct
+    from the training decision. If the column is missing (older runs
+    persisted before the column existed) we fall back to recomputing via
+    :func:`core.acceptance.is_accepted_score_rule`, which is the **same
+    function** the coach uses, so reporting can never diverge.
     """
-    decided = arena_data["wins"] + arena_data["losses"]
-    win_rate = arena_data["wins"].astype(float) / decided.where(decided > 0, 1)
-    return (decided > 0) & (win_rate >= update_threshold)
+    from core.acceptance import is_accepted_score_rule
+    if "accepted" in arena_data.columns:
+        return arena_data["accepted"].fillna(False).astype(bool)
+    return arena_data.apply(
+        lambda row: is_accepted_score_rule(
+            new_wins=int(row["wins"]),
+            prev_wins=int(row["losses"]),
+            draws=int(row["draws"]),
+            threshold=update_threshold,
+        ),
+        axis=1,
+    )
 
 
 def _make_kpi_cards(
@@ -401,9 +413,16 @@ def _make_arena_plot(arena_data: pd.DataFrame, update_threshold: float) -> go.Fi
 
     # Only annotate ACCEPTED generations — rejected is the default expectation
     # and labelling every bar caused overlap with 30+ generations.
+    #
+    # The x-axis is a categorical axis (categoryarray = stringified gens)
+    # because numerically-typed generation values used to sort
+    # alphabetically due to pandas category dtype. With type="category",
+    # annotations need their x value as a string matching a category —
+    # passing an int would put labels at the *index* (off-by-one from the
+    # generation number) instead of the bar position. Hence ``str(...)``.
     for _, row in df[df["is_accepted"]].iterrows():
         fig.add_annotation(
-            x=row["generation"], y=108, text="✓ Accepted", showarrow=False,
+            x=str(row["generation"]), y=108, text="✓ Accepted", showarrow=False,
             font={"size": 11, "color": _COLORS["positive"], "family": "monospace"},
         )
 
@@ -953,33 +972,85 @@ h1 {{ border-bottom: 2px solid #636efa; padding-bottom: 8px; margin-bottom: 4px;
 """
 
 
-def _make_elo_plot(elo_data: pd.DataFrame) -> go.Figure:
-    """Absolute Elo rating over generations, with the gen-0 baseline anchored.
+def _make_elo_plot(
+    elo_data: pd.DataFrame,
+    arena_data: pd.DataFrame | None = None,
+) -> go.Figure:
+    """Absolute Elo rating over generations, anchored at the gen-0 baseline.
 
-    The headline strength curve, following AlphaZero-paper convention: the
-    random-init network is anchored at ``baseline_rating`` (default 1000) and
-    every other generation is shown relative to that as an absolute rating.
-    A dashed horizontal line marks the baseline. The dip below the baseline
-    that you sometimes see in early gens (training noise floor) is preserved
-    — it just sits below the dashed line rather than at a negative number.
+    Important interpretation detail: Elo evaluation runs *after* the
+    accept/reject decision each gen. When a gen is rejected, ``self.nnet``
+    has been reverted to the previous-best checkpoint — so the rated
+    network is the *previous accepted* net, not the just-trained one.
+    Two consecutive rejected gens produce two Elo points for the *same*
+    underlying network (differing only by 20-game sampling noise).
+
+    Rejected gens are drawn with an open marker + dashed line segment to
+    make this visible — solid filled markers = the gen's newly-trained
+    accepted net, hollow markers = a reverted (previous-best) net being
+    re-evaluated.
+
+    When ``arena_data`` is not provided (e.g. when called for older runs
+    without the column), all gens are plotted as accepted.
     """
     df = elo_data.sort_values("generation").copy()
     baseline = int(df["baseline_rating"].iloc[0])
+
+    if arena_data is not None and not arena_data.empty:
+        # The 'accepted' column is read straight off arena_data when present;
+        # the threshold passed here is only used by the fallback path for
+        # older runs without the column persisted.
+        mask = _accepted_mask(arena_data, update_threshold=0.5)
+        accepted_lookup = pd.Series(
+            mask.values, index=arena_data["generation"].astype(int).values,
+        )
+        df["accepted"] = (
+            df["generation"].astype(int).map(accepted_lookup).fillna(True).astype(bool)
+        )
+    else:
+        df["accepted"] = True
+
     fig = go.Figure()
+    # Single connecting line through all gens, regardless of accept/reject.
     fig.add_trace(go.Scatter(
         x=df["generation"], y=df["elo_rating"],
-        mode="lines+markers", name="Model Elo",
+        mode="lines", name="", showlegend=False,
         line={"width": 2.5, "color": _COLORS["accent"]},
-        marker={"size": 6},
-        customdata=df[["elo_diff", "score_rate", "wins", "losses", "draws"]].values,
+        hoverinfo="skip",
+    ))
+    # Accepted-gen markers (filled).
+    accepted_df = df[df["accepted"]]
+    fig.add_trace(go.Scatter(
+        x=accepted_df["generation"], y=accepted_df["elo_rating"],
+        mode="markers", name="Accepted (newly-trained net)",
+        marker={"size": 9, "color": _COLORS["accent"], "symbol": "circle"},
+        customdata=accepted_df[["elo_diff", "score_rate", "wins", "losses", "draws"]].values,
         hovertemplate=(
-            "Gen %{x} — Elo: %{y:.0f} "
+            "Gen %{x} (accepted) — Elo: %{y:.0f} "
             "(%{customdata[0]:+.0f} vs baseline)<br>"
-            "Score rate: %{customdata[1]:.3f} "
+            "Score: %{customdata[1]:.3f} "
             "(W%{customdata[2]} L%{customdata[3]} D%{customdata[4]})"
             "<extra></extra>"
         ),
     ))
+    # Rejected-gen markers (open) — these re-evaluate the previous accepted net.
+    rejected_df = df[~df["accepted"]]
+    if not rejected_df.empty:
+        fig.add_trace(go.Scatter(
+            x=rejected_df["generation"], y=rejected_df["elo_rating"],
+            mode="markers", name="Rejected (re-evaluation of prev best)",
+            marker={"size": 9, "color": _COLORS["accent"], "symbol": "circle-open",
+                    "line": {"width": 2, "color": _COLORS["accent"]}},
+            customdata=rejected_df[["elo_diff", "score_rate", "wins", "losses", "draws"]].values,
+            hovertemplate=(
+                "Gen %{x} (rejected — rating shown is the reverted "
+                "previous-best net) — Elo: %{y:.0f} "
+                "(%{customdata[0]:+.0f} vs baseline)<br>"
+                "Score: %{customdata[1]:.3f} "
+                "(W%{customdata[2]} L%{customdata[3]} D%{customdata[4]})"
+                "<extra></extra>"
+            ),
+        ))
     fig.add_hline(
         y=baseline, line_dash="dash", line_color=_COLORS["neutral"], line_width=1,
         annotation_text=f"Baseline (gen 0) = {baseline}",
@@ -1510,7 +1581,7 @@ def create_html_report(config: RunConfig) -> None:
         else None
     )
     fig_elo = (
-        _make_elo_plot(elo_data)
+        _make_elo_plot(elo_data, arena_data)
         if elo_data is not None and not elo_data.empty
         else None
     )
@@ -1558,10 +1629,20 @@ def create_html_report(config: RunConfig) -> None:
             '<section>',
             '<h2>Strength vs Fixed Baselines</h2>',
             '<p class="section-desc">'
-            'External strength measurements: how does the new network this '
-            'generation compare to fixed opponents, regardless of whether it '
-            'was accepted in arena? Elo is the headline progress curve; '
-            'minimax (TTT only) is the absolute "is this optimal?" signal.'
+            'External strength measurements: the active network (after the '
+            'accept/reject decision) plays a fixed gen-0 opponent. Filled '
+            'markers = accepted gen (rating is for the just-trained net); '
+            'open markers = rejected gen (rating is for the reverted '
+            'previous-best net — so two adjacent open markers measure the '
+            '<em>same</em> network and differ only by 20-game sampling '
+            'noise). Minimax (TTT only) is the absolute '
+            '"is this optimal?" signal.<br>'
+            '<strong>Caveat:</strong> at high MCTS sim counts the search '
+            'dominates the network signal, so the trained-net-vs-random '
+            'gap is squeezed and per-gen swings are dominated by the '
+            'small (20-game) sample. Treat the absolute level as noisy; '
+            'trust the trend over many gens. The reliable training-progress '
+            'signals are <em>policy agreement</em> and <em>value loss</em>.'
             '</p>',
         ]
         if fig_elo is not None:

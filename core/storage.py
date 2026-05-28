@@ -179,8 +179,9 @@ class MetricsCollector:
         charts in the dashboard instead of the noisy auto-step view that the
         per-episode / per-batch metrics produce.
         """
-        import wandb  # lazy import — wandb is a heavy dep
         from datetime import UTC, datetime
+
+        import wandb  # lazy import — wandb is a heavy dep
 
         assert self.config is not None and self.config.wandb is not None  # narrowed by caller
         wandb_config = self.config.wandb
@@ -1048,7 +1049,7 @@ class SelfPlayStore:
 
         self._directory.mkdir(parents=True, exist_ok=True)
 
-        boards, policies, values = zip(*examples)
+        boards, policies, values = zip(*examples, strict=False)
 
         df = pd.DataFrame({
             "board": [b.tobytes() for b in boards],

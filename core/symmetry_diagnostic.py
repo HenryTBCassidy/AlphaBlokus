@@ -21,11 +21,14 @@ augmented training signal isn't fully averaging out.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import TYPE_CHECKING
 
 import numpy as np
-from numpy.typing import NDArray
 
-from core.interfaces import IBoard, IGame, INeuralNetWrapper
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+    from core.interfaces import IBoard, IGame, INeuralNetWrapper
 
 
 @dataclass(frozen=True)

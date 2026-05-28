@@ -142,6 +142,26 @@ class RunConfig:
     # seed + same config + same hardware will produce identical metrics.
     seed: int | None = 42
 
+    # F1 (parallel self-play): number of worker processes used for the
+    # self-play / arena / Elo phases. ``1`` (default) keeps the existing
+    # single-process behaviour bit-for-bit identical to before F1 landed —
+    # the parallel codepath is not taken at all. Values > 1 spawn a
+    # ``ProcessPoolExecutor`` with that many workers; each holds its own
+    # copy of the network in its own CUDA context. Determinism is
+    # preserved per-episode via a seed derived from
+    # ``(seed, generation, episode_idx)``, so set membership of training
+    # examples matches the serial path regardless of worker count.
+    num_parallel_workers: int = 1
+
+    # F2 (precomputed-move-list move generator): if True, BlokusDuoGame
+    # routes ``valid_move_masking`` through the F2 implementation in
+    # :mod:`games.blokusduo.movegen_runtime`. Default False to preserve
+    # the existing array-based path. Produces bit-identical training
+    # trajectories at the same seed (verified by
+    # ``tests/test_blokusduo/test_movegen_determinism.py``). Only
+    # ``BlokusDuoGame`` consults this flag; TTT ignores it.
+    use_optimised_movegen: bool = False
+
     @property
     def run_directory(self) -> Path:
         """Base directory for all files related to this training run."""
@@ -257,7 +277,7 @@ def load_args(config_path: str | Path) -> RunConfig:
         RunConfig: Configuration object for the run
     """
     config_path = Path(config_path)
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         args_json = json.load(f)
 
     return fromdict(RunConfig, args_json)

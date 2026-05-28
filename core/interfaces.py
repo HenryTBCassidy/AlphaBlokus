@@ -1,12 +1,11 @@
 from __future__ import annotations
 
-from typing import Protocol, TypeAlias
+from typing import TYPE_CHECKING, Protocol, TypeAlias
 
-import numpy as np
 from numpy.typing import NDArray
 
-from core.config import RunConfig
-from core.storage import MetricsCollector
+if TYPE_CHECKING:
+    from core.storage import MetricsCollector
 
 # Type aliases for commonly used types
 TrainingExample: TypeAlias = tuple[NDArray, NDArray, float]  # (board_state, policy_vector, value)

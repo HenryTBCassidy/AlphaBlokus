@@ -1,13 +1,15 @@
-from dataclasses import dataclass, field
-from typing import Callable, TypeAlias
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, TypeAlias
 
 import numpy as np
 from loguru import logger
-from numpy.typing import NDArray
 from tqdm import tqdm
 
 from core.interfaces import IBoard, IGame
 
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 # Type aliases for improved readability
 Player: TypeAlias = Callable[[IBoard], int]  # Function that takes a board state and returns an action
