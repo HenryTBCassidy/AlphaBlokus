@@ -5,6 +5,8 @@ from typing import TYPE_CHECKING, Protocol, TypeAlias
 from numpy.typing import NDArray
 
 if TYPE_CHECKING:
+    from collections.abc import Sequence
+
     from core.storage import MetricsCollector
 
 # Type aliases for commonly used types
@@ -207,6 +209,25 @@ class INeuralNetWrapper(Protocol):
 
         Returns:
             Tuple of (policy vector, value prediction).
+        """
+        ...
+
+    def predict_batch(self, boards: Sequence[IBoard]) -> tuple[list[NDArray], list[float]]:
+        """Run the network on N boards in a single forward pass.
+
+        Equivalent to ``[self.predict(b) for b in boards]`` but executes the
+        forward pass once with batch dimension ``len(boards)``. This is the
+        core primitive behind F3 (batched MCTS inference) — the speedup comes
+        entirely from collapsing N batch-of-1 GPU calls into one batch-of-N
+        call.
+
+        Args:
+            boards: Board objects in canonical form (player 1 perspective).
+
+        Returns:
+            Tuple of ``(policies, values)`` — lists of length ``len(boards)``,
+            each policy a length-``action_size`` array, each value a float
+            in ``[-1, 1]``.
         """
         ...
 

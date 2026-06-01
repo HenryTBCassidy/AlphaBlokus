@@ -2,13 +2,14 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from loguru import logger
-from torch import optim, Tensor
+from torch import Tensor, optim
 from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
@@ -303,6 +304,28 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             pi, v = self.nnet(tensor)
 
         return torch.exp(pi).data.cpu().numpy()[0], v.data.cpu().numpy()[0]
+
+    def predict_batch(self, boards: Sequence[IBoard]) -> tuple[list[np.ndarray], list[float]]:
+        """Run the network on N boards in a single forward pass.
+
+        Equivalent to ``[self.predict(b) for b in boards]`` but executes the
+        forward pass once with batch dimension ``len(boards)``. Used by F3
+        batched MCTS inference. See :meth:`INeuralNetWrapper.predict_batch`.
+
+        Args:
+            boards: Board objects in canonical form (player 1 perspective).
+        """
+        arrs = [board.as_multi_channel(1) for board in boards]
+        tensor = torch.tensor(np.stack(arrs), dtype=torch.float32)
+        if self.net_config.cuda:
+            tensor = tensor.contiguous().cuda()
+        self.nnet.eval()
+        with torch.no_grad():
+            log_pi, v = self.nnet(tensor)
+
+        policies = torch.exp(log_pi).data.cpu().numpy()
+        values = v.view(-1).data.cpu().numpy()
+        return [policies[i] for i in range(len(arrs))], [float(x) for x in values]
 
     @staticmethod
     def loss_pi(targets: Tensor, outputs: Tensor) -> Tensor:

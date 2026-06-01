@@ -19,6 +19,16 @@ class MCTSConfig:
     cpuct: float  # Exploration constant in the PUCT formula (typically between 1 and 4)
     profiling_level: str = "standard"  # "none", "standard" (episode aggregates), "detailed" (per-move breakdown)
 
+    # F3 (batched inference): number of leaf evaluations collected per MCTS
+    # outer step before a single batched ``predict_batch`` call. ``1`` (default)
+    # keeps the existing one-sim-per-NN-call path bit-for-bit identical to the
+    # pre-F3 recursive search — the batched codepath still runs but with batch
+    # size 1, so virtual loss is a no-op and selection/backprop arithmetic is
+    # unchanged. Values > 1 collect K diversified leaves per step (via virtual
+    # loss) and evaluate them in one GPU call, trading a slight search-quality
+    # approximation for far better GPU utilisation.
+    mcts_batch_size: int = 1
+
 
 @dataclass(frozen=True)
 class NetConfig:

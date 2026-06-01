@@ -474,12 +474,26 @@ def main() -> None:
         "Overrides ``use_optimised_movegen`` in the config JSON. Effective in "
         "both the main process and any spawned workers.",
     )
+    parser.add_argument(
+        "--mcts-batch-size", type=int, default=None,
+        help="F3 batched-inference leaf batch size K. Overrides "
+        "``mcts_config.mcts_batch_size``. K=1 is the pre-F3 behaviour; K>1 "
+        "collects K virtual-loss-diversified leaves per single batched GPU "
+        "call. Propagates to workers via the config.",
+    )
     args = parser.parse_args()
 
     config = _force_detailed_profiling(load_args(args.config))
     if args.use_f2:
         from dataclasses import replace as dc_replace
         config = dc_replace(config, use_optimised_movegen=True)
+    if args.mcts_batch_size is not None:
+        from dataclasses import replace as dc_replace
+        config = dc_replace(
+            config,
+            mcts_config=dc_replace(config.mcts_config, mcts_batch_size=args.mcts_batch_size),
+        )
+        print(f"[F3] MCTS batch size K={args.mcts_batch_size}", flush=True)
     output_dir = Path(args.output_dir) if args.output_dir else config.root_directory / f"{config.run_name}_benchmark"
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output → {output_dir}")
