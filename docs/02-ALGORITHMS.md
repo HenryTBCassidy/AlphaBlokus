@@ -486,7 +486,7 @@ The original AlphaZero paper (Silver et al., 2018) provides key implementation d
 
 - **MCTS simulations:** 800 per move in Chess, scaled by game complexity
 - **cpuct:** Uses a formula that increases with the number of visits, not a fixed constant. We use a fixed constant (1.0) as a simplification
-- **Dirichlet noise:** Added to root node priors for exploration: `P(s,a) = (1-ε)p_a + ε·η_a` where `η ~ Dir(α)`. Not yet implemented in AlphaBlokus
+- **Dirichlet noise:** Added to root node priors for exploration: `P(s,a) = (1-ε)p_a + ε·η_a` where `η ~ Dir(α)`. Not yet implemented in AlphaBlokus — tracked as a candidate avenue in [`IDEAS.md` (I2)](IDEAS.md#i2-dirichlet-root-noise)
 - **Temperature:** τ=1 for first 30 moves, τ→0 afterwards. Our `temp_threshold` serves the same purpose
 - **Training:** 700,000 training steps with batch size 4096 for Chess. We use much smaller scale
 - **Evaluation:** New network accepted if it wins 55%+ of 400 games. We use the same threshold with fewer games

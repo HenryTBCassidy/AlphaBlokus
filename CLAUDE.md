@@ -85,6 +85,7 @@ docs/
 ├── 06-INTERFACES.md       # Pentobi adapter, UI, translation layer
 ├── 07-DATA-STORAGE.md     # Parquet format, metrics tables, checkpoints
 ├── 08-TRAINING-ESTIMATES.md # Wall-clock time estimates for different configs/hardware
+├── IDEAS.md               # Register of candidate avenues not yet committed (distinct from plans/)
 ├── guides/
 │   ├── STYLE-GUIDE.md     # Code conventions (ALWAYS reference before writing code)
 │   ├── PLAN-FORMAT.md     # How to write implementation plans
