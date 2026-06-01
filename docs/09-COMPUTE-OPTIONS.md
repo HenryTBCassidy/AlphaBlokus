@@ -77,7 +77,7 @@ Professional cloud with pre-configured PyTorch environments. Faster CPUs, better
 
 Cost = `total_games × per-game_cost`. Per-game cost compounds GPU-hour rate with cluster throughput. The canonical configs and their wall-clock projections live in [`08-TRAINING-ESTIMATES.md`](08-TRAINING-ESTIMATES.md). This table converts them to cost across providers.
 
-Assumptions: post-F1+F4 throughput on an 8× 4090 node is ~1,000 games/hour (see the per-game cost model in 08). Single-4090 throughput is ~125 games/hour. Costs below assume each provider for either an 8× node (large runs) or a single card (small runs).
+Assumptions: post-F1+F3 throughput on an 8× 4090 node is ~1,000 games/hour (see the per-game cost model in 08). Single-4090 throughput is ~125 games/hour. Costs below assume each provider for either an 8× node (large runs) or a single card (small runs).
 
 | Config | Total games | Single 4090 (RunPod ~$0.40/hr) | 8× 4090 (RunPod ~$3.20/hr) | A100 80GB (Lambda ~$1.99/hr) |
 |---|---|---|---|---|
@@ -97,8 +97,8 @@ Ladder rungs 3 and 4 want a bigger cluster than 8× cards for wall-clock reasons
 ## Recommended phasing
 
 1. **TicTacToe iteration (done):** MacBook for test runs, personal PC for full runs. No cloud needed.
-2. **Blokus algorithm iteration (now):** Personal PC for the Single-PC reference / stretch configs. Multi-day runs over Tailscale + systemd-user. This is where F1/F2/F4 development and validation happens.
-3. **First cloud touch (after F1+F4 land):** Run **Ladder rung 1** (10K games, ~$30) on RunPod Community 4090 to validate the cloud pipeline end-to-end. Treat this as a pipeline test, not an attempt to beat Pentobi.
+2. **Blokus algorithm iteration (now):** Personal PC for the Single-PC reference / stretch configs. Multi-day runs over Tailscale + systemd-user. This is where F1/F2/F3 development and validation happens.
+3. **First cloud touch (after F1+F3 land):** Run **Ladder rung 1** (10K games, ~$30) on RunPod Community 4090 to validate the cloud pipeline end-to-end. Treat this as a pipeline test, not an attempt to beat Pentobi.
 4. **First serious Pentobi attempt:** **Ladder rung 2** (100K games, ~$310). Evaluate the checkpoint against Pentobi 1/3/5/7/9. If it beats 9 — we're done, sooner than expected. If it beats 5 or 7 — climb to rung 3.
 5. **Pentobi-9-targeted run:** **Ladder rung 3** (1M games, ~$3,100). My honest expectation is this is where the agent crosses level 9. If not, climb to rung 4.
 6. **Fallback if rung 3 stalls:** Either rung 4 (10M games, ~$31K) or rethink. At rung-4 cost it's worth pausing to check whether net architecture, search depth, or training stability is the real ceiling rather than just throwing more games at it.
@@ -112,7 +112,7 @@ We never need to commit to a big cloud run blind. Every step has a fixed cost an
 The optimisations from [`docs/plans/full-cycle-optimisation.md`](plans/full-cycle-optimisation.md) all reduce per-game cost, which directly reduces every cloud config's price:
 
 1. **F1 (parallel self-play, ~3-4× alone)** — multiplies wall-clock throughput by workers. Same total compute, drastically less wall-clock. On hourly cloud rates, the cost is unchanged but the time to result drops 3-4×.
-2. **F4 (batched inference)** — combined with F1 gives ~6-8× wall-clock improvement. *And* this one actually saves compute, because batched GPU calls are far more efficient than batch-of-1. Probably ~30% cost reduction on top of the wall-clock win.
+2. **F3 (batched inference)** — combined with F1 gives ~6-8× wall-clock improvement. *And* this one actually saves compute, because batched GPU calls are far more efficient than batch-of-1. Probably ~30% cost reduction on top of the wall-clock win.
 3. **F2 (bitboard move-gen)** — reduces the 43% move-gen slice to ~10%. ~1.5× compute reduction, applies to single-PC and cloud equally.
 
 Doing all three before any cloud run > $1K is the obviously right call. Combined they should give roughly 2× cost reduction *and* 6-8× wall-clock reduction, so a rung-3 attempt drops from ~$3K and ~6 weeks to ~$1.5K and ~1 week.

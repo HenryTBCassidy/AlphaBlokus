@@ -116,13 +116,13 @@ What we explicitly rule out:
 
 - **Thread pool**: GIL-bound on move gen → no real speedup.
 - **`asyncio` workers**: same GIL constraint plus higher cognitive overhead.
-- **Shared inference server** (one nnet on GPU, workers send positions for evaluation): more complex, defers naturally to F4 (batched inference) where it'll be needed. Out of scope here.
+- **Shared inference server** (one nnet on GPU, workers send positions for evaluation): more complex, defers naturally to F3 (batched inference) where it'll be needed. Out of scope here.
 
 **Reconfirmed 2026-05-26** after the production-net benchmark showed inference is ~50% of search time (not ~17%). Decision still holds:
 
 - Threads are still wrong — the 43% move-gen slice is still GIL-bound, so threads still can't parallelise it. The bigger inference slice doesn't change that.
 - Processes are still right — each worker holds its own net copy in its own GPU context (memory pressure is fine: 8 × ~50 MB ≈ 400 MB on the 8 GB 3060 Ti).
-- The downside the new finding *did* surface is GPU contention between workers on the 50% inference slice — that caps F1's single-axis speedup at ~1.8× (instead of the original 5–7× estimate). The fix is F4 (batched inference server) in the master plan, not a worker-model change here.
+- The downside the new finding *did* surface is GPU contention between workers on the 50% inference slice — that caps F1's single-axis speedup at ~1.8× (instead of the original 5–7× estimate). The fix is F3 (batched inference server) in the master plan, not a worker-model change here.
 
 ---
 
@@ -333,7 +333,7 @@ Landed during implementation but not in the original P0-P11 row table:
 
 ## Out of scope
 
-- **F4 (batched inference)**: per the master plan's compatibility matrix, F1 + F4 needs a shared inference server. Defer.
+- **F3 (batched inference)**: per the master plan's compatibility matrix, F1 + F3 needs a shared inference server. Defer.
 - **Parallel training step**: training within an epoch already uses PyTorch's data-parallel DataLoader pattern; not a self-play concern.
 - **Worker autoscaling**: keep `num_parallel_workers` as a static config field for now. Dynamic adjustment based on CPU load is over-engineering at this stage.
 - **Cross-machine distributed self-play**: single-PC only. Revisit when the master plan hits M3.

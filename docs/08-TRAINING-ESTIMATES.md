@@ -88,7 +88,7 @@ Hardware scaling from RTX 3060 Ti:
 
 - **RTX 4090 (cloud):** ~2.5× inference throughput, same move-gen. So per-game time drops by roughly the inference fraction × 2.5 reduction.
 - **8 parallel workers (F1 alone):** ~3–4× wall-clock improvement bound by GPU contention on inference. Move-gen scales linearly, inference contends.
-- **F1 + F4 (batched inference server):** ~6–8× wall-clock improvement combined.
+- **F1 + F3 (batched inference server):** ~6–8× wall-clock improvement combined.
 
 ---
 
@@ -96,7 +96,7 @@ Hardware scaling from RTX 3060 Ti:
 
 All use 64f×4b (our current production net) on RTX 3060 Ti. Wall-clock includes self-play + arena + Elo + training overhead.
 
-| Name | Total games | Sims | Wall-clock (current) | Wall-clock (post F1+F2+F4) | Purpose |
+| Name | Total games | Sims | Wall-clock (current) | Wall-clock (post F1+F2+F3) | Purpose |
 |---|---|---|---|---|---|
 | **Pipeline test** | 10 (5 ep × 2 gens) | 100 | ~3 min | ~30 sec | "Does the loop run end-to-end" — used by `test_run.json` |
 | **Dev iteration** | 16 (16 ep × 1 gen) | 300 | ~15 min | ~3 min | Current `profile_baseline.json`. Use for before/after benchmark comparisons. |
@@ -110,7 +110,7 @@ None of these have enough total games to plausibly beat Pentobi level 9 — see 
 
 ### Cloud configs (Pentobi-targeted ladder)
 
-All assume **8× RTX 4090** with F1+F4 landed. Cost is RunPod spot pricing ($0.40/hr per 4090 = $3.20/hr for an 8× node). Wall-clock assumes ~1,000 games/hour cluster throughput after parallelism + batched inference.
+All assume **8× RTX 4090** with F1+F3 landed. Cost is RunPod spot pricing ($0.40/hr per 4090 = $3.20/hr for an 8× node). Wall-clock assumes ~1,000 games/hour cluster throughput after parallelism + batched inference.
 
 | Name | Total games | Wall-clock | Cost | Reading on plausibility of beating Pentobi 9 |
 |---|---|---|---|---|
@@ -154,7 +154,7 @@ Move generation is **~43% of MCTS search time at production net size**, not the 
 | 6× faster | 11.0% | ~35s | ~1.5× |
 | 30× faster (bitboard) | 2.4% | ~31s | ~1.7× |
 
-i.e. even a 30× move-gen speedup only gets you ~1.7× wall-clock at the current net size, because inference is the bigger slice. To get further you also need batched inference (F4 in `docs/plans/full-cycle-optimisation.md`) — together they push the ceiling much higher.
+i.e. even a 30× move-gen speedup only gets you ~1.7× wall-clock at the current net size, because inference is the bigger slice. To get further you also need batched inference (F3 in `docs/plans/full-cycle-optimisation.md`) — together they push the ceiling much higher.
 
 Optimisation approaches (deferred to `docs/plans/move-gen-further-optimisation.md`): pre-computed piece corners, numpy vectorisation, bitboard representation. Still worth doing but no longer the only thing — the bigger near-term win comes from parallelising self-play across CPU cores (F1) so the per-move cost is paid in parallel across many games, not improved per-game.
 
@@ -172,12 +172,12 @@ What's measured vs what's projected:
 | Inference cost scales ~linearly with `filters² × blocks` | **Projected** | Plausible CNN scaling; not benchmarked on bigger nets |
 | RTX 4090 is ~2.5× the 3060 Ti for our inference shape | **Projected** | Based on FLOPs ratio; not benchmarked |
 | F1 alone gives ~3-4× wall-clock improvement | **Projected** | Amdahl on the 43% move-gen slice, GPU contention on the 50% inference slice |
-| F1+F4 gives ~6-8× wall-clock improvement | **Projected** | Combined effect; both pieces still to land |
+| F1+F3 gives ~6-8× wall-clock improvement | **Projected** | Combined effect; both pieces still to land |
 | Cluster throughput ~1,000 games/hour on 8× 4090 | **Projected** | Compounds the above |
 | Pentobi 9 reachable somewhere between 100K and 1M games | **Guess** | Educated; based on Blokus Duo being structurally simpler than Go and Pentobi 9 being weaker than world-champion-class |
 | Training step time negligible vs self-play | **Measured** | Training was ~3 min/gen vs ~70 min self-play in `blokus_pc_second` |
 
-**Refresh after:** F1 lands (re-benchmark with `--num-workers 8` once that flag exists), F2 lands (verify move-gen slice has shrunk), F4 lands (verify inference slice has shrunk and cross-worker batching works), and any net-size change.
+**Refresh after:** F1 lands (re-benchmark with `--num-workers 8` once that flag exists), F2 lands (verify move-gen slice has shrunk), F3 lands (verify inference slice has shrunk and cross-worker batching works), and any net-size change.
 
 ---
 

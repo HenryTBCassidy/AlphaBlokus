@@ -47,7 +47,7 @@ If after F2 lands the move-gen slice still dominates the wall-clock (i.e. it did
 Three reasons:
 
 1. **Move-gen is the largest remaining CPU-bound slice.** Post-F1 the production-net cost profile is ~50% GPU inference + ~43% Python move-gen + ~7% other. F1 made the move-gen slice parallelise across cores but didn't make it cheaper per game. F2 makes it cheaper per game, which compounds.
-2. **F4 (batched inference) and F2 are independent.** They attack different slices. We can land F2 without making F4's work harder; in fact, by shrinking the move-gen share, F4's later inference improvements become a larger fraction of the remaining wall-clock.
+2. **F3 (batched inference) and F2 are independent.** They attack different slices. We can land F2 without making F3's work harder; in fact, by shrinking the move-gen share, F3's later inference improvements become a larger fraction of the remaining wall-clock.
 3. **The infrastructure is ready.** F1 brought reliable parallel-execution scaffolding and the `benchmark_phases.py` script gives clean before/after measurements. F2 inherits all of that.
 
 ---
