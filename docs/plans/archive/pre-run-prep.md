@@ -10,12 +10,12 @@ Two must-dos (memory, Dirichlet), one optional speed nicety (fp16), then a short
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| R1 | **Memory fix** — store the training-example policy as float32 (not float64); confirm board dtype too. Then a 1-gen dry run measuring peak RSS at scale, and set `max_queue_length` / `max_generations_lookback` / `num_eps` from what it shows | 1.5-2 hr | High | |
-| R2 | **Dirichlet root noise** — add `P(s,a) = (1-ε)·p + ε·η`, `η ~ Dir(α)` at the root, self-play only, off at arena/Elo. Config-gated (`dirichlet_epsilon`, `dirichlet_alpha`), default ε=0 → bit-identical when off | 2-3 hr | High | See [R2 detail](#r2-dirichlet-root-noise) |
-| R3 | **fp16 inference** (optional, speed only — *not* required for a valid run). Wrap `predict`/`predict_batch` forward in `torch.autocast` on CUDA, behind a `fp16_inference` flag | 1 hr | Low / optional | |
-| R4 | **End-to-end validation run** — short run (2 gens, ~20 eps, 8 workers, conv head, F2+F3 on, Dirichlet on) of the *full Coach loop* on the PC. Confirm: no crash/OOM/NaN, Elo computed, checkpoints save/load across gens, W&B logs. The first time the whole stack runs together | 1 hr + ~40 min run | High | |
+| R1 | **Memory fix** — store the training-example policy as float32 (not float64); confirm board dtype too. Then a 1-gen dry run measuring peak RSS at scale, and set `max_queue_length` / `max_generations_lookback` / `num_eps` from what it shows | 1.5-2 hr | High | ✅ float32 cast in `self_play.py` (board already float32). Measured **223 KB/position** → **lookback=1 at 1000 games = ~13.4 GB (fits)**; lookback 2 = ~27 GB (over). Scaled config updated |
+| R2 | **Dirichlet root noise** — add `P(s,a) = (1-ε)·p + ε·η`, `η ~ Dir(α)` at the root, self-play only, off at arena/Elo. Config-gated (`dirichlet_epsilon`, `dirichlet_alpha`), default ε=0 → bit-identical when off | 2-3 hr | High | ✅ `_apply_root_dirichlet_noise` + `add_root_noise` param; `dirichlet_epsilon`/`alpha` on `MCTSConfig`; self-play passes True, arena/Elo don't. 3 tests (no-op at ε=0, valid perturbation, determinism) |
+| R3 | **fp16 inference** (optional, speed only — *not* required for a valid run). Wrap `predict`/`predict_batch` forward in `torch.autocast` on CUDA, behind a `fp16_inference` flag | 1 hr | Low / optional | ✅ `fp16_inference` flag + `_inference_autocast`; outputs cast back to float32; no-op on CPU (tested). GPU speedup not separately benchmarked (ran clean in R4) |
+| R4 | **End-to-end validation run** — short run (2 gens, ~20 eps, 8 workers, conv head, F2+F3 on, Dirichlet on) of the *full Coach loop* on the PC. Confirm: no crash/OOM/NaN, Elo computed, checkpoints save/load across gens, W&B logs. The first time the whole stack runs together | 1 hr + ~40 min run | High | ✅ `blokus_validation.json`, 2 gens, **exit 0 in 5.8 min**. Loss drops, no NaN; arena gating + Elo (gen2 782, W9 L1) + symmetry diagnostic + checkpoints + parquet + metrics all ran. Whole F1–F4+Dirichlet+fp16 stack composes |
 
-Total: ~6 focused hours + the validation run. R3 is skippable.
+Total: ~6 focused hours + the validation run. **All R1–R4 done 2026-06-02.**
 
 ---
 
