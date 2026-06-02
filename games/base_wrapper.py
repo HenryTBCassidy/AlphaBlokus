@@ -3,6 +3,7 @@ from __future__ import annotations
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Sequence
+from contextlib import nullcontext
 
 import numpy as np
 import torch
@@ -289,6 +290,17 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             "calib_counts": bucket_counts,
         }
 
+    def _inference_autocast(self):
+        """fp16 autocast context for the forward pass, or a no-op.
+
+        Active only when ``fp16_inference`` is set *and* we're on CUDA — autocast
+        with ``device_type="cuda"`` requires a GPU. On CPU (or when disabled) this
+        is ``nullcontext``, so the forward runs exactly as before.
+        """
+        if self.net_config.fp16_inference and self.net_config.cuda:
+            return torch.autocast(device_type="cuda", dtype=torch.float16)
+        return nullcontext()
+
     def predict(self, board: IBoard) -> tuple[np.ndarray, float]:
         """Make a prediction for a given board state.
 
@@ -300,10 +312,12 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             tensor = tensor.contiguous().cuda()
         tensor = tensor.unsqueeze(0)  # (C, H, W) → (1, C, H, W)
         self.nnet.eval()
-        with torch.no_grad():
+        with torch.no_grad(), self._inference_autocast():
             pi, v = self.nnet(tensor)
 
-        return torch.exp(pi).data.cpu().numpy()[0], v.data.cpu().numpy()[0]
+        # .float() casts back from fp16 (if autocast was active) so downstream
+        # code always sees float32; a no-op when inference ran in float32.
+        return torch.exp(pi).float().data.cpu().numpy()[0], v.float().data.cpu().numpy()[0]
 
     def predict_batch(self, boards: Sequence[IBoard]) -> tuple[list[np.ndarray], list[float]]:
         """Run the network on N boards in a single forward pass.
@@ -320,11 +334,11 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         if self.net_config.cuda:
             tensor = tensor.contiguous().cuda()
         self.nnet.eval()
-        with torch.no_grad():
+        with torch.no_grad(), self._inference_autocast():
             log_pi, v = self.nnet(tensor)
 
-        policies = torch.exp(log_pi).data.cpu().numpy()
-        values = v.view(-1).data.cpu().numpy()
+        policies = torch.exp(log_pi).float().data.cpu().numpy()
+        values = v.view(-1).float().data.cpu().numpy()
         return [policies[i] for i in range(len(arrs))], [float(x) for x in values]
 
     @staticmethod

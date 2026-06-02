@@ -23,7 +23,7 @@ Base: `blokus_pc_second.json`. Changes and rationale:
 | `num_mcts_sims` | 300 | **300** | Hold, to attribute any gain to the data scaling, not a sims confound. More sims = sharper policy targets but linear cost; revisit (→400-600) in a follow-up. |
 | `mcts_batch_size` | (1) | **16** | **Critical — the F3 speedup only happens if this is set.** Defaults to 1. |
 | `max_queue_length` | 5000 | **70000** | Per-generation `deque(maxlen=…)`. At ~60k positions/gen, 5000 would silently drop ~92% of each gen's data. Must hold a full generation. |
-| `max_generations_lookback` | 10 | **2** | Memory ceiling (see below). Also: data from 10 gens ago came from a much weaker net — fresher is better. |
+| `max_generations_lookback` | 10 | **1** | **Measured 2026-06-02** (after the float32 policy fix): ~223 KB/position incl. the train-time copies, so 1000 games × 1 gen (~60k positions) peaks at **~13.4 GB — fits 24 GB**; ×2 gens (~120k) hits ~26.8 GB — over. So lookback=1 at 1000 games. (Higher lookback would need the lazy-Dataset change — deferred — to drop the contiguous copies.) Also: fresher data is better than gens-old weak-net data. |
 | `epochs` | 5 | **2** | One epoch = one full pass over the training data updating weights each batch. With ~60k fresh positions/gen, 5 passes risks overfitting that gen + wastes time. 1-2 is the AlphaZero norm when data is plentiful. |
 | `temp_threshold` | 6 | **12** | Games are ~24-30 plies; at 6 you explore only the opening then play greedy. 12 keeps midgame diverse — the point of generating many games. |
 | `batch_size` (train) | 64 | **256** | Big dataset trains faster with bigger batches; fine on the GPU at 64f×4b. |
@@ -37,24 +37,18 @@ Base: `blokus_pc_second.json`. Changes and rationale:
 
 ---
 
-## ⚠️ Memory is the binding constraint (read before launching)
+## Memory — resolved (pre-run-prep R1, 2026-06-02)
 
-Scaling games collides with the WSL 24 GB cap. The arithmetic:
+Scaling games collides with the WSL 24 GB cap. What we did and measured:
 
-- **~60,000 positions/generation**: 1000 games × ~30 plies × **2 symmetries** (`get_symmetries` returns identity + main-diagonal transpose — it IS implemented; the old "gap" claim in CLAUDE.md was stale).
-- **~150 KB per position**: board `44×14×14` (~34 KB) + the **dense 17,837-long policy vector stored as float64 (~143 KB)**. The policy dominates.
-- **Replay buffer**: the coach holds `max_generations_lookback` generations in RAM at once. At lookback=2 that's ~120k positions ≈ **~18 GB** just in the deques.
-- **Train-time copy**: `base_wrapper.train` builds a *contiguous* `np.array(pis_np)` (~17 GB) while the originals still live in the deques → transient **~34 GB peak on the policy arrays alone**. This overflows 24 GB.
+- **The fix that landed:** the policy target is now stored **float32** (`core/self_play.py`), not float64 — halves the dominant per-position cost (the 17,837-long policy was ~143 KB as float64). Board planes were already float32.
+- **Measured peak:** **~223 KB/position** including `base_wrapper.train`'s transient contiguous `np.array` + tensor copies (the copies, not the buffer, dominate the peak). Linear in positions.
+- **Verdict — use `lookback=1` at 1000 games:**
+  - 1000 games × 1 gen (~60k positions) → **~13.4 GB peak — fits** (≈10 GB headroom).
+  - 1000 games × 2 gens (~120k) → ~26.8 GB — **over** 24 GB.
+- **If we later want more replay** (lookback ≥ 2 at 1000 games): the proper fix is a **lazy training Dataset** (`__getitem__` converts each position to a tensor on demand, avoiding the contiguous copy → drops the cost back to ~106 KB/position). Deferred — not needed for the first run.
 
-So **1000 games at lookback=2 likely will not fit as-is.** Options, in order of preference:
-
-1. **Store the policy as float32, not float64** (small, safe code change in `core/self_play.py` — training casts to float32 anyway, so nothing is lost). Halves the dominant cost. Best single lever.
-2. **Lazy training Dataset**: a custom `torch.utils.data.Dataset` that converts each position to a tensor in `__getitem__`, avoiding the giant contiguous `np.array` copy entirely. The proper fix for scale; a bit more code.
-3. **Reduce scale**: `lookback=1` (train on current gen only, ~60k positions) and/or `num_eps=500`. Cheapest path to a first run, no code change.
-
-**Mandatory pre-flight: a 1-generation dry run that measures peak RAM** (`/usr/bin/time -v` or a `psutil` RSS probe) before committing to the overnight run. Set `lookback` / `num_eps` from what it actually shows. Do not guess the ceiling.
-
-Recommended first cut: do option 1 (float32 policy) + a dry run; if RAM is comfortable, run 1000 games / lookback 2; if not, fall back to lookback 1 or 500 games.
+So the config above uses `num_eps=1000`, `max_generations_lookback=1`, `max_queue_length=70000`. 60k fresh positions/gen is plenty of training signal; replay across gens can come later via the lazy Dataset if training looks unstable.
 
 ---
 

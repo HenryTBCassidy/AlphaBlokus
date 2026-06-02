@@ -308,3 +308,36 @@ def test_batched_search_self_consistent_blokus(tmp_path: Path, batch_size: int) 
     assert root_visits == expected, (
         f"K={batch_size}: root visits {root_visits}, expected {expected}"
     )
+
+
+# ---------------------------------------------------------------------------
+# fp16 inference flag (R3) — must be a clean no-op on CPU
+# ---------------------------------------------------------------------------
+
+def test_fp16_inference_flag_noop_on_cpu(tmp_path: Path) -> None:
+    """fp16 autocast only engages on CUDA; on CPU the flag must be a no-op so
+    the flag is safe to leave set. Confirms plumbing without needing a GPU."""
+    import torch
+
+    game = TicTacToeGame()
+    board = game.get_canonical_form(game.initialise_board(), 1)
+
+    def predict_with(fp16: bool):
+        torch.manual_seed(0)
+        net_config = NetConfig(
+            learning_rate=1e-3, dropout=0.3, epochs=1, batch_size=4, cuda=False,
+            num_filters=32, num_residual_blocks=1, fp16_inference=fp16,
+        )
+        run_config = RunConfig(
+            game="tictactoe", run_name="t", num_generations=1, num_eps=2, temp_threshold=5,
+            update_threshold=0.55, max_queue_length=10, num_arena_matches=2,
+            max_generations_lookback=1, root_directory=tmp_path, load_model=False,
+            mcts_config=MCTSConfig(num_mcts_sims=2, cpuct=1.0), net_config=net_config,
+        )
+        from games.tictactoe.neuralnets.wrapper import NNetWrapper
+        return NNetWrapper(game, run_config).predict(board)
+
+    pol_off, val_off = predict_with(False)
+    pol_on, val_on = predict_with(True)
+    np.testing.assert_array_equal(pol_off, pol_on)
+    assert float(np.asarray(val_off).reshape(-1)[0]) == float(np.asarray(val_on).reshape(-1)[0])

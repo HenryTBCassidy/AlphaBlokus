@@ -151,13 +151,26 @@ class MCTS:
 
     # -- Public methods --------------------------------------------------------
 
-    def get_action_prob(self, canonical_board: IBoard, temp: float = 1) -> list[float]:
+    def get_action_prob(
+        self, canonical_board: IBoard, temp: float = 1, add_root_noise: bool = False,
+    ) -> list[float]:
         """Get action probabilities for the current board state.
 
         Performs multiple MCTS simulations and returns a probability distribution
         over possible actions based on the visit counts of each action.
+
+        Args:
+            canonical_board: Root position (current player's perspective).
+            temp: Temperature for the final visit-count → probability sampling.
+            add_root_noise: If True (self-play only), mix Dirichlet exploration
+                noise into the root priors before searching — gated by
+                ``MCTSConfig.dirichlet_epsilon`` (0 = no-op). Arena/Elo leave it
+                False so evaluation play is noise-free.
         """
         self._num_moves += 1
+
+        if add_root_noise and self.config.dirichlet_epsilon > 0:
+            self._apply_root_dirichlet_noise(canonical_board)
 
         # Snapshot counters before this move (for per-move delta)
         if self._detailed:
@@ -428,6 +441,42 @@ class MCTS:
                 self.virtual_visits[(s, a)] = remaining
             else:
                 self.virtual_visits.pop((s, a), None)
+
+    def _apply_root_dirichlet_noise(self, canonical_board: IBoard) -> None:
+        """Mix Dirichlet noise into the root's priors (AlphaZero exploration).
+
+        Ensures the root is expanded (its priors set), then replaces them over
+        the legal moves with ``(1-ε)·prior + ε·Dir(α)``. Self-play only, gated by
+        ``dirichlet_epsilon > 0`` at the call site. Applied once per move, before
+        the simulations, so every descent this move sees the noised priors. Uses
+        the episode's seeded RNG, so it stays reproducible.
+        """
+        s = self.game.state_key(canonical_board)
+
+        # A terminal root has no policy to perturb.
+        if s not in self.game_ended_cache:
+            self.game_ended_cache[s] = self.game.get_game_ended(canonical_board, 1)
+        if self.game_ended_cache[s] != 0:
+            return
+
+        # Ensure the root is expanded so its priors exist (mirrors the leaf path:
+        # NN eval → mask → store). Cheap one-off per move; the sims then reuse it.
+        if s not in self.policy_priors:
+            if self._profiling:
+                infer_start = time.perf_counter()
+            priors, _ = self.nnet.predict(canonical_board)
+            if self._profiling:
+                self._total_inference_time_s += time.perf_counter() - infer_start
+            self._expand_leaf(canonical_board, s, priors)
+
+        epsilon = self.config.dirichlet_epsilon
+        legal = np.where(self.valid_moves_cache[s])[0]
+        if len(legal) == 0:
+            return
+        noise = np.random.dirichlet([self.config.dirichlet_alpha] * len(legal))
+        priors = self.policy_priors[s].copy()
+        priors[legal] = (1 - epsilon) * priors[legal] + epsilon * noise
+        self.policy_priors[s] = priors
 
     def _estimate_tree_memory_bytes(self) -> int:
         """Estimate memory used by MCTS tree dictionaries.

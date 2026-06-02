@@ -68,7 +68,7 @@ def play_self_play_episode(
         # MCTS-improved policy. ``mcts`` accumulates per-move profiling
         # stats internally; the caller pulls them out via
         # ``mcts.get_episode_stats()`` after the episode ends.
-        pi = mcts.get_action_prob(canonical_board, temp=temperature)
+        pi = mcts.get_action_prob(canonical_board, temp=temperature, add_root_noise=True)
 
         # Symmetry augmentation: store every symmetric (board, policy)
         # pair the game exposes. Multiplies training-example count per
@@ -87,7 +87,17 @@ def play_self_play_episode(
             # (NDArray, pi, value) shape the network trainer expects.
             # The value sign flips for each position where the player to
             # move differs from the player at game end.
+            #
+            # The policy is cast to float32 here: ``get_action_prob`` returns
+            # Python floats that ``np.asarray`` widens to float64 (~143 KB for
+            # the 17,837-long vector), which dominates replay-buffer memory at
+            # scale. Training casts to float32 anyway, so this loses nothing and
+            # halves the per-position footprint. Board planes are already float32.
             return [
-                (x[0].as_multi_channel(1), x[2], game_result * ((-1) ** (x[1] != current_player)))
+                (
+                    x[0].as_multi_channel(1),
+                    np.asarray(x[2], dtype=np.float32),
+                    game_result * ((-1) ** (x[1] != current_player)),
+                )
                 for x in train_examples
             ]

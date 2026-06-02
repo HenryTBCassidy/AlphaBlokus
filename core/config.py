@@ -19,6 +19,17 @@ class MCTSConfig:
     cpuct: float  # Exploration constant in the PUCT formula (typically between 1 and 4)
     profiling_level: str = "standard"  # "none", "standard" (episode aggregates), "detailed" (per-move breakdown)
 
+    # Dirichlet root-exploration noise (AlphaZero). During self-play only, the
+    # root node's priors are mixed with Dirichlet noise:
+    # ``P(s,a) = (1-ε)·p_a + ε·η_a``, ``η ~ Dir(α)`` over the legal moves. This
+    # guarantees exploration of moves the (possibly-wrong, early-training) policy
+    # rates poorly. ``dirichlet_epsilon = 0`` (default) disables it entirely — the
+    # search is then bit-identical to pre-noise behaviour, so arena/Elo (which
+    # never request noise) and existing tests are unaffected. AlphaZero used
+    # ε=0.25; α≈0.03 suits Blokus's ~400 early legal moves (Go-like).
+    dirichlet_epsilon: float = 0.0
+    dirichlet_alpha: float = 0.03
+
     # F3 (batched inference): number of leaf evaluations collected per MCTS
     # outer step before a single batched ``predict_batch`` call. ``1`` (default)
     # keeps the existing one-sim-per-NN-call path bit-for-bit identical to the
@@ -47,6 +58,13 @@ class NetConfig:
     num_filters: int  # Number of convolutional filters per layer (power of 2)
     num_residual_blocks: int  # Number of residual blocks in the network
     lr_scheduler: str | None = None  # LR schedule: None = constant, "cosine" = CosineAnnealingLR
+
+    # Half-precision (fp16) inference. When True AND running on CUDA, the
+    # forward pass in predict/predict_batch runs under torch.autocast(fp16) —
+    # faster on GPUs with Tensor Cores (e.g. the 3060 Ti), inference-only so no
+    # gradient-stability concerns. No effect on CPU. Default False; outputs are
+    # cast back to float32 so downstream code is unaffected either way.
+    fp16_inference: bool = False
 
     # F4 (conv policy head): "fc" = the original fully-connected policy head
     # (a single Linear(2·cells → action_size), ~95% of the net's params);
