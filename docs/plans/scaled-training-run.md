@@ -30,6 +30,7 @@ Base: `blokus_pc_second.json`. Changes and rationale:
 | `num_arena_matches` | 50 | **50** | Reliable 55%-threshold gating; cheap now. |
 | `elo_games_per_gen` | 20 | **50** | The "is it getting stronger" curve; cheap now. |
 | `net` (filters×blocks) | 64×4 | **64×4** | Hold — a bigger net eats the F3 inference gains and adds a confound. Scale data first. |
+| `policy_head` | fc | **conv** (default since F4) | The conv head (21.6× fewer params) is now the default — this run is also the de-facto strength validation for it. Doesn't change the memory analysis below (the stored policy *target* is still the dense 17,837-vector). |
 | `lr_scheduler` | none | **cosine** | Sensible decay over a 10-gen run. |
 | `cpuct` | 2.5 | 2.5 | Unchanged. |
 | `seed` | 42 | 42 | Reproducible. |

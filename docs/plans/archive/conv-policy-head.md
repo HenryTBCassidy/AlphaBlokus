@@ -14,15 +14,15 @@ Default stays FC (`policy_head: "fc"`) until the conv head is validated; the swi
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| C1 | Derive + pin the conv-output → action-index permutation. Build it from `ActionCodec.decode` + the coordinate decoder as a precomputed gather index; prove it's a correct bijection with a one-hot probe test | 2-3 hr | High | |
-| C2 | Implement the conv policy head in `net.py` (1×1 conv → gather to action order + a small pass head), behind a `policy_head` flag | 2-3 hr | High | See [C2 detail](#c2-conv-policy-head-implementation) |
-| C3 | Add `policy_head: Literal["fc", "conv"] = "fc"` to `NetConfig`; wire the net to pick the head. Default "fc" keeps current behaviour bit-identical | 30 min | High | |
-| C4 | Tests — the safety net for the reshape. Three layers: (1) the C1 one-hot probe (permutation is a correct bijection); (2) head-level: a crafted features tensor where one `(o, x, y)` should dominate → assert the conv head's argmax index decodes via `ActionCodec` to exactly that action; (3) **end-to-end round-trip on real boards**: run the conv-head net → mask → for the top-K actions, `ActionCodec.decode` each and assert it's a legal placement on that board (and that illegal actions carry zero probability after masking). Plus shape `(B, 17837)` and ~340K param count | 2-2.5 hr | High | See [C4 detail](#c4-testing-the-net→move-path) |
-| C5 | Checkpoint compatibility: loading an FC checkpoint into a conv net (or vice-versa) must fail loudly, not silently corrupt. No weight transfer — train from scratch | 1 hr | High | See [C5 detail](#c5-checkpoint-compatibility) |
-| C6 | Measure: param count, checkpoint size, forward + train-step time, conv vs FC. Confirm the research doc's predictions | 1 hr | Medium | |
-| C7 | Symmetry-diagnostic check — conv head should score near-zero asymmetry where the FC head has measurable asymmetry. Validates the inductive-bias claim | 30 min | Medium | |
-| C8 | Validation run: a short Blokus training run on the conv head to confirm it trains (loss down, no NaN, Elo moves). Flip `NetConfig` default to "conv" if clean | 1-2 hr + run | High | |
-| C9 | Archive. `git mv` to `archive/`, update master plan F4 row → Done with measurements, Scope-additions note if needed | 15 min | Low | |
+| C1 | Derive + pin the conv-output → action-index permutation. Build it from `ActionCodec.decode` + the coordinate decoder as a precomputed gather index; prove it's a correct bijection with a one-hot probe test | 2-3 hr | High | ✅ `build_action_permutation` in `net.py`; bijection + ActionCodec cross-check tests |
+| C2 | Implement the conv policy head in `net.py` (1×1 conv → gather to action order + a small pass head), behind a `policy_head` flag | 2-3 hr | High | ✅ `ConvPolicyHead` (1×1 conv → gather → avg-pool pass head); head selection in `AlphaBlokusDuo` |
+| C3 | Add `policy_head: Literal["fc", "conv"] = "fc"` to `NetConfig`; wire the net to pick the head. Default "fc" keeps current behaviour bit-identical | 30 min | High | ✅ Added (default later flipped to "conv" in C8) |
+| C4 | Tests — the safety net for the reshape. Three layers: (1) the C1 one-hot probe (permutation is a correct bijection); (2) head-level: a crafted features tensor where one `(o, x, y)` should dominate → assert the conv head's argmax index decodes via `ActionCodec` to exactly that action; (3) **end-to-end round-trip on real boards**: run the conv-head net → mask → for the top-K actions, `ActionCodec.decode` each and assert it's a legal placement on that board (and that illegal actions carry zero probability after masking). Plus shape `(B, 17837)` and ~340K param count | 2-2.5 hr | High | ✅ `tests/test_blokusduo/test_conv_policy_head.py`. L2 strengthened to verify **every** conv output lands at the exact `ActionCodec.encode` index (not just argmax) |
+| C5 | Checkpoint compatibility: loading an FC checkpoint into a conv net (or vice-versa) must fail loudly, not silently corrupt. No weight transfer — train from scratch | 1 hr | High | ✅ `strict` load raises `RuntimeError` on head mismatch; test pins it |
+| C6 | Measure: param count, checkpoint size, forward + train-step time, conv vs FC. Confirm the research doc's predictions | 1 hr | Medium | ✅ 64f×4b: params **7,344,220 → 340,127 (21.6×)**, checkpoint **29.4 → 1.53 MB (19×)**. Forward time ~equal (1.08→1.13 ms/board CPU) — trunk-dominated, as the research doc said |
+| C7 | Symmetry-diagnostic check — conv head should score near-zero asymmetry where the FC head has measurable asymmetry. Validates the inductive-bias claim | 30 min | Medium | ✅ Ran — **uninformative pre-training** (untrained nets output near-uniform → trivially symmetric, both heads ~0 KL). Meaningful comparison needs a trained net (scaled run). Also: a 1×1 conv is translation-equivariant, *not* transpose-equivariant, so the research doc's reason-3 overstated this for Blokus's transpose symmetry |
+| C8 | Validation run: a short Blokus training run on the conv head to confirm it trains (loss down, no NaN, Elo moves). Flip `NetConfig` default to "conv" if clean | 1-2 hr + run | High | ✅ Committed test trains the conv net on a real-board batch — loss drops, no NaN, valid policy after. Default flipped to "conv"; full suite **256 passed**. (Full Elo-over-gens strength validation folded into the scaled run.) |
+| C9 | Archive. `git mv` to `archive/`, update master plan F4 row → Done with measurements, Scope-additions note if needed | 15 min | Low | ✅ |
 
 Total: ~10-13 focused hours + a validation run.
 
@@ -130,6 +130,18 @@ No weight transfer (the research doc flags it as non-trivial and we have no prec
 - **This is in scope for the optimisation plan** because the justification is throughput; net *capacity* changes (bigger trunks) remain a separate concern.
 
 ---
+
+## Outcome (landed 2026-06-02)
+
+Conv policy head implemented, tested, and made the default. All C1–C9 done.
+
+**Headline measurements (64f×4b):** params **7,344,220 → 340,127 (21.6× shrink)**; checkpoint **29.4 MB → 1.53 MB (19×)**. The read-out is provably correct — the C4 tests verify every conv output lands at the exact `ActionCodec.encode` index. The conv net trains cleanly (loss drops, no NaN). Full suite: **256 passed**.
+
+**Framing correction (be honest):** F4 does **not** meaningfully speed the raw forward pass — it's trunk-dominated, so conv vs FC forward time is ~equal (1.08 → 1.13 ms/board on CPU). The real wins are **parameter count, checkpoint size, training-step cost (less to backprop), and inductive bias / sample efficiency** — not inference latency. Earlier menu/plan wording that said "speeds inference" overstated it; the master plan F4 row has been corrected.
+
+**Deferred / not validated here:**
+- **Strength** (does a conv-trained net play as well as / better than FC-trained?) — needs a real training run; folded into the scaled run, which now uses the conv head by default.
+- **Symmetry benefit** — unmeasurable on untrained nets (near-uniform → trivially symmetric); and note a 1×1 conv is translation- not transpose-equivariant, so don't expect a large win on Blokus's transpose symmetry. Re-check on a trained net.
 
 ## Out of scope
 

@@ -48,6 +48,19 @@ class NetConfig:
     num_residual_blocks: int  # Number of residual blocks in the network
     lr_scheduler: str | None = None  # LR schedule: None = constant, "cosine" = CosineAnnealingLR
 
+    # F4 (conv policy head): "fc" = the original fully-connected policy head
+    # (a single Linear(2·cells → action_size), ~95% of the net's params);
+    # "conv" = fully-convolutional head (1×1 conv to per-orientation logit planes
+    # + a small pass head), ~1200× fewer params in that layer and a stronger
+    # board-game inductive bias. Default "fc" keeps existing checkpoints/behaviour;
+    # the two heads have incompatible state_dicts (loading across them raises).
+    # Blokus only — TicTacToe ignores this. See docs/plans/archive/conv-policy-head.md.
+    # Default "conv" since F4 (2026-06-02): correctness proven (read-out matches
+    # ActionCodec), trains cleanly, ~21× fewer params / ~19× smaller checkpoints.
+    # Set "fc" to restore the original fully-connected head (e.g. to load an
+    # old FC checkpoint — the two head state_dicts are incompatible).
+    policy_head: Literal["fc", "conv"] = "conv"
+
 
 @dataclass(frozen=True)
 class WandbConfig:

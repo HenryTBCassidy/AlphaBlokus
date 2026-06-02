@@ -94,13 +94,13 @@ docs/
 │   ├── REMOTE-TRAINING.md # Runbook for running training on the home PC over SSH
 │   └── AI-CONTEXT.md      # Extended context, architecture rationale, gotchas
 └── plans/                                # Top-level = in-flight or not-yet-started
-    ├── full-cycle-optimisation.md        # Master optimisation plan (F1-F4 menu + progress tracker)
-    ├── conv-policy-head.md               # F4: fully-convolutional policy head (active)
+    ├── full-cycle-optimisation.md        # Master optimisation plan (F1-F4 done; menu + progress tracker)
     ├── scaled-training-run.md            # Plan for the first ~1000-games/gen training run (not launched)
     ├── move-gen-further-optimisation.md  # Deferred: Cython, bitboard, caching (post-training)
     ├── training-infrastructure.md        # SSH/GPU/cloud compute options
     └── archive/                          # Completed plans, retained for context
         ├── batched-inference.md          # F3: batched MCTS inference + virtual loss
+        ├── conv-policy-head.md           # F4: fully-convolutional policy head
         ├── blokus-valid-move-algorithm.md # Valid move generation
         ├── board-game-separation.md       # Board/Game responsibility split
         ├── bug-fixes.md                   # Bug fixes

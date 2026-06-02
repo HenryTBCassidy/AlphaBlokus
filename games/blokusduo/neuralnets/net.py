@@ -1,5 +1,6 @@
 import math
 
+import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
@@ -64,6 +65,70 @@ class ResNetBlock(nn.Module):
         return out
 
 
+def build_action_permutation(board_rows: int, board_cols: int, num_orientations: int) -> np.ndarray:
+    """Gather index from a flat conv-policy output into ``ActionCodec`` order.
+
+    The conv policy head emits a ``(num_orientations, board_rows, board_cols)``
+    tensor; flattened channel-major its element order is
+    ``o · (rows·cols) + row · cols + col`` (array coords, top-left origin).
+
+    ``ActionCodec`` orders actions as ``index = y · (cols·O) + x · O + o`` in
+    board coords (bottom-left origin), with ``CoordinateIndexDecoder.to_idx``
+    giving ``row = N-1-y``, ``col = x``.
+
+    Returns ``perm`` such that ``conv_flat[perm]`` is in ActionCodec order:
+    ``perm[action_index]`` = the conv-flat position holding that action's logit.
+    Pure arithmetic replicating ``ActionCodec``/``CoordinateIndexDecoder``; the
+    C4 one-hot probe test pins it against the real ``ActionCodec.encode``.
+    """
+    board_size = board_cols  # Blokus Duo is square; ActionCodec uses one board_size
+    cells = board_rows * board_cols
+    perm = np.empty(cells * num_orientations, dtype=np.int64)
+    for action_index in range(perm.size):
+        o = action_index % num_orientations
+        remaining = action_index // num_orientations
+        x = remaining % board_size
+        y = remaining // board_size
+        row = board_rows - 1 - y  # CoordinateIndexDecoder.to_idx: length_idx
+        col = x                   # width_idx
+        perm[action_index] = o * cells + row * board_cols + col
+    return perm
+
+
+class ConvPolicyHead(nn.Module):
+    """Fully-convolutional policy head (F4).
+
+    A 1×1 convolution maps the trunk's per-cell features to ``num_orientations``
+    logit planes (one per piece-orientation), reordered into ``ActionCodec``
+    action order. Pass is a single logit from a small global head rather than a
+    wasted full plane. Output: ``(B, action_size)`` raw logits, matching the FC
+    head's interface so the surrounding net/forward is unchanged.
+    """
+
+    def __init__(self, num_filters: int, num_orientations: int,
+                 board_rows: int, board_cols: int) -> None:
+        super().__init__()
+        self.move_conv = nn.Conv2d(
+            in_channels=num_filters, out_channels=num_orientations,
+            kernel_size=1, stride=1, bias=True,
+        )
+        # Pass action: one scalar logit from globally-pooled features.
+        self.pass_head = nn.Sequential(
+            nn.AdaptiveAvgPool2d(1),
+            nn.Flatten(),
+            nn.Linear(num_filters, 1),
+        )
+        perm = build_action_permutation(board_rows, board_cols, num_orientations)
+        self.register_buffer("perm", torch.as_tensor(perm, dtype=torch.long))
+
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        moves = self.move_conv(features)               # (B, O, rows, cols)
+        moves = moves.reshape(moves.size(0), -1)        # (B, O·rows·cols), channel-major
+        moves = moves[:, self.perm]                     # -> ActionCodec order
+        pass_logit = self.pass_head(features)           # (B, 1)
+        return torch.cat([moves, pass_logit], dim=1)    # (B, action_size)
+
+
 class AlphaBlokusDuo(nn.Module):
     def __init__(self, board_rows: int, board_cols: int, action_size: int,
                  num_input_channels: int, config: NetConfig):
@@ -122,19 +187,35 @@ class AlphaBlokusDuo(nn.Module):
             nn.Tanh(),
         )
 
-        self.policy_head = nn.Sequential(
-            nn.Conv2d(
-                in_channels=config.num_filters,
-                out_channels=2,
-                kernel_size=1,
-                stride=1,
-                bias=False,
-            ),
-            nn.BatchNorm2d(num_features=2),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.Linear(2 * conv_out, self.action_size),
-        )
+        if config.policy_head == "conv":
+            # Action space = board_rows · board_cols · num_orientations + 1 (pass).
+            cells = self.board_rows * self.board_cols
+            num_orientations, remainder = divmod(self.action_size - 1, cells)
+            if remainder != 0:
+                raise ValueError(
+                    f"action_size {self.action_size} is not cells·O+1 for a "
+                    f"{self.board_rows}×{self.board_cols} board; conv head needs "
+                    "an (orientation, cell) action space.")
+            self.policy_head = ConvPolicyHead(
+                num_filters=config.num_filters,
+                num_orientations=num_orientations,
+                board_rows=self.board_rows,
+                board_cols=self.board_cols,
+            )
+        else:
+            self.policy_head = nn.Sequential(
+                nn.Conv2d(
+                    in_channels=config.num_filters,
+                    out_channels=2,
+                    kernel_size=1,
+                    stride=1,
+                    bias=False,
+                ),
+                nn.BatchNorm2d(num_features=2),
+                nn.ReLU(),
+                nn.Flatten(),
+                nn.Linear(2 * conv_out, self.action_size),
+            )
 
     def forward(self, x):
         """
