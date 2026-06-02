@@ -15,7 +15,7 @@ Status legend: **Idea** (raw, unexamined) · **Researching** (actively being inv
 | I2 | [Dirichlet root noise](#i2-dirichlet-root-noise) | Idea | Add exploration noise to root priors so good moves with weak priors still get explored — the standard AlphaZero fix for thin early-game coverage |
 | I3 | [Evaluation-time search tuning](#i3-evaluation-time-search-tuning) | Idea | Use a stronger/exact search at eval than at train (e.g. K=1 and/or more sims) since eval cares about strength, not throughput |
 
-> Ideas already captured elsewhere (not duplicated here): mixed-precision / fp16 inference, cross-worker inference server, MCTS tree reuse (F4), cached-valid-moves (F6), Cython move-gen (F5) — all live in the [optimisation menu](plans/full-cycle-optimisation.md#optimisation-menu).
+> Ideas already captured elsewhere (not duplicated here): the conv policy head (F4) is the active next step in the [optimisation menu](plans/full-cycle-optimisation.md#optimisation-menu); MCTS tree reuse, Cython move-gen, cached-valid-moves and the cross-worker inference server are in that plan's [Considered and set aside](plans/full-cycle-optimisation.md#considered-and-set-aside) section; mixed-precision / fp16 inference is in its Out-of-scope list.
 
 ---
 
