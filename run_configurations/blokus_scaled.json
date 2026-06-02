@@ -39,6 +39,6 @@
     "project": "alphablokus-poc",
     "entity": null,
     "tags": ["scaled", "first-big-run", "f1-f4"],
-    "mode": "disabled"
+    "mode": "online"
   }
 }

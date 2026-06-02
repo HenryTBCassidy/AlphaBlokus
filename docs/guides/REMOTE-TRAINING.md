@@ -114,6 +114,21 @@ Run this in a **long-running foreground SSH session** held by some process on th
 
 `ServerAliveInterval=30` keeps the TCP connection alive across network blips (hotel WiFi, sleeping the dev machine briefly, etc).
 
+### ⚠️ Long runs: the persistence problem — read before launching anything multi-hour
+
+**The attached SSH session is a single point of failure.** The run lives only as long as that `ssh → wsl → bash` invocation stays alive. Over a multi-hour run, the Tailscale link *will* eventually drop (it did at the 43-minute mark of the first scaled run on 2026-06-02: `Read from remote host … Operation timed out / Broken pipe`), and when the SSH session dies, **the whole training run dies with it.** `ServerAliveInterval` helps with brief blips but does not save you from a real drop.
+
+**Detaching the process does NOT work on this WSL setup.** Tested 2026-06-02, all of these died as soon as the launching `wsl.exe` invocation returned, *even with `vmIdleTimeout=-1` and `loginctl enable-linger` both set*:
+- `tmux new-session -d` — the tmux server itself was reaped (`tmux ls` → no server).
+- `setsid` / `nohup … & disown` — process gone in a separate invocation (`pgrep` → 0).
+- `systemd-run --user --unit=…` — unit `Stopping…` ~15 s in (seen during the F3 benchmark).
+
+WSL reaps the launching invocation's entire process tree on exit; `vmIdleTimeout=-1` keeps the *VM* up but not the orphaned processes. **So there is currently no verified fire-and-forget launch for this box.** Candidate fixes not yet validated — try one and document the result here: (a) detach on the **Windows** side via `powershell Start-Process wsl …` so the `wsl.exe` invocation itself is a persistent Windows process; (b) a **root** `systemctl` *system* service (PID-1 systemd, not `--user`); (c) hold the WSL instance open with a separate persistent `wsl -- sleep infinity` and `nohup` inside it.
+
+**Until that's solved, two rules for any real run:**
+1. **Always set `wandb.mode: "online"`** (never `"disabled"`). W&B mirrors metrics live, so even if the local process dies you keep a remote record of everything up to the drop and can see how far it got. Disabling W&B on the first scaled run is exactly why that run left nothing to inspect — don't repeat it.
+2. **Treat an attached-session run as "best effort"** — it may not survive to completion. For a short validation (minutes) it's fine; for an overnight run, expect to either solve persistence first or accept it may drop partway.
+
 ### Get the W&B URL once it appears
 
 ```bash
@@ -183,6 +198,8 @@ For shell scripts longer than one line: write to a file locally, `scp` to PC, ru
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
+| Long run dies partway with `Read from remote host … Operation timed out` / `Broken pipe` | The attached SSH session dropped (Tailscale) and took the run with it — the run is tethered to that session | No fire-and-forget launch works on this box yet (tmux/setsid/nohup/systemd-run/Windows-Start-Process all reaped — tested 2026-06-02). Always run W&B `online` so progress is recorded; see [Long runs: the persistence problem](#️-long-runs-the-persistence-problem--read-before-launching-anything-multi-hour) |
+| Can't find the run in W&B | `wandb.mode` was `"disabled"` in the config | Set `wandb.mode: "online"` for every real run — never disable monitoring |
 | Training dies after ~30s with no traceback in the log | Disowned process killed when SSH session closed | Use a long-running SSH session (don't `nohup & disown`) |
 | Detached run via `systemd-run --user --unit=…` dies ~15s in (`systemctl --user` shows `inactive`, journal shows `Stopping …`) | WSL idle-terminates the whole distro once the launching session returns; this tears the user unit down too. `loginctl enable-linger` keeps the *user manager* alive across logins but does **not** stop the VM teardown. Confirmed 2026-06-01 during the F3 benchmark. | Don't rely on `systemd-run --user` for detached runs. Hold a long-running foreground SSH session for the run's duration (a Claude Code background task works), exactly as in [The launch pattern](#the-launch-pattern). |
 | `tmux ls` says no session right after creating one | WSL idle timeout (60s default) wiped `/tmp/tmux-*` | `vmIdleTimeout=-1` in `.wslconfig`, then `wsl --shutdown` |
