@@ -92,13 +92,17 @@ docs/
 │   ├── REMOTE-TRAINING.md # Runbook for running training on the home PC over SSH
 │   └── AI-CONTEXT.md      # Extended context, architecture rationale, gotchas
 └── plans/                                # Top-level = in-flight or not-yet-started
+    ├── full-cycle-optimisation.md        # Master optimisation plan (F1-F6 menu + progress tracker)
     ├── move-gen-further-optimisation.md  # Deferred: Cython, bitboard, caching (post-training)
     ├── training-infrastructure.md        # SSH/GPU/cloud compute options
     └── archive/                          # Completed plans, retained for context
+        ├── batched-inference.md          # F3: batched MCTS inference + virtual loss
         ├── blokus-valid-move-algorithm.md # Valid move generation
         ├── board-game-separation.md       # Board/Game responsibility split
         ├── bug-fixes.md                   # Bug fixes
         ├── mcts-profiling.md              # MCTS profiling instrumentation
+        ├── move-gen-optimisation.md       # F2: precomputed move-list table
+        ├── parallel-self-play.md          # F1: parallel self-play across workers
         ├── remote-setup-mac.md            # MacBook-side SSH setup
         ├── remote-setup-windows.md        # Windows-side WSL2 + SSH setup
         ├── remote-training-setup.md       # Original combined remote-training plan

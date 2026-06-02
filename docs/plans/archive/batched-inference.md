@@ -63,9 +63,9 @@ Three reasons F3 is the right thing to do now:
 | P4 | Refactor `search()` from recursive single-leaf to iterative leaf-collection. Need to track each descent's path (state-action sequence) so we can backprop + remove virtual loss after the batched eval | 3-4 hr | High | ✓ `_descend_to_leaf`/`_expand_leaf`/`_backprop` + `_Descent` dataclass; `search()` kept as size-1 batch; per-descent path tracked |
 | P5 | Wire batched inference. In `get_action_prob`, replace the inner `for _ in range(num_sims)` loop with `for _ in range(num_sims // K): collect K leaves → predict_batch → backprop K`. Add `mcts_batch_size: int = 1` to `MCTSConfig`. ``K=1`` keeps the existing path bit-identical | 1-2 hr | High | ✓ `_simulate_batch` with leaf-dedup; `mcts_batch_size` added (default 1); K=1 bit-identical (golden test), remainder batch keeps total sims = num_mcts_sims for all K |
 | P6 | Validate. Run the K=1 equivalence test + the K=N self-consistency test on the dev_5000 fixtures. Run the F2 determinism test with F3 enabled to confirm no regression | 1 hr | High | ✓ K=1 golden bit-identical; K>1 deterministic (K=4/8/16); K=N self-consistent on Blokus dev positions; full suite **248 passed** (F2 determinism suite green with F3 present) |
-| P7 | Measurement. Re-run `scripts/run_benchmark.sh --config run_configurations/profile_baseline_f4.json --num-workers 8 --output-dir temp/profile_baseline_f2_f4_w8_<date>` with `mcts_batch_size=8` and `mcts_batch_size=16`. Compare per-process component split against the F2 8w baseline. Update master plan progress tracker | 1 hr | High | |
-| P8 | Microbenchmark (optional but cheap). Time `predict_batch(K)` vs K serial `predict()` calls on the GPU directly. Confirms the GPU-side speedup independent of MCTS overhead | 30 min | Medium | |
-| P9 | Archive plan. `git mv` to `docs/plans/archive/`. Append a Scope additions section if anything landed beyond this checklist. Update master plan F3 row to **Done** ✓ | 5 min | Low | |
+| P7 | Measurement. Re-run `scripts/run_benchmark.sh --config run_configurations/profile_baseline_f4.json --num-workers 8 --output-dir temp/profile_baseline_f2_f4_w8_<date>` with `mcts_batch_size=8` and `mcts_batch_size=16`. Compare per-process component split against the F2 8w baseline. Update master plan progress tracker | 1 hr | High | ✓ Ran K=1/8/16 at 8 workers on RTX 3060 Ti via `--mcts-batch-size`. K=16: **1.86× total / 3.58× lighter inference** vs K=1 baseline (~14× vs serial). Results in `temp/profile_baseline_f3_k{1,8,16}_w8_2026-06-01/`; master tracker updated. K=8 self-play noisy (contention). |
+| P8 | Microbenchmark (optional but cheap). Time `predict_batch(K)` vs K serial `predict()` calls on the GPU directly. Confirms the GPU-side speedup independent of MCTS overhead | 30 min | Medium | ✓ `scripts/benchmark_predict_batch.py` on idle 3060 Ti, production net: **K=8 → 9.23×, K=16 → 11.53×** GPU-side (saturates ~20× at K≥32). Isolated batching gain is far bigger than the 1.86× end-to-end — the gap is 8-worker GPU contention, which is exactly what Option B would attack. |
+| P9 | Archive plan. `git mv` to `docs/plans/archive/`. Append a Scope additions section if anything landed beyond this checklist. Update master plan F3 row to **Done** ✓ | 5 min | Low | ✓ Archived; master plan F3 → Done. |
 
 Total: ~12-15 focused hours.
 
@@ -184,6 +184,26 @@ for batch_step in range(self.config.num_mcts_sims // K):
 Edge cases to handle in the iterative descent:
 - Reaching a terminal state during descent: no NN eval needed, just backprop the terminal value
 - Two descents reaching the same not-yet-expanded leaf: the second one's expansion would be redundant. Easiest fix: deduplicate the leaves before predict_batch, share the result back to each duplicate's backprop. Or accept the redundancy as a small inefficiency for now (only matters for early sims when the tree is small)
+
+---
+
+## Outcome & scope additions
+
+Landed 2026-06-01. F3 (within-worker batching, Option A) is implemented, tested, and benchmarked.
+
+**Headline result:** at K=16, **1.86× total wall-clock / 3.58× lighter inference per game** end-to-end (8 workers, 64f×4b, 3060 Ti); **~14× cumulative vs the serial baseline**. The isolated GPU-side batching gain is much larger — **9.23× (K=8), 11.53× (K=16)** in the P8 microbenchmark — so the end-to-end gain is throttled by 8-worker cross-worker GPU contention, not by Option A's mechanism.
+
+**Key finding → motivates Option B.** The gap between the 11.5× isolated batching gain and the 1.86× end-to-end result is the cost of 8 workers sharing one GPU: each worker's batched call still queues behind the others. A cross-worker inference server (Option B) that coalesces leaves across *all* workers is the lever to recover the rest. Worth a new sub-plan if/when we want to push past this.
+
+**Beyond the original checklist:**
+- `--mcts-batch-size` flag added to `scripts/benchmark_phases.py` (overrides config, propagates to workers).
+- `scripts/benchmark_predict_batch.py` — the P8 GPU microbenchmark (reusable).
+- `scripts/optimisation_progress_report.py` — self-contained HTML report of the serial→F1→F2→F3 progression (regenerate any time; add a row when F4 lands).
+- `docs/IDEAS.md` — new ideas register (adaptive sim budget, Dirichlet noise, eval-time search tuning), spun out of the discussion during this work.
+
+**Deferred:**
+- **Strength validation (K=1 vs K=16 head-to-head).** Needs a net good enough that search quality matters; a throwaway short training gives too weak a net for the K-difference to show. **Folded into the first real Blokus training run** — run a K=1-vs-K=16 arena on a real checkpoint there before trusting K>1 for production training. Until then, the conservative default is K=1 at evaluation (exact search) per [`IDEAS.md` I3](../IDEAS.md#i3-evaluation-time-search-tuning).
+- **WSL detached-execution gotcha.** `systemd-run --user` + linger is *not* sufficient for detached PC runs — WSL idle-terminates the whole distro once no session is attached, killing the unit. Worked around by holding an SSH session open for the run's duration. Noted in `docs/guides/REMOTE-TRAINING.md`.
 
 ---
 

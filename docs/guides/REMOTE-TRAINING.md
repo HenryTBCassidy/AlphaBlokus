@@ -184,6 +184,7 @@ For shell scripts longer than one line: write to a file locally, `scp` to PC, ru
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
 | Training dies after ~30s with no traceback in the log | Disowned process killed when SSH session closed | Use a long-running SSH session (don't `nohup & disown`) |
+| Detached run via `systemd-run --user --unit=…` dies ~15s in (`systemctl --user` shows `inactive`, journal shows `Stopping …`) | WSL idle-terminates the whole distro once the launching session returns; this tears the user unit down too. `loginctl enable-linger` keeps the *user manager* alive across logins but does **not** stop the VM teardown. Confirmed 2026-06-01 during the F3 benchmark. | Don't rely on `systemd-run --user` for detached runs. Hold a long-running foreground SSH session for the run's duration (a Claude Code background task works), exactly as in [The launch pattern](#the-launch-pattern). |
 | `tmux ls` says no session right after creating one | WSL idle timeout (60s default) wiped `/tmp/tmux-*` | `vmIdleTimeout=-1` in `.wslconfig`, then `wsl --shutdown` |
 | `error: Failed to spawn: pytest` | Dev extras not installed | `uv sync --extra dev` |
 | `wandb login` CLI hangs or returns "No API key configured" | CLI auth via env is unreliable on this stack | Use `wandb.login(key=...)` from Python |
