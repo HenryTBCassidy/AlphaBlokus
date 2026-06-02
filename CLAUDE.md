@@ -95,6 +95,7 @@ docs/
 │   └── AI-CONTEXT.md      # Extended context, architecture rationale, gotchas
 └── plans/                                # Top-level = in-flight or not-yet-started
     ├── full-cycle-optimisation.md        # Master optimisation plan (F1-F4 done; menu + progress tracker)
+    ├── pre-run-prep.md                   # Memory fix + Dirichlet + fp16(opt) + end-to-end validation before a big run
     ├── scaled-training-run.md            # Plan for the first ~1000-games/gen training run (not launched)
     ├── move-gen-further-optimisation.md  # Deferred: Cython, bitboard, caching (post-training)
     ├── training-infrastructure.md        # SSH/GPU/cloud compute options
