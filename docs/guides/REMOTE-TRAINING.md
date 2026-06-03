@@ -114,20 +114,40 @@ Run this in a **long-running foreground SSH session** held by some process on th
 
 `ServerAliveInterval=30` keeps the TCP connection alive across network blips (hotel WiFi, sleeping the dev machine briefly, etc).
 
-### ⚠️ Long runs: the persistence problem — read before launching anything multi-hour
+### 🛑 Unattended long runs are UNSOLVED on this box — read before launching anything multi-hour
 
-**The attached SSH session is a single point of failure.** The run lives only as long as that `ssh → wsl → bash` invocation stays alive. Over a multi-hour run, the Tailscale link *will* eventually drop (it did at the 43-minute mark of the first scaled run on 2026-06-02: `Read from remote host … Operation timed out / Broken pipe`), and when the SSH session dies, **the whole training run dies with it.** `ServerAliveInterval` helps with brief blips but does not save you from a real drop.
+**Bottom line (as of 2026-06-03): there is no working hands-off launch on this PC.** A training run launched over SSH dies within **15–80 seconds** of the launching session/context ending, by every method tried. A real overnight run currently needs one of the hands-on fixes at the bottom of this section. Don't burn an evening re-discovering this — it was exhaustively tested on 2026-06-02/03.
 
-**Detaching the process does NOT work on this WSL setup.** Tested 2026-06-02, all of these died as soon as the launching `wsl.exe` invocation returned, *even with `vmIdleTimeout=-1` and `loginctl enable-linger` both set*:
-- `tmux new-session -d` — the tmux server itself was reaped (`tmux ls` → no server).
-- `setsid` / `nohup … & disown` — process gone in a separate invocation (`pgrep` → 0).
-- `systemd-run --user --unit=…` — unit `Stopping…` ~15 s in (seen during the F3 benchmark).
+**Root cause — the WSL2 distro shutdown.** WSL **2.6.3.0** shuts the *entire distro* down ~15–20 s after the last session closes. When the distro goes down, every process in it is SIGTERM'd (`status=143`). This is a known regression ([microsoft/WSL #13416](https://github.com/microsoft/wsl/issues/13416)). Two confusing non-fixes:
+- `vmIdleTimeout=-1` in `.wslconfig` keeps the lightweight **VM** alive but **not the distro** — different things.
+- A keep-alive **systemd service** (`ExecStart=/usr/bin/sleep infinity`) does **not** prevent the distro shutdown on 2.6.x (it's part of the regression). Confirmed: the keep-alive showed "active" only because the polling SSH had just booted the distro.
 
-WSL reaps the launching invocation's entire process tree on exit; `vmIdleTimeout=-1` keeps the *VM* up but not the orphaned processes. **So there is currently no verified fire-and-forget launch for this box.** Candidate fixes not yet validated — try one and document the result here: (a) detach on the **Windows** side via `powershell Start-Process wsl …` so the `wsl.exe` invocation itself is a persistent Windows process; (b) a **root** `systemctl` *system* service (PID-1 systemd, not `--user`); (c) hold the WSL instance open with a separate persistent `wsl -- sleep infinity` and `nohup` inside it.
+**Methods tried — ALL die (don't retry these):**
 
-**Until that's solved, two rules for any real run:**
-1. **Always set `wandb.mode: "online"`** (never `"disabled"`). W&B mirrors metrics live, so even if the local process dies you keep a remote record of everything up to the drop and can see how far it got. Disabling W&B on the first scaled run is exactly why that run left nothing to inspect — don't repeat it.
-2. **Treat an attached-session run as "best effort"** — it may not survive to completion. For a short validation (minutes) it's fine; for an overnight run, expect to either solve persistence first or accept it may drop partway.
+| Method | Result |
+|---|---|
+| Attached SSH (`ssh "wsl … main.py"`, held open) | Runs only while the session holds; dies on any Tailscale drop. Best result ~43 min, then dropped. Also killed early by *concurrent* check-sessions. |
+| `tmux new-session -d` | tmux server reaped when the launching `wsl.exe` exits. |
+| `nohup` / `setsid … & disown` | gone in a separate invocation (`pgrep` → 0). |
+| `systemd-run --user` | distro shuts down under it → SIGTERM ~15 s. |
+| `systemd-run` / installed **system** service (PID-1) | also SIGTERM ~15 s once no session is attached. |
+| **Enabled** system service (`WantedBy=multi-user.target`) | ☠️ **restart-loop trap** — every SSH connect (even a status check) boots the distro → the enabled service auto-starts → fresh `main.py` + **new W&B run** → dies ~15 s later → repeat. Created ~19 W&B runs in one night. **Never enable training as a boot service.** |
+| Windows `powershell Start-Process wsl …` | did not persist. |
+| Windows **Scheduled Task** (`schtasks /run`, default "only when logged on") | launched the run but it still died ~80 s in. Likely needs run-whether-logged-on-or-not (stored creds) and/or an interactive desktop logon. |
+
+**The real fixes — all need hands-on access (can't be done blind over SSH):**
+1. **Downgrade WSL below the regression** (pre-2.6.1, or whatever version #13416 is fixed in), then a keep-alive system service + `nohup`/systemd works normally. Needs Windows admin (`wsl --update` / version pin) + a `wsl --shutdown`.
+2. **Scheduled Task that runs *whether the user is logged on or not*** — `schtasks /create … /ru <user> /rp <password>` (needs Henry's Windows password) or as a service account, with GPU access verified. Set it up interactively once and it's reusable.
+3. **Run attended at the machine** — an interactive desktop logon keeps the distro up reliably; fine for runs you can sit with, not for hands-off overnight.
+
+**Once persistence is fixed, the clean recipe is:** launch as a *non-enabled* unit (or `nohup` under the now-alive distro), `wandb.mode: "online"`, and **monitor entirely via W&B** — no SSH session needs to stay open; SSH is only for launch + occasional checks.
+
+**Always `wandb.mode: "online"` for real runs.** It mirrors metrics live, so progress is recorded even if the process dies, *and* it's how you watch the run without holding SSH. (Disabling it on the first attempt is why that run left nothing to inspect.)
+
+**Cleanup recipe** when launches leave a mess:
+- Kill strays: `wsl -d Ubuntu -- bash -lc 'pkill -9 -f "[m]ain.py"'`
+- Remove stray units/tasks: `systemctl disable --now <svc>` ; `schtasks /delete /tn <name> /f`
+- Delete stray W&B runs by date with a `wandb.Api()` script (filter `r.created_at` to the day, `r.delete()`) — see `wandb_cleanup.py` pattern used 2026-06-03.
 
 ### Get the W&B URL once it appears
 
