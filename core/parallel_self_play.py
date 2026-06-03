@@ -39,7 +39,15 @@ from loguru import logger
 from tqdm import tqdm
 
 from core.arena import Arena, GameRecord
-from core.game_factory import instantiate_game_and_network
+from core.game_factory import instantiate_game, instantiate_game_and_network
+from core.inference_channel import (
+    ChannelHandles,
+    ChannelSpec,
+    InferenceClientNet,
+    SharedInferenceChannel,
+    SharedMemoryRequestSource,
+)
+from core.inference_server import FlushPolicy, InferenceServer
 from core.mcts import MCTS
 from core.players import NetworkPlayer
 
@@ -63,6 +71,9 @@ _WORKER_CONFIG: RunConfig | None = None
 _WORKER_GAME: IGame | None = None
 _WORKER_NNET_A: INeuralNetWrapper | None = None
 _WORKER_NNET_B: INeuralNetWrapper | None = None
+# F5: a self-play worker's view of the shared-memory inference channel, when the
+# cross-worker inference server is enabled. ``None`` on the per-worker (F3) path.
+_WORKER_CHANNEL: SharedInferenceChannel | None = None
 
 
 # Phase codes that get mixed into the per-episode seed so the same
@@ -140,6 +151,71 @@ def _maybe_enable_f2(config: RunConfig, game: IGame) -> None:
         return
     if (enable := getattr(game, "enable_optimised_movegen", None)) is not None:
         enable()
+
+
+# -- F5: cross-worker inference server --------------------------------------
+
+
+def _server_enabled(config: RunConfig, num_workers: int) -> bool:
+    """Whether the F5 inference server should run for this phase.
+
+    Requires the flag, real parallelism (``> 1`` worker), and CUDA — on CPU the
+    server adds IPC overhead with no GPU-contention to relieve, so we keep the
+    per-worker path.
+    """
+    return bool(getattr(config, "inference_server", False)) and num_workers > 1 and config.net_config.cuda
+
+
+def _resolve_server_batch(config: RunConfig, num_workers: int) -> tuple[int, int]:
+    """Return ``(max_leaves, max_batch)`` for the channel / flush policy.
+
+    ``max_leaves`` is each worker's per-request cap (its F3 batch size);
+    ``max_batch`` is the server's GPU batch cap — config override if set, else
+    every worker's full leaf batch at once.
+    """
+    max_leaves = max(1, config.mcts_config.mcts_batch_size)
+    max_batch = config.server_max_batch if config.server_max_batch > 0 else num_workers * max_leaves
+    return max_leaves, max_batch
+
+
+def _run_inference_server(
+    handles: ChannelHandles, config: RunConfig, checkpoint_path: str | None, max_batch: int
+) -> None:
+    """Inference-server process entrypoint: own the GPU net, serve batches.
+
+    Loads one copy of the network (the whole point — one net on the GPU, not
+    one per worker), then runs the accumulate-flush-route loop over the shared
+    channel until the orchestrator sets the stop event.
+    """
+    _game, nnet = instantiate_game_and_network(config)
+    if checkpoint_path is not None:
+        nnet.load_checkpoint(filename=checkpoint_path)
+    channel = SharedInferenceChannel.attach(handles)
+    policy = FlushPolicy(max_batch=max_batch, max_wait_s=config.server_max_wait_ms / 1000.0)
+    server = InferenceServer(nnet.predict_encoded, SharedMemoryRequestSource(channel), policy)
+    try:
+        server.serve_forever()
+    finally:
+        channel.close()
+
+
+def _worker_init_self_play_server(config: RunConfig, handles: ChannelHandles, counter: object) -> None:
+    """Pool initialiser for self-play workers in F5 server mode.
+
+    Builds the game only (no per-worker net — the server owns it), claims a
+    unique slot id from the shared counter, attaches the channel, and installs
+    an :class:`InferenceClientNet` as the worker's network so MCTS routes its
+    leaf evaluations to the server unchanged.
+    """
+    global _WORKER_CONFIG, _WORKER_GAME, _WORKER_NNET_A, _WORKER_CHANNEL
+    _WORKER_CONFIG = config
+    _WORKER_GAME = instantiate_game(config)
+    with counter.get_lock():  # type: ignore[attr-defined]
+        worker_id = counter.value  # type: ignore[attr-defined]
+        counter.value += 1  # type: ignore[attr-defined]
+    _WORKER_CHANNEL = SharedInferenceChannel.attach(handles)
+    _WORKER_NNET_A = InferenceClientNet(_WORKER_CHANNEL, worker_id)
+    _maybe_enable_f2(config, _WORKER_GAME)
 
 
 def _worker_init_two_nets(
@@ -324,22 +400,66 @@ def run_self_play_episodes_parallel(
     # might collide with other code that touched ``multiprocessing``.
     import multiprocessing as mp
     ctx = mp.get_context("spawn")
-    with (
-        ProcessPoolExecutor(
-            max_workers=num_workers,
-            mp_context=ctx,
-            initializer=_worker_init_self_play,
-            initargs=(config, checkpoint_path),
-        ) as pool,
-        # ``map`` preserves submission order. ``chunksize=1`` keeps each
-        # task as its own unit of work so tqdm advances per episode and
-        # one slow game doesn't block neighbours behind it.
-        tqdm(total=len(tasks), desc=f"Self-play gen {generation}") as bar,
-    ):
-        for examples, stats in pool.map(_worker_play_self_play_episode, tasks, chunksize=1):
-            per_episode_examples.append(examples)
-            per_episode_stats.append(stats)
-            bar.update(1)
+
+    # F5: when the inference server is enabled, spawn it and point workers at a
+    # client net via the server initialiser. Otherwise the existing per-worker
+    # (F3) path is taken verbatim — flag off is byte-for-byte unchanged.
+    channel: SharedInferenceChannel | None = None
+    server_proc = None
+    if _server_enabled(config, num_workers):
+        max_leaves, max_batch = _resolve_server_batch(config, num_workers)
+        probe_game = instantiate_game(config)
+        board_shape = tuple(probe_game.initialise_board().as_multi_channel(1).shape)
+        spec = ChannelSpec(
+            num_workers=num_workers,
+            max_leaves=max_leaves,
+            board_shape=board_shape,
+            action_size=probe_game.get_action_size(),
+        )
+        channel = SharedInferenceChannel.create(spec, ctx=ctx)
+        server_proc = ctx.Process(
+            target=_run_inference_server,
+            args=(channel.handles(), config, checkpoint_path, max_batch),
+            daemon=True,
+        )
+        server_proc.start()
+        worker_counter = ctx.Value("i", 0)
+        initializer = _worker_init_self_play_server
+        initargs: tuple = (config, channel.handles(), worker_counter)
+        logger.info(
+            "F5 inference server enabled (max_batch={} = {} workers × {} leaves)",
+            max_batch, num_workers, max_leaves,
+        )
+    else:
+        initializer = _worker_init_self_play
+        initargs = (config, checkpoint_path)
+
+    try:
+        with (
+            ProcessPoolExecutor(
+                max_workers=num_workers,
+                mp_context=ctx,
+                initializer=initializer,
+                initargs=initargs,
+            ) as pool,
+            # ``map`` preserves submission order. ``chunksize=1`` keeps each
+            # task as its own unit of work so tqdm advances per episode and
+            # one slow game doesn't block neighbours behind it.
+            tqdm(total=len(tasks), desc=f"Self-play gen {generation}") as bar,
+        ):
+            for examples, stats in pool.map(_worker_play_self_play_episode, tasks, chunksize=1):
+                per_episode_examples.append(examples)
+                per_episode_stats.append(stats)
+                bar.update(1)
+    finally:
+        if channel is not None:
+            channel.request_stop()
+            if server_proc is not None:
+                server_proc.join(timeout=30)
+                if server_proc.is_alive():
+                    logger.warning("Inference server did not stop in 30s; terminating")
+                    server_proc.terminate()
+            channel.unlink()
 
     return per_episode_examples, per_episode_stats
 

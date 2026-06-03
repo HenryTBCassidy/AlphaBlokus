@@ -301,23 +301,44 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             return torch.autocast(device_type="cuda", dtype=torch.float16)
         return nullcontext()
 
+    def predict_encoded(self, planes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Run the network on a pre-encoded batch of board planes.
+
+        The single source of truth for the inference forward pass: both
+        :meth:`predict` / :meth:`predict_batch` (which encode boards first) and
+        the cross-worker inference server (F5, which receives already-encoded
+        planes over shared memory) route through here, so they are guaranteed
+        bit-identical.
+
+        Args:
+            planes: ``(N, C, H, W)`` float32 — ``N`` boards already encoded via
+                ``board.as_multi_channel(1)`` and stacked.
+
+        Returns:
+            ``(policies, values)`` — ``(N, A)`` softmaxed policy array and
+            ``(N,)`` value array, both float32 on the CPU.
+        """
+        tensor = torch.from_numpy(np.ascontiguousarray(planes, dtype=np.float32))
+        if self.net_config.cuda:
+            tensor = tensor.cuda()
+        self.nnet.eval()
+        with torch.no_grad(), self._inference_autocast():
+            log_pi, v = self.nnet(tensor)
+
+        # .float() casts back from fp16 (if autocast was active) so downstream
+        # code always sees float32; a no-op when inference ran in float32.
+        policies = torch.exp(log_pi).float().data.cpu().numpy()
+        values = v.view(-1).float().data.cpu().numpy()
+        return policies, values
+
     def predict(self, board: IBoard) -> tuple[np.ndarray, float]:
         """Make a prediction for a given board state.
 
         Args:
             board: Board object (canonical, i.e. player 1 perspective).
         """
-        tensor = torch.tensor(board.as_multi_channel(1), dtype=torch.float32)
-        if self.net_config.cuda:
-            tensor = tensor.contiguous().cuda()
-        tensor = tensor.unsqueeze(0)  # (C, H, W) → (1, C, H, W)
-        self.nnet.eval()
-        with torch.no_grad(), self._inference_autocast():
-            pi, v = self.nnet(tensor)
-
-        # .float() casts back from fp16 (if autocast was active) so downstream
-        # code always sees float32; a no-op when inference ran in float32.
-        return torch.exp(pi).float().data.cpu().numpy()[0], v.float().data.cpu().numpy()[0]
+        policies, values = self.predict_encoded(board.as_multi_channel(1)[np.newaxis, ...])
+        return policies[0], values[0]
 
     def predict_batch(self, boards: Sequence[IBoard]) -> tuple[list[np.ndarray], list[float]]:
         """Run the network on N boards in a single forward pass.
@@ -329,16 +350,8 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         Args:
             boards: Board objects in canonical form (player 1 perspective).
         """
-        arrs = [board.as_multi_channel(1) for board in boards]
-        tensor = torch.tensor(np.stack(arrs), dtype=torch.float32)
-        if self.net_config.cuda:
-            tensor = tensor.contiguous().cuda()
-        self.nnet.eval()
-        with torch.no_grad(), self._inference_autocast():
-            log_pi, v = self.nnet(tensor)
-
-        policies = torch.exp(log_pi).float().data.cpu().numpy()
-        values = v.view(-1).float().data.cpu().numpy()
+        arrs = np.stack([board.as_multi_channel(1) for board in boards])
+        policies, values = self.predict_encoded(arrs)
         return [policies[i] for i in range(len(arrs))], [float(x) for x in values]
 
     @staticmethod

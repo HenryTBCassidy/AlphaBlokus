@@ -203,6 +203,23 @@ class RunConfig:
     # ``BlokusDuoGame`` consults this flag; TTT ignores it.
     use_optimised_movegen: bool = False
 
+    # F5 (cross-worker inference server): if True, a single server process owns
+    # the GPU net and batches MCTS leaf evaluations across *all* workers into
+    # large forward passes (vs F3's per-worker batching), recovering GPU
+    # under-utilisation. Default False keeps the existing per-worker path
+    # bit-for-bit identical. Only takes effect when ``num_parallel_workers > 1``
+    # and ``net_config.cuda`` is True. Results are unaffected (inference is
+    # per-row independent in eval mode) — verified by the server-on vs
+    # server-off equivalence tests.
+    inference_server: bool = False
+    # Max positions per server GPU batch. 0 = auto (num_parallel_workers ×
+    # mcts_config.mcts_batch_size, i.e. every worker's full leaf batch at once).
+    server_max_batch: int = 0
+    # Max time the server's first queued request waits before flushing an
+    # under-full batch. The size-OR-timeout rule self-corrects, so this is a
+    # safe backstop rather than a tuned knife-edge.
+    server_max_wait_ms: float = 5.0
+
     @property
     def run_directory(self) -> Path:
         """Base directory for all files related to this training run."""
