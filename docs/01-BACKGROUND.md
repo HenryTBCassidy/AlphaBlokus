@@ -12,7 +12,7 @@ Train a neural network through self-play reinforcement learning to master **Blok
 
 Blokus Duo is an interesting target for AlphaZero because:
 
-1. **Combinatorial complexity:** The action space (17,837 possible moves) dwarfs Chess (~30 legal moves per position) and approaches Go-level branching factor in the early game
+1. **Combinatorial complexity:** The early-game branching factor (~ 400–600 legal moves) rivals Go and dwarfs Chess (~30 legal moves per position). The network outputs over a fixed **17,837-dimensional** action space, of which **13,729** are placements that ever fit on the board (the rest of the 14×14×91 grid hangs off the edge) — see [Action Space Scale](#1-action-space-scale)
 2. **Spatial reasoning:** Piece placement requires geometric intuition — rotations, reflections, corner-touching constraints
 3. **Nobody has done it:** As of 2026, no strong AlphaZero-style Blokus agent exists. The few attempts either abandoned neural networks (too slow) or have zero published results
 4. **Clear benchmark:** Pentobi provides a well-established opponent with configurable difficulty levels (1-9)
@@ -188,15 +188,39 @@ Several factors make Blokus a challenging target for AlphaZero, explaining why n
 
 #### 1. Action Space Scale
 
-| Game | Legal Moves (typical) | Total Action Space |
+| Game | Legal moves (typical) | Network output dim |
 |------|----------------------|-------------------|
 | Tic-Tac-Toe | ~5 | 10 |
 | Connect 4 | ~5 | 7 |
 | Chess | ~30 | 4,672 |
 | Go (19×19) | ~250 | 362 |
-| **Blokus Duo** | **~100-500** | **17,837** |
+| **Blokus Duo** | **~400–600 (early), → handful (late)** | **17,837** |
 
-Blokus has 3.8× the raw action space of Chess and 49× that of Go. Most actions are illegal at any given position, but the network must still output and mask over the full 17,837-dimensional space.
+The network outputs and masks over a fixed **17,837**-dimensional policy — 3.8× the output space of Chess and 49× that of Go. That number is the clean cartesian product `14×14 grid × 91 piece-orientations + 1 pass` (see [Key Decisions Log](#key-decisions-log)). Only **13,729** of those placements ever fit entirely on the board; the rest extend off the edge and are permanently illegal. Of the on-board placements, only a few hundred are legal at any single position, and the network must learn to concentrate probability on them.
+
+The *legal* branching factor is highest in the opening and collapses as the board fills. Both players' first move is a fixed set of **414** placements covering their starting square. Averaged over 5 random-play games (every second ply shown; data from `scripts/move_count_analysis.py`):
+
+```
+turn   mean legal moves
+  0  ████████████████████ 414   ← fixed opening (covers start square)
+  2  ███████████████████████ 468
+  4  ███████████████████████ 466
+  6  ████████████████████████ 480   ← peak ~500
+  8  ██████████████████████ 451
+ 10  ███████████████████ 379
+ 12  ███████████████ 309
+ 14  ███████████ 219
+ 16  ██████ 131
+ 18  ████ 86
+ 20  ██ 43
+ 22  █ 20
+ 24  ▏ 7
+ 26  ▏ 3
+ 28  ▏ 2
+ 30    0   ← board full / no legal placements
+```
+
+A full game runs ~30–34 plies. The early/mid game is where both the branching factor and the subtlety of the corner-touch / no-edge constraints are greatest — which is why move generation (not inference) was historically the per-game bottleneck, and why the optimised generator targets exactly that regime (see [02-ALGORITHMS.md](02-ALGORITHMS.md)).
 
 #### 2. Geometric Complexity
 
@@ -227,7 +251,7 @@ Unlike Chess (symmetric) or Go (mostly symmetric), Blokus Duo has players starti
 | Published training curves | N/A | No | Planned |
 | Pentobi benchmark | N/A (is Pentobi) | No | Systematic (levels 1-9) |
 | Game-agnostic framework | No | Some | Yes (`IGame` protocol) |
-| Symmetry augmentation | N/A | Unknown | Planned (4 symmetries) |
+| Symmetry augmentation | N/A | Unknown | Yes (2×, main-diagonal reflection) |
 | Configurable network depth | N/A | Varies | Yes (1-8 ResNet blocks) |
 | Board encoding with per-piece spatial planes | N/A | Unknown | Yes (44×14×14) |
 
@@ -258,10 +282,10 @@ AlphaBlokus bets that a neural network trained through self-play can develop pos
 | Framework design | Game-agnostic protocols | `IGame` and `INeuralNetWrapper` interfaces make adding new games easy without touching core MCTS/Coach/Arena |
 | Blokus network | ResNet (not plain CNN) | Residual connections help with deeper networks needed for Blokus complexity. Configurable depth (1-8 blocks) allows experimentation |
 | Board encoding | 44×14×14 (per-piece spatial planes) | 21 binary planes per player (one per piece, 1s where that piece sits on the board) + 2 aggregate planes. Follows AlphaZero convention. Piece inventory is implicit: an all-zero plane means the piece hasn't been played |
-| Action space | 14×14×91 + 1 = 17,837 | Grid positions × piece-orientation combos + pass. Large but finite — same approach as AlphaZero for Chess/Go |
+| Action space | 14×14×91 + 1 = 17,837 (network output); 13,729 ever-legal placements | The network outputs over the full cartesian product (grid positions × piece-orientation combos + pass). Most are permanently illegal: a piece anchored near an edge extends off the board, so only 13,729 placements ever fit. We keep the full 17,837-wide head anyway — it's a clean encoding and the move mask zeros out the impossible ones. Same approach as AlphaZero for Chess/Go |
 | Piece orientations | Symmetry-reduced basis | Each piece stores only unique orientations (1-8) after removing rotational/reflective duplicates. Reduces 21×8=168 to 91 |
 | Coordinate system | Board coords (bottom-left origin) + array indices (top-left) | Board coords match standard Blokus notation. CoordinateIndexDecoder handles conversion |
-| Training data storage | Pickle per generation → Parquet consolidation | Pickle for fast writes during training, Parquet for efficient analysis afterwards |
+| Training data storage | Parquet (per-generation self-play + hive-partitioned metrics) | Self-play examples and all metrics are written as Parquet — one self-play file per generation (board/policy arrays byte-serialised with shape metadata in the schema), metrics hive-partitioned by generation. Efficient to write during training and to load back for analysis/reporting |
 | Reporting | HTML with Plotly | Interactive charts for loss curves, arena results, timing — viewable in browser |
 | Benchmark target | Pentobi | Strongest open-source Blokus AI. Uses MCTS + RAVE but no neural networks. Clear, reproducible benchmark |
 
@@ -302,9 +326,8 @@ This is a genuine research-level problem — the existing literature on multi-pl
 
 ## Open Questions
 
-- **Parallel MCTS:** Batching neural network inference across multiple MCTS simulations could dramatically speed up self-play. Root parallelisation vs leaf parallelisation trade-offs need investigation
-- **MCTS node reuse:** Currently trees are rebuilt from scratch each game. Reusing subtrees between moves would save computation
-- **Board representation alternatives:** ~~Current 14x18 encoding may not be optimal~~ Done — migrated to 44-channel per-piece spatial planes (see `plans/archive/board-encoding-options.md` for design rationale)
-- **Connect 4 as debugging step:** If Blokus move generation proves too difficult, Connect 4 could serve as an intermediate complexity game
-- **Regularisation:** Current loss function has no explicit regularisation term. Weight decay or L2 penalty may improve generalisation
-- **cpuct tuning:** The PUCT exploration constant is fixed at 1.0. May need to be tuned for Blokus's larger action space
+- **Regularisation:** The loss function has no explicit regularisation term (no weight decay / L2 penalty). May improve generalisation, especially at larger network sizes
+- **cpuct tuning:** The PUCT exploration constant is a fixed per-run config value. It may need tuning for Blokus's larger action space rather than carrying TTT's setting across
+- **Resigning / early termination:** Self-play games are always played to a terminal position. A value-threshold resignation rule (as in AlphaZero) could cut wasted compute on decided games
+
+> Resolved since this doc was first written: batched MCTS inference (collect K leaves per step under virtual loss, one GPU call), parallel self-play across worker processes, the precomputed-table move generator, and the 44-channel per-piece board encoding are all implemented. See [02-ALGORITHMS.md](02-ALGORITHMS.md) and [03-NEURAL-NETWORKS.md](03-NEURAL-NETWORKS.md).

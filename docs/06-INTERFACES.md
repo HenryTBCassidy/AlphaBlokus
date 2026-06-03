@@ -2,6 +2,8 @@
 
 Three pieces of infrastructure sit between the AlphaBlokus agent and the outside world: a **Pentobi adapter** for automated benchmarking, a **human-playable UI**, and a shared **translation layer** that converts between internal and external representations. This document scopes all three.
 
+> **Status: this is a design/scoping document — none of these three components are built yet.** The internal pieces they depend on (e.g. `ActionCodec`, the game logic, MCTS players) exist; the adapter, UI, and translation layer do not. Effort estimates below are forward-looking.
+
 ---
 
 ## 1. Translation Layer (Shared Foundation)
@@ -32,8 +34,10 @@ Pentobi's GTP interface uses a different format:
 | Board | Text-based, 14×14. Columns a-n, rows 1-14 |
 | Coordinates | Origin bottom-left. Columns are letters (a=0, b=1, ..., n=13). Rows are 1-indexed (1=bottom) |
 | Moves | Comma-separated coordinate list: `e8,d9,e9,f9,e10` |
-| Players | `b` = first player (Blue), `w` = second player (White) |
+| Players | Two GTP colour letters — **verify the exact letters and first-mover mapping against the actual `pentobi-gtp` build before relying on them** |
 | Pass | The string `pass` |
+
+> ⚠️ **Colour mapping must be pinned down when the adapter is built.** Our internal convention (see [04-BLOKUS-DUO.md](04-BLOKUS-DUO.md) and `games/blokusduo/game.py`) is: **White = player `+1` = first to move, starting at (4, 4)**, mapped onto Pentobi's `Color(0)`; Black = `−1` = second, starting at (9, 9). Earlier drafts of this doc guessed the GTP letters as `b`/`w`, which conflicts with that — don't trust the guess. Confirm against `showboard` / `genmove` output from the real binary, since a swapped mapping silently flips every benchmark result.
 
 A move in Pentobi does **not** specify which piece or orientation — just the cells the piece occupies. The engine deduces the piece from the coordinates. This is elegant but means the translation layer needs to work in both directions differently.
 
@@ -96,7 +100,7 @@ This should be a standalone utility function usable by the CLI, the Pentobi adap
 | Coordinate converter (AlphaBlokus ↔ Pentobi) | ~20 min | Straightforward mapping |
 | Action → cell list (for outgoing moves) | ~30 min | Apply piece shape at position, collect occupied cells |
 | Cell list → Action (for incoming moves) | ~1 hour | Pattern matching against 91 orientations. Needs care |
-| Action ↔ action index encoder/decoder | ~45 min | Currently missing from codebase (noted in architecture review §10) |
+| Action ↔ action index encoder/decoder | — | **Already exists** — `ActionCodec` in `games/blokusduo/board.py` (encode/decode/is_pass). No work needed |
 | Board text renderer | ~15 min | Numpy array → formatted string |
 | **Total** | **~2.5 hours** | Claude-assisted estimate |
 

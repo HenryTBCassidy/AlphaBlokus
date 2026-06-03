@@ -2,6 +2,8 @@
 
 Estimated wall-clock time for Blokus Duo self-play training under various configurations. Originally derived from Mac CPU profiling (March 2026); updated 2026-05-18 with `mcts_profiling.py` numbers on a small net; **updated 2026-05-26 with production-net measurements** from `scripts/benchmark_phases.py` on the home PC.
 
+> ⚠️ **These measured numbers are a pre-optimisation baseline.** They were taken before **F2** (precomputed-table move generation), **F3** (batched MCTS inference + virtual loss), and **F4** (conv policy head) landed. All three have since shipped, so the realised per-game cost and the move-gen/inference split below are now stale. The "post F1+F2+F3" columns and the projections are **estimates, not measurements**. Re-run `scripts/benchmark_phases.py` on the PC to get current figures before relying on them — the "Refresh after" note at the bottom lists exactly what to re-measure.
+
 **Headline finding (2026-05-26):** the cost split depends heavily on net size. Earlier estimates assumed move generation was ~70% of MCTS time — true with the 32f×1b profiling net, **wrong** with the production 64f×4b net we actually train with. At production net size, **inference is ~50% of search time and move-gen is ~43%**. The GPU is *not* idle at production scale; the previously reported "Python move-gen dominates" picture only holds for tiny nets.
 
 ## Measured baselines
