@@ -17,6 +17,7 @@ from tqdm import tqdm
 
 from core.config import RunConfig
 from core.interfaces import IBoard, IGame, INeuralNetWrapper
+from core.sparse_policy import as_dense
 from core.storage import EvalSet, MetricsCollector
 
 
@@ -34,7 +35,6 @@ class AverageMeter:
         self.count: int = 0
 
     def __repr__(self) -> str:
-        """Return string representation of the average value."""
         return f'{self.avg:.2e}'
 
     def update(self, val: float, n: int = 1) -> None:
@@ -113,7 +113,12 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             logger.warning("No training examples provided, skipping training.")
             return
 
-        boards_np, pis_np, vs_np = zip(*examples)
+        boards_np, raw_pis, vs_np = zip(*examples)
+        # Policies are stored sparse (indices, values) to keep replay-buffer RAM
+        # small; normalise to the dense vector the loss expects (accepts already-
+        # dense too — e.g. resume-loaded or hand-built test examples).
+        action_size = self.game.get_action_size()
+        pis_np = [as_dense(p, action_size) for p in raw_pis]
 
         # Validate training data at the interface boundary
         sample_board = boards_np[0]
@@ -306,7 +311,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
 
         The single source of truth for the inference forward pass: both
         :meth:`predict` / :meth:`predict_batch` (which encode boards first) and
-        the cross-worker inference server (F5, which receives already-encoded
+        the cross-worker inference server (which receives already-encoded
         planes over shared memory) route through here, so they are guaranteed
         bit-identical.
 
@@ -344,7 +349,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         """Run the network on N boards in a single forward pass.
 
         Equivalent to ``[self.predict(b) for b in boards]`` but executes the
-        forward pass once with batch dimension ``len(boards)``. Used by F3
+        forward pass once with batch dimension ``len(boards)``. Used by
         batched MCTS inference. See :meth:`INeuralNetWrapper.predict_batch`.
 
         Args:

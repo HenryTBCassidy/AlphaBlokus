@@ -17,6 +17,7 @@ from core.config import RunConfig
 from core.interfaces import IBoard, IGame, INeuralNetWrapper
 from core.mcts import MCTS
 from core.players import NetworkPlayer
+from core.sparse_policy import as_dense
 from core.storage import (
     CycleStage,
     EvalSet,
@@ -155,8 +156,8 @@ class Coach:
         which is the single source of truth for the episode loop. Both
         this serial entry point and the parallel worker module in
         :mod:`core.parallel_self_play` call into that function — keeping
-        them bit-for-bit equivalent at the same seed (basis of the F1
-        determinism test).
+        them bit-for-bit equivalent at the same seed, which is what the
+        parallel/serial determinism test relies on.
         """
         from core.self_play import play_self_play_episode
         return play_self_play_episode(
@@ -317,8 +318,7 @@ class Coach:
     def _run_self_play_serial(
         self, generation: int, iteration_examples: deque,
     ) -> None:
-        """Original sequential self-play loop. Kept bit-for-bit identical
-        to the pre-F1 behaviour: same MCTS instance lifecycle, same
+        """Sequential self-play loop: same MCTS instance lifecycle, same
         per-episode logging, same tqdm. The parallel codepath is opt-in
         via ``config.num_parallel_workers > 1``.
         """
@@ -346,7 +346,7 @@ class Coach:
     def _run_self_play_parallel(
         self, generation: int, iteration_examples: deque,
     ) -> None:
-        """Parallel self-play across a process pool (F1).
+        """Parallel self-play across a process pool.
 
         Saves the current ``self.nnet`` to a fixed checkpoint workers
         load at pool startup, dispatches ``num_eps`` per-episode tasks,
@@ -389,7 +389,7 @@ class Coach:
     def _run_arena_serial(
         self, top_k_to_record: int,
     ) -> tuple[int, int, int, list]:
-        """Original sequential arena loop. Returns
+        """Sequential arena loop. Returns
         ``(new_wins, prev_wins, draws, game_records)``.
         """
         prev_player = NetworkPlayer(
@@ -409,7 +409,7 @@ class Coach:
     def _run_arena_parallel(
         self, generation: int, top_k_to_record: int,
     ) -> tuple[int, int, int, list]:
-        """Parallel arena across the F1 worker pool.
+        """Parallel arena across the worker pool.
 
         Returns ``(new_wins, prev_wins, draws, game_records)`` —
         identical shape to ``_run_arena_serial``.
@@ -508,7 +508,7 @@ class Coach:
         )
 
     def _run_elo_serial(self, n: int) -> tuple[int, int, int]:
-        """Original sequential Elo loop. Returns ``(new_wins, baseline_wins, draws)``."""
+        """Sequential Elo loop. Returns ``(new_wins, baseline_wins, draws)``."""
         assert self.elo_baseline_net is not None
         new_player = NetworkPlayer(
             game=self.game, nnet=self.nnet,
@@ -523,7 +523,7 @@ class Coach:
         return wins, losses, draws
 
     def _run_elo_parallel(self, generation: int, n: int) -> tuple[int, int, int]:
-        """Parallel Elo across the F1 worker pool.
+        """Parallel Elo across the worker pool.
 
         The baseline checkpoint (``elo_baseline.pth.tar``) is written
         once in ``Coach.__init__`` and never changes, so workers can
@@ -669,8 +669,11 @@ class Coach:
             return
 
         # Sample positions from the training examples (capped to actual size).
+        # Policies are stored sparse (indices, values) — densify to the full
+        # action-space vector the eval set holds.
+        action_size = self.game.get_action_size()
         boards_all = np.array([ex[0] for ex in train_examples])
-        policies_all = np.array([ex[1] for ex in train_examples])
+        policies_all = np.array([as_dense(ex[1], action_size) for ex in train_examples])
         values_all = np.array([ex[2] for ex in train_examples])
         n = min(self._eval_set_size, len(boards_all))
         rng = np.random.default_rng(seed=self.config.seed or 0)
@@ -759,12 +762,7 @@ class Coach:
         return max_val
 
     def _manage_training_window(self, generation: int) -> None:
-        """
-        Remove old training data that falls outside the current window.
-
-        Args:
-            generation: Current training iteration
-        """
+        """Remove old training data that falls outside the current window."""
         window_size = self._generation_window_size(generation)
         if len(self.train_examples_history) > window_size:
             logger.warning(
@@ -774,12 +772,7 @@ class Coach:
             self.train_examples_history.pop(0)
 
     def _prepare_training_data(self) -> list[ProcessedExample]:
-        """
-        Combine and shuffle training examples from all retained generations.
-
-        Returns:
-            List[ProcessedExample]: Shuffled training examples
-        """
+        """Combine and shuffle training examples from all retained generations."""
         examples = []
         for generation_examples in self.train_examples_history:
             examples.extend(generation_examples)
@@ -812,7 +805,15 @@ class Coach:
         latest = self.train_examples_history[-1]
         if not latest:
             return
-        self._self_play_store.save(latest, generation)
+        # In-RAM examples hold sparse policies (indices, values); the on-disk
+        # store keeps dense, so densify a transient copy here. By this point the
+        # self-play worker pool is torn down, so the memory is free.
+        action_size = self.game.get_action_size()
+        dense_latest = deque(
+            (board, as_dense(pi, action_size), value)
+            for board, pi, value in latest
+        )
+        self._self_play_store.save(dense_latest, generation)
 
     def load_self_play_history(self, up_to_generation: int) -> None:
         """Load self-play examples from parquet files for recent generations.

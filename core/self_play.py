@@ -14,15 +14,19 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from core.sparse_policy import sparsify
+
 if TYPE_CHECKING:
     from core.interfaces import IGame
     from core.mcts import MCTS
 
-# (board_array, policy_array, value) — the shape Coach passes to
-# ``nnet.train`` after a generation of self-play. Kept untyped at runtime
-# because the inner board element is an NDArray returned by
-# ``IBoard.as_multi_channel`` and the value is a float ∈ [-1, 1].
-ProcessedExample = tuple[np.ndarray, np.ndarray, float]
+# (board_array, sparse_policy, value) — the shape Coach passes to
+# ``nnet.train`` after a generation of self-play. The policy is stored
+# **sparse** as ``(indices, values)`` (see :mod:`core.sparse_policy`) because
+# the dense 17,837-vector dominated replay-buffer RAM; the trainer densifies it.
+# Kept untyped at runtime (board is an NDArray from ``IBoard.as_multi_channel``,
+# value is a float ∈ [-1, 1]).
+ProcessedExample = tuple[np.ndarray, tuple[np.ndarray, np.ndarray], float]
 
 
 def play_self_play_episode(
@@ -88,15 +92,16 @@ def play_self_play_episode(
             # The value sign flips for each position where the player to
             # move differs from the player at game end.
             #
-            # The policy is cast to float32 here: ``get_action_prob`` returns
-            # Python floats that ``np.asarray`` widens to float64 (~143 KB for
-            # the 17,837-long vector), which dominates replay-buffer memory at
-            # scale. Training casts to float32 anyway, so this loses nothing and
-            # halves the per-position footprint. Board planes are already float32.
+            # The policy is stored sparse (nonzero ``(indices, values)``): the
+            # MCTS visit distribution is sparse, but a dense float32 vector is
+            # ~71 KB and dominates replay-buffer RAM at scale. ``sparsify`` is
+            # lossless — the trainer densifies it back. Symmetry augmentation
+            # above operates on the dense ``pi``, so ``get_symmetries`` is
+            # unaffected; we only sparsify the final stored result here.
             return [
                 (
                     x[0].as_multi_channel(1),
-                    np.asarray(x[2], dtype=np.float32),
+                    sparsify(np.asarray(x[2], dtype=np.float32)),
                     game_result * ((-1) ** (x[1] != current_player)),
                 )
                 for x in train_examples
