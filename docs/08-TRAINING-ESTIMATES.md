@@ -156,7 +156,7 @@ Move generation is **~43% of MCTS search time at production net size**, not the 
 | 6× faster | 11.0% | ~35s | ~1.5× |
 | 30× faster (bitboard) | 2.4% | ~31s | ~1.7× |
 
-i.e. even a 30× move-gen speedup only gets you ~1.7× wall-clock at the current net size, because inference is the bigger slice. To get further you also need batched inference (F3 in `docs/plans/full-cycle-optimisation.md`) — together they push the ceiling much higher.
+i.e. even a 30× move-gen speedup only gets you ~1.7× wall-clock at the current net size, because inference is the bigger slice. To get further you also need batched inference (F3 in `docs/plans/archive/full-cycle-optimisation.md`) — together they push the ceiling much higher.
 
 Optimisation approaches (deferred to `docs/plans/move-gen-further-optimisation.md`): pre-computed piece corners, numpy vectorisation, bitboard representation. Still worth doing but no longer the only thing — the bigger near-term win comes from parallelising self-play across CPU cores (F1) so the per-move cost is paid in parallel across many games, not improved per-game.
 

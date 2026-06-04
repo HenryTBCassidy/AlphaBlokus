@@ -4,7 +4,7 @@
 
 AlphaZero implementation for Blokus Duo. Self-play reinforcement learning on a 14x14 board with 21 polyomino pieces per player. The goal is to beat Pentobi (strongest open-source Blokus AI) in a majority of 100 games.
 
-**Current state:** Core framework complete and validated on Tic-Tac-Toe. Blokus Duo game logic is complete — board, pieces, placement validation, move generation, masking, game-end detection, `get_symmetries` (order-2: identity + main-diagonal transpose), and neural net all work. Blokus training runs have been executed on the PC (see `docs/plans/full-cycle-optimisation.md`), and F1–F3 performance optimisations have landed. See README.md "Current Status" for details.
+**Current state:** Core framework complete and validated on Tic-Tac-Toe. Blokus Duo game logic is complete — board, pieces, placement validation, move generation, masking, game-end detection, `get_symmetries` (order-2: identity + main-diagonal transpose), and neural net all work. Blokus training runs have been executed on the PC (see `docs/plans/archive/full-cycle-optimisation.md`), and the full-cycle performance optimisations (F1–F4) have landed. See README.md "Current Status" for details.
 
 > ⚠️ The "Critical path" section below is **stale** — it predates the Blokus training runs and the F1–F3 optimisation work. Treat it as historical until refreshed.
 
@@ -94,11 +94,11 @@ docs/
 │   ├── REMOTE-TRAINING.md # Runbook for running training on the home PC over SSH
 │   └── AI-CONTEXT.md      # Extended context, architecture rationale, gotchas
 └── plans/                                # Top-level = in-flight or not-yet-started
-    ├── full-cycle-optimisation.md        # Master optimisation plan (F1-F4 done; menu + progress tracker)
+    ├── self-play-memory-fix.md           # Active: sparse storage + per-batch densify + train-from-disk (M1 done)
     ├── scaled-training-run.md            # Plan for the first ~1000-games/gen training run (not launched)
-    ├── move-gen-further-optimisation.md  # Deferred: Cython, bitboard, caching (post-training)
-    ├── training-infrastructure.md        # SSH/GPU/cloud compute options
     └── archive/                          # Completed plans, retained for context
+        ├── full-cycle-optimisation.md    # Master optimisation tracker (F1–F5 done; ~14× vs serial)
+        ├── cross-worker-inference-server.md # F5: cross-worker inference batching (built; 0.99×, not adopted)
         ├── batched-inference.md          # F3: batched MCTS inference + virtual loss
         ├── conv-policy-head.md           # F4: fully-convolutional policy head
         ├── pre-run-prep.md               # Memory fix + Dirichlet + fp16 + end-to-end validation

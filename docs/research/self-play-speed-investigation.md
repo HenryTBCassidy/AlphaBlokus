@@ -1,7 +1,7 @@
 # Self-Play Speed Investigation — Profiling Plan + Technique Menu
 
 **Status: for review (decide what to pursue next).** This is a candidates-and-plan
-doc, not committed work. Companion to [`../plans/full-cycle-optimisation.md`](../plans/full-cycle-optimisation.md)
+doc, not committed work. Companion to [`../plans/full-cycle-optimisation.md`](../plans/archive/full-cycle-optimisation.md)
 (F1–F5) and [`../IDEAS.md`](../IDEAS.md).
 
 ## Why this exists

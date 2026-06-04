@@ -1,6 +1,6 @@
 # Self-Play Memory Fix — Sparse Storage, Per-Batch Densify, Train-from-Disk
 
-**Status: revised after the gen-3 OOM (2026-06-04).** The sparse-policy fix shipped but was **necessary, not sufficient** — the scaled run still OOM'd. Root cause is now precisely understood (below). Companion to [`../research/self-play-speed-investigation.md`](../research/self-play-speed-investigation.md) and [`full-cycle-optimisation.md`](full-cycle-optimisation.md). To be executed on `further-full-cycle-optimisations`.
+**Status: revised after the gen-3 OOM (2026-06-04).** The sparse-policy fix shipped but was **necessary, not sufficient** — the scaled run still OOM'd. Root cause is now precisely understood (below). Companion to [`../research/self-play-speed-investigation.md`](../research/self-play-speed-investigation.md) and [`full-cycle-optimisation.md`](archive/full-cycle-optimisation.md). To be executed on `further-full-cycle-optimisations`.
 
 ## The problem (measured 2026-06-04, run `blokus_scaled_15_20260603_222031`)
 
