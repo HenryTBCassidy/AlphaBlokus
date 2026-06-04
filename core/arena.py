@@ -1,13 +1,15 @@
-from dataclasses import dataclass, field
-from typing import Callable, TypeAlias
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, TypeAlias
 
 import numpy as np
 from loguru import logger
-from numpy.typing import NDArray
 from tqdm import tqdm
 
 from core.interfaces import IBoard, IGame
 
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 # Type aliases for improved readability
 Player: TypeAlias = Callable[[IBoard], int]  # Function that takes a board state and returns an action
@@ -74,15 +76,6 @@ class Arena:
         game: IGame,
         display: DisplayFn | None = None
     ) -> None:
-        """
-        Initialize the arena with two players and game rules.
-
-        Args:
-            player1: First player (function that takes board state and returns action)
-            player2: Second player (function that takes board state and returns action)
-            game: Game implementation providing rules and mechanics
-            display: Optional function to display the game board (used in verbose mode)
-        """
         self.player1 = player1
         self.player2 = player2
         self.game = game
@@ -102,9 +95,6 @@ class Arena:
         2. The player chooses an action
         3. The action is validated and applied
         4. The game checks if a terminal state is reached
-
-        Args:
-            verbose: Whether to display the game state after each move
 
         Args:
             verbose: Whether to display the game state after each move.

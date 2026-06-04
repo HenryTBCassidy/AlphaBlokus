@@ -15,38 +15,32 @@ Both paths are set in `RunConfig` (`core/config.py`). Every property below hangs
 ```
 {run_directory}/
 │
-├── SelfPlayHistory/              Raw training data (board, policy, value)
+├── SelfPlayHistory/              Raw training data (board, policy, value); flat, one file per gen
 │   ├── self_play_0.parquet
-│   ├── self_play_1.parquet
 │   └── ...
 │
-├── TrainingData/                 Neural network loss metrics
-│   ├── generation=1/data.parquet
-│   └── generation=2/data.parquet
+│   # ── Hive-partitioned metrics (all written by MetricsCollector.flush) ──
+├── TrainingData/                 Per-batch loss (pi/v/total)
+├── ArenaData/                    Arena W/L/D + accept decision (per gen)
+├── Timings/                      Phase durations (per gen)
+├── SelfPlayProfiling/            MCTS performance (per episode)
+├── ResourceUsage/                Process + GPU memory snapshots (per phase)
+├── TrainingThroughput/           Samples/second (per epoch)
+├── TrainingEntropy/              Network policy entropy on the eval set (per epoch)
+├── PolicyAccuracy/               Network top-1/top-5 vs eval-set targets (per epoch)
+├── ValueCalibration/             Value-head reliability buckets (per epoch)
+├── EloRatings/                   Elo vs frozen gen-0 baseline (per gen)
+├── MinimaxResults/               Results vs perfect-play minimax — TTT only (per gen)
+├── SymmetryDiagnostic/           Policy-symmetry KL per reference position (per gen)
+├── ArenaReplays/                 Recorded arena games: moves + top-K policies (per gen)
+│   └── generation=N/<file>.parquet   (each of the above follows this layout)
 │
-├── ArenaData/                    Model evaluation results
-│   ├── generation=1/arena.parquet
-│   └── generation=2/arena.parquet
-│
-├── Timings/                      Phase durations per generation
-│   ├── generation=1/timings.parquet
-│   └── generation=2/timings.parquet
-│
-├── SelfPlayProfiling/            MCTS performance per episode
-│   ├── generation=1/profiling.parquet
-│   └── generation=2/profiling.parquet
-│
-├── ResourceUsage/                Process and GPU memory snapshots
-│   ├── generation=1/resources.parquet
-│   └── generation=2/resources.parquet
-│
-├── TrainingThroughput/           Samples/second per epoch
-│   ├── generation=1/throughput.parquet
-│   └── generation=2/throughput.parquet
-│
+├── EvalSet/                      Frozen held-out positions (boards/policies/values .npy + marker)
 ├── Nets/                         Model checkpoints (.pth.tar)
 └── Logs/                         Log files
 ```
+
+Each hive-partitioned directory contains `generation=N/<name>.parquet` subdirectories; `pd.read_parquet(dir)` reconstructs the `generation` column from the path. `EvalSet/` is the one non-parquet metrics directory — three `.npy` arrays plus a `targets_kind.txt` marker (`minimax_v1` for TTT, `selfplay_v1` otherwise).
 
 ---
 
@@ -57,9 +51,9 @@ All parquet I/O lives in `core/storage.py`. Data is written by two independent s
 | System | Directories | Partitioning | Read pattern |
 |--------|-------------|-------------|--------------|
 | **`SelfPlayStore`** | `SelfPlayHistory/` | Flat numbered files | `store.load()` / `store.load_window()` |
-| **`MetricsCollector`** | All other 6 directories | Hive-partitioned (`generation=N/`) | `pd.read_parquet(directory)` |
+| **`MetricsCollector`** | All other hive-partitioned directories (TrainingData, ArenaData, Timings, profiling, resources, throughput, entropy, accuracy, calibration, Elo, minimax, symmetry, arena replays) | Hive-partitioned (`generation=N/`) | `pd.read_parquet(directory)` |
 
-The split exists because self-play data contains numpy arrays serialised as raw bytes (opaque binary blobs), which need a custom deserialiser to reconstruct. The metrics tables are all plain tabular data. Coach retains thin wrapper methods that delegate to `SelfPlayStore`.
+The split exists because self-play data contains numpy arrays serialised as raw bytes (opaque binary blobs), which need a custom deserialiser to reconstruct. The metrics tables are all plain tabular data. Coach retains thin wrapper methods that delegate to `SelfPlayStore`. (`EvalSet/` is written directly by `Coach` as `.npy`, not by either class.)
 
 ---
 
@@ -85,9 +79,9 @@ Shape and dtype information is stored in the parquet file's schema metadata (not
 | Key | Example Value | Description |
 |-----|---------------|-------------|
 | `board_shape` | `"44,14,14"` (Blokus) / `"2,3,3"` (TicTacToe) | Comma-separated dimensions |
-| `board_dtype` | `"float64"` | Numpy dtype string |
+| `board_dtype` | `"float32"` | Numpy dtype string (board planes are float32) |
 | `policy_size` | `"17837"` (Blokus) / `"10"` (TicTacToe) | Length of the policy vector |
-| `policy_dtype` | `"float64"` | Numpy dtype string |
+| `policy_dtype` | `"float32"` | Numpy dtype string (policy cast to float32 in self-play to halve buffer footprint) |
 
 ### Notes
 
@@ -127,12 +121,11 @@ df = pd.read_parquet(config.training_data_directory)  # or any of the 6
 |--------|------|-------------|
 | `epoch` | `int` | Epoch index within the generation |
 | `batch_number` | `int` | Batch index within the epoch |
-| `pi_loss` | `float64` | Policy head cross-entropy loss for this batch |
+| `pi_loss` | `float64` | Policy-head loss for this batch (`F.kl_div`, batch-mean) |
 | `v_loss` | `float64` | Value head MSE loss for this batch |
 | `total_loss` | `float64` | `pi_loss + v_loss` for this batch |
-| `average_pi_loss` | `float` | Running mean of policy loss up to this batch |
-| `average_v_loss` | `float` | Running mean of value loss up to this batch |
-| `average_loss` | `float` | **Derived at flush:** `average_pi_loss + average_v_loss` |
+
+> Earlier versions also wrote `average_pi_loss` / `average_v_loss` / `average_loss` running-mean columns. These were **removed** — they reset every epoch and produced misleading start-of-epoch spikes; the reporting layer smooths the raw per-batch losses instead.
 
 ---
 
@@ -147,8 +140,9 @@ df = pd.read_parquet(config.training_data_directory)  # or any of the 6
 | `wins` | `int` | Games won by the new (candidate) network |
 | `losses` | `int` | Games won by the previous (incumbent) network |
 | `draws` | `int` | Drawn games |
+| `accepted` | `bool` | Whether the new network passed the acceptance test (persisted so the report never recomputes it) |
 
-The new network is accepted if `wins / (wins + losses) >= config.update_threshold`.
+The new network is accepted if `(wins + 0.5·draws) / (wins + losses + draws) >= config.update_threshold` — the score-based rule in `core/acceptance.py`. The decision is computed once there and stored in the `accepted` column.
 
 ---
 
@@ -217,6 +211,92 @@ Memory is measured at the Python process level (not system-wide). GPU memory cov
 | `num_examples` | `int` | Total training examples processed in this epoch |
 | `epoch_time_s` | `float` | Wall-clock seconds for the full epoch |
 | `samples_per_second` | `float` | **Derived:** `num_examples / epoch_time_s` |
+
+---
+
+### TrainingEntropy / PolicyAccuracy / ValueCalibration — per-epoch network diagnostics
+
+These three are logged by `BaseNNetWrapper.train()` after each epoch when an `EvalSet` is supplied — they forward-pass the network (no MCTS) over the frozen held-out positions.
+
+**TrainingEntropy** (`entropy.parquet`) — one row per epoch:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `epoch` | `int` | Epoch within the generation |
+| `mean_entropy` / `std_entropy` | `float` | Network policy entropy over the eval set |
+| `eval_set_size` | `int` | Number of held-out positions |
+
+**PolicyAccuracy** (`accuracy.parquet`) — one row per epoch:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `epoch` | `int` | Epoch within the generation |
+| `top1_accuracy` / `top5_accuracy` | `float` | Fraction of eval positions where the net's top-1 / top-5 hits a target-optimal action |
+| `eval_set_size` | `int` | Number of held-out positions |
+
+**ValueCalibration** (`calibration.parquet`) — one row per reliability bucket per epoch (10 buckets):
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `epoch` | `int` | Epoch within the generation |
+| `bucket_idx` | `int` | Bucket index 0–9 over predicted v ∈ [-1, 1] |
+| `bucket_center` | `float` | Bucket centre |
+| `bucket_mean_actual` | `float`/`null` | Mean actual outcome of positions in this bucket (null if empty) |
+| `bucket_count` | `int` | Positions in this bucket |
+
+---
+
+### EloRatings — strength vs the frozen gen-0 baseline
+
+**Path:** `EloRatings/generation=N/elo.parquet` · **Granularity:** one row per generation · **Logged by:** `Coach` via `MetricsCollector.log_elo()`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `elo_rating` | `float` | Absolute display rating = `baseline_rating + elo_diff` |
+| `elo_diff` | `float` | `400·log10(score_rate/(1−score_rate))` vs the frozen baseline |
+| `baseline_rating` | `int` | Display anchor (default 400) |
+| `score_rate` | `float` | `(wins + 0.5·draws) / games` |
+| `wins` / `losses` / `draws` / `games` | `int` | Results vs the baseline |
+
+---
+
+### MinimaxResults — vs perfect play (TicTacToe only)
+
+**Path:** `MinimaxResults/generation=N/minimax.parquet` · **Granularity:** one row per generation · **Logged by:** `Coach` via `MetricsCollector.log_minimax()`. Only written when `game == "tictactoe"` and `minimax_games_per_gen > 0`.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `wins` / `losses` / `draws` / `games` | `int` | Results vs the minimax oracle |
+| `win_rate` / `draw_rate` / `loss_rate` | `float` | Derived rates. Target: `draw_rate → 1`, `loss_rate → 0` |
+
+---
+
+### SymmetryDiagnostic — policy equivariance
+
+**Path:** `SymmetryDiagnostic/generation=N/symmetry.parquet` · **Granularity:** one row per (reference position, symmetry) · **Logged by:** `Coach` via `MetricsCollector.log_symmetry_diagnostic()`
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `position_idx` | `int` | Reference-position index (stable across generations) |
+| `symmetry_idx` | `int` | Which non-identity symmetry (Blokus has 1: the transpose) |
+| `kl_divergence` | `float` | KL between the net's policy on the symmetric board and the symmetric image of its policy. 0 = equivariant |
+| `top1_match` | `bool` | Whether the argmax matched under the symmetry |
+
+---
+
+### ArenaReplays — recorded games for the replay viewer
+
+**Path:** `ArenaReplays/generation=N/games.parquet` · **Granularity:** one row per move · **Logged by:** `Coach` via `MetricsCollector.log_arena_game()`. Bulky structured data — **not** mirrored to W&B.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `game_idx` / `move_idx` | `int` | Game within the generation / move within the game |
+| `player` | `int` | +1 or −1 — who moved |
+| `action` | `int` | Action index chosen |
+| `top_k_actions` / `top_k_probs` | `list` | Top-K visited actions and their MCTS visit fractions |
+| `played_prob` | `float` | Visit fraction of the played action (surfaced even when it falls outside top-K) |
+| `outcome` | `float` | Game outcome (denormalised onto every move row) |
+| `player1_was_white` | `bool` | Which side player1 played (denormalised) |
 
 ---
 

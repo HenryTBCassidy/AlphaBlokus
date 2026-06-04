@@ -1,0 +1,44 @@
+{
+  "game": "blokusduo",
+  "run_name": "blokus_scaled",
+  "seed": 42,
+  "num_generations": 10,
+  "num_eps": 1000,
+  "temp_threshold": 12,
+  "update_threshold": 0.55,
+  "max_queue_length": 70000,
+  "root_directory": "./temp/",
+  "load_model": false,
+  "max_generations_lookback": 1,
+  "num_parallel_workers": 8,
+  "use_optimised_movegen": true,
+  "elo_games_per_gen": 50,
+  "minimax_games_per_gen": 0,
+  "symmetry_diagnostic_positions": 100,
+  "num_arena_matches": 50,
+  "mcts_config": {
+    "num_mcts_sims": 300,
+    "cpuct": 2.5,
+    "mcts_batch_size": 16,
+    "dirichlet_epsilon": 0.25,
+    "dirichlet_alpha": 0.03
+  },
+  "net_config": {
+    "learning_rate": 0.001,
+    "dropout": 0.3,
+    "epochs": 2,
+    "batch_size": 256,
+    "cuda": true,
+    "num_filters": 64,
+    "num_residual_blocks": 4,
+    "lr_scheduler": "cosine",
+    "policy_head": "conv",
+    "fp16_inference": true
+  },
+  "wandb": {
+    "project": "alphablokus-poc",
+    "entity": null,
+    "tags": ["scaled", "first-big-run", "f1-f4"],
+    "mode": "online"
+  }
+}

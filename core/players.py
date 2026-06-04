@@ -10,12 +10,13 @@ Available players:
 - :class:`RandomPlayer` — uniform over legal moves. Cheap baseline.
 - :class:`NetworkPlayer` — neural-network-backed, plays via MCTS using the
   supplied checkpoint. The standard "trained model" player.
-- :class:`MinimaxTicTacToePlayer` — perfect-play opponent for TTT (R14).
-- :class:`HumanPlayer` — reads moves from stdin (R16).
+- :class:`MinimaxTicTacToePlayer` — perfect-play opponent for TTT.
+- :class:`HumanPlayer` — reads moves from stdin.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, TypeAlias
+from collections.abc import Callable
+from typing import TYPE_CHECKING, TypeAlias
 
 import numpy as np
 

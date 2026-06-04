@@ -29,7 +29,7 @@ When we start a section, we:
 5. Archive the sub-plan to `docs/plans/archive/`.
 6. Tick the row in the menu.
 
-The master plan itself only gets archived once enough of the optimisations are done that further speedup isn't worth chasing (likely when single-PC training time is in the "feasible overnight for Serious-scale runs" range — see the [Targets](#targets) section).
+The master plan itself only gets archived once enough of the optimisations are done that further speedup isn't worth chasing (likely when the Single-PC stretch config from `docs/08-TRAINING-ESTIMATES.md` fits comfortably in an overnight run — see the [Targets](#targets) section).
 
 ---
 
@@ -48,21 +48,22 @@ Measured during `blokus_pc_second` (300 sims, 80 eps, RTX 3060 Ti, 64f×4b net):
 | Total per gen | **~2h 20min** | |
 | Total for 5-gen run | **~11h 30min** | |
 
-Bottleneck breakdown (from `scripts/mcts_profiling.py` on the same hardware, smaller net):
+Bottleneck breakdown (from `scripts/benchmark_phases.py` 2026-05-26 on the same hardware, **production net 64f×4b**):
 
 | Component | % of MCTS search time |
 |-----------|----------------------|
-| Move generation (`_generate_valid_moves`, `_all_cells_valid`) | **65–72%** |
-| Neural-net inference | 17–27% |
-| Everything else (UCB, game-ended checks, tree bookkeeping) | the rest |
+| Neural-net inference | **49.7%** |
+| Move generation (`_generate_valid_moves`, `_all_cells_valid`) | **42.6%** |
+| Other (UCB, tree bookkeeping) | 6.0% |
+| Game-ended checks | 1.7% |
 
-**Two-line takeaway:** ~70% of a run's time goes to Python move generation. Self-play games are run one at a time even though we have 8+ idle CPU cores. Both are addressable.
+**Two-line takeaway:** the cost is split roughly evenly between Python move generation and GPU inference at production net size — *not* dominated by move-gen as the small-net profiling earlier suggested. Self-play games still run one at a time on a single core while 7 others sit idle; parallelising solves that for the move-gen ~43% but workers will contend on the shared GPU for the inference ~50% (this is why F3 — batched inference server — matters as a follow-up to F1).
 
 ---
 
 ## Targets
 
-Three milestones, each with an associated wall-clock budget for the current "Serious" Blokus config (5 gens × 80 eps × 300 sims × 50 arena games):
+Three milestones, each with an associated wall-clock budget for the **Single-PC reference** config from [`docs/08-TRAINING-ESTIMATES.md`](../08-TRAINING-ESTIMATES.md) (5 gens × 80 eps × 300 sims × 50 arena, 64f×4b net — matches `blokus_pc_second` at ~11.5 h baseline):
 
 | Milestone | Wall-clock target | Implies |
 |-----------|------------------|---------|
@@ -76,34 +77,35 @@ Optimisations in the menu below have rough speedup estimates that compound, so M
 
 ## Optimisation menu
 
+F1–F4 are all **done** — ~14× cumulative wall-clock vs serial (M1 and M2 smashed), plus a 21.6×-smaller net from F4 (see [Progress tracker](#progress-tracker)). **F5 (cross-worker inference server) was built, validated, and benchmarked — but gave no speedup (0.99×), so it is not adopted** (kept behind a default-off flag). The negative result is itself useful: F4's net shrink moved the bottleneck off the GPU, so the ~30% self-play GPU util is CPU-bound idle, not batch-starved — see the [F5 sub-plan Result](cross-worker-inference-server.md#result-2026-06-03-implemented--validated-but-no-speedup--not-adopted). A few other ideas were also considered and **set aside** — see [Considered and set aside](#considered-and-set-aside).
+
 | # | Optimisation | Expected speedup | Effort | Sub-plan | Status |
 |---|--------------|------------------|--------|----------|--------|
-| F1 | **Parallel self-play & arena across CPU cores** — N concurrent games per phase, using a worker pool over the `Player` abstraction | **5–7×** (linear in core count, up to ~num_eps) | Medium (~1 day) | `parallel-self-play.md` | Pending |
-| F2 | **Move-gen — bitboard representation** — 14×14 board as a 196-bit integer; validation becomes 2 bitwise ANDs vs ~20 Python ops | **3–5×** overall | Big (~3–4 days) | `move-gen-bitboard.md` | Pending |
-| F3 | **MCTS tree reuse between moves** — re-root the search tree after each ply instead of rebuilding from scratch | **1.5–2×** | Small-medium (~1 day) | `mcts-tree-reuse.md` | Pending |
-| F4 | **Batched neural-net inference in MCTS** — collect leaf evals into batches, single GPU call per batch with virtual-loss to keep MCTS correct | **2–5×** on the inference slice → **~1.2–1.5×** overall (more impact when net is bigger) | Medium-big (~2 days) | `batched-inference.md` | Pending |
-| F5 | **Move-gen — Cython** — recompile existing logic with C type annotations. Alternative to F2; lower ceiling but lower risk. | **2–3×** overall | Medium (~1 day) | (none yet — only spawn if F2 is rejected for risk) | Pending |
-| F6 | **Cached valid moves per placement point** — incremental cache invalidation rather than full re-enumeration | Unclear (~2× on `_valid_moves` but adds cost to `with_piece`) | Medium (~half day) | (only spawn if F1+F2 leave us short of M2) | Pending |
+| F1 | **Parallel self-play & arena across CPU cores** — N concurrent games per phase, using a worker pool over the `Player` abstraction | Projected ~1.8× alone, measured **4.13× at 4 workers**, **5.72× at 8 workers** on the PC (GPU has more headroom than the Amdahl projection assumed) | Medium (landed in ~1.5 days) | [`archive/parallel-self-play.md`](archive/parallel-self-play.md) | **Done** ✓ |
+| F2 | **Move-gen — precomputed move-list table** — Pentobi-style; runtime is byte-array reads + a 4D lookup `(anchor, adj_status, piece) → candidate move IDs` + a 5-cell unrolled OR per candidate. | Measured **9.06× per-call**; **1.33× full-pipeline wall-clock** on top of F1-8w. Per-process move-gen share dropped from 52.4% to 8.7%; inference now 77.5% of per-process time — clear next target. | Medium (landed in ~1 day) | [`archive/move-gen-optimisation.md`](archive/move-gen-optimisation.md) | **Done** ✓ |
+| F3 | **Batched neural-net inference in MCTS** — collect K leaf evaluations per MCTS step, single GPU call per batch with virtual-loss to keep paths diversified. Now the headline next-step lever because F2 surfaced GPU-contention as the binding constraint. | Measured **1.86× total at K=16** (8w, on top of F2; ~14× vs serial); GPU-side batching 9–11× but throttled by cross-worker contention → motivates Option B. Within-worker (Option A) only. | Medium-big (landed in ~1 day) | [`archive/batched-inference.md`](archive/batched-inference.md) | **Done** ✓ |
+| F4 | **Convolutional policy head** — replace the final fully-connected policy layer (~95% of the net's ~7.3M params) with a fully-convolutional head emitting a `(91, 14, 14)` logit map + a pass logit (actions are position×orientation — spatial). | Measured **21.6× fewer params** (7.34M → 340K), **19× smaller checkpoints** (29.4 → 1.53 MB), faster training step, better inductive bias. *Not* a raw-inference speedup (trunk-dominated — forward time ~equal). Read-out provably correct vs `ActionCodec`. | Medium (landed in ~1 day) | [`archive/conv-policy-head.md`](archive/conv-policy-head.md) (research: [`../research/policy-head-architecture.md`](../research/policy-head-architecture.md)) | **Done** ✓ |
+| F5 | **Cross-worker inference server (Option B)** — a separate process batches MCTS leaf-evals across *all* workers into single large GPU calls (shared-memory IPC, size-OR-timeout flush). | **Measured 0.99× (no speedup).** Built + bit-identical-correct, but F4's 21.6× net shrink moved the bottleneck off the GPU: the ~30% self-play GPU util is CPU-bound idle, not batch-starved, so cross-worker batching adds IPC cost for no gain. | Large (multi-process) | [`cross-worker-inference-server.md`](cross-worker-inference-server.md) | **Done — not adopted** (parked behind default-off flag; revisit only if the net grows) |
+
+### Considered and set aside
+
+On the menu at some point, but **not pursued**. Recorded by name (they're not part of the active sequence) so the reasoning is preserved and not re-litigated:
+
+- **MCTS tree reuse between moves.** *Not pursued — already implicit.* Our MCTS is a per-episode instance whose state-keyed dictionaries persist across moves and are never rebuilt. Verified empirically (2026-06-02): each move's search warm-starts from the previous move's subtree — root visit counts carry over move-to-move (`visits_before` is non-zero from move 2 on; the tree grows 25→50→75 rather than resetting). The 1.5–2× that tree reuse buys a *rebuild-from-scratch* search is therefore already baked into the F1–F3 numbers; there's no separate speedup to capture. (The tree does grow unbounded *within* an episode — a memory consideration for large runs, handled in [`scaled-training-run.md`](scaled-training-run.md), not a speedup.)
+- **Move-gen in Cython.** *Superseded by F2.* The precomputed move-list table hit 9× per-call in pure Python; recompiling in C is unnecessary unless F2 were ever rolled back.
+- **Cached valid moves per placement point.** *Not needed.* Only worth spawning if F1+F2+F3 left us short of M2 — they didn't (~14×, past M2).
+- **Cross-worker inference server** (the F3 follow-up). *Promoted to F5 (2026-06-03)* — see the menu row above and [`cross-worker-inference-server.md`](cross-worker-inference-server.md). The genuine remaining pure-runtime inference lever: a separate process batching leaf-evals across all 8 workers, to close the gap between F3's 11.5× *isolated* GPU batching and the 1.86× we actually got (the loss is cross-worker GPU contention). Was set aside as higher-complexity (IPC + a managed process); promoted once the post-F4 self-play GPU measurement (~30% utilised) confirmed the headroom is real.
 
 ### Sequencing rationale
 
-Recommended order is **F1 → F2 → F3 → F4**, with F5 / F6 as fallbacks. Why:
+The executed order was **F1 → F2 → F3**, refined as measurements came in:
 
-- **F1 first**: highest ROI (5–7× wall-clock), independent of the rest, gives immediate iteration speedup that makes everything else faster to develop. Touches `Coach` / `Arena` / `Player` plumbing but doesn't perturb the game-logic core.
-- **F2 second**: biggest single-thread gain. With F1 already in place, the dev loop is fast enough to test the bitboard rewrite confidently.
-- **F3 third**: complements F1/F2 — tree reuse halves MCTS work per move regardless of search backend.
-- **F4 last**: batched inference matters most when the network is bigger. Currently with 64f×4b the inference slice is small; gain is real but modest. Save for when we scale up the net for the Pentobi-beating runs.
+- **F1 first** — done. Even with the modest Amdahl ceiling on a single axis, it landed the parallel execution infrastructure that everything else depends on. Measured 5.72× at 8 workers.
+- **F2 second** — done. Targeted the biggest remaining CPU slice (move-gen, 52% of per-process time post-F1). Measured 7.2× reduction in move-gen time, 1.33× wall-clock on top of F1. **Surfaced the real binding constraint: GPU contention.** Post-F2, inference is 77.5% of per-process time and 8 workers all hammer the GPU simultaneously.
+- **F3 third** — promoted after the F2 measurement: inference dominated and 8-worker GPU contention became the binding constraint. Batched inference (within-worker, Option A) unblocked the part of the F1+F2 win that queue contention was eating. Landed 1.86× total.
+- **F4 done** — the conv policy head shrank the net 21.6× (7.34M → 340K params) and checkpoints 19×, with a faster training step and a stronger inductive bias. It did **not** speed the raw forward pass (trunk-dominated), so it's a model-size/training/quality win rather than an inference-latency one. The remaining pure-runtime lever (the cross-worker inference server) is deferred above as higher-complexity — the only path toward M3, if we ever want it.
 
-### Compatibility matrix
-
-| | F1 | F2 | F3 | F4 |
-|---|---|---|---|---|
-| F1 (parallel) | — | ✓ | ✓ | Tricky (each worker needs own GPU/CPU inference queue) |
-| F2 (bitboard) | ✓ | — | ✓ | ✓ |
-| F3 (tree reuse) | ✓ | ✓ | — | ✓ |
-| F4 (batched inference) | Tricky | ✓ | ✓ | — |
-
-F1 + F4 is the only awkward combination — workers in F1 each have their own MCTS; batching across workers requires an inference server. Probably manageable but the design needs care. Defer F4 until both F1 and F2 are landed.
+**Why F2 before F3** (rather than the reverse): F3's gain scales with how much time workers spend in inference. Pre-F2, workers spent ~half their time in CPU move-gen, masking inference contention. Doing F3 first would have shown smaller wins because move-gen was the binding constraint. F2 stripped out move-gen and made inference unambiguously the bottleneck — so F3 had clear, measurable headroom to attack.
 
 ---
 
@@ -125,27 +127,29 @@ Filled in as each section completes. Empty until the first run.
 
 | Section | Date | Measured before | Measured after | Speedup achieved | Notes |
 |---------|------|-----------------|----------------|------------------|-------|
-| Baseline | 2026-05-22 | — | 55s/game, 2h 20min/gen | — | `blokus_pc_second`, 300 sims, 80 eps, 50 arena |
-| F1 — Parallel self-play | | | | | |
-| F2 — Move-gen bitboard | | | | | |
-| F3 — MCTS tree reuse | | | | | |
-| F4 — Batched inference | | | | | |
+| Baseline (full run) | 2026-05-22 | — | 55s/game, 2h 20min/gen | — | `blokus_pc_second`, 300 sims, 80 eps, 50 arena. Headline measurement at production scale; preserved as immutable reference. |
+| Baseline (benchmark) | 2026-05-26 | — | Self-play 54.1s/game, Arena 53.9s/game, Elo 55.2s/game, total 32.6min for 16+10+10 games | — | `scripts/benchmark_phases.py --config run_configurations/profile_baseline.json` on RTX 3060 Ti. Component split: 49.7% NN inference, 42.6% move-gen, 6.0% other, 1.7% game-ended. Re-run this exact benchmark after each F-step for clean before/after deltas. |
+| F1 — Parallel self-play (4 workers) | 2026-05-27 | Self-play 54.1s/game; Arena 53.9s/game; Elo 55.2s/game; **total 32.6 min** | Self-play 12.0s/game (4.5×); Arena ~14.6s/game (3.75×); Elo ~14.6s/game (3.83×); **total 7.9 min** | **4.13×** at 4 workers | Bested the ~1.8× Amdahl projection by 2.3× — GPU has more headroom than the inference-fraction model predicted. 8-worker run originally OOM'd WSL — backfilled below after raising the memory cap. |
+| F1 — Parallel self-play (8 workers backfill) | 2026-05-28 | (same serial baseline as 4-worker row above) | Self-play 8.08s/game (6.7×); Arena ~10.8s/game (5.0×); Elo ~10.5s/game (5.3×); **total 5.7 min** | **5.72×** at 8 workers | Required raising WSL memory cap to 24 GB (`.wslconfig`). Peak memory ~14 GB during run. 4→8 worker gain is 1.39× — sub-linear because GPU contention on inference grows with worker count (per-process inference share grew from 31.8% to 37.3%). This is the "true" F1 ceiling on the 3060 Ti; further gains would need F3 (batched inference). |
+| F2 — Move-gen precomputed table | 2026-05-28 | F1 8-worker baseline: Self-play 8.08s/game, total 5.7 min; per-process move-gen 52.4% / inference 37.3% | F2 + F1 8-worker: Self-play 6.49s/game (1.24×), Arena ~7.65s/game (1.41×), Elo ~7.50s/game (1.40×); **total 4.3 min (1.33× vs F1-8w; 7.58× vs serial baseline)**; per-process move-gen **8.7%** / inference **77.5%** | **1.33×** at 8 workers on top of F1 | F2 collapsed the move-gen slice from 52.4% to 8.7% of per-process time. Inference now dominates at 77.5% — F3 (batched inference) is unambiguously the next lever. Per-call move-gen speedup measured at 9.06× via `scripts/benchmark_movegen.py`. Determinism verified bit-identical at 5 seeds. |
+| F3 — Batched inference | 2026-06-01 | F2 8-worker baseline re-measured on new code (K=1): Self-play 6.33s/game, total 257.6s for 16+10+10 games; inference 36.7s per self-play game (~80% of search time) | K=16 + F1-8w + F2: Self-play 3.73s/game (1.70×), Arena 40.6s (1.90×), Elo 38.4s (2.05×); **total 138.7s (1.86× vs F2-8w; ~14× vs serial baseline)**; inference per self-play game **10.2s (3.58× lighter)**. K=8 intermediate: total 217.5s (1.18×) | **1.86×** at K=16 on top of F2 (K=8: 1.18×) | Within-worker batching (Option A). Inference component genuinely 1.62×(K=8)/3.58×(K=16) lighter — F3's mechanism works. K=16 the clear winner; K=8 self-play anomalously weak (1.05×) from CPU move-gen contention in that 16-game run (valid_moves wall-time non-monotonic across K = measurement noise under 8-worker contention, not algorithmic). Single 16-game runs, not repeated — treat 1.86× as directional. K=1 bit-identical to pre-F3 (golden test). Strength validation (K=1 vs K=16) and Option B (cross-worker server) still pending. |
+| F4 — Convolutional policy head | 2026-06-02 | FC head: 7,344,220 params, 29.4 MB checkpoint (64f×4b) | Conv head: **340,127 params (21.6× fewer)**, **1.53 MB checkpoint (19× smaller)**; forward time ~equal (trunk-dominated); read-out provably correct vs `ActionCodec`; trains cleanly | **21.6× params / 19× size** (not a wall-clock speedup) | Within-worker only. Default now `policy_head: "conv"`. Strength validation folded into the scaled run. Sub-plan [`archive/conv-policy-head.md`](archive/conv-policy-head.md). |
 
 ---
 
 ## Out of scope for this plan
 
 - Multi-machine distributed training (single-PC focus for now; revisit when M3 hits)
-- Mixed-precision / fp16 GPU inference (would interact with batched inference; consider as part of F4)
+- Mixed-precision / fp16 GPU inference (would interact with batched inference; consider as part of F3)
 - C++ rewrite of move generation (more invasive than Cython, less leverage than bitboard)
 - Custom CUDA kernels for the neural net (over-engineering for our scale)
-- Network architecture changes (separate concern; tracked in any future `net-scaling.md` plan, not here)
+- Network architecture changes **for capacity/scaling** (bigger nets — separate concern; tracked in any future `net-scaling.md` plan, not here). Note: the conv policy head (F4) *is* in scope here, because its justification is throughput, not capacity.
 
 ---
 
 ## Notes for whoever picks this up next
 
-- The bitboard rewrite (F2) is the highest-risk piece because it touches `BlokusDuoBoard` internals that the existing test suite covers. Don't skip the existing tests — make them pass before merging.
+- The move-gen rewrite (F2) is a touchy piece because it changes `BlokusDuoBoard` internals that the existing test suite covers. The F2 plan explicitly requires equivalence tests on 10,000+ random positions before switch-over — don't skip them. Make the full test suite pass before merging.
 - Parallel self-play (F1) needs careful handling of the `nnet` state. Easiest path: each worker re-loads the latest checkpoint at start. Memory pressure on the 8GB 3060 Ti will be the deciding factor — 8 workers × ~50MB net = 400MB, fine.
-- Tree reuse (F3) sounds simple but has subtle correctness traps around canonical-form transitions between turns. Will need targeted equivariance tests, similar to the symmetry work.
+- Tree reuse turned out to be **already implicit** — don't re-plan it as a speedup (see [Considered and set aside](#considered-and-set-aside)). The conv policy head (F4) is the next item; its correctness risk is the action-index ↔ conv-output layout mapping, which needs equivalence tests against the current dense head.
 - Always measure before claiming a speedup. The move-gen plan (now absorbed here) initially proposed 5 different micro-optimisations of which **the benchmarked low-hanging-fruit ones (O5-O8) were ultimately rejected for not actually helping**. Trust the profiler.

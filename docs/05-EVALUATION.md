@@ -4,10 +4,10 @@
 
 Evaluation for AlphaBlokus operates at two levels:
 
-1. **Training diagnostics** — Is the network actually learning? Loss curves, policy accuracy, value calibration, internal BayesElo, arena results. Cheap signals computed every generation.
-2. **Pentobi benchmarking** — How strong is the network in absolute terms? Win rates against Pentobi's 9 difficulty levels, composite scores, and the headline "Pentobi Level" metric. Expensive but meaningful, run periodically.
+1. **Training diagnostics** — Is the network actually learning? Loss curves, policy accuracy, value calibration, Elo vs a frozen baseline, a minimax oracle (TTT), a symmetry diagnostic, and arena results. Cheap signals computed every generation. **These are implemented.**
+2. **Pentobi benchmarking** — How strong is the network in absolute terms? Win rates against Pentobi's 9 difficulty levels, composite scores, and the headline "Pentobi Level" metric. Expensive but meaningful, run periodically. **This is a plan — the Pentobi adapter is not built yet (see [06-INTERFACES.md](06-INTERFACES.md)).**
 
-AlphaZero (Silver et al., 2017) used BayesElo from self-play arena results as a continuous training health monitor, but grounded its headline strength claims in external matches against Stockfish and Elmo. We follow the same philosophy: internal Elo tracks training progress, Pentobi results measure real strength.
+AlphaZero (Silver et al., 2017) used Elo from self-play arena results as a continuous training health monitor, but grounded its headline strength claims in external matches against Stockfish and Elmo. We follow the same philosophy: internal Elo (vs a frozen gen-0 baseline) tracks training progress; Pentobi results will measure real strength once the adapter exists.
 
 ---
 
@@ -17,7 +17,7 @@ These metrics are computed every generation and are cheap — they use data the 
 
 ### Loss Monitoring
 
-Every training generation produces per-batch metrics logged to pickle files and consolidated to Parquet:
+Every training generation produces per-batch metrics logged to hive-partitioned Parquet (and mirrored to W&B when configured):
 
 | Metric | Formula | Target Behaviour |
 |--------|---------|-----------------|
@@ -62,9 +62,10 @@ After each training generation, the new network plays the previous best in an ar
 ```
 New network vs Old network
   - num_arena_matches games (e.g., 40)
-  - Alternating sides (White/Black)
-  - Full MCTS for both players
-  - Accept new if win_rate > update_threshold (e.g., 55%)
+  - Half the games each colour (controls for first-move advantage)
+  - Full MCTS for both players, temperature 0
+  - Accept new if score ≥ update_threshold, where
+        score = (wins + 0.5·draws) / (wins + losses + draws)   (e.g., 0.55)
 ```
 
 Track per generation:
@@ -78,30 +79,38 @@ Track per generation:
 - 100% win rate for new network → generations too far apart in strength, reduce training epochs
 - ~50% win rate → network not improving meaningfully per generation
 
-### Internal BayesElo
+### Elo vs a frozen gen-0 baseline
 
-Compute a BayesElo rating for each generation as a cheap, continuous progress signal. AlphaZero used the same approach — BayesElo from self-play arena results — to produce the characteristic monotonically increasing training curve.
+The headline "is it actually getting stronger?" curve. At run start the random-init network is **frozen** and saved as `elo_baseline.pth.tar`. Every generation (when `elo_games_per_gen > 0`, default 50) the *current* network plays that fixed anchor head-to-head, noise-free, and the result is converted to an Elo difference:
 
 ```
-After each arena match between generation i and generation j:
-
-E_i = 1 / (1 + 10^((R_j - R_i) / 400))    # Expected score for i
-S_i = actual result (1=win, 0.5=draw, 0=loss)
-R_i_new = R_i + K × (S_i - E_i)            # Update rating
+score_rate = (wins + 0.5·draws) / games            # clamped to [0.001, 0.999]
+elo_diff   = 400 · log10(score_rate / (1 − score_rate))
+elo_rating = baseline_rating + elo_diff             # baseline_rating default 400
 ```
+
+The crucial property is that the opponent **never moves** — unlike chaining Elo between consecutive generations, every generation is measured against the *same* fixed reference, so the curve is directly comparable across the whole run and isn't distorted by a drifting baseline.
 
 | Parameter | Value | Rationale |
 |-----------|-------|-----------|
-| Initial Elo | 1000 | Arbitrary baseline for generation 0 |
-| K-factor | 32 | Standard for provisional ratings |
-| Draws | 0.5 | Standard Elo draw handling |
+| Baseline (anchor) rating | 400 (`elo_baseline_rating`) | Display anchor for the random net. Above 0 so a gen that briefly learns something worse-than-random can dip without going negative; low enough to read as "weak". A converged model has room to climb to ~800–1200+ |
+| Games per generation | 50 (`elo_games_per_gen`) | Cheap; 0 disables Elo entirely |
+| Draws | 0.5 | Standard Elo draw handling, baked into `score_rate` |
 
-**Important caveats:** Internal BayesElo is a *relative* measure with an arbitrary baseline. The numbers are not comparable to chess Elo, Pentobi Elo, or any external rating system. A BayesElo of 1800 in our system means nothing except "800 points stronger than generation 0." Its only purpose is tracking whether training is progressing — if the curve flattens for 10+ generations, something is wrong.
+**Important caveat:** this is a *relative* measure with an arbitrary anchor. The numbers are not comparable to chess Elo, Pentobi Elo, or any external system — an Elo of 1200 here means only "≈800 points stronger than the random gen-0 net." Its job is tracking progress; if the curve flattens for many generations, something is wrong.
 
 **Expected trajectory:**
 - Generations 1-10: Rapid Elo gain (learning basic moves)
 - Generations 10-30: Steady improvement (learning piece interactions)
 - Generations 30-50+: Diminishing returns (fine-tuning positional understanding)
+
+### Minimax oracle (Tic-Tac-Toe only)
+
+For the validation game we have a *perfect* reference. When `game == "tictactoe"` and `minimax_games_per_gen > 0`, the current network plays a perfect-play minimax opponent each generation. Because TTT is a forced draw under optimal play, the target is **draw-rate → 1.0 with loss-rate → 0** — the signal that the network has internalised optimal play. The minimax solver also supplies the *oracle eval set* (target policy = uniform over all game-theoretically optimal actions, target value = the true minimax value), which is what the per-epoch top-1/5 accuracy plots are scored against for TTT.
+
+### Symmetry diagnostic
+
+A trained network should be *equivariant* under the game's symmetry group: mirroring the board should mirror its policy. Every generation (when `symmetry_diagnostic_positions > 0`, default 100) we take a fixed, seeded set of reference positions and, for each non-identity symmetry, compute the KL divergence between the network's policy on the symmetric board and the symmetric image of its policy on the original. **Zero is perfect.** A rising or persistently-high KL means the network has baked in directional biases that augmentation should be averaging out. The reference set is the same every generation, so the per-gen trend is comparable.
 
 ### Game Length Analysis
 
@@ -126,11 +135,13 @@ Each phase of the training loop should be timed to identify bottlenecks:
 | Arena evaluation | minutes/evaluation | num_arena_matches × seconds/game |
 | Total generation | minutes/generation | Sum of all phases |
 
-The existing framework saves timing data to `{run_directory}/Timings/`. Key optimisation targets:
+The framework saves timing data to `{run_directory}/Timings/` and per-episode MCTS profiling to `{run_directory}/SelfPlayProfiling/`. The major per-game cost levers — all **implemented** — are:
 
-1. **MCTS simulation speed** — currently the bottleneck. Iterates all 17,837 actions per simulation
-2. **Neural net inference latency** — called once per MCTS simulation. Batching would amortise this
-3. **Self-play parallelism** — games are independent and could run in parallel (not yet implemented)
+1. **Precomputed move generation** — the Pentobi-style table generator (PUCT already iterates only legal actions, never the full 17,837 space)
+2. **Batched neural-net inference** — leaves are collected under virtual loss and evaluated in one GPU call per batch, plus optional fp16 on CUDA
+3. **Parallel self-play** — independent games run across worker processes (`num_parallel_workers`)
+
+See [02-ALGORITHMS.md](02-ALGORITHMS.md) for how each works and [08-TRAINING-ESTIMATES.md](08-TRAINING-ESTIMATES.md) for measured cost splits.
 
 ---
 
@@ -309,7 +320,7 @@ Overlay three lines on a single chart, all against generation number:
 
 ### Training Diagnostics (secondary plots)
 
-1. **BayesElo curve** — Internal Elo vs generation number. A sanity check that training is progressing between Pentobi evaluations
+1. **Elo curve** — Elo vs the frozen gen-0 baseline, per generation. A sanity check that training is progressing between Pentobi evaluations
 2. **Loss curves** — π_loss and v_loss vs generation, with per-epoch detail on hover
 3. **Arena results** — Stacked bar chart of W/L/D per generation
 4. **Timing breakdown** — Stacked area chart of time spent in each phase
@@ -327,13 +338,13 @@ The original AlphaZero paper provides useful reference points for expected train
 | Training games to converge | ~44M | Much fewer (simpler game) |
 | Loss convergence | ~200k training steps | Faster (smaller state space than Go/Chess) |
 | Policy accuracy plateau | ~55% top-1 | Higher expected (fewer "equally good" moves) |
-| Internal BayesElo trajectory | Monotonically increasing | Same expected |
+| Elo-vs-baseline trajectory | Monotonically increasing | Same expected |
 
 Key differences from AlphaZero's original setup:
-- **No parallel MCTS** — single-threaded self-play is much slower
-- **Smaller network** — AlphaZero Chess used 20 residual blocks, 256 channels. We start with 4 blocks, 512 channels
-- **Larger action space** (17,837 vs 4,672 for Chess) — but many actions are geometrically invalid, so effective branching factor may be comparable
-- **No transposition tables** — current MCTS rebuilds from scratch each move
+- **Far less compute** — AlphaZero used thousands of TPUs; we use a single consumer GPU, so far fewer games and simulations per move
+- **Smaller network** — AlphaZero Chess used 20 residual blocks, 256 channels. We use ~4 blocks at production (64 filters), configurable up
+- **Larger action space** (17,837 vs 4,672 for Chess) — but only 13,729 placements ever fit on the board and only a few hundred are legal at any position, so the effective branching factor is comparable
+- **Self-play parallelism is across processes, not a batched MCTS server** — independent games run on worker processes; within a search, leaves are batched via virtual loss. Transpositions are handled implicitly (the tree is keyed by board state and reused across a game's moves)
 - **Different external benchmark** — AlphaZero had Stockfish (with known FIDE Elo). We have Pentobi (no established rating system, but 9 calibrated difficulty levels)
 
 ---
@@ -347,7 +358,7 @@ Key differences from AlphaZero's original setup:
 - [ ] Arena accepts at least one new network in the first 10 generations
 
 ### Phase 3 (Training) — "It Learns"
-- [ ] Monotonically increasing BayesElo curve (with noise)
+- [ ] Monotonically increasing Elo-vs-baseline curve (with noise)
 - [ ] Pentobi Level >= 1 within 20 generations
 - [ ] Pentobi Level >= 5 within 50 generations
 - [ ] Training throughput > 10 games/hour

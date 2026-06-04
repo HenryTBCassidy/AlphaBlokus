@@ -31,7 +31,7 @@ The distinct piece-orientation combinations (basis orientations) total **91**.
   first-to-move colour, mapping to Pentobi's Color(0) "Purple") starts at
   **(4, 4)**, and Black (second-to-move, Pentobi's Color(1) "Orange") starts
   at **(9, 9)**. Both squares lie on the main diagonal — see
-  [`docs/plans/blokus-symmetries.md`](plans/blokus-symmetries.md) for the
+  [`docs/plans/archive/blokus-symmetries.md`](plans/archive/blokus-symmetries.md) for the
   knock-on symmetry implications.
 
 ## Placement Rules
@@ -364,7 +364,7 @@ action = (row × 14 × 91) + (col × 91) + piece_orientation_id
 Where piece_orientation_id ∈ [0, 90] maps to a specific (piece, orientation) pair.
 ```
 
-The mapping is built by `PieceManager.populate_lookup()` in `blokusduo/pieces.py`, iterating through pieces in ID order and orientations in definition order.
+The mapping is built by the `OrientationCodec` inside `PieceManager` (`blokusduo/pieces.py`), iterating through pieces in ID order and orientations in definition order, assigning contiguous 0-based IDs.
 
 | Piece | ID | Orientations | Orientation IDs |
 |-------|----|-------------|-----------------|
@@ -390,7 +390,7 @@ The mapping is built by `PieceManager.populate_lookup()` in `blokusduo/pieces.py
 | Y | 20 | 8 | 79–86 |
 | Z | 21 | 4 | 87–90 |
 
-**Note:** The IDs above assume contiguous 0-indexed assignment. The current codebase uses 1-indexed IDs with a known off-by-one gap between pieces (see [Bug Fixes §4](plans/bug-fixes.md)). After the fix, the mapping will be exactly as shown above.
+**Note:** Orientation IDs are contiguous and 0-based (0–90) exactly as shown — `OrientationCodec` guarantees no gaps. (Piece *IDs* remain 1-indexed, 1–21; the *orientation* IDs in the right-hand column are the 0-based action-encoding indices.)
 
 ---
 

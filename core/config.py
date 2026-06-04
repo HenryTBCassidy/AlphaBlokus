@@ -8,26 +8,44 @@ from dataclass_wizard import fromdict
 
 @dataclass(frozen=True)
 class MCTSConfig:
-    """
-    Configuration parameters for Monte Carlo Tree Search (MCTS).
-    
-    MCTS is used to select moves during self-play by building a search tree
-    and evaluating positions using the neural network. The search process is
-    controlled by these parameters.
+    """Configuration parameters for Monte Carlo Tree Search (MCTS).
+
+    MCTS selects moves during self-play by building a search tree and
+    evaluating positions with the neural network; these parameters control
+    that search.
     """
     num_mcts_sims: int  # Number of MCTS simulations per move
     cpuct: float  # Exploration constant in the PUCT formula (typically between 1 and 4)
     profiling_level: str = "standard"  # "none", "standard" (episode aggregates), "detailed" (per-move breakdown)
 
+    # Dirichlet root-exploration noise (AlphaZero). During self-play only, the
+    # root node's priors are mixed with Dirichlet noise:
+    # ``P(s,a) = (1-ε)·p_a + ε·η_a``, ``η ~ Dir(α)`` over the legal moves. This
+    # guarantees exploration of moves the (possibly-wrong, early-training) policy
+    # rates poorly. ``dirichlet_epsilon = 0`` (default) disables it entirely — the
+    # search is then bit-identical to pre-noise behaviour, so arena/Elo (which
+    # never request noise) and existing tests are unaffected. AlphaZero used
+    # ε=0.25; α≈0.03 suits Blokus's ~400 early legal moves (Go-like).
+    dirichlet_epsilon: float = 0.0
+    dirichlet_alpha: float = 0.03
+
+    # Number of leaf evaluations collected per MCTS outer step before a single
+    # batched ``predict_batch`` call. ``1`` (default) keeps the
+    # one-sim-per-NN-call path bit-for-bit identical to recursive search — the
+    # batched codepath still runs but with batch size 1, so virtual loss is a
+    # no-op and selection/backprop arithmetic is unchanged. Values > 1 collect
+    # K diversified leaves per step (via virtual loss) and evaluate them in one
+    # GPU call, trading a slight search-quality approximation for far better
+    # GPU utilisation.
+    mcts_batch_size: int = 1
+
 
 @dataclass(frozen=True)
 class NetConfig:
-    """
-    Configuration parameters for the neural network.
-    
-    These parameters control both the architecture of the neural network
-    and its training process. The network uses a residual architecture
-    with convolutional layers for board state processing.
+    """Configuration parameters for the neural network.
+
+    Controls both the architecture (a residual network with convolutional
+    layers for board-state processing) and its training process.
     """
     learning_rate: float  # Learning rate for the optimizer
     dropout: float  # Dropout probability for regularisation (0 to 1)
@@ -37,6 +55,25 @@ class NetConfig:
     num_filters: int  # Number of convolutional filters per layer (power of 2)
     num_residual_blocks: int  # Number of residual blocks in the network
     lr_scheduler: str | None = None  # LR schedule: None = constant, "cosine" = CosineAnnealingLR
+
+    # Half-precision (fp16) inference. When True AND running on CUDA, the
+    # forward pass in predict/predict_batch runs under torch.autocast(fp16) —
+    # faster on GPUs with Tensor Cores (e.g. the 3060 Ti), inference-only so no
+    # gradient-stability concerns. No effect on CPU. Default False; outputs are
+    # cast back to float32 so downstream code is unaffected either way.
+    fp16_inference: bool = False
+
+    # Policy head architecture. "fc" = the original fully-connected policy head
+    # (a single Linear(2·cells → action_size), ~95% of the net's params);
+    # "conv" = fully-convolutional head (1×1 conv to per-orientation logit planes
+    # + a small pass head), ~1200× fewer params in that layer and a stronger
+    # board-game inductive bias. The two heads have incompatible state_dicts
+    # (loading across them raises). Blokus only — TicTacToe ignores this.
+    # Default "conv" (since 2026-06-02): correctness proven (read-out matches
+    # ActionCodec), trains cleanly, ~21× fewer params / ~19× smaller checkpoints.
+    # Set "fc" to restore the original fully-connected head (e.g. to load an
+    # old FC checkpoint — the two head state_dicts are incompatible).
+    policy_head: Literal["fc", "conv"] = "conv"
 
 
 @dataclass(frozen=True)
@@ -56,16 +93,11 @@ class WandbConfig:
 
 @dataclass(frozen=True)
 class RunConfig:
-    """
-    Configuration parameters for a complete training run.
-    
-    This class holds all parameters needed to configure a training session,
-    including hyperparameters for:
-    - Self-play game generation
-    - Neural network training
-    - Model evaluation
-    - Data storage and logging
-    
+    """Configuration parameters for a complete training run.
+
+    Holds all parameters for a training session — self-play generation,
+    neural network training, model evaluation, and data storage/logging.
+
     The training process consists of repeated cycles of:
     1. Self-play game generation using MCTS + current neural network
     2. Training the neural network on the generated games
@@ -141,6 +173,42 @@ class RunConfig:
     # want a single run to have stochastic warm-up). Two runs with the same
     # seed + same config + same hardware will produce identical metrics.
     seed: int | None = 42
+
+    # Number of worker processes used for the self-play / arena / Elo phases.
+    # ``1`` (default) keeps single-process behaviour bit-for-bit identical —
+    # the parallel codepath is not taken at all. Values > 1 spawn a
+    # ``ProcessPoolExecutor`` with that many workers; each holds its own
+    # copy of the network in its own CUDA context. Determinism is
+    # preserved per-episode via a seed derived from
+    # ``(seed, generation, episode_idx)``, so set membership of training
+    # examples matches the serial path regardless of worker count.
+    num_parallel_workers: int = 1
+
+    # Precomputed-move-list move generator: if True, BlokusDuoGame routes
+    # ``valid_move_masking`` through the implementation in
+    # :mod:`games.blokusduo.movegen_runtime`. Default False to preserve
+    # the existing array-based path. Produces bit-identical training
+    # trajectories at the same seed (verified by
+    # ``tests/test_blokusduo/test_movegen_determinism.py``). Only
+    # ``BlokusDuoGame`` consults this flag; TTT ignores it.
+    use_optimised_movegen: bool = False
+
+    # Cross-worker inference server: if True, a single server process owns
+    # the GPU net and batches MCTS leaf evaluations across *all* workers into
+    # large forward passes (vs per-worker batching), recovering GPU
+    # under-utilisation. Default False keeps the existing per-worker path
+    # bit-for-bit identical. Only takes effect when ``num_parallel_workers > 1``
+    # and ``net_config.cuda`` is True. Results are unaffected (inference is
+    # per-row independent in eval mode) — verified by the server-on vs
+    # server-off equivalence tests.
+    inference_server: bool = False
+    # Max positions per server GPU batch. 0 = auto (num_parallel_workers ×
+    # mcts_config.mcts_batch_size, i.e. every worker's full leaf batch at once).
+    server_max_batch: int = 0
+    # Max time the server's first queued request waits before flushing an
+    # under-full batch. The size-OR-timeout rule self-corrects, so this is a
+    # safe backstop rather than a tuned knife-edge.
+    server_max_wait_ms: float = 5.0
 
     @property
     def run_directory(self) -> Path:
@@ -257,7 +325,7 @@ def load_args(config_path: str | Path) -> RunConfig:
         RunConfig: Configuration object for the run
     """
     config_path = Path(config_path)
-    with open(config_path, "r") as f:
+    with open(config_path) as f:
         args_json = json.load(f)
 
     return fromdict(RunConfig, args_json)

@@ -114,6 +114,41 @@ Run this in a **long-running foreground SSH session** held by some process on th
 
 `ServerAliveInterval=30` keeps the TCP connection alive across network blips (hotel WiFi, sleeping the dev machine briefly, etc).
 
+### 🛑 Unattended long runs are UNSOLVED on this box — read before launching anything multi-hour
+
+**Bottom line (as of 2026-06-03): there is no working hands-off launch on this PC.** A training run launched over SSH dies within **15–80 seconds** of the launching session/context ending, by every method tried. A real overnight run currently needs one of the hands-on fixes at the bottom of this section. Don't burn an evening re-discovering this — it was exhaustively tested on 2026-06-02/03.
+
+**Root cause — the WSL2 distro shutdown.** WSL **2.6.3.0** shuts the *entire distro* down ~15–20 s after the last session closes. When the distro goes down, every process in it is SIGTERM'd (`status=143`). This is a known regression ([microsoft/WSL #13416](https://github.com/microsoft/wsl/issues/13416)). Two confusing non-fixes:
+- `vmIdleTimeout=-1` in `.wslconfig` keeps the lightweight **VM** alive but **not the distro** — different things.
+- A keep-alive **systemd service** (`ExecStart=/usr/bin/sleep infinity`) does **not** prevent the distro shutdown on 2.6.x (it's part of the regression). Confirmed: the keep-alive showed "active" only because the polling SSH had just booted the distro.
+
+**Methods tried — ALL die (don't retry these):**
+
+| Method | Result |
+|---|---|
+| Attached SSH (`ssh "wsl … main.py"`, held open) | Runs only while the session holds; dies on any Tailscale drop. Best result ~43 min, then dropped. Also killed early by *concurrent* check-sessions. |
+| `tmux new-session -d` | tmux server reaped when the launching `wsl.exe` exits. |
+| `nohup` / `setsid … & disown` | gone in a separate invocation (`pgrep` → 0). |
+| `systemd-run --user` | distro shuts down under it → SIGTERM ~15 s. |
+| `systemd-run` / installed **system** service (PID-1) | also SIGTERM ~15 s once no session is attached. |
+| **Enabled** system service (`WantedBy=multi-user.target`) | ☠️ **restart-loop trap** — every SSH connect (even a status check) boots the distro → the enabled service auto-starts → fresh `main.py` + **new W&B run** → dies ~15 s later → repeat. Created ~19 W&B runs in one night. **Never enable training as a boot service.** |
+| Windows `powershell Start-Process wsl …` | did not persist. |
+| Windows **Scheduled Task** (`schtasks /run`, default "only when logged on") | launched the run but it still died ~80 s in. Likely needs run-whether-logged-on-or-not (stored creds) and/or an interactive desktop logon. |
+
+**The real fixes — all need hands-on access (can't be done blind over SSH):**
+1. **Downgrade WSL below the regression** (pre-2.6.1, or whatever version #13416 is fixed in), then a keep-alive system service + `nohup`/systemd works normally. Needs Windows admin (`wsl --update` / version pin) + a `wsl --shutdown`.
+2. **Scheduled Task that runs *whether the user is logged on or not*** — `schtasks /create … /ru <user> /rp <password>` (needs Henry's Windows password) or as a service account, with GPU access verified. Set it up interactively once and it's reusable.
+3. **Run attended at the machine** — an interactive desktop logon keeps the distro up reliably; fine for runs you can sit with, not for hands-off overnight.
+
+**Once persistence is fixed, the clean recipe is:** launch as a *non-enabled* unit (or `nohup` under the now-alive distro), `wandb.mode: "online"`, and **monitor entirely via W&B** — no SSH session needs to stay open; SSH is only for launch + occasional checks.
+
+**Always `wandb.mode: "online"` for real runs.** It mirrors metrics live, so progress is recorded even if the process dies, *and* it's how you watch the run without holding SSH. (Disabling it on the first attempt is why that run left nothing to inspect.)
+
+**Cleanup recipe** when launches leave a mess:
+- Kill strays: `wsl -d Ubuntu -- bash -lc 'pkill -9 -f "[m]ain.py"'`
+- Remove stray units/tasks: `systemctl disable --now <svc>` ; `schtasks /delete /tn <name> /f`
+- Delete stray W&B runs by date with a `wandb.Api()` script (filter `r.created_at` to the day, `r.delete()`) — see `wandb_cleanup.py` pattern used 2026-06-03.
+
 ### Get the W&B URL once it appears
 
 ```bash
@@ -183,7 +218,10 @@ For shell scripts longer than one line: write to a file locally, `scp` to PC, ru
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
+| Long run dies partway with `Read from remote host … Operation timed out` / `Broken pipe` | The attached SSH session dropped (Tailscale) and took the run with it — the run is tethered to that session | No fire-and-forget launch works on this box yet (tmux/setsid/nohup/systemd-run/Windows-Start-Process all reaped — tested 2026-06-02). Always run W&B `online` so progress is recorded; see [Long runs: the persistence problem](#️-long-runs-the-persistence-problem--read-before-launching-anything-multi-hour) |
+| Can't find the run in W&B | `wandb.mode` was `"disabled"` in the config | Set `wandb.mode: "online"` for every real run — never disable monitoring |
 | Training dies after ~30s with no traceback in the log | Disowned process killed when SSH session closed | Use a long-running SSH session (don't `nohup & disown`) |
+| Detached run via `systemd-run --user --unit=…` dies ~15s in (`systemctl --user` shows `inactive`, journal shows `Stopping …`) | WSL idle-terminates the whole distro once the launching session returns; this tears the user unit down too. `loginctl enable-linger` keeps the *user manager* alive across logins but does **not** stop the VM teardown. Confirmed 2026-06-01 during the F3 benchmark. | Don't rely on `systemd-run --user` for detached runs. Hold a long-running foreground SSH session for the run's duration (a Claude Code background task works), exactly as in [The launch pattern](#the-launch-pattern). |
 | `tmux ls` says no session right after creating one | WSL idle timeout (60s default) wiped `/tmp/tmux-*` | `vmIdleTimeout=-1` in `.wslconfig`, then `wsl --shutdown` |
 | `error: Failed to spawn: pytest` | Dev extras not installed | `uv sync --extra dev` |
 | `wandb login` CLI hangs or returns "No API key configured" | CLI auth via env is unreliable on this stack | Use `wandb.login(key=...)` from Python |
@@ -192,6 +230,96 @@ For shell scripts longer than one line: write to a file locally, `scp` to PC, ru
 | `An expression was expected after '('` | PowerShell parsed `()` in your Python | Base64-encode the Python |
 | nvidia-smi from Windows shows no python process | Windows nvidia-smi only sees Windows processes | Query inside WSL: `wsl -- bash -lc "nvidia-smi"` |
 | Two W&B runs with the same name | `wandb.init(name=config.run_name)` collides on re-runs | We now append a UTC timestamp suffix — see `core/storage.py` `_init_wandb` |
+| `ssh: Operation timed out` to `<gpu-host>` | PC dropped off the tailnet (sleep, Tailscale service stopped, VPN interference) — `tailscale status` shows `offline, last seen Xh ago` | See [Tailscale connectivity recovery](#tailscale-connectivity-recovery) below |
+| PC `active` in `tailscale status` but `tailscale ping` and SSH both time out | Mac-side Tailscale system extension stuck — typically a `MagicSock function ReceiveIPv4 is not running` health warning | Force-kill **both** `Tailscale` and `IPNExtension` on the Mac, then relaunch — see recovery section below |
+
+---
+
+## Tailscale connectivity recovery
+
+The Tailscale tunnel between Mac and PC has two failure modes that look superficially the same (SSH times out) but need very different fixes.
+
+### Read the health check first
+
+Always start with:
+
+```bash
+/Applications/Tailscale.app/Contents/MacOS/Tailscale status
+```
+
+The line for `desktop-5nut9e9` (the PC) tells you which side is broken:
+
+| Status line for PC | Meaning | Where to fix |
+|--------------------|---------|--------------|
+| `offline, last seen Xh ago` | PC is not talking to the control plane at all | **PC side** — see "PC-side recovery" below |
+| `active; relay "lhr"` *(or similar)* with a `# Health check:` warning about MagicSock | Control plane sees both nodes but Mac-side Tailscale internals are wedged | **Mac side** — see "Mac-side recovery" below |
+| `active` with no warnings, but `tailscale ping` still times out | Usually a VPN or firewall blocking UDP between the two | Disable VPN, check OS firewall |
+
+Also run `/Applications/Tailscale.app/Contents/MacOS/Tailscale netcheck` to confirm UDP works at all and which DERP relays are reachable. If `UDP: false`, no Tailscale path will work — it's a local network issue, not a Tailscale issue.
+
+### PC-side recovery (PC offline in tailscale status)
+
+Most common cause is PC sleep + Tailscale tray icon dropping its connection.
+
+1. Wake the PC manually (move mouse / open lid).
+2. Check Windows system tray — Tailscale icon should be green. If red/missing, right-click → "Connect" (or restart the service).
+3. If still offline 30s after waking, RDP/console into the PC and from admin PowerShell:
+   ```powershell
+   Restart-Service Tailscale
+   ```
+4. Verify from the Mac: `tailscale status | grep desktop` should now show `active`.
+
+### Mac-side recovery (PC active but no traffic)
+
+This is the harder one. Symptoms: PC shows `active` in `tailscale status`, but `tailscale ping` to the PC times out, SSH times out, and there's a Mac-side health warning like:
+
+```
+# Health check:
+#     - The MagicSock function ReceiveIPv4 is not running.
+```
+
+**Why the menu-bar "Quit" doesn't fix it:** the macOS Tailscale app is two processes — the GUI app *and* a separately-launched system extension (`IPNExtension`). Quitting from the menu only kills the GUI. The extension keeps running with its broken state, and when you re-open the app it inherits that state. You have to kill **both**.
+
+```bash
+# Kill the GUI and the system extension
+killall Tailscale IPNExtension
+
+# Wait a moment, confirm gone
+sleep 2
+ps aux | grep -iE "tailscale|ipnextension" | grep -v grep
+# Should be empty
+
+# Relaunch
+open /Applications/Tailscale.app
+```
+
+When the app comes back up it has no in-memory auth token, so a fresh login flow opens in the default browser. Click **Connect** to re-authorise — within ~5s `tailscale status` should show `active` with no health warning. Confirm with:
+
+```bash
+/Applications/Tailscale.app/Contents/MacOS/Tailscale ping -c 2 100.109.47.123
+```
+
+If you see `pong from desktop-5nut9e9` (with or without "via DERP"), the tunnel is back. SSH should work immediately.
+
+**If even `killall` doesn't fix it** (rare): the system extension can occasionally hang in a state only `sudo killall IPNExtension` can clear, or only a reboot can clear. Reboot is the universal fix when nothing else works.
+
+### A note on VPNs
+
+Several Tailscale connectivity issues we've hit have traced back to a corporate / always-on VPN being silently re-enabled after a network change or schedule. If `tailscale netcheck` shows `UDP: false` or the DERP relays all have high latency / fail, check whether a VPN client decided to re-engage. Tailscale and most corporate VPNs fight over the routing table.
+
+### What the symptoms looked like the first time we hit this
+
+(Documenting for future-us so the next person doesn't have to re-derive the diagnosis.)
+
+- Mac tailscale status showed PC `active; relay "lhr"`, no `offline` flag.
+- `tailscale ping` to PC: `ping ... timed out` (no reply).
+- `tailscale status` had health warning: `The MagicSock function ReceiveIPv4 is not running. You might experience connectivity issues.`
+- `curl https://controlplane.tailscale.com/health` returned a clean HTTP 404 in 60 ms (TLS verified OK) — proves Tailscale's infrastructure was reachable, so the issue was local-Mac, not network.
+- `scutil --proxy` showed default config, no env proxy variables — ruling out a transparent proxy.
+- The Mac had two Tailscale processes: main app + `IPNExtension`. Quitting via the menu killed the main app but left the extension stuck.
+- `killall Tailscale IPNExtension && open /Applications/Tailscale.app` triggered a fresh browser login. Clicking Connect restored everything within seconds.
+
+Total time spent debugging this the first time: ~30 minutes. With this section, hopefully under 2 next time.
 
 ---
 

@@ -1,33 +1,12 @@
 import argparse
 import time
-from pathlib import Path
 
 from loguru import logger
 
 from core.coach import Coach
-from core.config import RunConfig, load_args
-from core.interfaces import IGame, INeuralNetWrapper
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.neuralnets.wrapper import NNetWrapper as BlokusDuoNNetWrapper
-from games.tictactoe.game import TicTacToeGame
-from games.tictactoe.neuralnets.wrapper import NNetWrapper as TicTacToeNNetWrapper
+from core.config import load_args
+from core.game_factory import instantiate_game_and_network
 from reporting import create_html_report
-
-GAMES_DIR = Path(__file__).parent / "games"
-
-
-def initialise_game_and_network(config: RunConfig) -> tuple[IGame, INeuralNetWrapper]:
-    """Instantiate the game and neural net wrapper from the run config."""
-    match config.game:
-        case "tictactoe":
-            game = TicTacToeGame()
-            nnet = TicTacToeNNetWrapper(game, config)
-        case "blokusduo":
-            game = BlokusDuoGame(pieces_config_path=GAMES_DIR / "blokusduo" / "pieces.json")
-            nnet = BlokusDuoNNetWrapper(game, config)
-        case unknown:
-            raise ValueError(f"Unknown game: {unknown!r}. Expected 'tictactoe' or 'blokusduo'.")
-    return game, nnet
 
 
 def main():
@@ -60,7 +39,7 @@ def main():
     start = time.perf_counter()
 
     logger.info(f"Loading game: {args.game}")
-    game, nnet = initialise_game_and_network(args)
+    game, nnet = instantiate_game_and_network(args)
 
     if args.load_model:
         logger.info("Loading checkpoint from best.pth.tar...")

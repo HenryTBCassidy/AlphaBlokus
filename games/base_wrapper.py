@@ -2,19 +2,22 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
+from collections.abc import Sequence
+from contextlib import nullcontext
 
 import numpy as np
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from loguru import logger
-from torch import optim, Tensor
+from torch import Tensor, optim
 from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler
 from torch.utils.data import DataLoader, TensorDataset
 from tqdm import tqdm
 
 from core.config import RunConfig
 from core.interfaces import IBoard, IGame, INeuralNetWrapper
+from core.sparse_policy import as_dense
 from core.storage import EvalSet, MetricsCollector
 
 
@@ -32,7 +35,6 @@ class AverageMeter:
         self.count: int = 0
 
     def __repr__(self) -> str:
-        """Return string representation of the average value."""
         return f'{self.avg:.2e}'
 
     def update(self, val: float, n: int = 1) -> None:
@@ -111,7 +113,12 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             logger.warning("No training examples provided, skipping training.")
             return
 
-        boards_np, pis_np, vs_np = zip(*examples)
+        boards_np, raw_pis, vs_np = zip(*examples)
+        # Policies are stored sparse (indices, values) to keep replay-buffer RAM
+        # small; normalise to the dense vector the loss expects (accepts already-
+        # dense too — e.g. resume-loaded or hand-built test examples).
+        action_size = self.game.get_action_size()
+        pis_np = [as_dense(p, action_size) for p in raw_pis]
 
         # Validate training data at the interface boundary
         sample_board = boards_np[0]
@@ -288,21 +295,69 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             "calib_counts": bucket_counts,
         }
 
+    def _inference_autocast(self):
+        """fp16 autocast context for the forward pass, or a no-op.
+
+        Active only when ``fp16_inference`` is set *and* we're on CUDA — autocast
+        with ``device_type="cuda"`` requires a GPU. On CPU (or when disabled) this
+        is ``nullcontext``, so the forward runs exactly as before.
+        """
+        if self.net_config.fp16_inference and self.net_config.cuda:
+            return torch.autocast(device_type="cuda", dtype=torch.float16)
+        return nullcontext()
+
+    def predict_encoded(self, planes: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+        """Run the network on a pre-encoded batch of board planes.
+
+        The single source of truth for the inference forward pass: both
+        :meth:`predict` / :meth:`predict_batch` (which encode boards first) and
+        the cross-worker inference server (which receives already-encoded
+        planes over shared memory) route through here, so they are guaranteed
+        bit-identical.
+
+        Args:
+            planes: ``(N, C, H, W)`` float32 — ``N`` boards already encoded via
+                ``board.as_multi_channel(1)`` and stacked.
+
+        Returns:
+            ``(policies, values)`` — ``(N, A)`` softmaxed policy array and
+            ``(N,)`` value array, both float32 on the CPU.
+        """
+        tensor = torch.from_numpy(np.ascontiguousarray(planes, dtype=np.float32))
+        if self.net_config.cuda:
+            tensor = tensor.cuda()
+        self.nnet.eval()
+        with torch.no_grad(), self._inference_autocast():
+            log_pi, v = self.nnet(tensor)
+
+        # .float() casts back from fp16 (if autocast was active) so downstream
+        # code always sees float32; a no-op when inference ran in float32.
+        policies = torch.exp(log_pi).float().data.cpu().numpy()
+        values = v.view(-1).float().data.cpu().numpy()
+        return policies, values
+
     def predict(self, board: IBoard) -> tuple[np.ndarray, float]:
         """Make a prediction for a given board state.
 
         Args:
             board: Board object (canonical, i.e. player 1 perspective).
         """
-        tensor = torch.tensor(board.as_multi_channel(1), dtype=torch.float32)
-        if self.net_config.cuda:
-            tensor = tensor.contiguous().cuda()
-        tensor = tensor.unsqueeze(0)  # (C, H, W) → (1, C, H, W)
-        self.nnet.eval()
-        with torch.no_grad():
-            pi, v = self.nnet(tensor)
+        policies, values = self.predict_encoded(board.as_multi_channel(1)[np.newaxis, ...])
+        return policies[0], values[0]
 
-        return torch.exp(pi).data.cpu().numpy()[0], v.data.cpu().numpy()[0]
+    def predict_batch(self, boards: Sequence[IBoard]) -> tuple[list[np.ndarray], list[float]]:
+        """Run the network on N boards in a single forward pass.
+
+        Equivalent to ``[self.predict(b) for b in boards]`` but executes the
+        forward pass once with batch dimension ``len(boards)``. Used by
+        batched MCTS inference. See :meth:`INeuralNetWrapper.predict_batch`.
+
+        Args:
+            boards: Board objects in canonical form (player 1 perspective).
+        """
+        arrs = np.stack([board.as_multi_channel(1) for board in boards])
+        policies, values = self.predict_encoded(arrs)
+        return [policies[i] for i in range(len(arrs))], [float(x) for x in values]
 
     @staticmethod
     def loss_pi(targets: Tensor, outputs: Tensor) -> Tensor:

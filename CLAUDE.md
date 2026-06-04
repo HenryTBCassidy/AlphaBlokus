@@ -4,7 +4,9 @@
 
 AlphaZero implementation for Blokus Duo. Self-play reinforcement learning on a 14x14 board with 21 polyomino pieces per player. The goal is to beat Pentobi (strongest open-source Blokus AI) in a majority of 100 games.
 
-**Current state:** Core framework complete and validated on Tic-Tac-Toe. Blokus Duo game logic is mostly complete — board, pieces, placement validation, move generation, masking, game-end detection, and neural net all work. Remaining game-logic gap: `BlokusDuoGame.get_symmetries()`. The next *operational* milestone is a TicTacToe training run on the home PC's GPU (W&B integration + GPU smoke test). See README.md "Current Status" for details.
+**Current state:** Core framework complete and validated on Tic-Tac-Toe. Blokus Duo game logic is complete — board, pieces, placement validation, move generation, masking, game-end detection, `get_symmetries` (order-2: identity + main-diagonal transpose), and neural net all work. Blokus training runs have been executed on the PC (see `docs/plans/full-cycle-optimisation.md`), and F1–F3 performance optimisations have landed. See README.md "Current Status" for details.
+
+> ⚠️ The "Critical path" section below is **stale** — it predates the Blokus training runs and the F1–F3 optimisation work. Treat it as historical until refreshed.
 
 ## Commands
 
@@ -85,19 +87,27 @@ docs/
 ├── 06-INTERFACES.md       # Pentobi adapter, UI, translation layer
 ├── 07-DATA-STORAGE.md     # Parquet format, metrics tables, checkpoints
 ├── 08-TRAINING-ESTIMATES.md # Wall-clock time estimates for different configs/hardware
+├── IDEAS.md               # Register of candidate avenues not yet committed (distinct from plans/)
 ├── guides/
 │   ├── STYLE-GUIDE.md     # Code conventions (ALWAYS reference before writing code)
 │   ├── PLAN-FORMAT.md     # How to write implementation plans
 │   ├── REMOTE-TRAINING.md # Runbook for running training on the home PC over SSH
 │   └── AI-CONTEXT.md      # Extended context, architecture rationale, gotchas
 └── plans/                                # Top-level = in-flight or not-yet-started
+    ├── full-cycle-optimisation.md        # Master optimisation plan (F1-F4 done; menu + progress tracker)
+    ├── scaled-training-run.md            # Plan for the first ~1000-games/gen training run (not launched)
     ├── move-gen-further-optimisation.md  # Deferred: Cython, bitboard, caching (post-training)
     ├── training-infrastructure.md        # SSH/GPU/cloud compute options
     └── archive/                          # Completed plans, retained for context
+        ├── batched-inference.md          # F3: batched MCTS inference + virtual loss
+        ├── conv-policy-head.md           # F4: fully-convolutional policy head
+        ├── pre-run-prep.md               # Memory fix + Dirichlet + fp16 + end-to-end validation
         ├── blokus-valid-move-algorithm.md # Valid move generation
         ├── board-game-separation.md       # Board/Game responsibility split
         ├── bug-fixes.md                   # Bug fixes
         ├── mcts-profiling.md              # MCTS profiling instrumentation
+        ├── move-gen-optimisation.md       # F2: precomputed move-list table
+        ├── parallel-self-play.md          # F1: parallel self-play across workers
         ├── remote-setup-mac.md            # MacBook-side SSH setup
         ├── remote-setup-windows.md        # Windows-side WSL2 + SSH setup
         ├── remote-training-setup.md       # Original combined remote-training plan

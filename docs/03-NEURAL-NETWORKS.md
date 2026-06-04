@@ -19,8 +19,11 @@ AlphaBlokus uses two neural network architectures: a simple **4-layer CNN** for 
 | Configurable depth | No (fixed 4 layers) | Yes (1-8 residual blocks) |
 | Configurable width | Yes (num_filters) | Yes (num_filters) |
 | Dropout | Yes (configurable rate) | No |
-| Parameters (typical) | ~8.1M (512ch) | ~26M (512ch, 4 blocks) |
+| Policy head | FC trunk → `FC(512→10)` | **Fully-convolutional** (1×1 conv → per-orientation planes + pass head); legacy FC head selectable |
+| Parameters (illustrative, 512ch) | ~8.1M | ~19M (4 blocks, conv head) |
 | Source file | `tictactoe/neuralnets/net.py` | `blokusduo/neuralnets/net.py` |
+
+> The illustrative parameter counts use 512 channels for comparison with AlphaZero. Production Blokus runs use much smaller nets (e.g. 64 filters × 4 blocks) — see the run configs.
 
 ---
 
@@ -45,7 +48,7 @@ How does Blokus Duo stack up against the games AlphaZero was built for? This tab
 
 ### What Stands Out
 
-**Blokus has the largest action space by far.** At 17,837 possible actions, Blokus Duo's action space is ~4× Chess and ~49× Go. This is because every combination of grid position (196) × piece-orientation (91) is a distinct action. The policy head's final FC layer (392 → 17,837 ≈ 7M params) is a direct consequence — it's the single most expensive layer in the network.
+**Blokus has the largest action space by far.** At 17,837 possible actions, Blokus Duo's action space is ~4× Chess and ~49× Go. This is because every combination of grid position (196) × piece-orientation (91) is a distinct action. A naive fully-connected policy head (`FC(392 → 17,837)`) would be ~7M params — the single most expensive layer in the network. The **fully-convolutional policy head** (the default, see below) avoids this: a 1×1 convolution emits one logit plane per piece-orientation, so the head costs ~47K params instead of ~7M, with a stronger spatial inductive bias to boot.
 
 **Go has a much deeper network for a smaller action space.** AlphaZero uses 20 residual blocks for both Chess and Go, versus our 1–8. The deeper architecture compensates for Go's enormous state space (19×19 board, ~10^170 legal positions) — the network needs more capacity to evaluate positions, even though the number of possible moves per turn is relatively small.
 
@@ -187,23 +190,24 @@ Input: 44 × 14 × 14 (44-channel per-piece spatial planes)
               │
      ┌────────┴────────┐
      ▼                 ▼
-┌───────────────┐ ┌───────────────┐
-│  Policy Head  │ │  Value Head   │
-│               │ │               │
-│ Conv2d(C→2,   │ │ Conv2d(C→1,   │
-│   1×1)        │ │   1×1)        │
-│ BN(2) → ReLU │ │ BN(1) → ReLU │
-│ Flatten       │ │ Flatten       │
-│ (2×14×14=392) │ │ (1×14×14=196) │
-│               │ │               │
-│ FC(392 →      │ │ FC(196 → C)   │
-│   17837)      │ │ ReLU          │
-│               │ │ FC(C → 1)     │
-│ log_softmax   │ │ Tanh          │
-└───────┬───────┘ └───────┬───────┘
-        │                 │
-        ▼                 ▼
-  π ∈ ℝ¹⁷⁸³⁷         v ∈ [-1,1]
+┌────────────────────┐ ┌───────────────┐
+│  Policy Head       │ │  Value Head   │
+│  (conv, default)   │ │               │
+│                    │ │ Conv2d(C→1,   │
+│ Conv2d(C→91, 1×1)  │ │   1×1)        │
+│  → (B,91,14,14)    │ │ BN(1) → ReLU │
+│ reshape + reindex  │ │ Flatten       │
+│  → ActionCodec ord │ │ (1×14×14=196) │
+│ ┌────────────────┐ │ │               │
+│ │ pass head:     │ │ │ FC(196 → C)   │
+│ │ AdaptiveAvgPool│ │ │ ReLU          │
+│ │ → FC(C → 1)    │ │ │ FC(C → 1)     │
+│ └────────────────┘ │ │ Tanh          │
+│ concat → log_soft  │ │               │
+└─────────┬──────────┘ └───────┬───────┘
+          │                    │
+          ▼                    ▼
+    π ∈ ℝ¹⁷⁸³⁷            v ∈ [-1,1]
 ```
 
 ### Residual Block Detail
@@ -282,18 +286,24 @@ Total: 14 × 14 × 91 + 1 = 17,837
 - After removing duplicates: 91 unique orientations (basis orientations)
 - Examples: the 1-square piece has only 1 orientation; asymmetric pentominoes have all 8
 
-The `PieceManager` maintains a `BidirectionalDict` mapping between `(piece_id, orientation)` tuples and integer IDs for fast conversion in both directions.
+The `PieceManager` uses an `OrientationCodec` to map between `(piece_id, orientation)` tuples and contiguous integer IDs for fast conversion in both directions.
 
 ### Output Heads
 
-**Policy Head:**
-1. 1×1 convolution reducing C channels → 2 channels (spatial features extraction)
-2. BatchNorm + ReLU
-3. Flatten: 2 × 14 × 14 = 392
-4. Linear projection: 392 → 17,837
-5. `log_softmax` for numerical stability during training
+**Policy Head (`policy_head: "conv"`, the default — F4).**
 
-The output is log-probabilities. During prediction, `torch.exp(pi)` converts back to probabilities for MCTS.
+A fully-convolutional head, which exploits the structure of the action space: every action is a `(grid cell, piece-orientation)` pair, so the natural output is one logit *per orientation per cell*.
+
+1. 1×1 convolution `C → 91`, producing one logit plane per piece-orientation: `(B, 91, 14, 14)`.
+2. Reshape (channel-major) and reindex through a precomputed permutation buffer so the flat vector lands in `ActionCodec` order. (The permutation reconciles the conv's `(orientation, row, col)` layout with the codec's `(y, x, orientation)` board-coordinate layout; pinned by a one-hot probe test against the real `ActionCodec.encode`.)
+3. Pass action: a separate small head — `AdaptiveAvgPool2d(1) → Flatten → Linear(C → 1)` — emits a single pass logit rather than wasting a whole 14×14 plane on it.
+4. Concatenate the `14×14×91` move logits with the pass logit → `(B, 17,837)`, then `log_softmax`.
+
+This head costs ~47K params (at C=512) versus the ~7M of the fully-connected alternative — a ~150× reduction in that layer and a ~19× smaller checkpoint, while training cleanly and giving a stronger board-game inductive bias.
+
+**Legacy fully-connected head (`policy_head: "fc"`).** The original head, kept selectable: `Conv2d(C→2, 1×1) → BN → ReLU → Flatten(392) → Linear(392 → 17,837)`. The two heads have **incompatible** `state_dict`s, so a checkpoint trained with one head can't be loaded into the other. Use `"fc"` only to load an old FC-head checkpoint.
+
+Both heads output log-probabilities; during prediction `torch.exp(pi)` converts back to probabilities for MCTS.
 
 **Value Head:**
 1. 1×1 convolution reducing C channels → 1 channel
@@ -315,12 +325,10 @@ Both architectures use the same loss functions from the AlphaZero paper:
 ### Policy Loss
 
 ```
-L_π = -1/N × Σ π_target · log(π_predicted)
+L_π = KL(π_target ‖ π_predicted) = Σ π_target · (log π_target − log π_predicted),  batch-mean
 ```
 
-This is the cross-entropy between the MCTS-derived target policy and the network's predicted policy. The target policy comes from MCTS visit counts (normalised to sum to 1). The network outputs log-probabilities directly, so the loss is just the negative dot product averaged over the batch.
-
-**Implementation note:** The current code computes `-torch.sum(targets * outputs) / targets.size()[0]` which is equivalent to cross-entropy when `outputs` are log-probabilities. There's a TODO to switch to `torch.nn.CrossEntropyLoss` for clarity.
+Implemented as `F.kl_div(outputs, targets, reduction='batchmean')`, where `outputs` are the network's log-probabilities and `targets` are the MCTS visit distribution (normalised to sum to 1). KL divergence and cross-entropy differ only by the target's own entropy — a constant w.r.t. the network's parameters — so they produce **identical gradients**. KL is used because it reads as a true divergence (zero when the prediction matches the target) and is the natural pairing with a `log_softmax` output.
 
 ### Value Loss
 
@@ -365,40 +373,40 @@ Repeat for num_epochs
 
 ### Training Loop Detail
 
-1. **Optimiser:** Adam with configurable learning rate (no schedule currently — noted as future work)
-2. **Batching:** Random sampling with replacement from the training pool
+1. **Optimiser:** Adam with configurable learning rate. Optional LR schedule via `lr_scheduler` config — `null` (constant, default) or `"cosine"` (`CosineAnnealingLR` with `T_max = num_generations × epochs`).
+2. **Batching:** `DataLoader` with `shuffle=True` over the cumulative training pool, `batch_size` per step
 3. **Epochs:** Configurable number of passes over the data per generation
-4. **CUDA support:** Automatic GPU transfer when `cuda=True` in config
-5. **Logging:** Per-batch pi_loss, v_loss, total_loss, and running averages
-6. **Persistence:** Training metrics saved as pickle per generation, consolidated to Parquet at end of run
+4. **CUDA support:** GPU transfer when `cuda=True` in config; optional fp16 autocast on the forward pass when `fp16_inference=True` (inference only — training stays fp32)
+5. **Logging:** Per-batch pi_loss, v_loss, total_loss to Parquet (+ W&B if configured); per-epoch held-out diagnostics (policy entropy, top-1/5 accuracy, value calibration) when an eval set is supplied
+6. **Persistence:** All metrics written as hive-partitioned Parquet per generation (no pickle) — see [07-DATA-STORAGE.md](07-DATA-STORAGE.md)
 
 ### Prediction
 
 ```python
-# 1. Get multi-channel tensor from board
-tensor = board.as_multi_channel(1)
-tensor = torch.FloatTensor(tensor.astype(np.float64))
-
-# 2. Add batch dimension
+# 1. Multi-channel tensor from the (canonical) board, add batch dim
+tensor = torch.tensor(board.as_multi_channel(1), dtype=torch.float32)
+if self.net_config.cuda:
+    tensor = tensor.contiguous().cuda()
 tensor = tensor.unsqueeze(0)  # (C, H, W) → (1, C, H, W)
 
-# 3. Set network to eval mode (disables dropout, uses running BN stats)
+# 2. eval mode (disables dropout, uses running BN stats); no grad;
+#    optional fp16 autocast on CUDA when fp16_inference is set
 self.nnet.eval()
-
-# 4. No gradient computation needed for inference
-with torch.no_grad():
+with torch.no_grad(), self._inference_autocast():
     pi, v = self.nnet(tensor)
 
-# 5. Convert log-probabilities back to probabilities
-return torch.exp(pi).data.cpu().numpy()[0], v.data.cpu().numpy()[0]
+# 3. exp() back to probabilities; .float() casts fp16 → fp32 if autocast ran
+return torch.exp(pi).float().cpu().numpy()[0], v.float().cpu().numpy()[0]
 ```
+
+`predict_batch` is the same forward pass with a real batch dimension — it stacks N boards into one `(N, C, H, W)` call. MCTS uses it to evaluate a whole batch of leaves in a single GPU round-trip (see [02-ALGORITHMS.md](02-ALGORITHMS.md)).
 
 ### Checkpointing
 
-- **Save:** `torch.save({'state_dict': nnet.state_dict()}, filepath)` — saves only model weights (not optimiser state)
-- **Load:** `torch.load(filepath, map_location=...)` with automatic CPU fallback when CUDA unavailable
+- **Save:** stores `state_dict` (weights) **and** `optimizer_state_dict`, plus `scheduler_state_dict` when a scheduler is configured — so Adam's momentum buffers and the LR schedule survive a resume
+- **Load:** `torch.load(filepath, map_location=...)` with automatic CPU fallback when CUDA unavailable; restores optimiser/scheduler state if present in the file
 - **Directory structure:** `{run_directory}/Nets/{filename}`
-- **Naming convention:** `best.pth.tar` for the current best network, `temp.pth.tar` for the candidate during arena evaluation
+- **Naming convention:** `best.pth.tar` (current best), `temp.pth.tar` (candidate's pre-arena snapshot), `accepted_{gen}` / `rejected_{gen}` (per-generation outcomes), `elo_baseline.pth.tar` (frozen gen-0 anchor)
 
 ---
 
@@ -420,20 +428,19 @@ return torch.exp(pi).data.cpu().numpy()[0], v.data.cpu().numpy()[0]
 | fc_bn1, fc_bn2 | 3,072 |
 | **Total** | **~8.1M** |
 
-### Blokus ResNet (C=512, N=4 residual blocks)
+### Blokus ResNet (C=512, N=4 residual blocks, conv policy head)
 
 | Layer | Parameters |
 |-------|-----------|
 | Initial conv (44→512, 3×3) + BN | 202,752 + 1,024 |
 | Per residual block (2 convs + 2 BNs, no bias) | 2 × 512 × 512 × 9 + 2 × 1,024 = 4,720,640 |
 | 4 residual blocks | 4 × 4,720,640 = 18,882,560 |
-| Policy conv (512→2, 1×1) + BN | 1,024 + 4 |
-| Policy FC (392→17,837) | 6,991,904 + 17,837 (bias) ≈ 7.0M |
+| Policy head — move conv (512→91, 1×1) + pass `Linear(512→1)` | 46,683 + 513 ≈ 47K |
 | Value conv (512→1, 1×1) + BN | 512 + 2 |
-| Value FC1 (196→512) + FC2 (512→1) | 100,352 + 513 |
-| **Total** | **~26M** |
+| Value FC1 (196→512) + FC2 (512→1) | 100,864 + 513 |
+| **Total** | **~19.2M** |
 
-The policy head's final FC layer (392 → 17,837 ≈ 7M params) is the single largest layer due to Blokus's massive action space.
+With the conv policy head, the network is **trunk-dominated**: the residual blocks (~18.9M) are essentially the entire parameter budget. The policy head — the single largest layer (~7M) under the legacy FC design — is now a rounding error (~47K). Swapping in the legacy FC head would push the total back to ~26M.
 
 ---
 
@@ -444,26 +451,19 @@ Both architectures are configured through `NetConfig`:
 ```python
 @dataclass(frozen=True)
 class NetConfig:
-    learning_rate: float     # Adam LR (e.g., 0.001)
-    dropout: float           # Dropout rate (TTT only, e.g., 0.3)
-    epochs: int              # Training epochs per generation (e.g., 10)
-    batch_size: int          # Batch size (e.g., 64)
-    cuda: bool               # GPU acceleration
-    num_filters: int         # Conv channel width (e.g., 512)
-    num_residual_blocks: int # ResNet depth (Blokus only, e.g., 4)
+    learning_rate: float            # Adam LR
+    dropout: float                  # Dropout rate (TTT only)
+    epochs: int                     # Training epochs per generation
+    batch_size: int                 # Batch size
+    cuda: bool                      # GPU acceleration
+    num_filters: int                # Conv channel width
+    num_residual_blocks: int        # ResNet depth (Blokus only)
+    lr_scheduler: str | None = None # None (constant) or "cosine"
+    fp16_inference: bool = False    # fp16 autocast on the forward pass (CUDA only)
+    policy_head: Literal["fc", "conv"] = "conv"  # Blokus policy head (TTT ignores it)
 ```
 
-### Typical Configurations
-
-| Parameter | Tic-Tac-Toe (test) | Blokus (full) |
-|-----------|-------------------|---------------|
-| learning_rate | 0.001 | 0.001 |
-| dropout | 0.3 | 0.3 |
-| epochs | 10 | 10 |
-| batch_size | 64 | 64 |
-| cuda | false | true |
-| num_filters | 512 | 512 |
-| num_residual_blocks | 1 | 4 |
+Concrete values live in the run configs (`run_configurations/*.json`) — they change often and are deliberately not duplicated here.
 
 ---
 
@@ -474,19 +474,18 @@ class NetConfig:
 | ResNet over plain CNN for Blokus | ResNet | Residual connections prevent degradation in deeper networks. Blokus needs more capacity than TTT. Matches AlphaZero paper architecture |
 | Multi-channel input | 2 ch (TTT), 44 ch (Blokus) | One plane per piece per player, following AlphaZero convention. Richer information for conv filters |
 | 14×14 input with per-piece planes | Spatial encoding | Piece inventory is implicit in the per-piece planes (all-zero = not played). No column padding needed |
-| log_softmax + manual cross-entropy | Performance | Numerically stable when combined with the target × log(pred) loss formula. Could switch to torch.nn.CrossEntropyLoss for clarity |
-| Adam optimiser (no schedule) | Simplicity | Works well out of the box. Learning rate scheduling is listed as future work |
+| Fully-convolutional policy head (default) | Conv head | Action space is `(cell, orientation)` pairs, so a 1×1 conv to per-orientation planes is the natural read-out. ~150× fewer params than the FC head in that layer, ~19× smaller checkpoints, stronger spatial bias. Legacy FC head kept selectable via `policy_head="fc"` |
+| KL-divergence policy loss | `F.kl_div(..., 'batchmean')` | Identical gradient to cross-entropy (differ only by the target's constant entropy); reads as a true divergence and pairs naturally with `log_softmax` |
+| Adam optimiser, optional cosine schedule | `lr_scheduler` config | Constant LR by default; `"cosine"` (`CosineAnnealingLR`) available for longer runs |
 | No weight decay / L2 | Simplicity | Following the minimal AlphaZero recipe first. Regularisation may improve generalisation — listed as open question |
-| No optimiser state in checkpoint | Simplicity | Means training restarts from fresh optimiser state each generation. Acceptable because each generation trains from scratch on cumulative data |
+| Checkpoint includes optimiser + scheduler state | Resumability | Adam momentum and the LR schedule survive a resume rather than resetting |
 
 ---
 
 ## Open Questions / Future Work
 
-- **Learning rate scheduling:** Warm-up then cosine/step decay could improve training stability, especially for longer runs
-- **Weight decay:** L2 regularisation in the loss function to prevent overfitting
-- **Mixed precision training (FP16):** Could roughly double training throughput on modern GPUs
-- **Batch normalisation momentum:** Default PyTorch momentum (0.1) may not be optimal for small batch counts
-- **Gradient clipping:** Could prevent training instability in early generations
-- **Cross-entropy loss refactor:** Switch from manual `targets * outputs` to `torch.nn.CrossEntropyLoss` for clarity
-- **Optimiser state persistence:** Saving Adam's momentum buffers across generations for smoother training
+- **Weight decay:** L2 regularisation in the loss function to prevent overfitting (currently none)
+- **fp16 *training*:** fp16 *inference* is implemented; full mixed-precision training (autocast + `GradScaler` on the backward pass) could roughly double training throughput but isn't done
+- **LR warm-up:** the cosine schedule has no warm-up phase; a short warm-up could help stability in early generations
+- **Batch normalisation momentum:** default PyTorch momentum (0.1) may not be optimal for small batch counts
+- **Gradient clipping:** could prevent training instability in early generations

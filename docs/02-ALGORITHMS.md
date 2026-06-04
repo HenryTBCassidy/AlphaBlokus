@@ -2,320 +2,253 @@
 
 ## Overview
 
-AlphaBlokus implements three tightly coupled algorithms that form the AlphaZero training loop:
+AlphaBlokus implements the algorithms that form the AlphaZero training loop:
 
-1. **Monte Carlo Tree Search (MCTS)** — Explores the game tree guided by a neural network
-2. **Self-Play** — Generates training data by having the network play against itself
-3. **Arena Evaluation** — Determines whether a newly trained network is stronger than the previous best
+1. **Monte Carlo Tree Search (MCTS)** — explores the game tree guided by a neural network
+2. **Self-Play** — generates training data by having the network play against itself
+3. **Arena Evaluation** — decides whether a newly trained network is stronger than the previous best
+4. **Strength evaluation** — measures the new network against fixed baselines (frozen gen-0, and a perfect-play minimax oracle for Tic-Tac-Toe)
 
-These are orchestrated by the **Coach**, which runs the full loop: self-play → training → arena → accept/reject.
+These are orchestrated by the **Coach** (`core/coach.py`), which runs one generation at a time.
 
 ```
 Coach.learn() — one generation:
 
-  Self-Play ──────> Training ──────> Arena
-  (MCTS + net)      (SGD)            (new vs old, both w/ MCTS)
-                                          │
-                                     win% ≥ 55%?
-                                      /        \
-                                    Yes          No
-                                     │            │
-                                  Accept        Reject
-                                (save new)    (keep old)
-                                     \          /
-                                      ┗━━━━━━━┛
-                                          │
-                                    Next generation
+  Self-Play ─────> Training ─────> Arena ─────> Strength eval
+  (MCTS + net)     (SGD)           (new vs old)  (vs gen-0 / minimax)
+                                        │
+                                  score ≥ threshold?
+                                  (wins + ½·draws) / games
+                                    /          \
+                                  Yes           No
+                                   │             │
+                                Accept         Reject
+                              (save new)     (keep old)
+                                   \           /
+                                    ┗━━━━━━━━━┛
+                                         │
+                                   Next generation
 ```
 
 ---
 
 ## Monte Carlo Tree Search (MCTS)
 
-### Core Idea
+### Core idea
 
-MCTS builds a search tree by running many simulations from the current game state. Each simulation walks down the tree, expanding a new node when it reaches an unexplored position, and evaluating it with the neural network. The visit counts at the root node then determine the move to play.
+MCTS builds a search tree by running many simulations from the current position. Each simulation descends the tree picking promising actions, stops when it reaches an unexpanded or terminal position, evaluates that leaf with the neural network, and propagates the value back up. After a fixed number of simulations, the **visit counts** at the root define the move-probability distribution.
 
-### Implementation (`core/mcts.py`)
+### Tree storage (`core/mcts.py`)
 
-The MCTS tree is stored as **6 flat dictionaries** keyed by string representations of game states:
+The tree is stored implicitly as a set of dictionaries keyed by **board state** (`state_key` — for Blokus this is the 196-byte signed `int8` placement board; for TTT the flat board bytes). Because the keys are positions, not move sequences, transpositions are handled for free.
 
 | Dictionary | Key | Value | Purpose |
 |------------|-----|-------|---------|
-| `Qsa` | `(state, action)` | float | Q-value (average value of taking action `a` in state `s`) |
-| `Nsa` | `(state, action)` | int | Visit count for `(state, action)` pair |
-| `Ns` | `state` | int | Total visit count for state `s` |
-| `Ps` | `state` | array | Neural network policy prediction for state `s` |
-| `Es` | `state` | float | Game-ended status cache (0 if not ended) |
-| `Vs` | `state` | array | Valid moves mask for state `s` |
+| `q_values` | `(state, action)` | float | Mean value of taking `a` in `s` |
+| `visit_counts` | `(state, action)` | int | Visits to the `(s, a)` edge |
+| `state_visits` | `state` | int | Total visits to `s` |
+| `policy_priors` | `state` | array | Network policy for `s`, masked to legal moves and renormalised |
+| `game_ended_cache` | `state` | float | Cached game-ended result (0 = ongoing) |
+| `valid_moves_cache` | `state` | array | Cached legal-move mask for `s` |
+| `virtual_visits` | `(state, action)` | int | In-flight virtual loss during a batch (empty between moves) |
 
-### PUCT Formula
+### PUCT formula
 
-At each node, MCTS selects the action with the highest Upper Confidence Bound:
+At each expanded node the search picks the action maximising the PUCT score:
 
 ```
 best_action = argmax_a [ Q(s,a) + U(s,a) ]
 
-where:
-  U(s,a) = cpuct * P(s,a) * sqrt(N(s)) / (1 + N(s,a))
+  U(s,a) = cpuct · P(s,a) · √N(s) / (1 + N(s,a))
 
-  Q(s,a) = average value from simulations through (s,a)
-  P(s,a) = neural network's prior probability for action a
-  N(s)   = total visit count for state s
-  N(s,a) = visit count for (state, action) pair
-  cpuct  = exploration constant (default: 1.0)
+  Q(s,a) = mean value of simulations through (s,a)   (0 for an unvisited edge)
+  P(s,a) = network's prior probability for action a
+  N(s)   = total visits to state s
+  N(s,a) = visits to the (s, a) edge
+  cpuct  = exploration constant (set per run in config)
 ```
 
-**Intuition:**
-- **Q(s,a)** exploits known good moves (high average value)
-- **U(s,a)** explores under-visited moves, weighted by the network's prior
-- As N(s,a) grows, U(s,a) shrinks — the algorithm naturally shifts from exploration to exploitation
-- `cpuct` controls the exploration/exploitation trade-off
+`Q(s,a)` exploits moves with high observed value; `U(s,a)` explores under-visited moves weighted by the network's prior, and shrinks as `N(s,a)` grows — so the search shifts from exploration to exploitation on its own. Only **legal** actions are scored: the loop iterates `np.where(valids)[0]`, never the full 17,837-wide space.
 
-### Single Simulation Walkthrough
+### Dirichlet root noise
+
+To guarantee the search explores moves the (possibly wrong, early-training) policy rates poorly, AlphaZero mixes Dirichlet noise into the **root** priors during **self-play only**:
 
 ```
-def search(state):
-    1. CHECK TERMINAL
-       If game_ended(state) != 0:
-           return -game_ended(state)  # negate because of alternating players
-
-    2. EXPAND LEAF NODE
-       If state not in Ps (never visited):
-           - Run neural network: policy, value = nnet.predict(state)
-           - Mask invalid moves from policy
-           - Renormalise policy (or set uniform if all invalid)
-           - Store: Ps[s] = policy, Vs[s] = valid_moves, Ns[s] = 0
-           - Return -value  # negate for alternating perspective
-
-    3. SELECT BEST ACTION
-       For each valid action a:
-           if (s,a) visited before:
-               u = Q(s,a) + cpuct * P(s,a) * sqrt(N(s)) / (1 + N(s,a))
-           else:
-               u = cpuct * P(s,a) * sqrt(N(s) + EPS)  # encourage first visit
-       best_action = argmax(u)
-
-    4. RECURSE
-       next_state, next_player = game.get_next_state(state, player, best_action)
-       canonical_state = game.get_canonical_form(next_state, next_player)
-       value = search(canonical_state)
-
-    5. BACKUP
-       Q(s,a) = (N(s,a) * Q(s,a) + value) / (N(s,a) + 1)  # running average
-       N(s,a) += 1
-       N(s) += 1
-       return -value  # negate for alternating perspective
+P(s,a) = (1 − ε)·p_a + ε·η_a ,   η ~ Dir(α)   over the legal moves at the root
 ```
 
-### Move Selection from Root
+- Applied once per move, before the simulations, so every descent that move sees the noised priors.
+- Gated by `MCTSConfig.dirichlet_epsilon`. At `ε = 0` (the default) the noise codepath is a no-op and the search is bit-identical to noise-free behaviour — which is why **arena and Elo evaluation never request it** (they pass `add_root_noise=False`), keeping evaluation deterministic.
+- It draws from the episode's seeded RNG, so noised self-play stays reproducible.
+- AlphaZero used `ε = 0.25`; `α ≈ 0.03` suits Blokus's few-hundred early legal moves (Go-like).
 
-After running `num_mcts_sims` simulations, the root node visit counts determine the move:
+### How a simulation batch runs
+
+Simulations are run in batches of `K = mcts_batch_size` (the F-series batched-inference optimisation; see [What makes MCTS fast](#what-makes-mcts-fast)). One batch of size `K`:
+
+1. **Descend `K` times.** Each descent walks from the root picking the PUCT-best action until it reaches a terminal or unexpanded leaf. As it traverses an edge it deposits a **virtual loss** on that edge (counts as `VIRTUAL_LOSS = 3` extra visits each worth value −1), which depresses that edge's PUCT score so the next descent in the same batch is steered down a *different* path. This keeps the `K` collected leaves diverse.
+2. **Evaluate the distinct leaves once.** The unexpanded leaves are de-duplicated and sent through a single batched `predict_batch` call — one GPU forward pass for the whole batch instead of `K` separate calls. Terminal leaves need no network call (their value is the cached game result).
+3. **Expand** each freshly evaluated leaf: mask its priors to legal moves, renormalise, initialise its node stats.
+4. **Back-propagate** every descent's leaf value up its path (running-mean `Q` update, sign flipped each ply), then **remove** the virtual loss it deposited, so `virtual_visits` returns to empty.
+
+At `K = 1` (the default) a single descent deposits virtual loss that affects no other descent and is removed immediately — so the arithmetic is exactly the classic one-leaf-per-NN-call recursive search. `K > 1` trades a slight search approximation for far better GPU utilisation.
+
+### Move selection from the root
+
+After `num_mcts_sims` simulations, the root visit counts define the policy:
 
 ```python
-def get_action_probabilities(state, temperature):
-    for _ in range(num_mcts_sims):
-        search(state)
+counts = [visit_counts.get((root, a), 0) for a in range(action_size)]
 
-    counts = [Nsa[(s, a)] for a in range(action_size)]
-
-    if temperature == 0:
-        # Exploitation: pick the most-visited move
-        best = argmax(counts)
-        probs = [0] * action_size
-        probs[best] = 1
-    else:
-        # Exploration: sample proportional to visit counts^(1/temp)
-        counts = [c ** (1.0 / temperature) for c in counts]
-        total = sum(counts)
-        probs = [c / total for c in counts]
-
-    return probs
+if temperature == 0:           # exploitation: most-visited move (ties broken at random)
+    probs = one_hot(argmax(counts))
+else:                          # exploration: sample ∝ counts^(1/temperature)
+    counts = [c ** (1 / temperature) for c in counts]
+    probs  = counts / sum(counts)
 ```
 
-### Temperature Schedule
+The raw (pre-temperature) visit distribution's entropy is also recorded per move as a search-confidence diagnostic.
 
-- **First `temp_threshold` moves:** temperature = 1 (explore, build diverse training data)
-- **After threshold:** temperature → 0 (exploit, play strongest move)
+### Temperature schedule
 
-This produces varied opening play while maintaining strong endgame play.
-
-### Known Performance Issues for Blokus
-
-**1. Action space iteration (CRITICAL):**
-The current implementation iterates over ALL actions to find the best PUCT score:
-
-```python
-# Current: O(17,837) per node visit
-for a in range(game.get_action_size()):
-    if valid_moves[a]:
-        # compute PUCT score
-```
-
-For Blokus (17,837 actions), this is prohibitively slow. Typical positions have 50-300 valid moves, meaning >98% of iterations are wasted checking invalid actions.
-
-**Fix:** Maintain a list of valid action indices and iterate only those:
-```python
-# Target: O(num_valid_moves) per node visit
-valid_indices = np.nonzero(valid_moves)[0]
-for a in valid_indices:
-    # compute PUCT score
-```
-
-**2. Tree reconstruction:**
-A fresh MCTS tree is built for each self-play game. Between moves within a game, the subtree rooted at the chosen action could be reused.
-
-**3. String-based state keys:**
-States are converted to strings for dictionary keys via `board.tostring()`. For 14x14 boards, this creates 784-byte keys on every lookup. A hash-based approach would be faster.
+- **First `temp_threshold` moves:** temperature = 1 — sample proportional to visit counts, producing varied openings and diverse training data.
+- **After the threshold:** temperature → 0 — play the most-visited (strongest) move.
 
 ---
 
-## MCTS Caching & Optimisation Strategies
+## What makes MCTS fast
 
-The current MCTS implementation has several opportunities for performance improvement that become critical at Blokus scale.
+The bottleneck in AlphaZero-style search is twofold: legal-move generation (CPU, Python) and neural-net evaluation (GPU). AlphaBlokus attacks both, plus avoids redundant work across moves.
 
-### Valid Move Caching
+### 1. Precomputed legal-move tables (Pentobi-style)
 
-The Blokus game logic already maintains a **placement point cache** — after each piece insertion, it updates the set of valid corner positions where future pieces can be placed. This avoids recomputing all valid moves from scratch.
+The single biggest CPU win. Instead of re-deriving piece geometry on every `valid_move_masking` call, all of the static geometry — which `(piece, orientation, anchor)` placements exist, which cells each occupies, which it forbids, which it opens as new attach points — is enumerated **once at startup** into lookup tables. At runtime the only board-dependent input is a 196-byte `forbidden` array; move generation becomes "look up a short candidate list per attach point, then verify each candidate with a handful of byte reads."
 
-The caching strategy (designed but not yet fully implemented) works in layers:
+This design is taken directly from **[Pentobi](https://github.com/enz/pentobi)** (Markus Enzenberger) — its precomputed `(anchor, adj_status, piece) → candidate move-id list` table is the heart of its speed, and notably uses **no bitboard**, just byte arrays plus precomputation. We reimplemented the same algorithm in Python (our own code, not a port). It is ~9× faster per call than the readable reference generator and produces bit-identical results. Full detail in [Move Generation](#move-generation-blokus-duo) below.
 
-```
-Layer 1: Placement Points
-   - Track all valid corner positions for each player
-   - Updated incrementally after each piece placement
-   - Already partially implemented in Player class
+### 2. Batched neural-net inference with virtual loss
 
-Layer 2: Per-Point Move Generation
-   - For each placement point, enumerate all piece-orientation combos that can
-     be legally placed touching that corner
-   - Cache result: invalidate only when nearby squares change
-   - populate_moves_for_new_placement() — the critical unimplemented function
+A batch-of-one forward pass barely uses the GPU. Collecting `K` leaves per outer step (diversified via virtual loss, see [How a simulation batch runs](#how-a-simulation-batch-runs)) and evaluating them in a single `predict_batch` call collapses `K` GPU round-trips into one. Identical leaves within a batch are de-duplicated so the network sees each unique position once. Combined with optional fp16 inference on CUDA, this is the main GPU-side speedup.
 
-Layer 3: Aggregate Valid Moves
-   - Union of all per-point valid moves = total valid moves for the position
-   - valid_moves() aggregates from all placement points
-```
+### 3. Implicit subtree reuse within a game
 
-### Initial Move Pre-computation
+A fresh MCTS tree is created per game, but the **same tree is kept across every move of that game** — `play_self_play_episode` (and `NetworkPlayer` in evaluation) reuse one `MCTS` instance for the whole game. Because the tree is keyed by board state, all statistics for any position already explored remain available and are reused the moment a later search revisits that position. This gives the benefit usually described as "promote the chosen child to the new root" — without any explicit re-rooting step — and additionally reuses work across in-game transpositions. The tree is only discarded between games (via the `startGame` hook on `NetworkPlayer`).
 
-First moves for both players are **pre-computed and cached** at game initialisation. Since the first move must cover a specific starting square (White: (4,4), Black: (9,9) — Pentobi convention), the set of valid first moves is fixed and can be computed once.
+### 4. Per-state caches inside the search
 
-### Transposition Table
-
-Different move sequences can reach the same board position in Blokus (transpositions). A transposition table would recognise these and reuse MCTS evaluations:
-
-```
-Approach:
-  - Hash board state (Zobrist hashing: XOR of random values per piece-position)
-  - Before expanding a node, check if this state exists in the table
-  - If found: reuse P(s), V(s), Q(s,a), N(s,a)
-  - Trade-off: memory usage vs computation savings
-```
-
-**Estimated impact:** Moderate. Blokus has fewer transpositions than Chess (piece placement is permanent), but they do occur when different piece-ordering sequences produce the same board.
-
-### Subtree Reuse Between Moves
-
-After player A makes a move, the MCTS tree from A's perspective has a subtree rooted at the chosen action that remains valid for the next search. Currently, this entire tree is discarded.
-
-```
-Before move:
-        root
-       / | \
-      a   b   c    ← player A's moves
-     /|\  ...
-    x  y  z         ← player B's responses (still valid!)
-
-After choosing move 'a':
-    Current:  rebuild entire tree from scratch
-    Better:   promote subtree under 'a' as new root
-```
-
-**Estimated impact:** Significant. Saves ~30-50% of MCTS simulations per move in the mid-game.
-
-### Batched Neural Network Inference
-
-The single biggest bottleneck in MCTS is neural network evaluation — one forward pass per leaf node expansion. Batching multiple leaf evaluations into a single GPU forward pass dramatically improves throughput.
-
-**Approaches:**
-
-1. **Root parallelisation:** Run N independent MCTS trees in parallel, batch their leaf evaluations
-2. **Leaf parallelisation:** Within a single tree, collect multiple leaves before evaluating, then backpropagate all at once
-3. **Virtual loss:** During parallel search, add a "virtual loss" to nodes being evaluated to encourage exploration of different paths
-
-**Estimated impact:** 4-16x speedup depending on batch size and GPU utilisation.
+Within a search, `get_game_ended` results, legal-move masks, and masked priors are each computed once per state and cached (`game_ended_cache`, `valid_moves_cache`, `policy_priors`). Repeated descents through the same internal node pay nothing for them.
 
 ---
 
-## Self-Play (`core/coach.py`)
+## Move Generation (Blokus Duo)
 
-### How Self-Play Works
+Legal-move generation is the per-game CPU bottleneck for Blokus. The codebase has **two implementations** that produce identical legal-move sets — a readable reference and an optimised fast path that is validated against it.
 
-Each generation, the Coach runs `num_eps` complete games of self-play:
+### The reference generator
+
+The straightforward "generate and test" approach (`BlokusDuoGame._generate_valid_moves`). It centres on **placement points** (a.k.a. attach points): board cells diagonally adjacent to a friendly piece and not side-adjacent to one. By Blokus's corner-touch rule these are the only cells where a new piece can make contact, so they anchor the search.
+
+```
+_valid_moves(board, player):
+    if first move:
+        return initial_actions   # precomputed at game init; the fixed set covering the start square
+
+    for each placement_point:
+        for each remaining piece:
+            for each orientation:
+                for each filled cell of the piece:
+                    slide the piece so that cell lands on the placement point
+                    if it fits on-board AND every cell is empty AND no friendly side-adjacency:
+                        yield Action
+    deduplicate (a move can be reachable from several placement points)
+```
+
+A short-circuit variant `_has_valid_moves` returns `True` on the first move found — used by `get_game_ended` to detect a stuck player without enumerating everything.
+
+The board maintains two caches that this path relies on, both updated incrementally after each placement: the **placement-point set** and a **side-danger zone** (a boolean 14×14 array marking cells orthogonally adjacent to a friendly piece, so the no-edge-touching rule is one lookup instead of four neighbour checks). Piece-orientation arrays are precomputed once by `PieceManager`.
+
+### The optimised generator (Pentobi-style precomputed tables)
+
+`games/blokusduo/movegen_tables.py` + `movegen_runtime.py`, enabled by the `use_optimised_movegen` config flag. This is the [Pentobi-derived](https://github.com/enz/pentobi) design credited above. Built once per process (~200 ms):
+
+- **Geometry table** — every legal `(piece, orientation, anchor)` placement that fits on the board, numbered `move_id` 0..13,728 (**13,729** total, verified against Pentobi's hard-coded constant by `scripts/count_onboard_placements.py`). Each stores its occupied cells, the cells it forbids, the cells it opens as attach points, and its `action_id` in the 17,837-wide action space.
+- **Lookup table** — indexed by `(anchor, adj_status, piece) → short list of candidate move-ids`, where `adj_status` is a 6-bit summary of which of 6 specific neighbour cells around the anchor are currently forbidden. This pre-filters out placements that can't fit given the local blocked cells.
+
+At runtime the only per-board input is `forbidden = occupied OR side-danger`. For each attach point: read its 6 neighbours into a 6-bit `adj_status`, look up the candidate list per remaining piece, and confirm each candidate with an unrolled OR over its (≤5) cells' forbidden bytes (a `NULL_CELL` sentinel slot, always 0, lets the loop run a fixed 5 iterations without bounds checks). A `seen` set dedups moves reachable from multiple attach points.
+
+**Equivalence is proven, not assumed:** a position-level test compares the two generators' legal-move *sets* across thousands of stratified positions, and a stronger determinism test confirms self-play at a fixed seed produces bit-identical training trajectories with the fast path on or off.
+
+> Deferred further speedups (Cython, true bitboard) are tracked in [`docs/plans/move-gen-further-optimisation.md`](plans/move-gen-further-optimisation.md). They are not needed to train.
+
+---
+
+## Self-Play (`core/self_play.py`)
+
+Each generation the Coach runs `num_eps` complete self-play games. One game (`play_self_play_episode`):
 
 ```python
-def execute_episode(game, nnet):
-    """Play one complete game, return training examples."""
-    board = game.initialise_board()
-    player = 1  # white starts
-    episode_step = 0
+def play_self_play_episode(game, mcts, temp_threshold):
+    board, current_player, move_count = game.initialise_board(), 1, 0
     train_examples = []
 
     while True:
-        episode_step += 1
-        canonical = game.get_canonical_form(board, player)
+        move_count += 1
+        canonical = game.get_canonical_form(board, current_player)
+        temp = 1 if move_count < temp_threshold else 0
 
-        # Temperature: explore early, exploit late
-        temp = 1 if episode_step < temp_threshold else 0
+        # MCTS-improved policy; root Dirichlet noise requested (no-op unless ε > 0)
+        pi = mcts.get_action_prob(canonical, temp=temp, add_root_noise=True)
 
-        # MCTS produces move probabilities
-        pi = mcts.get_action_probabilities(canonical, temp)
+        # Symmetry augmentation: store every symmetric (board, policy) pair
+        for sym_board, sym_pi in game.get_symmetries(canonical, pi):
+            train_examples.append((sym_board, current_player, sym_pi, None))
 
-        # Augment with symmetries for training data
-        symmetries = game.get_symmetries(canonical, pi)
-        for sym_board, sym_pi in symmetries:
-            train_examples.append([sym_board, player, sym_pi, None])
-
-        # Sample move from probabilities
         action = np.random.choice(len(pi), p=pi)
-        board, player = game.get_next_state(board, player, action)
+        board, current_player = game.get_next_state(board, current_player, action)
 
-        # Check game end
-        result = game.get_game_ended(board, player)
+        result = game.get_game_ended(board, current_player)
         if result != 0:
-            # Assign values: +1 for winner's positions, -1 for loser's
-            return [(x[0], x[2], result * ((-1) ** (x[1] != player)))
-                    for x in train_examples]
+            # Fill in values: +result for positions whose player matches the
+            # last mover, −result for the others. Policy cast to float32.
+            return [(b.as_multi_channel(1),
+                     np.asarray(p, dtype=np.float32),
+                     result * ((-1) ** (player != current_player)))
+                    for (b, player, p, _) in train_examples]
 ```
 
-### Training Data Format
+This single function is the source of truth for the episode loop — both the serial Coach path and the parallel worker pool call it, which is what makes their output identical at the same seed.
 
-Each training example is a tuple of:
-- **Board state** (canonical form — always from current player's perspective)
-- **Policy vector** (MCTS visit count distribution — the "correct" move probabilities)
-- **Value** (+1 if current player eventually won, -1 if lost)
+### Training data format
 
-### Symmetry Augmentation
+Each example is `(board_state, policy_vector, value)`:
 
-For games with symmetries (rotations, reflections), each position generates multiple training examples. This is free data augmentation:
+- **Board state** — canonical multi-channel encoding (current player's planes first).
+- **Policy vector** — the MCTS visit-count distribution (the improved target the network is trained toward).
+- **Value** — `+1` if the player to move at that position eventually won, `−1` if lost, ~0 for a draw.
 
-- **Tic-Tac-Toe:** 8 symmetries (4 rotations × 2 reflections)
-- **Blokus Duo:** Not yet implemented. The 14x14 board has no rotational symmetry (starting squares break it), but 180-degree rotation with colour swap is valid. Needs careful analysis.
+### Symmetry augmentation
 
-### Training Window
+Each visited position is stored once per symmetry of the game — free data augmentation:
 
-Not all historical self-play data is used for training. A sliding window controls how many generations of data to include:
+- **Tic-Tac-Toe:** 8 symmetries (the full D₄ group: 4 rotations × 2 reflections).
+- **Blokus Duo:** 2 (identity + main-diagonal reflection). The fixed starting squares at array indices (4,4) and (9,9) lie on the main diagonal, so only the transpose preserves them; every other rigid motion of the square either moves a start square off the diagonal or swaps the two (which the first-mover rule forbids). The policy is reindexed under transposition via a precomputed action permutation. (See `games/blokusduo/game.py` `get_symmetries` / `transpose_policy`.)
+
+### Training window
+
+Not all history is used. A sliding window controls how many recent generations of self-play feed each training step:
 
 ```python
 def window_size(generation, max_lookback):
-    """Linearly grow the training window from 5 to max_lookback."""
-    return min(5 + generation, max_lookback)
+    if generation <= 5:
+        return 5
+    # grows linearly from 5 toward max_lookback, then plateaus there
+    if 2 * max_lookback > generation:
+        return round(generation * (max_lookback - 5) / (2 * max_lookback) + 5)
+    return max_lookback
 ```
 
-**Rationale:** Early generations produce low-quality data (random play). As the network improves, older data becomes less representative. The growing window balances:
-- **Recency:** Prioritise recent, higher-quality games
-- **Diversity:** Include enough data to prevent overfitting to recent patterns
+Early generations are random and low-quality; as the network improves, old data becomes less representative. The growing-then-plateauing window balances **recency** (recent, stronger games) against **diversity** (enough data to avoid overfitting recent patterns).
 
 ---
 
@@ -323,172 +256,90 @@ def window_size(generation, max_lookback):
 
 ### Purpose
 
-After training, the new network must prove it's stronger than the previous best. The Arena plays them head-to-head.
+After training, the new network must prove it is stronger than the previous best. The Arena plays them head-to-head, both using MCTS at temperature 0 (pure exploitation, no temperature randomness).
 
-### Protocol
+### Alternating start positions
 
-```python
-def play_games(num_games):
-    """
-    Play num_games between new net and old net.
-    Each pair of games alternates who plays first.
-    Both players use MCTS with temperature=0 (pure exploitation).
-    """
-    new_wins, old_wins, draws = 0, 0, 0
+Games are played in two halves with the colours swapped, so each network plays White in half the games. This controls for first-move advantage: if the two are equal they should split the games regardless of who starts.
 
-    for i in range(num_games):
-        if i % 2 == 0:
-            result = play_one_game(player1=new_net, player2=old_net)
-        else:
-            result = play_one_game(player1=old_net, player2=new_net)
+### Acceptance criterion (score-based)
 
-        # Tally results...
-
-    return new_wins, old_wins, draws
-```
-
-### Acceptance Criterion
+The decision lives in one place — `core/acceptance.py` — so the training loop and the report can never disagree:
 
 ```
-accept = new_wins / (new_wins + old_wins) >= update_threshold
+score  = (new_wins + 0.5 · draws) / (new_wins + prev_wins + draws)
+accept = score ≥ update_threshold      (default 0.55; False if no games played)
 ```
 
-- **Default threshold:** 0.55 (new net must win 55%+ of decisive games)
-- If accepted: save new net as "best", continue training from it
-- If rejected: revert to old net, discard new weights
+Draws count as half a point each, in both numerator and denominator. This is the chess-style criterion rather than the draws-excluded `new_wins / (new_wins + prev_wins)` form — the latter silently rejects every generation in forced-draw regimes (TTT under near-perfect play, late-stage Blokus where both nets have converged), which score-based handles cleanly. A threshold above 0.5 demands the new network be genuinely (not just marginally) stronger before it's accepted.
 
-**Why threshold > 0.50?** A 50% threshold would accept networks that are merely equal. 55% provides statistical confidence that the new network is genuinely stronger, reducing noise in the training process.
-
-### Alternating Start Positions
-
-Games are played in pairs with swapped colours. This controls for first-move advantage:
-- Game 1: new_net plays White, old_net plays Black
-- Game 2: old_net plays White, new_net plays Black
-
-If both players are equal, each should win one game regardless of first-move advantage.
-
-### Arena MCTS Settings
-
-Arena games use **temperature = 0** throughout (no exploration). This ensures the evaluation reflects pure playing strength, not randomness from temperature-based sampling.
+- **Accepted:** saved as `best.pth.tar` and `accepted_{gen}.pth.tar`; training continues from it.
+- **Rejected:** weights reverted to the pre-training checkpoint; the candidate saved as `rejected_{gen}.pth.tar` for inspection.
 
 ---
 
-## The Complete Training Loop
+## Strength evaluation vs fixed baselines
 
-Putting it all together, one generation of training:
+Independent of accept/reject, every generation the new network is measured against fixed references (`Coach._evaluate_strength_vs_baselines`). Unlike the arena (which compares against a *moving* target), these give an absolute "is it actually getting stronger?" signal:
+
+- **Elo vs frozen gen-0** (when `elo_games_per_gen > 0`): the random-init network is frozen at run start as a fixed anchor. Score rate → Elo difference via the standard `400 · log10(score / (1 − score))`, added to a display anchor rating.
+- **Minimax oracle (TTT only):** games against a perfect-play opponent. Since TTT is a forced draw under optimal play, draw-rate → 1.0 with loss-rate → 0 is the "the model has learned optimal play" signal.
+- **Symmetry diagnostic:** on a fixed set of reference positions, the KL divergence between the network's policy on a position and on its symmetric image — zero for a perfectly equivariant network. Catches learned directional biases that augmentation should be averaging out.
+
+All of these run noise-free and reset the MCTS tree between games.
+
+---
+
+## The complete training loop
+
+One generation, end to end:
 
 ```
 Generation N:
 
-1. SELF-PLAY                          [~70% of time]
-   ├── Create fresh MCTS tree
-   ├── Play num_eps games (e.g. 100)
-   │   ├── Each game: MCTS search → sample move → repeat until terminal
-   │   └── Augment positions with symmetries
-   ├── Store (board, policy, value) tuples
-   └── Save to self_play_history_{N}.pickle
+1. SELF-PLAY                         (dominant share of wall-clock)
+   ├── Fresh MCTS tree per game (reused across that game's moves)
+   ├── Play num_eps games (serial, or across worker processes if num_parallel_workers > 1)
+   │   └── Each move: MCTS search → sample by temperature → augment with symmetries
+   └── Save the generation's examples to SelfPlayHistory/self_play_{N}.parquet
 
-2. TRAINING                           [~15% of time]
-   ├── Save current net as "temp" checkpoint
-   ├── Combine examples from last window_size(N) generations
-   ├── Shuffle all examples
-   ├── Train for num_epochs
-   │   ├── Each epoch: iterate batches
-   │   │   ├── Forward pass: board → (log_policy, value)
-   │   │   ├── Policy loss: -sum(target_pi * log_policy) / batch_size
-   │   │   ├── Value loss: sum((target_v - pred_v)^2) / batch_size
-   │   │   ├── Total loss: policy_loss + value_loss
-   │   │   └── Backward pass + Adam step
-   │   └── Log loss metrics per batch
-   └── Save training metrics to pickle
+2. TRAINING
+   ├── Snapshot current net → temp.pth.tar (the previous-best for the arena)
+   ├── Combine + shuffle examples from the last window_size(N) generations
+   ├── Train num_epochs:
+   │   ├── Forward: board → (log-policy, value)
+   │   ├── Policy loss: KL(target_pi ‖ predicted) ;  Value loss: MSE(target_v, predicted)
+   │   ├── Backward + Adam step
+   │   └── Per-epoch held-out diagnostics (entropy, top-1/5 accuracy, value calibration)
+   └── Log loss + throughput metrics
 
-3. ARENA EVALUATION                   [~15% of time]
-   ├── Load "temp" checkpoint as old net
-   ├── Play num_arena_matches (e.g. 100) with alternating starts
-   ├── Both players use MCTS with temp=0
-   ├── Count wins/losses/draws
-   ├── If new_wins / (new_wins + old_wins) >= 0.55:
-   │   ├── ACCEPT: save new net as "best"
-   │   └── Save as accepted_{N}.pth.tar
-   └── Else:
-       ├── REJECT: revert to "temp" (old net)
-       └── Save as rejected_{N}.pth.tar
+3. ARENA                             (new vs previous-best, both MCTS @ temp 0)
+   ├── num_arena_matches games, colours swapped halfway, replays recorded
+   ├── accept iff (wins + ½·draws) / games ≥ update_threshold
+   └── Accept → save best.pth.tar ;  Reject → revert to temp.pth.tar
 
-4. REPORTING
-   ├── Write timing data to parquet
-   ├── Save arena results to parquet
-   └── After all generations: generate HTML report
+4. STRENGTH EVAL                     (logged whether or not accepted)
+   ├── Elo vs frozen gen-0 baseline
+   ├── Minimax oracle (TTT only)
+   └── Symmetry diagnostic
+
+5. REPORTING
+   └── Flush metrics to Parquet (+ mirror to W&B if configured)
+
+After all generations: render the interactive HTML report.
 ```
-
-### Configuration Comparison
-
-| Parameter | Test Run | Full Run |
-|-----------|----------|----------|
-| num_generations | 2 | 50 |
-| num_eps (games per gen) | 10 | 100 |
-| num_mcts_sims | 2 | 200 |
-| num_arena_matches | 2 | 100 |
-| batch_size | 10 | 32 |
-| epochs | 1 | 5 |
-| cpuct | 1 | 1 |
-| learning_rate | 0.001 | 0.001 |
-| update_threshold | 0.55 | 0.55 |
 
 ---
 
-## AlphaZero Paper Reference
+## AlphaZero paper reference
 
-## Move Generation (Blokus Duo)
+The original AlphaZero paper (Silver et al., 2018) guides the design. Where we diverge, it's deliberate scaling-down for a single-GPU project:
 
-Legal move generation is the computational bottleneck for Blokus Duo self-play. With 21 pieces per player, 91 piece-orientations, and a 14×14 board, the theoretical action space is 17,837 — but only a fraction are legal at any given position.
+- **MCTS simulations:** 800 per move in Chess, scaled to game complexity. We use far fewer (config-driven).
+- **cpuct:** the paper uses a formula that grows with visit count; we use a fixed per-run constant.
+- **Dirichlet noise:** added to root priors for exploration, `P(s,a) = (1−ε)·p_a + ε·η_a`, `η ~ Dir(α)`. **Implemented** (self-play only; see [Dirichlet root noise](#dirichlet-root-noise)).
+- **Temperature:** τ = 1 for the first ~30 moves, τ → 0 afterwards — our `temp_threshold` does the same.
+- **Training:** 700k steps at batch size 4096 for Chess. We train at much smaller scale.
+- **Evaluation:** new network accepted at 55% over 400 games. We use the same threshold (score-based) with fewer games.
 
-### Algorithm
-
-The algorithm centres on **placement points** — board cells that are diagonally adjacent to a friendly piece and not side-adjacent to one. These are the only cells where a new piece can make contact, so they anchor the search.
-
-```
-_valid_moves(board, player):
-    if first move:
-        return initial_actions (pre-computed at game init, filtered for opponent overlap)
-
-    for each placement_point in board.placement_points(player):
-        for each remaining piece_id:
-            for each orientation of that piece:
-                for each filled cell in the piece:
-                    compute insertion point that puts this cell on the placement point
-                    if piece fits on board AND all cells empty AND no friendly side adjacency:
-                        yield Action
-
-    deduplicate via set() (same action reachable from multiple placement points)
-```
-
-A short-circuit variant `_has_valid_moves` returns `True` on the first valid action found, used by `get_game_ended` to avoid computing the full list.
-
-### Caches maintained on the board
-
-- **Placement points** (`PlacementDict`): Updated incrementally by `_update_placement_points()` after each piece placement. Only cells in the neighbourhood of the placed piece are re-checked.
-- **Side danger zone** (`bool[14][14]`): Precomputed boolean board where `True` means orthogonally adjacent to a friendly piece. Replaces 4 per-cell neighbour checks with a single lookup.
-- **Piece orientation arrays and filled cell indices**: Precomputed once at game init by `PieceManager`. Eliminates `np.rot90()`/`np.flip()` calls during move generation.
-
-### Performance
-
-Profiling data (25 MCTS sims, CPU):
-- ~2ms per `valid_move_masking` call (one per leaf expansion)
-- ~300-500 legal moves in the early/mid game, dropping to near zero in late game
-- ~30 moves per game, ~30 turns total
-- Move generation is ~70% of MCTS search time; neural net inference is ~20%
-
-See `docs/08-TRAINING-ESTIMATES.md` for projected training times and `docs/plans/move-gen-further-optimisation.md` for deferred optimisation candidates (Cython, bitboard, batched inference).
-
----
-
-The original AlphaZero paper (Silver et al., 2018) provides key implementation details that guide this project:
-
-- **MCTS simulations:** 800 per move in Chess, scaled by game complexity
-- **cpuct:** Uses a formula that increases with the number of visits, not a fixed constant. We use a fixed constant (1.0) as a simplification
-- **Dirichlet noise:** Added to root node priors for exploration: `P(s,a) = (1-ε)p_a + ε·η_a` where `η ~ Dir(α)`. Not yet implemented in AlphaBlokus
-- **Temperature:** τ=1 for first 30 moves, τ→0 afterwards. Our `temp_threshold` serves the same purpose
-- **Training:** 700,000 training steps with batch size 4096 for Chess. We use much smaller scale
-- **Evaluation:** New network accepted if it wins 55%+ of 400 games. We use the same threshold with fewer games
-
-**Paper:** Silver, D. et al. "A general reinforcement learning algorithm that masters chess, shogi, and Go through self-play." *Science* 362.6419 (2018): 1140-1144.
+**Paper:** Silver, D. et al. "A general reinforcement learning algorithm that masters chess, shogi, and Go through self-play." *Science* 362.6419 (2018): 1140–1144.
