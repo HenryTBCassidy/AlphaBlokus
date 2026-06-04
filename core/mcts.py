@@ -14,7 +14,7 @@ from core.interfaces import IBoard, IGame, INeuralNetWrapper
 # Constants
 EPS: Final[float] = 1e-8  # Small constant to prevent division by zero
 
-# F3 virtual loss. When a batch descent traverses edge (s, a), the edge is
+# Virtual loss. When a batch descent traverses edge (s, a), the edge is
 # temporarily credited with VIRTUAL_LOSS extra visits each worth a value of -1
 # (i.e. W -= VIRTUAL_LOSS, N += VIRTUAL_LOSS). This depresses the edge's UCB so
 # the next descent in the same batch is steered down a different path, keeping
@@ -129,7 +129,7 @@ class MCTS:
         self.game_ended_cache: dict[StateKey, float] = {}
         self.valid_moves_cache: dict[StateKey, ValidMoves] = {}
 
-        # F3 virtual-loss counters. Maps (state, action) -> in-flight virtual
+        # Virtual-loss counters. Maps (state, action) -> in-flight virtual
         # visit count during a batch. Always empty between get_action_prob
         # calls (every increment is matched by a decrement after backprop).
         self.virtual_visits: dict[StateAction, int] = {}
@@ -180,10 +180,10 @@ class MCTS:
             pre_game_ended = self._total_game_ended_time_s
             pre_leaf = self._num_leaf_expansions
 
-        # Run simulations in batches of K (F3). K=1 (default) collects one leaf
-        # per batched NN call, reproducing the pre-F3 single-leaf search exactly
-        # — virtual loss is a no-op at K=1 and the selection/backprop arithmetic
-        # is unchanged. K>1 collects K virtual-loss-diversified leaves per outer
+        # Run simulations in batches of K. K=1 (default) collects one leaf
+        # per batched NN call, reproducing single-leaf search exactly — virtual
+        # loss is a no-op at K=1 and the selection/backprop arithmetic is
+        # unchanged. K>1 collects K virtual-loss-diversified leaves per outer
         # step and evaluates them in a single predict_batch call.
         if self._profiling:
             sim_start = time.perf_counter()
@@ -246,11 +246,11 @@ class MCTS:
         Retained as a public single-simulation entry point. Internally it runs
         a batch of size 1 through the same machinery ``get_action_prob`` uses,
         and returns the value backpropagated to the root (negated leaf value),
-        matching the pre-F3 recursive ``search`` return convention.
+        matching the original recursive ``search`` return convention.
         """
         return self._simulate_batch(canonical_board, 1)[0]
 
-    # -- F3 batched search internals -------------------------------------------
+    # -- Batched search internals ----------------------------------------------
 
     def _simulate_batch(self, root_board: IBoard, k: int) -> list[float]:
         """Run ``k`` simulations as one batch.
@@ -261,7 +261,7 @@ class MCTS:
         per-descent root values are returned in descent order (``search`` uses
         the first; ``get_action_prob`` discards them).
 
-        At ``k == 1`` this is bit-for-bit equivalent to the pre-F3 recursive
+        At ``k == 1`` this is bit-for-bit equivalent to the original recursive
         search: a single descent applies virtual loss that affects no other
         descent and is removed immediately, so selection and backprop are
         identical to the original arithmetic.
@@ -347,7 +347,7 @@ class MCTS:
         """Return the UCB-best valid action at expanded state ``s``.
 
         When an edge carries no virtual loss (always the case at K=1) the score
-        uses the exact pre-F3 expression so the choice is bit-identical. When an
+        uses the exact original expression so the choice is bit-identical. When an
         edge is in-flight (virtual visits > 0) it is scored as if it had
         ``virtual_visits`` extra visits each returning value -1, depressing its
         UCB so parallel descents diversify.
@@ -387,7 +387,7 @@ class MCTS:
 
     def _expand_leaf(self, board: IBoard, s: StateKey, priors: PolicyVector) -> None:
         """Expand a freshly evaluated leaf: mask its priors to legal moves,
-        renormalise, and initialise its node statistics. Mirrors the pre-F3
+        renormalise, and initialise its node statistics. Mirrors the original
         leaf-handling exactly (only the NN call is hoisted out into the batch)."""
         if self._detailed:
             vm_start = time.perf_counter()
@@ -413,7 +413,7 @@ class MCTS:
     def _backprop(self, path: list[StateAction], leaf_value: float) -> float:
         """Propagate ``leaf_value`` (leaf-perspective) back up ``path``, flipping
         sign at each ply. Updates Q-values, visit counts and state visits with
-        the same running-mean arithmetic as the pre-F3 recursive unwind. Returns
+        the same running-mean arithmetic as the original recursive unwind. Returns
         the value as seen above the root (the negated leaf value for an empty
         path), matching the old ``search`` return value."""
         value = -leaf_value

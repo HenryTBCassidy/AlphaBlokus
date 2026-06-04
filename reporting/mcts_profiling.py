@@ -344,7 +344,7 @@ def build_multi_phase_report(
     Layout:
 
     1. **Wall-clock summary** — per-phase total time + games + sims/sec, side
-       by side, so the F1 "before vs after" comparison is obvious at a glance.
+       by side, so the "before vs after" comparison is obvious at a glance.
     2. **Run-time estimate table** — optional; passed in as HTML by the
        caller (the estimator lives in :mod:`scripts.benchmark_phases`).
     3. **Per-phase drill-down** — the original mcts_profiling-style detail

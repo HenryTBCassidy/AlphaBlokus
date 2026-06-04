@@ -1,19 +1,17 @@
-"""Equivalence tests between move-gen implementations (F2 P3).
+"""Equivalence tests between move-gen implementations.
 
 This test compares the *current* ``valid_move_masking`` against the
-*new* (post-F2) implementation across a large set of stratified random
+new table-driven implementation across a large set of stratified random
 positions. If they ever disagree, the new implementation is buggy.
 
-Right now there is no new implementation — F2 P6 hasn't been written
-yet. So this test compares the current implementation against itself,
-which is trivially true. **That's deliberate**: the infrastructure
-needs to exist and the cache needs to be live *before* the new
-implementation is written, so we have a working oracle from day one of
-P6 work.
+Right now there is no new implementation yet. So this test compares the
+current implementation against itself, which is trivially true.
+**That's deliberate**: the infrastructure needs to exist and the cache
+needs to be live *before* the new implementation is written, so we have
+a working oracle from day one.
 
-When F2 P6 lands, replace ``new_implementation`` below with a call
-into the real new generator. The rest of the test machinery stays the
-same.
+When the new generator lands, replace ``new_implementation`` below with
+a call into it. The rest of the test machinery stays the same.
 
 Fixtures live at ``tests/fixtures/blokus_duo_positions/dev_5000.npz``
 (5,000 stratified positions). See
@@ -21,7 +19,7 @@ Fixtures live at ``tests/fixtures/blokus_duo_positions/dev_5000.npz``
 and stratification rationale.
 
 The 50,000-position gauntlet (``gauntlet_50000.npz``) is a separate,
-slow test marked with ``pytest.mark.slow`` that runs once before P8
+slow test marked with ``pytest.mark.slow`` that runs once before
 switch-over rather than on every pytest invocation.
 """
 from __future__ import annotations
@@ -64,7 +62,7 @@ def current_valid_moves(game: BlokusDuoGame, board: BlokusDuoBoard, player: int)
 
 
 def new_valid_moves(game: BlokusDuoGame, board: BlokusDuoBoard, player: int) -> NDArray:
-    """The F2 implementation — precomputed-table-driven move generator.
+    """The precomputed-table-driven move generator.
 
     Returns a bool mask of legal actions (shape ``(17837,)``). When this
     test passes, it means the new implementation agrees with the old
@@ -158,7 +156,7 @@ def test_movegen_equivalence_dev_cache(blokus_game_module: BlokusDuoGame) -> Non
     """Compare current vs new implementation on every cached dev position.
 
     Currently trivially passes (both call the current impl). Becomes
-    a real test the moment F2 P6 swaps in the new implementation.
+    a real test the moment the new implementation is swapped in.
 
     Runs in ~10 seconds against the 5,000-position cache because
     replay is fast and we're not generating positions on the fly.
@@ -211,7 +209,7 @@ def test_movegen_equivalence_dev_cache(blokus_game_module: BlokusDuoGame) -> Non
 
 @pytest.mark.slow
 def test_movegen_equivalence_gauntlet(blokus_game_module: BlokusDuoGame) -> None:
-    """The 50,000-position gauntlet — runs only before P8 switch-over.
+    """The 50,000-position gauntlet — runs only before the switch-over.
 
     Skipped automatically if the gauntlet cache hasn't been built. To
     build, run::

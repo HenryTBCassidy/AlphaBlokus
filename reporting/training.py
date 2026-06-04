@@ -28,7 +28,7 @@ def _load_metrics(directory: Path) -> pd.DataFrame:
     return df
 
 # ---------------------------------------------------------------------------
-# D1: Consistent color palette and chart defaults
+# Consistent color palette and chart defaults
 # ---------------------------------------------------------------------------
 
 _COLORS = {
@@ -66,7 +66,7 @@ def _apply_defaults(fig: go.Figure, *, width: int = _FULL_WIDTH, height: int = _
 
 
 # ---------------------------------------------------------------------------
-# D2: KPI summary cards
+# KPI summary cards
 # ---------------------------------------------------------------------------
 
 def _format_duration(seconds: float) -> str:
@@ -111,7 +111,7 @@ def _make_kpi_cards(
     throughput_data: pd.DataFrame,
     update_threshold: float,
 ) -> str:
-    """D2: Build HTML for the KPI card row."""
+    """Build HTML for the KPI card row."""
     # Final loss + delta — mean of each generation's last epoch (the
     # epoch where the network is most trained). Avoids the noise of a
     # single trailing batch and the artefact of running-mean resets.
@@ -164,7 +164,7 @@ def _make_kpi_cards(
 
 
 # ---------------------------------------------------------------------------
-# D4: Loss per generation
+# Loss per generation
 # ---------------------------------------------------------------------------
 
 def _make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
@@ -220,7 +220,7 @@ def _make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
 
 
 # ---------------------------------------------------------------------------
-# D5: Smoothed per-batch loss timeline
+# Smoothed per-batch loss timeline
 # ---------------------------------------------------------------------------
 
 def _make_loss_timeline(df: pd.DataFrame) -> go.Figure:
@@ -437,7 +437,7 @@ def _make_arena_plot(arena_data: pd.DataFrame, update_threshold: float) -> go.Fi
 
 
 # ---------------------------------------------------------------------------
-# D6: Performance charts (half-width for grid)
+# Performance charts (half-width for grid)
 # ---------------------------------------------------------------------------
 
 def _make_timing_plot(timings_data: pd.DataFrame) -> go.Figure:
@@ -1324,7 +1324,7 @@ def _make_profiling_plot(profiling_data: pd.DataFrame) -> go.Figure:
     """
     df = profiling_data.copy()
     if "mean_policy_entropy" not in df.columns:
-        df["mean_policy_entropy"] = 0.0  # backward compat with pre-R8 runs
+        df["mean_policy_entropy"] = 0.0  # backward compat with older runs
     agg = df.groupby("generation").agg(
         moves_mean=("num_moves", "mean"),
         moves_std=("num_moves", "std"),
@@ -1427,7 +1427,7 @@ def _mean_band_trace(
 
 
 # ---------------------------------------------------------------------------
-# D7: Config table (unchanged content, moved to bottom)
+# Config table (unchanged content, moved to bottom)
 # ---------------------------------------------------------------------------
 
 def _make_config_table(config: RunConfig) -> str:
@@ -1456,7 +1456,7 @@ def _make_config_table(config: RunConfig) -> str:
 
 
 # ---------------------------------------------------------------------------
-# D3: HTML template with CSS grid, collapsible sections, descriptions
+# HTML template with CSS grid, collapsible sections, descriptions
 # ---------------------------------------------------------------------------
 
 _CSS = """

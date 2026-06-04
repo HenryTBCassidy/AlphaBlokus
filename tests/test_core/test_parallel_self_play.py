@@ -1,4 +1,4 @@
-"""Determinism + correctness tests for the F1 parallel self-play worker.
+"""Determinism + correctness tests for the parallel self-play worker.
 
 The headline invariants this file enforces:
 
@@ -6,9 +6,9 @@ The headline invariants this file enforces:
    different inputs → (statistically) different outputs.
 2. ``run_self_play_episodes_parallel`` with ``num_workers=1`` produces
    the same per-episode training examples as with ``num_workers=4`` at
-   the same seed. This is the F1 P4 determinism check — proves the
-   worker pool introduces no statistical drift relative to a serial
-   walk through the same tasks.
+   the same seed. This determinism check proves the worker pool
+   introduces no statistical drift relative to a serial walk through
+   the same tasks.
 3. The function returns one episode-worth of examples per
    ``range(num_eps)`` slot, in submission order.
 
@@ -144,9 +144,9 @@ def test_parallel_one_worker_matches_four_workers(
     orchestrator uses ``pool.map`` (not ``imap_unordered``); per-episode
     determinism is guaranteed by ``derive_episode_seed``.
 
-    If this test fails, any speedup claim from F1 is suspect — we'd be
-    getting "free" wall-clock at the cost of running different (worse)
-    training data.
+    If this test fails, any speedup claim from parallel self-play is
+    suspect — we'd be getting "free" wall-clock at the cost of running
+    different (worse) training data.
 
     Workers must load from the same checkpoint or their random-init
     weights diverge across process boundaries — in production

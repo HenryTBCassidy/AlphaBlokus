@@ -1,4 +1,4 @@
-"""Multi-process round-trip tests for the shared-memory channel (F5 / C3).
+"""Multi-process round-trip tests for the shared-memory channel.
 
 Spawns a real inference-server process and real worker processes that talk over
 shared memory, verifying results route back correctly and per-row-independently

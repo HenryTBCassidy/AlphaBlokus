@@ -9,9 +9,10 @@ piece extends off the board (e.g. a 5-cell vertical piece anchored on row
 board).
 
 Pentobi's source (`libpentobi_base/Move.h:32`) reports **13,729** legal
-on-board placements for Blokus Duo. If our count disagrees, our F2 plan
-(which sizes precomputed tables to 13,729 entries) is broken from the
-start and we need to investigate before doing any further F2 work.
+on-board placements for Blokus Duo. If our count disagrees, the
+table-driven move generator (which sizes precomputed tables to 13,729
+entries) is broken from the start and we need to investigate before
+building those tables.
 
 Possible reasons for a mismatch:
 - Our ``pieces.json`` definitions differ from Pentobi's piece shapes.

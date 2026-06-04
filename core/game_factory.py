@@ -29,9 +29,10 @@ _BLOKUS_PIECES = _REPO_ROOT / "games" / "blokusduo" / "pieces.json"
 def instantiate_game(config: RunConfig) -> IGame:
     """Instantiate just the game (no network) from the run config.
 
-    Used by F5 inference-server workers, which need the game rules but **not**
+    Used by inference-server workers, which need the game rules but **not**
     their own network — the server process owns the single GPU net, so building
-    a net per worker would recreate the multi-net GPU contention F5 removes.
+    a net per worker would recreate the multi-net GPU contention the server
+    is designed to remove.
     """
     match config.game:
         case "tictactoe":

@@ -1,4 +1,4 @@
-"""F2 training-determinism check (P9.b).
+"""Training-determinism check for the table-driven move generator.
 
 Stronger than the position-level equivalence test in
 ``test_movegen_equivalence.py``: this test runs full self-play episodes
@@ -12,8 +12,8 @@ Why this is stricter:
   in a different order, or otherwise causes downstream divergence,
   the position-level test could pass while training trajectories drift.
 - This test fixes the seed, runs self-play through both impls, and
-  byte-compares training examples. If they don't match, F2 has a hidden
-  side-effect somewhere — a real correctness bug.
+  byte-compares training examples. If they don't match, the new
+  generator has a hidden side-effect somewhere — a real correctness bug.
 
 The test uses MCTS with very few sims to stay fast; the determinism
 invariant is independent of sim count.
@@ -34,10 +34,11 @@ PIECES_PATH = Path(__file__).resolve().parent.parent.parent / "games" / "blokusd
 
 def _run_episode_with_movegen(seed: int, use_f2: bool, num_moves: int) -> list:
     """Play ``num_moves`` legal moves with a fixed seed using either the
-    current or F2 move generator. Returns the action sequence.
+    current or table-driven move generator. Returns the action sequence.
 
-    If trajectories agree across both impls at the same seed, F2
-    introduces no RNG-state drift or ordering side-effects.
+    If trajectories agree across both impls at the same seed, the
+    table-driven generator introduces no RNG-state drift or ordering
+    side-effects.
     """
     rng = np.random.default_rng(seed)
     game = BlokusDuoGame(pieces_config_path=PIECES_PATH)
@@ -73,12 +74,13 @@ def _run_episode_with_movegen(seed: int, use_f2: bool, num_moves: int) -> list:
 
 @pytest.mark.parametrize("seed", [0, 17, 42, 99, 2026])
 def test_training_trajectory_identical(seed: int) -> None:
-    """Two self-play walks at the same seed, one with current impl, one
-    with F2, must produce identical action sequences.
+    """Two self-play walks at the same seed, one with the current impl,
+    one with the table-driven generator, must produce identical action
+    sequences.
 
     Five seeds × ~30 moves each = 150 actions per impl per test run.
-    If F2 caused any drift it would manifest as a divergent action
-    somewhere in this sequence.
+    If the table-driven generator caused any drift it would manifest as
+    a divergent action somewhere in this sequence.
     """
     target_moves = 30
     actions_old = _run_episode_with_movegen(seed, use_f2=False, num_moves=target_moves)

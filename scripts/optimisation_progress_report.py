@@ -1,15 +1,14 @@
 """Generate an HTML report visualising the full-cycle optimisation progress.
 
 Renders the measured milestone progression from the master plan's progress
-tracker (`docs/plans/full-cycle-optimisation.md`) — serial baseline → F1
-(parallel self-play) → F2 (precomputed move-gen) → F3 (batched inference) — as
-a single self-contained HTML page so the cumulative speedup is visible at a
-glance.
+tracker (`docs/plans/full-cycle-optimisation.md`) — serial baseline → parallel
+self-play → precomputed move-gen → batched inference — as a single
+self-contained HTML page so the cumulative speedup is visible at a glance.
 
 The milestone numbers are the curated figures from the progress tracker (the
-historical per-run parquets for F1 no longer exist locally, so the tracker is
-the source of truth). The F3 figures come from
-`temp/profile_baseline_f3_k{1,8,16}_w8_2026-06-01/`.
+historical per-run parquets for the parallel-self-play step no longer exist
+locally, so the tracker is the source of truth). The batched-inference figures
+come from `temp/profile_baseline_f3_k{1,8,16}_w8_2026-06-01/`.
 
 Usage:
     uv run python -m scripts.optimisation_progress_report
@@ -62,7 +61,8 @@ class Milestone:
     colour: str
 
 
-# Curated from docs/plans/full-cycle-optimisation.md progress tracker + the F3 run.
+# Curated from docs/plans/full-cycle-optimisation.md progress tracker + the
+# batched-inference run.
 MILESTONES: list[Milestone] = [
     Milestone("Serial baseline", "2026-05-26", 32.6, 1.00, 54.1, _C_SERIAL),
     Milestone("F1 — parallel (4 workers)", "2026-05-27", 7.9, 4.13, 12.0, _C_F1),
@@ -84,7 +84,7 @@ COMPONENT_SPLIT: list[tuple[str, float, float, float]] = [
 # F3 batch-size sweep — total benchmark wall-clock (s), 8 workers (end-to-end, contended).
 F3_K_SWEEP: list[tuple[str, float]] = [("K=1", 257.6), ("K=8", 217.5), ("K=16", 138.7)]
 
-# P8 microbenchmark — isolated GPU-side speedup of predict_batch(K) vs K serial
+# Microbenchmark — isolated GPU-side speedup of predict_batch(K) vs K serial
 # predict() on the idle 3060 Ti (production net). Shows the pure batching gain,
 # uncontaminated by MCTS / 8-worker contention.
 F3_MICROBENCH: list[tuple[int, float]] = [

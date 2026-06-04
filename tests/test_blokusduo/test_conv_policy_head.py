@@ -1,4 +1,4 @@
-"""F4 conv-policy-head tests — the safety net for the policy read-out.
+"""Conv-policy-head tests — the safety net for the policy read-out.
 
 The conv head emits a ``(num_orientations, rows, cols)`` block and *reads it out*
 into the flat 17,837-long action vector that MCTS / masking / training expect. A
@@ -187,7 +187,7 @@ def test_conv_net_masked_policy_decodes_to_legal_moves(
 
 
 # ---------------------------------------------------------------------------
-# C5 — checkpoint compatibility must fail loudly across head types
+# checkpoint compatibility must fail loudly across head types
 # ---------------------------------------------------------------------------
 
 def test_loading_fc_checkpoint_into_conv_net_raises(tmp_path: Path) -> None:
@@ -203,7 +203,7 @@ def test_loading_fc_checkpoint_into_conv_net_raises(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# C8 — the conv head actually trains (gradients flow, loss drops, no NaN)
+# the conv head actually trains (gradients flow, loss drops, no NaN)
 # ---------------------------------------------------------------------------
 
 def test_conv_net_trains_and_loss_drops(tmp_path: Path) -> None:

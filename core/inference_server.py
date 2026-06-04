@@ -1,17 +1,17 @@
-"""Cross-worker batched inference server (F5, "Option B").
+"""Cross-worker batched inference server.
 
 The transport-agnostic *core* of the inference server: it accumulates leaf
 evaluation requests arriving from many self-play / arena / Elo workers and
 flushes them to the network in single large batches, recovering the GPU
-under-utilisation (~30% during self-play) that per-worker batching (F3) leaves
-on the table.
+under-utilisation (~30% during self-play) that per-worker batching leaves on
+the table.
 
 This module deliberately knows nothing about *how* requests arrive or *how*
 results are delivered (that is the transport layer — shared memory in
 production, an in-memory queue in tests) and nothing about *how* inference runs
 (that is an injected ``predict_fn`` wrapping the GPU net). Keeping those
 concerns out makes the batching logic unit-testable on CPU with no IPC and no
-CUDA. See ``docs/plans/cross-worker-inference-server.md`` (C2).
+CUDA.
 """
 
 from __future__ import annotations
@@ -51,7 +51,7 @@ class FlushPolicy:
 
     Attributes:
         max_batch: Maximum positions per GPU forward pass. Set near the net's
-            throughput-saturation point (C1 sweep).
+            throughput-saturation point.
         max_wait_s: Maximum time the first queued request waits before the batch
             is flushed even if it is not yet full.
     """

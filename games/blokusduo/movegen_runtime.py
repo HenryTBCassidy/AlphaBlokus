@@ -1,10 +1,10 @@
-"""F2 runtime move generator backed by precomputed lookup tables.
+"""Runtime move generator backed by precomputed lookup tables.
 
-This module is the hot path the F2 optimisation rewrites. Instead of the
-existing array-based ``BlokusDuoGame._generate_valid_moves`` (which
-loops over every piece × every orientation × every placement point and
-runs ``_all_cells_valid`` per candidate), F2 uses two precomputed tables
-built in :mod:`games.blokusduo.movegen_tables`:
+This is the optimised hot path for move generation. Instead of the
+array-based ``BlokusDuoGame._generate_valid_moves`` (which loops over
+every piece × every orientation × every placement point and runs
+``_all_cells_valid`` per candidate), this generator uses two precomputed
+tables built in :mod:`games.blokusduo.movegen_tables`:
 
 - ``MoveTables``: every legal ``(piece, orientation, anchor)`` triple
   numbered 0..13,728 with cell lists and adj/attach metadata.
@@ -32,7 +32,7 @@ cell here would be illegal*. That happens for two reasons:
   no-edge-touching-own-colour rule). Captured by
   ``board.side_danger_zone(player)``.
 
-The union of these two is F2's ``forbidden`` byte array.
+The union of these two is the ``forbidden`` byte array.
 
 The first-move case
 -------------------
@@ -40,8 +40,8 @@ The first-move case
 Until a player has placed a piece, ``placement_points`` is empty (the
 attach-point set requires at least one own piece on the board). The
 existing code handles this by falling back to a precomputed
-``initial_actions`` list. F2 does the same — for the special case of
-no pieces played, defer to the existing fast path. The optimisation
+``initial_actions`` list. This generator does the same — for the special
+case of no pieces played, defer to that fast path. The optimisation
 matters for the *thousands* of subsequent moves, not the one-off first
 move.
 
@@ -240,7 +240,7 @@ class F2MoveGenerator:
         """Populate ``out`` with the legal first moves for a player.
 
         Delegates to the existing ``_generate_valid_moves`` for the
-        first-move case; F2's hot path doesn't need to be optimised for
+        first-move case; the hot path doesn't need to be optimised for
         the one-off opening move per colour per game.
         """
         for action in game._generate_valid_moves(board, player):  # noqa: SLF001

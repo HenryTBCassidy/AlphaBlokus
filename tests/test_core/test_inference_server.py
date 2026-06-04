@@ -1,7 +1,7 @@
-"""Unit tests for the transport-agnostic inference-server core (F5 / C2).
+"""Unit tests for the transport-agnostic inference-server core.
 
 These exercise the batching logic in isolation: an in-memory request source
-stands in for the shared-memory transport (C3), and a deterministic,
+stands in for the shared-memory transport, and a deterministic,
 per-row-independent fake stands in for the GPU forward pass. No CUDA, no IPC.
 """
 

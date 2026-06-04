@@ -1,10 +1,10 @@
-"""F5 benchmark: self-play wall-clock + GPU utilisation, server-off vs server-on.
+"""Benchmark self-play wall-clock + GPU utilisation, server-off vs server-on.
 
 Run on the PC (CUDA), repo root:  uv run python -m scripts.benchmark_inference_server
 
 Times ``run_self_play_episodes_parallel`` at production settings (8 workers, 300
-sims, K=16) with the inference server off (F3 per-worker batching) then on (F5
-cross-worker batching), and reports the self-play s/game speedup plus the GPU
+sims, K=16) with the cross-worker inference server off (per-worker batching) then
+on (cross-worker batching), and reports the self-play s/game speedup plus the GPU
 utilisation each path achieves.
 """
 

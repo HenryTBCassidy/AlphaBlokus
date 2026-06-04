@@ -79,7 +79,7 @@ def build_action_permutation(board_rows: int, board_cols: int, num_orientations:
     Returns ``perm`` such that ``conv_flat[perm]`` is in ActionCodec order:
     ``perm[action_index]`` = the conv-flat position holding that action's logit.
     Pure arithmetic replicating ``ActionCodec``/``CoordinateIndexDecoder``; the
-    C4 one-hot probe test pins it against the real ``ActionCodec.encode``.
+    The one-hot probe test pins it against the real ``ActionCodec.encode``.
     """
     board_size = board_cols  # Blokus Duo is square; ActionCodec uses one board_size
     cells = board_rows * board_cols
@@ -96,7 +96,7 @@ def build_action_permutation(board_rows: int, board_cols: int, num_orientations:
 
 
 class ConvPolicyHead(nn.Module):
-    """Fully-convolutional policy head (F4).
+    """Fully-convolutional policy head.
 
     A 1×1 convolution maps the trunk's per-cell features to ``num_orientations``
     logit planes (one per piece-orientation), reordered into ``ActionCodec``

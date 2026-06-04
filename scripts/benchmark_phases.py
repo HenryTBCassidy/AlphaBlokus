@@ -5,7 +5,7 @@ This is the "before/after" tool for performance optimisations in
 phases of a generation at production shape (same net + sim count), captures
 per-game MCTS profiling stats, and produces an HTML report with:
 
-1. Wall-clock per phase + bar chart (the headline F1 number).
+1. Wall-clock per phase + bar chart (the headline parallelism number).
 2. Run-time estimator: predicts how long a full run of arbitrary scale
    takes given the measured per-game numbers.
 3. The same per-move drill-down ``scripts/mcts_profiling.py`` produces,
@@ -153,8 +153,8 @@ def _run_self_play_phase_parallel(
     config: RunConfig, nnet: INeuralNetWrapper, num_workers: int,
 ) -> PhaseResult:
     """Dispatch self-play across ``num_workers`` worker processes via the
-    F1 orchestrator. Saves the current ``nnet`` to a fixed-name
-    checkpoint workers load at pool init.
+    parallel self-play orchestrator. Saves the current ``nnet`` to a
+    fixed-name checkpoint workers load at pool init.
     """
     from core.parallel_self_play import run_self_play_episodes_parallel
 
@@ -243,8 +243,9 @@ def _run_two_player_phase(
     """Shared engine for arena and Elo phases. Two-player game, swapped halfway.
 
     Sequential when ``num_workers == 1`` (preserves the original
-    benchmark behaviour). Process-pool parallel via the F1 orchestrator
-    otherwise — the same one Coach uses for live training.
+    benchmark behaviour). Process-pool parallel via the parallel
+    self-play orchestrator otherwise — the same one Coach uses for live
+    training.
     """
     if num_workers > 1:
         return _run_two_player_phase_parallel(
@@ -301,7 +302,7 @@ def _run_two_player_phase_parallel(
     phase_name: str, num_games: int, config: RunConfig,
     nnet_a: INeuralNetWrapper, nnet_b: INeuralNetWrapper, num_workers: int,
 ) -> PhaseResult:
-    """Parallel two-player phase via the F1 orchestrator.
+    """Parallel two-player phase via the parallel self-play orchestrator.
 
     Workers play the games — main process discards win/loss bookkeeping
     (the benchmark cares about wall-clock + per-game MCTS stats, not
@@ -348,7 +349,7 @@ def _run_two_player_phase_parallel(
     wall_clock = time.perf_counter() - phase_start
     # Parallel path doesn't currently return per-game MCTS stats (the
     # orchestrator was sized for outcome bookkeeping, not profiling).
-    # That's acceptable for the F1 measurement — the headline is
+    # That's acceptable for the parallelism measurement — the headline is
     # wall-clock per phase, and stats are still available from the
     # self-play phase. Future change: extend the worker return value to
     # include stats if we want full per-game drill-down here.
@@ -504,8 +505,9 @@ def main() -> None:
     game, nnet = instantiate_game_and_network(config)
     nnet_opponent = nnet.__class__(game, config)  # second random-init for arena/Elo
 
-    # Enable F2 in the main-process game if requested. Workers handle
-    # this themselves via ``core.parallel_self_play._maybe_enable_f2``.
+    # Enable the optimised move generator in the main-process game if
+    # requested. Workers handle this themselves via
+    # ``core.parallel_self_play._maybe_enable_f2``.
     if getattr(config, "use_optimised_movegen", False) and (
         enable := getattr(game, "enable_optimised_movegen", None)
     ) is not None:

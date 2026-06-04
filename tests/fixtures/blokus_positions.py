@@ -17,15 +17,16 @@ What this module provides
 Why action sequences, not boards
 --------------------------------
 
-The equivalence test (F2 P3) compares ``valid_moves()`` between two
+The equivalence test compares ``valid_moves()`` between two
 implementations of the move generator on identical positions. The
 cleanest way to guarantee both implementations see the *same* position
 is to play the same action sequence through both implementations,
 each starting from a fresh board.
 
 Action sequences are also stable across implementation changes: a
-sequence cached today still works after F2 lands, because the action
-encoding doesn't change (only the move-gen logic does).
+sequence cached today still works after the table-driven generator
+lands, because the action encoding doesn't change (only the move-gen
+logic does).
 
 Stratification
 --------------
@@ -107,7 +108,7 @@ def generate_position_sequences(
     Replay via :func:`replay_to_board` to get the position itself.
 
     The current ``BlokusDuoGame.valid_move_masking`` is used to pick
-    each step's random legal move — so the *new* (post-F2) move-gen
+    each step's random legal move — so the new table-driven move-gen
     will be tested on positions IT didn't pick, which is what we want.
 
     Yields:

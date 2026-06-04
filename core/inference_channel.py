@@ -1,8 +1,8 @@
-"""Shared-memory transport for the cross-worker inference server (F5 / C3).
+"""Shared-memory transport for the cross-worker inference server.
 
 Connects N self-play / arena / Elo worker processes to a single inference-server
 process over shared memory, so leaf evaluations are coalesced across *all*
-workers into large GPU batches (recovering the ~70% idle GPU that per-worker F3
+workers into large GPU batches (recovering the ~70% idle GPU that per-worker
 batching leaves on the table).
 
 **Why this is correct-by-construction.** Each worker is *synchronous*: it writes
@@ -22,8 +22,6 @@ Signalling: a ``Queue`` carries ``worker_id``s from workers to the server; a
 per-worker ``Event`` tells each worker its result is ready; a shared ``Event``
 requests shutdown. These are passed to children as process args (works under
 both ``fork`` and ``spawn``); the big arrays are attached by name.
-
-See ``docs/plans/cross-worker-inference-server.md`` (C3).
 """
 
 from __future__ import annotations

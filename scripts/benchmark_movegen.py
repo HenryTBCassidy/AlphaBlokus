@@ -1,9 +1,9 @@
-"""Microbenchmark: F2 vs current move-gen, per-call.
+"""Microbenchmark: table-driven vs current move-gen, per-call.
 
 Loads the dev_5000 cached positions, runs both implementations on each,
 and reports the per-position wall-clock breakdown. Designed to give a
-clear answer to "how much faster is F2?" without the noise of a full
-training-pipeline benchmark.
+clear answer to "how much faster is the table-driven generator?" without
+the noise of a full training-pipeline benchmark.
 
 Usage::
 

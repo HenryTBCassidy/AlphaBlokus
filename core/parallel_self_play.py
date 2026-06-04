@@ -1,13 +1,13 @@
-"""Process-pool workers for parallel game-playing phases (F1).
+"""Process-pool workers for parallel game-playing phases.
 
 Three phases of training run independent games and are all parallelised
 through the same machinery here:
 
-1. **Self-play** (P3): one network plays both sides of each game,
+1. **Self-play**: one network plays both sides of each game,
    producing training examples + MCTS stats.
-2. **Arena** (P8): two networks (current vs previous-best) play, with
+2. **Arena**: two networks (current vs previous-best) play, with
    game records returned for replay storage.
-3. **Elo** (P9): two networks (current vs frozen gen-0 baseline) play,
+3. **Elo**: two networks (current vs frozen gen-0 baseline) play,
    no records persisted.
 
 Public surface:
@@ -71,8 +71,9 @@ _WORKER_CONFIG: RunConfig | None = None
 _WORKER_GAME: IGame | None = None
 _WORKER_NNET_A: INeuralNetWrapper | None = None
 _WORKER_NNET_B: INeuralNetWrapper | None = None
-# F5: a self-play worker's view of the shared-memory inference channel, when the
-# cross-worker inference server is enabled. ``None`` on the per-worker (F3) path.
+# A self-play worker's view of the shared-memory inference channel, when the
+# cross-worker inference server is enabled. ``None`` when each worker holds its
+# own copy of the network instead.
 _WORKER_CHANNEL: SharedInferenceChannel | None = None
 
 
@@ -142,7 +143,7 @@ def _worker_init_self_play(config: RunConfig, checkpoint_path: str | None) -> No
 
 
 def _maybe_enable_f2(config: RunConfig, game: IGame) -> None:
-    """Enable F2 move generator on ``game`` if config asks for it.
+    """Enable the optimised move generator on ``game`` if config asks for it.
 
     Only effective for BlokusDuoGame — TTT ignores the flag (its move
     generator is already trivially fast).
@@ -153,11 +154,11 @@ def _maybe_enable_f2(config: RunConfig, game: IGame) -> None:
         enable()
 
 
-# -- F5: cross-worker inference server --------------------------------------
+# -- cross-worker inference server ------------------------------------------
 
 
 def _server_enabled(config: RunConfig, num_workers: int) -> bool:
-    """Whether the F5 inference server should run for this phase.
+    """Whether the cross-worker inference server should run for this phase.
 
     Requires the flag, real parallelism (``> 1`` worker), and CUDA — on CPU the
     server adds IPC overhead with no GPU-contention to relieve, so we keep the
@@ -169,9 +170,9 @@ def _server_enabled(config: RunConfig, num_workers: int) -> bool:
 def _resolve_server_batch(config: RunConfig, num_workers: int) -> tuple[int, int]:
     """Return ``(max_leaves, max_batch)`` for the channel / flush policy.
 
-    ``max_leaves`` is each worker's per-request cap (its F3 batch size);
-    ``max_batch`` is the server's GPU batch cap — config override if set, else
-    every worker's full leaf batch at once.
+    ``max_leaves`` is each worker's per-request cap (its MCTS leaf batch
+    size); ``max_batch`` is the server's GPU batch cap — config override if
+    set, else every worker's full leaf batch at once.
     """
     max_leaves = max(1, config.mcts_config.mcts_batch_size)
     max_batch = config.server_max_batch if config.server_max_batch > 0 else num_workers * max_leaves
@@ -200,7 +201,7 @@ def _run_inference_server(
 
 
 def _worker_init_self_play_server(config: RunConfig, handles: ChannelHandles, counter: object) -> None:
-    """Pool initialiser for self-play workers in F5 server mode.
+    """Pool initialiser for self-play workers in inference-server mode.
 
     Builds the game only (no per-worker net — the server owns it), claims a
     unique slot id from the shared counter, attaches the channel, and installs
@@ -401,9 +402,9 @@ def run_self_play_episodes_parallel(
     import multiprocessing as mp
     ctx = mp.get_context("spawn")
 
-    # F5: when the inference server is enabled, spawn it and point workers at a
-    # client net via the server initialiser. Otherwise the existing per-worker
-    # (F3) path is taken verbatim — flag off is byte-for-byte unchanged.
+    # When the inference server is enabled, spawn it and point workers at a
+    # client net via the server initialiser. Otherwise the per-worker path
+    # (each worker holds its own network copy) is taken verbatim.
     channel: SharedInferenceChannel | None = None
     server_proc = None
     if _server_enabled(config, num_workers):

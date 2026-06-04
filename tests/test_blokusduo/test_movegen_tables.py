@@ -1,8 +1,9 @@
-"""Unit tests for the F2 P4 geometry tables.
+"""Unit tests for the move-gen geometry tables.
 
 The :class:`MoveTables` produced by :func:`build_move_tables` is the
-foundation of the F2 runtime move generator. Any bug here propagates to
-every downstream piece of F2, so this test pins the invariants tightly.
+foundation of the table-driven runtime move generator. Any bug here
+propagates to every downstream piece of the generator, so this test
+pins the invariants tightly.
 
 Tests run in ~100ms (table build is fast).
 """
@@ -188,7 +189,7 @@ def test_offboard_actions_marked(tables) -> None:
 
 
 # ===========================================================================
-# P5: LookupTable tests
+# LookupTable tests
 # ===========================================================================
 
 @pytest.fixture(scope="module")

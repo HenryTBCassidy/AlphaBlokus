@@ -217,7 +217,7 @@ class INeuralNetWrapper(Protocol):
 
         Equivalent to ``[self.predict(b) for b in boards]`` but executes the
         forward pass once with batch dimension ``len(boards)``. This is the
-        core primitive behind F3 (batched MCTS inference) — the speedup comes
+        core primitive behind batched MCTS inference — the speedup comes
         entirely from collapsing N batch-of-1 GPU calls into one batch-of-N
         call.
 

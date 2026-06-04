@@ -12,10 +12,9 @@ Status legend: **Idea** (raw, unexamined) · **Researching** (actively being inv
 | # | Avenue | Status | One-liner |
 |---|--------|--------|-----------|
 | I1 | [Adaptive simulation budget](#i1-adaptive-simulation-budget) | Idea | Scale `num_mcts_sims` with branching factor / moves-left instead of a flat 300 — mostly to stop wasting sims in the low-branching endgame |
-| I2 | [Dirichlet root noise](#i2-dirichlet-root-noise) | Idea | Add exploration noise to root priors so good moves with weak priors still get explored — the standard AlphaZero fix for thin early-game coverage |
-| I3 | [Evaluation-time search tuning](#i3-evaluation-time-search-tuning) | Idea | Use a stronger/exact search at eval than at train (e.g. K=1 and/or more sims) since eval cares about strength, not throughput |
+| I2 | [Evaluation-time search tuning](#i2-evaluation-time-search-tuning) | Idea | Use a stronger/exact search at eval than at train (e.g. K=1 and/or more sims) since eval cares about strength, not throughput |
 
-> Ideas already captured elsewhere (not duplicated here): the conv policy head (F4) is the active next step in the [optimisation menu](plans/full-cycle-optimisation.md#optimisation-menu); MCTS tree reuse, Cython move-gen, cached-valid-moves and the cross-worker inference server are in that plan's [Considered and set aside](plans/full-cycle-optimisation.md#considered-and-set-aside) section; mixed-precision / fp16 inference is in its Out-of-scope list.
+> Ideas already captured elsewhere (not duplicated here): the conv policy head (F4) and the cross-worker inference server (F5) are done — see the [optimisation menu](plans/full-cycle-optimisation.md#optimisation-menu); MCTS tree reuse, Cython move-gen and cached-valid-moves are in that plan's [Considered and set aside](plans/full-cycle-optimisation.md#considered-and-set-aside) section; mixed-precision / fp16 inference is in its Out-of-scope list. Dirichlet root noise is **implemented** (`dirichlet_epsilon`/`dirichlet_alpha` in `MCTSConfig`, default-off).
 
 ---
 
@@ -39,36 +38,16 @@ So a flat 300 is simultaneously *thin* in the opening and *wasteful* in the endg
 
 - **Tapering sims *down* late-game is the clean win.** At turn 21+ with <30 legal moves, 300 sims is absurd; 50–100 would give equal-or-better coverage and reclaim real wall-clock. Low risk, easy to measure.
 - **Scaling sims *up* early-game is expensive and uncertain.** The opening is (a) the most expensive place to add sims (high branching → costly move-gen + more inference) and (b) arguably the least decision-critical (many roughly-equivalent developing moves). Worst ROI.
-- **Thin early coverage is better addressed by [I2 (Dirichlet noise)](#i2-dirichlet-root-noise)** than by brute-forcing more sims. AlphaZero gets away with flat sims precisely because the policy prior prunes the legal set down to a promising handful — you don't *need* to visit all 414 opening moves, you need the good ones visited enough, plus exploration insurance for when the prior is wrong.
+- **Thin early coverage is better addressed by Dirichlet root noise** (already implemented — `dirichlet_epsilon`/`dirichlet_alpha` in `MCTSConfig`, default-off) than by brute-forcing more sims. AlphaZero gets away with flat sims precisely because the policy prior prunes the legal set down to a promising handful — you don't *need* to visit all 414 opening moves, you need the good ones visited enough, plus exploration insurance (the noise) for when the prior is wrong.
 - **Subtlety:** varying sims per position changes how "sharp" each move's visit-count training target is, position to position. Not necessarily bad, but it makes targets less uniform across the game — be deliberate, and measure Elo impact rather than assume.
 
 **If promoted:** likely a small plan — a branching-aware (or pieces-left-aware) sim schedule, defaulting to today's flat 300 so it's opt-in, validated by an Elo-vs-flat-300 comparison. Composes with everything else (it's orthogonal to F1/F2/F3/F4).
 
-**Related:** [I2](#i2-dirichlet-root-noise) (complementary fix for early coverage), `docs/02-ALGORITHMS.md` (MCTS), `temp/move_count_analysis/` (the branching data).
+**Related:** Dirichlet root noise (implemented — the complementary fix for thin early coverage), `docs/02-ALGORITHMS.md` (MCTS), `temp/move_count_analysis/` (the branching data).
 
 ---
 
-## I2. Dirichlet root noise
-
-**The idea.** AlphaGo Zero / AlphaZero add Dirichlet noise to the root node's priors during self-play for exploration:
-
-```
-P(s,a) = (1-ε)·p_a + ε·η_a    where η ~ Dir(α)
-```
-
-This guarantees that even moves the network's policy head rates poorly still get *some* root visits, so a genuinely good move with a (wrongly) weak prior isn't permanently starved of exploration. It's the standard insurance against a bad early-training prior.
-
-**Why it matters for us.** We don't do this yet (noted in `docs/02-ALGORITHMS.md` as "not yet implemented"). It's the more principled answer to the thin early-game coverage that [I1](#i1-adaptive-simulation-budget) also touches: with ~414 legal opening moves, 300 sims, and an untrained prior, exploration is thin and we currently have no forced-exploration mechanism at the root. Most relevant once real Blokus training starts and early generations have weak priors.
-
-**Open parameters:** ε (mixing weight, AlphaZero used 0.25) and α (Dirichlet concentration, scaled to the action space — AlphaZero used ~0.03 for Go's 362 actions; our 17,837-action space needs its own value). Self-play only — never at evaluation.
-
-**If promoted:** small, well-scoped change in `MCTS` root handling, gated behind a config flag, with the usual K=1-style "off = bit-identical to today" safety. Should land before (or alongside) the first serious Blokus training run.
-
-**Related:** [I1](#i1-adaptive-simulation-budget), `docs/02-ALGORITHMS.md:489`, the F3 plan's out-of-scope note.
-
----
-
-## I3. Evaluation-time search tuning
+## I2. Evaluation-time search tuning
 
 **The idea.** MCTS is a search procedure, not something the network learns, so there's no requirement to search the same way at evaluation as during training. Evaluation (vs Pentobi, arena, Elo) cares about *playing strength*, not throughput, and runs far fewer games — so we can afford a stronger, slower search there.
 

@@ -1,4 +1,4 @@
-"""F3 microbenchmark: ``predict_batch(K)`` vs K serial ``predict()`` calls.
+"""Microbenchmark: ``predict_batch(K)`` vs K serial ``predict()`` calls.
 
 Isolates the *pure GPU-side* batching speedup from all MCTS / worker-contention
 overhead — the clean counterpart to the end-to-end phase benchmark

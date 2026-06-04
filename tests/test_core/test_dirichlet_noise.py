@@ -1,4 +1,4 @@
-"""R2 — Dirichlet root-noise tests.
+"""Dirichlet root-noise tests.
 
 Pins the exploration-noise contract: off by default (bit-identical search),
 on => valid perturbation of the root priors only, and reproducible under a seed.

@@ -1,12 +1,10 @@
-"""Precomputed move tables for the F2 move-gen rewrite.
+"""Precomputed move tables for the optimised move generator.
 
 This module enumerates every legal placement on a 14×14 Blokus Duo board
 and assigns each one a unique move ID 0..13,728. The static tables
-produced here are the foundation the (post-F2) runtime move generator
-will use.
+produced here are the foundation the runtime move generator uses.
 
-See ``docs/plans/move-gen-optimisation.md`` §P4 for the rationale and
-``docs/research/pentobi/move-generation.md`` for the original Pentobi
+See ``docs/research/pentobi/move-generation.md`` for the original Pentobi
 design this implementation is based on.
 
 What gets enumerated
@@ -33,16 +31,16 @@ The bidirectional ``action_id ↔ move_id`` mapping
 
 The rest of the codebase (MCTS, training, replay, etc.) thinks in
 **action IDs** — a number 0..17,836 from the action codec's
-14×14×91+1 cartesian product. F2 internals think in **move IDs** —
-a number 0..13,728 indexing the dense list of legal placements.
+14×14×91+1 cartesian product. The move-gen internals think in **move
+IDs** — a number 0..13,728 indexing the dense list of legal placements.
 
 Both are needed:
 
-- After move generation, F2 produces move IDs but the rest of the
-  system wants a 17,837-length boolean mask of legal actions.
+- After move generation, the generator produces move IDs but the rest
+  of the system wants a 17,837-length boolean mask of legal actions.
   ``move_to_action_id`` does that conversion.
 - When the rest of the system applies an action (via
-  ``Coach.execute_episode`` → ``Board.with_piece(action)``), F2's
+  ``Coach.execute_episode`` → ``Board.with_piece(action)``), the
   incremental state update needs to know which move ID that action
   corresponds to. ``action_to_move_id[action_id]`` does that (returning
   ``-1`` for the ~4,107 actions that are not legal placements).
@@ -52,7 +50,7 @@ Cell index convention
 
 We use **row-major, top-left origin**: ``cell_index = row * 14 + col``.
 This matches numpy's natural indexing of a (14, 14) array and is the
-convention F2's runtime forbidden/attach arrays use.
+convention the runtime forbidden/attach arrays use.
 
 The :class:`ActionCodec` uses (x, y) coordinates with bottom-left
 origin. Conversion happens at the boundary inside
@@ -693,7 +691,7 @@ def main() -> int:
 
     print()
     print("=" * 60)
-    print("Building lookup table (P5) on top of geometry tables...")
+    print("Building lookup table on top of geometry tables...")
     print("=" * 60)
     lookup = build_lookup_table(tables, BOARD_SIZE, verbose=True)
 

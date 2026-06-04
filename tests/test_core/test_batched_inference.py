@@ -1,18 +1,18 @@
-"""F3 (batched MCTS inference) safety-net tests.
+"""Batched MCTS inference safety-net tests.
 
 Two invariants are pinned here, both established *before* the iterative
-leaf-collection refactor (P3-P5) so we can prove the refactor didn't change
+leaf-collection refactor so we can prove the refactor didn't change
 behaviour:
 
 1. ``predict_batch(boards)`` is numerically equivalent to N separate
-   ``predict(board)`` calls. The whole F3 speedup rests on this — collapsing N
-   batch-of-1 forward passes into one batch-of-N pass must not change the
-   numbers (modulo float noise). Pinned on TicTacToe and on real Blokus
-   positions replayed from the dev fixture cache.
+   ``predict(board)`` calls. The whole batched-inference speedup rests on
+   this — collapsing N batch-of-1 forward passes into one batch-of-N pass
+   must not change the numbers (modulo float noise). Pinned on TicTacToe
+   and on real Blokus positions replayed from the dev fixture cache.
 
 2. MCTS is deterministic given a fixed network: the same network + same seed +
    same sim count produces identical visit counts. This is the contract the
-   F3 refactor must preserve at ``K=1`` (the batched path with batch size 1 has
+   refactor must preserve at ``K=1`` (the batched path with batch size 1 has
    to stay bit-identical to today's recursive search).
 """
 from __future__ import annotations
@@ -150,11 +150,11 @@ def test_predict_batch_matches_serial_blokus(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# MCTS determinism contract — the invariant the F3 refactor must preserve
+# MCTS determinism contract — the invariant the batched-inference refactor must preserve
 # ---------------------------------------------------------------------------
 
-# Golden visit counts + policy captured from the PRE-F3 recursive MCTS
-# (commit before the iterative refactor) with torch.manual_seed(0) for the
+# Golden visit counts + policy captured from the recursive MCTS that
+# predates the iterative refactor, with torch.manual_seed(0) for the
 # network weights, np.random.seed(123) before each search, num_mcts_sims=50,
 # cpuct=1.0, on a 32-filter / 1-block TTT net. The default mcts_batch_size=1
 # path must reproduce these byte-for-byte — that is the proof the iterative
@@ -184,7 +184,7 @@ _GOLDEN_TTT = {
 
 @pytest.mark.parametrize("label", list(_GOLDEN_TTT))
 def test_k1_matches_pre_f3_golden(tmp_path: Path, label: str) -> None:
-    """K=1 batched MCTS reproduces the pre-F3 recursive search bit-for-bit.
+    """K=1 batched MCTS reproduces the older recursive search bit-for-bit.
 
     Compares against visit counts and policies frozen from the recursive
     implementation. Any divergence means the iterative refactor changed
@@ -221,7 +221,7 @@ def test_mcts_visit_counts_deterministic_ttt(tmp_path: Path) -> None:
 
     Both MCTS instances share one (untrained, random-weight) network, so the
     priors are identical; any divergence in visit counts would mean the search
-    itself is non-deterministic. The F3 K=1 path must keep this property.
+    itself is non-deterministic. The K=1 batched path must keep this property.
     """
     game, nnet = _ttt_wrapper(tmp_path)
     config = MCTSConfig(num_mcts_sims=25, cpuct=1.0)
@@ -311,7 +311,7 @@ def test_batched_search_self_consistent_blokus(tmp_path: Path, batch_size: int) 
 
 
 # ---------------------------------------------------------------------------
-# fp16 inference flag (R3) — must be a clean no-op on CPU
+# fp16 inference flag — must be a clean no-op on CPU
 # ---------------------------------------------------------------------------
 
 def test_fp16_inference_flag_noop_on_cpu(tmp_path: Path) -> None:

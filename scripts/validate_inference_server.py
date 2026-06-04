@@ -1,4 +1,4 @@
-"""F5 validation on real GPU: server correctness + integration smoke.
+"""Validation + integration check for the cross-worker inference server, on real GPU.
 
 Run on the PC (CUDA) from the repo root:
 
@@ -14,7 +14,7 @@ Two checks:
    server-on stays equivalent to server-off). Any difference here is GPU/cuDNN
    fp16 batch-size numerics, not our code — reported, not hidden.
 
-2. **Integration smoke.** ``run_self_play_episodes_parallel`` actually runs with
+2. **Integration check.** ``run_self_play_episodes_parallel`` actually runs with
    ``inference_server=True`` on real GPU, proving the spawned server + shared-
    memory channel + client wiring all work end to end.
 """
