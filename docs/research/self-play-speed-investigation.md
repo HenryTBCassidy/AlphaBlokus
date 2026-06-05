@@ -1,6 +1,6 @@
 # Self-Play Profiling Investigation — Time + Memory
 
-**Status: companion reference for the [profiling investigation](../plans/profiling-investigation.md).** That plan owns the actionable checklist (P1–P8) and the optimise-or-train decision; this doc is the deeper reference it draws on — *why* self-play is now CPU-bound, the **Amdahl analysis** for sizing each lever, the tool rationale, the hot-loop anatomy, and the full **candidate-technique menu** (Part B). The discipline (F5's lesson): measure where time *and* memory actually go **before** prescribing any optimisation.
+**Status: companion reference for the [profiling investigation](../plans/archive/profiling-investigation.md).** That plan owns the actionable checklist (P1–P8) and the optimise-or-train decision; this doc is the deeper reference it draws on — *why* self-play is now CPU-bound, the **Amdahl analysis** for sizing each lever, the tool rationale, the hot-loop anatomy, and the full **candidate-technique menu** (Part B). The discipline (F5's lesson): measure where time *and* memory actually go **before** prescribing any optimisation.
 
 **Scope note:** the gen-3 training-step OOM is **not** a topic here — that's a known bug with a code-confirmed cause, fixed directly in [`../plans/self-play-memory-fix.md`](../plans/archive/self-play-memory-fix.md). Companion: [`../plans/archive/full-cycle-optimisation.md`](../plans/archive/full-cycle-optimisation.md) (F1–F5) and [`../IDEAS.md`](../IDEAS.md).
 
@@ -101,7 +101,7 @@ Part A confirms.
 
 ### The steps
 
-The executable checklist lives in the [profiling plan](../plans/profiling-investigation.md) (P1–P8): build the single-game harness, run py-spy / Scalene / line_profiler for time, tracemalloc for the in-episode tree and the replay buffer, then write up the current profile and decide. The tools above explain *why* each; the plan tracks *doing* them.
+The executable checklist lives in the [profiling plan](../plans/archive/profiling-investigation.md) (P1–P8): build the single-game harness, run py-spy / Scalene / line_profiler for time, tracemalloc for the in-episode tree and the replay buffer, then write up the current profile and decide. The tools above explain *why* each; the plan tracks *doing* them.
 
 Output: a **time** table (e.g. *"select_action 35%, move-gen 20%, get_next_state 15%, inference 12%, backprop 8%, other 10%"* — numbers TBD) plus a **memory** table ranking the tree / buffer components by bytes — and from them, the shortlist of what's worth optimising, each sized by its Amdahl ceiling.
 

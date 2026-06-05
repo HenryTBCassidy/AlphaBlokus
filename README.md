@@ -173,7 +173,7 @@ Two players, 14×14 board, 21 polyomino pieces each (sizes 1–5). The first mov
 `STYLE-GUIDE.md` (code conventions), `PLAN-FORMAT.md` (how plans are written), `REMOTE-TRAINING.md` (home-GPU runbook), `AI-CONTEXT.md` (extended context for AI assistants).
 
 ### Plans (`docs/plans/`)
-Top-level plans are in-flight; `docs/plans/archive/` is the historical record of shipped work — including the full optimisation stack ([`full-cycle-optimisation.md`](docs/plans/archive/full-cycle-optimisation.md)) and the training-step memory fix ([`self-play-memory-fix.md`](docs/plans/archive/self-play-memory-fix.md)). The current active plan is the **profiling investigation** ([`profiling-investigation.md`](docs/plans/profiling-investigation.md)). Candidate-but-uncommitted ideas live in [`docs/IDEAS.md`](docs/IDEAS.md).
+Top-level plans are in-flight; `docs/plans/archive/` is the historical record of completed work — the full optimisation stack ([`full-cycle-optimisation.md`](docs/plans/archive/full-cycle-optimisation.md)), the training-step memory fix ([`self-play-memory-fix.md`](docs/plans/archive/self-play-memory-fix.md)), and the profiling investigation ([`profiling-investigation.md`](docs/plans/archive/profiling-investigation.md) — see the visual [**profiling report**](docs/research/profiling-report.md)). No plan is currently in flight: the profile concluded the training cycle already fits comfortably overnight, so the next move is training runs, not further optimisation. Candidate-but-uncommitted ideas live in [`docs/IDEAS.md`](docs/IDEAS.md).
 
 ---
 

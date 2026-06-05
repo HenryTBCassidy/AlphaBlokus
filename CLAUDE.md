@@ -93,9 +93,9 @@ docs/
 │   ├── PLAN-FORMAT.md     # How to write implementation plans
 │   ├── REMOTE-TRAINING.md # Runbook for running training on the home PC over SSH
 │   └── AI-CONTEXT.md      # Extended context, architecture rationale, gotchas
-└── plans/                                # Top-level = in-flight or not-yet-started
-    ├── profiling-investigation.md        # Active: profile time+memory, decide optimise-or-train
+└── plans/                                # Top-level = in-flight or not-yet-started (none currently)
     └── archive/                          # Completed plans, retained for context
+        ├── profiling-investigation.md    # Profiled the cycle; decided RUN (report: docs/research/profiling-report.md)
         ├── self-play-memory-fix.md       # Training-step OOM fix (per-batch densify)
         ├── scaled-training-run.md        # First scaled-run prep (superseded; rationale kept)
         ├── full-cycle-optimisation.md    # Master optimisation tracker (F1–F5 done; ~14× vs serial)
