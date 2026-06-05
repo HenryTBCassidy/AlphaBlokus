@@ -1,103 +1,112 @@
-# Profiling Investigation — Where Does Self-Play Spend Time and Memory?
+# Profiling Investigation — Where Does the Training Cycle Spend Time and Memory?
 
-The deliberate **measure-before-you-optimise** step for the post-F5 codebase. The first optimisation wave (F1–F5, archived in [`archive/full-cycle-optimisation.md`](archive/full-cycle-optimisation.md)) took self-play training to **~14× vs serial** and shrank the net **21.6×** — which *moved the bottleneck*, so the old profile (inference 77.5%) is stale. F5's failure (built on that stale profile → **0.99×, no speedup**) is the lesson this plan exists to avoid: **nothing gets optimised until a current profile says which slice is worth it.**
+The deliberate **measure-before-you-optimise** step for the post-F5 codebase. The first optimisation wave (F1–F5, archived in [`archive/full-cycle-optimisation.md`](archive/full-cycle-optimisation.md)) took self-play training to **~14× vs serial** and shrank the net **21.6×** — which *moved the bottleneck*, so the old profile (inference 77.5%) is stale. F5's failure (built on that stale profile → **0.99×, no speedup**) is the lesson this plan exists to avoid.
 
-**This plan's output decides whether further optimisation happens at all.** It may well conclude we're near the practical limit on this hardware — in which case the right answer is "stop optimising, just train." Any optimisation work (and its own branch) is spawned *only after* P8, and *only if* P8 says so. This is not an optimisation plan; it's the plan that decides whether we need one.
+**RESULT (measured 2026-06-05): profile complete; decision in [P8](#p8-decision--run-now-optimisation-optional) is RUN NOW — the run already fits comfortably overnight (~5.3 h), so optimisation is optional. Training is ~1% of the cycle (not worth touching). The ranked self-play levers are recorded for when we want tighter iteration.**
 
-**Prerequisite:** the training-step OOM fix is on `main` (PR #12), so the loop runs to completion and the profile reflects healthy memory. **Companion:** the candidate-technique menu and the Amdahl analysis live in [`../research/self-play-speed-investigation.md`](../research/self-play-speed-investigation.md) — this plan is the actionable checklist; that doc is the reference for *what we'd do* with the results.
+**Companion:** the candidate-technique menu and the Amdahl analysis live in [`../research/self-play-speed-investigation.md`](../research/self-play-speed-investigation.md). Measurement harness: [`scripts/profile_self_play.py`](../../scripts/profile_self_play.py).
 
 ---
 
 ## Checklist
 
-| # | Item | Effort | Priority | Done |
-|---|------|--------|----------|------|
-| P1 | `scripts/profile_self_play.py` — play **one** self-play game single-process (fixed seed, production net + sims) under a `--profiler {pyspy,scalene,lineprofiler,tracemalloc}` switch | 1 hr | High | |
-| P2 | **py-spy** on an 8-worker self-play run (`--subprocesses`, ~30 s sample) → coarse flame-graph split across real parallel execution | 0.5 hr | High | |
-| P3 | **Scalene** on the single-game script — per-line CPU, **Python-vs-native split**, and memory | 0.5 hr | High | |
-| P4 | **line_profiler** on the 3–4 hot functions P2/P3 flag (`_select_action`, `_descend_to_leaf`, `get_next_state`, `state_key`) | 0.5 hr | High | |
-| P5 | **tracemalloc** — in-episode MCTS tree growth over one long game (scaling risk for long games / high sim counts) | 0.5 hr | Medium | |
-| P6 | **tracemalloc/Scalene** — self-play→replay-buffer growth across ≥2 generations (RAM held between phases) | 0.5 hr | Medium | |
-| P7 | Write the **current profile** into this plan: time + memory tables, each time-slice annotated with its Amdahl ceiling `1/(1-p)` | 0.5 hr | High | |
-| P8 | **Decision** — against the targets + stopping criterion below, decide *optimise or train*; if optimise, name the one lever and spawn its plan/branch (not before) | 0.5 hr | High | |
+| # | Item | Done |
+|---|------|------|
+| P1 | Profiling harness (`scripts/profile_self_play.py`: timing / cProfile / memory / train modes; **F2 enabled to match production**) | ✅ |
+| P2 | Self-play time profile — coarse phase split (built-in MCTS timers) + **cProfile** function attribution at the production config | ✅ |
+| P3 | Training-step profile — `train()` wall + RSS over a realistic 57k-example buffer *(added per scope: the phase MCTS work doesn't help)* | ✅ |
+| P4 | Memory profile — in-episode tree growth + process RSS (tracemalloc) | ✅ |
+| P5 | Full-cycle phase split (self-play / arena / elo / training) + Amdahl ceilings | ✅ |
+| P6 | Decision — optimise or train (see [P8](#p8-decision--run-now-optimisation-optional)) | ✅ |
+
+> py-spy / Scalene / line_profiler (the Python-vs-native split) were **deferred** — single-process cProfile + the built-in MCTS timers gave a clear, sufficient attribution, and the Python-vs-native nature is obvious from the call graph (the UCB loop is pure Python; move-gen/inference are native). Promote them only if we attack a slice and need per-line detail.
 
 ---
 
-## P1. Single-game profiling harness
+## P7. The current profile — RESULTS
 
-A `scripts/profile_self_play.py` that plays exactly one self-play game in a single process (fixed seed, production net + sim count), with a `--profiler` switch selecting the tool. Single-process + fixed seed = a reproducible, isolated target with no multiprocessing noise — the clean surface every other step measures against.
+**Method.** Single-process self-play at the production config (`blokus_scaled_15.json`: 300 sims, K=16, conv 64f×4b, CUDA, **F2 move-gen on**) on the RTX 3060 Ti, plus a synthetic-buffer training profile. Time from the built-in MCTS phase timers + cProfile function attribution; memory from tracemalloc + RSS.
 
-## P2. py-spy — coarse split across the real 8-worker run
+**Headline.** Self-play is **CPU-bound** (the GPU idles at ~0–30%). No single slice dominates — **inference, move-gen, and the UCB loop are three roughly co-equal thirds.** Training is a **rounding error** (~1% of the cycle).
 
-Sampling profiler, handles multiprocessing (`--subprocesses`), near-zero overhead, no code changes. `cProfile` doesn't work across our `ProcessPoolExecutor` workers; py-spy is the right coarse tool. Output: the honest % split across workers — select / move-gen / `get_next_state` / inference / backprop.
+### Self-play — 7.93 s/game (28 moves, 55 examples, 6,845 tree states)
 
-## P3. Scalene — line-level CPU, Python-vs-native, memory
+| Slice | % of self-play | Nature | Amdahl ceiling (→0) |
+|-------|----------------|--------|---------------------|
+| **NN inference** (`predict_batch`) | **~33%** | mostly GPU↔CPU **transfers** (`.cpu()` ~14% + `.cuda()` ~3%) **>** compute (conv/bn/linear ~7%) | 1.49× |
+| **Move generation** (F2, `valid_move_mask`) | **~24%** | native-ish; `_fill_legal_actions_for_anchor` is the core | 1.32× |
+| **`_select_action`** (UCB loop) | **~22%** | **pure Python** `for`-loop, `math.sqrt` ×2.5M/game — vectorisable | 1.28× |
+| **Board transitions** (`get_next_state` / `with_piece` copy) | **~10%** | numpy board copies | 1.11× |
+| Tree descend / expand / backprop / bookkeeping | **~10%** | Python | 1.11× |
+| Episode overhead (symmetries / sampling) | **~1%** | | 1.01× |
 
-Run on the single-game script. Crucially splits **Python-interpreter time vs native (numpy/torch) time** per line — that's what tells us whether a hot line is optimisable (interpreter-bound → Cython/Numba/vectorise helps) or already native (→ it won't). Also gives per-line memory.
+The surprise: **inference's cost is transfer overhead, not compute** — `.cpu()`/`.cuda()` moving the K=16 result tensors GPU↔CPU ~888×/game costs ~3× the actual conv math.
 
-## P4. line_profiler — exact timings on the hot functions
+### Training — 12.3 s/generation (57k examples × 2 epochs = 6.1 s/epoch), RSS 5.6 GB
 
-`@profile` the 3–4 functions P2/P3 surface. Deterministic, exact line costs — the precise targets, and the before-numbers any change is measured against.
+Confirms the OOM fix (5.6 GB, **not** 27 GB) and that training is fast + GPU-efficient on the small conv net.
 
-## P5. tracemalloc — in-episode tree growth
+### Full-cycle per generation (15-gen × 1000-game config)
 
-The per-episode MCTS node/edge dicts grow as sims accumulate. Quantify peak + growth over one long game: is tree memory a scaling risk at high sim counts / long games (informs caps / pruning), or a non-issue?
+| Phase | Wall / gen | % of cycle | Sped up by MCTS work? |
+|-------|-----------|------------|------------------------|
+| **Self-play** (1000 games) | ~19.5 min (measured, gen-1) | **~90%** | ✅ |
+| **Arena + Elo** (50 + 50 games) | ~2 min | ~7% | ✅ (same MCTS loop) |
+| **Training** (2 epochs, 57k) | **0.2 min** (12.3 s) | **~1%** | ❌ separate phase |
+| Diagnostics | <0.1 min | ~0% | ❌ |
+| **Total** | **~21 min/gen → ~5.3 h for 15 generations** | | |
 
-## P6. tracemalloc/Scalene — replay-buffer growth
+### Memory
 
-The RAM held *between* phases as examples accumulate across generations. The training-step OOM is already fixed; this measures whether the resident buffer itself is a concern at the full config, and how it compares to what's on disk.
+| Component | Measured | Scaling risk? |
+|-----------|----------|---------------|
+| In-episode MCTS tree | ~6,800 states/game; process RSS ~3.5 GB | Low — bounded per game, resets each episode |
+| Training step (resident) | RSS 5.6 GB at the 57k-example buffer | **None** — OOM fix holds; flat, well under the 28 GB cap |
 
-## P7. The current profile (the deliverable)
+**Caveats.** Single-process numbers; the 8-worker run's GPU contention raises inference's *real* share (so the transfer-overhead lever is **more** valuable in production, not less). cProfile %s are of instrumented runtime (proportions valid). Full-cycle self-play uses the measured gen-1 wall from the crashed run.
 
-Fill these in from P2–P6. This is the evidence base for P8.
+## P8. Decision — RUN NOW, optimisation optional
 
-**Time (per self-play game):**
+**Decision: stop optimising for now and train.** Against the stopping criterion:
 
-| Slice | % of wall-clock | Python vs native | Amdahl ceiling `1/(1-p)` |
-|-------|-----------------|-------------------|--------------------------|
-| `_select_action` (UCB loop) | TBD | TBD | TBD |
-| Move generation | TBD | TBD | TBD |
-| `get_next_state` | TBD | TBD | TBD |
-| NN inference | TBD | TBD | TBD |
-| Backprop / bookkeeping | TBD | TBD | TBD |
+1. **It fits — comfortably.** Projected 15-gen wall ≈ **5.3 h** — well under T1 (≤12 h) and inside T2 (≤6 h). The run doesn't need to be faster to deliver results overnight.
+2. **RAM is flat** — OOM fix verified (training RSS 5.6 GB).
+3. **Worthwhile levers exist** (move-gen 1.32×, select 1.28×, both > the 1.2× bar) — so optimisation isn't *pointless*, but it isn't *required*. Per the goal (a strong net = generations trained), more training beats shaving seconds.
 
-**Memory:**
+**Training: do not optimise** — answered directly by the data. It's ~1% of the cycle (12 s vs ~19 min self-play); reducing it to zero buys ~1.01×. The conv net + 2 epochs are already efficient and the memory fix solved its only real problem.
 
-| Component | Peak / growth | Scaling risk? |
-|-----------|---------------|---------------|
-| In-episode MCTS tree | TBD | TBD |
-| Replay buffer (resident) | TBD | TBD |
+**Ranked attack vectors (for when we want tighter iteration):**
 
-## P8. Decision — optimise or train?
+| Rank | Lever | Win | Effort | Why |
+|------|-------|-----|--------|-----|
+| 1 | **Vectorise `_select_action`** | ~1.25× | **Low** | pure-Python UCB loop, 22% of self-play, numpy-vectorisable, bit-identical-testable — best ROI |
+| 2 | **Cut inference transfer overhead** | ~1.15–1.2× | Medium | `.cpu()`/`.cuda()` dominate inference; fewer/larger transfers, pinned memory, keep results on GPU |
+| 3 | **Bitboard move-gen** | ~1.3× | **High** | move-gen is still 24% post-F2; structural rewrite of `_fill_legal_actions_for_anchor` — biggest but most expensive |
+| — | Training | ~1.01× | — | not worth it (~1% of cycle) |
 
-With P7 in hand, decide against the criteria below. Output is one of: **(a)** "near the limit → stop optimising, run more/longer training," or **(b)** "lever X has a worthwhile ceiling → spawn `optimise-<lever>` plan + branch." Record the decision and reasoning here, then act on it.
+Combined #1 + #2 (low/medium effort) plausibly takes ~5.3 h → ~3.5–4 h. The bitboard (#3) is the only path to the T3 stretch but is a multi-week piece — defer until training results justify faster iteration.
+
+**Next step: none required for the run.** When we want speed, promote lever #1 (`vectorise-select-action`) to its own plan + branch.
 
 ### Targets *(yardstick: a 15-gen × 1000-game run)*
 
-| Milestone | Goal | Implies |
-|-----------|------|---------|
-| **T1 — Comfortable overnight** | ≤ **12 h** on the RTX 3060 Ti | fits one unattended slot with margin |
-| **T2 — Tight iteration** | ≤ **6 h** | two runs/day; faster sweeps |
-| **T3 — Stretch** | ≤ **3 h** | near the practical limit on this hardware |
+| Milestone | Goal | Status |
+|-----------|------|--------|
+| **T1 — Comfortable overnight** | ≤ **12 h** | ✅ met (~5.3 h) |
+| **T2 — Tight iteration** | ≤ **6 h** | ✅ met (~5.3 h) |
+| **T3 — Stretch** | ≤ **3 h** | ✗ (needs bitboard move-gen) |
 
-### Stopping criterion — when to stop optimising and *run*
+### Candidate levers — detail + Amdahl in the [research doc](../research/self-play-speed-investigation.md)
 
-Stop and just train when **all** hold:
-1. **It fits** — the 15-gen run is projected to complete comfortably overnight (**T1 ≤ 12 h**).
-2. **The next lever is small** — the best remaining candidate's **Amdahl ceiling < ~1.2×** (even perfect, it can't move the needle).
-3. **It doesn't crash** — RAM stays flat across the run (OOM fix verified).
+Vectorise `_select_action` (low) · cut inference transfers (med) · bitboard move-gen (high) · code-level trims (low) · free-threaded Python spike (high) · adaptive-sim endgame taper (low–med). Promotion rule: a lever becomes real work only when we decide tighter iteration is worth the effort — then it gets its own plan + branch.
 
-The end goal is a world-class net, bought with **generations trained**, not seconds shaved per game. Past the point where the run fits overnight and the marginal lever buys < ~20%, more optimisation is worse ROI than more training.
+---
 
-### Candidate levers *(only if P8 says optimise — detail + Amdahl in the [research doc](../research/self-play-speed-investigation.md))*
+## P1–P6. Method (how the numbers above were produced)
 
-| Lever | Targets | Effort |
-|-------|---------|--------|
-| Vectorise `_select_action` | the per-move UCB Python loop (prime suspect) | Low |
-| Code-level trims | recomputed `state_key`, hoisting, cached `np.where`, buffer reuse | Low |
-| Bitboard board representation | `state_key` + `get_next_state` + move-gen at once (structural) | High |
-| Free-threaded Python spike | drop processes → threads, one shared net (needs a torch/numpy free-threading spike first) | High |
-| Cython / Numba on the hot kernel | whatever interpreted kernel remains the top slice | Medium |
-| Adaptive simulation taper | *do less work* — stop spending 300 sims on <30-move endgames | Low–Med |
-
-Promotion rule: a lever becomes real work only when P7 shows its slice is large enough to clear the stopping criterion's bar. Then it gets its own plan + branch — named at that point, not now.
+- **P1 harness** — `scripts/profile_self_play.py` plays game(s) single-process at a fixed seed, F2 enabled to match production. Modes: `timing` (wall + MCTS phase split), `cprofile` (function attribution), `memory` (tracemalloc), `train` (synthetic-buffer training cost).
+- **P2 self-play time** — built-in MCTS timers gave the coarse inference-vs-rest split; cProfile (single-process — works fine, unlike across the worker pool) attributed the "rest" to move-gen / UCB / board-copy / bookkeeping.
+- **P3 training** — `train()` timed over a synthetic 57k-example buffer (1 generation at lookback=1) at the production epochs/batch.
+- **P4 memory** — tracemalloc + RSS over one game (tree) and the training step (buffer).
+- **P5 full-cycle** — per-game self-play × game counts (with the measured gen-1 wall) + training + arena/elo, to get the phase split and full-cycle Amdahl ceilings.
+- **P6 decision** — [P8](#p8-decision--run-now-optimisation-optional).
