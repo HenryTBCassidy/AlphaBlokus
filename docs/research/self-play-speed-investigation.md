@@ -1,8 +1,8 @@
-# Self-Play Speed Investigation — Profiling Plan + Technique Menu
+# Self-Play Profiling Investigation — Time + Memory
 
-**Status: for review (decide what to pursue next).** This is a candidates-and-plan
-doc, not committed work. Companion to [`../plans/full-cycle-optimisation.md`](../plans/archive/full-cycle-optimisation.md)
-(F1–F5) and [`../IDEAS.md`](../IDEAS.md).
+**Status: Phase 0 of the optimisation master plan** ([`../plans/further-full-cycle-optimisation.md`](../plans/further-full-cycle-optimisation.md)). The discipline (F5's lesson): measure where the time *and* memory actually go **before** prescribing any optimisation. This doc's time breakdown populates the optimisation menu; its memory breakdown tells us how the loop behaves at scale and which structural levers (bitboards, threading) are worth it.
+
+**Scope note:** the gen-3 training-step OOM is **not** handled here — that's a known bug with a code-confirmed cause, fixed directly in [`../plans/self-play-memory-fix.md`](../plans/self-play-memory-fix.md) (no profiling needed to find a cause we already know). This investigation is the broader "where are all the bottlenecks" dive, done when choosing optimisation attack vectors. Companion: [`../plans/archive/full-cycle-optimisation.md`](../plans/archive/full-cycle-optimisation.md) (F1–F5) and [`../IDEAS.md`](../IDEAS.md).
 
 ## Why this exists
 
@@ -52,10 +52,25 @@ the ceiling was ~1.1×.)
 
 ## Part A — The profiling investigation (do this first)
 
-**Goal:** a trustworthy, current breakdown of where a self-play game's wall-clock
-goes, at two levels: (1) coarse, per MCTS phase; (2) fine, per line in the hot
-functions. Plus a memory profile, since the search tree grows unbounded within
-an episode.
+**Goal:** a trustworthy, current breakdown of both **where the wall-clock goes**
+and **where the memory goes**, at two levels each: (1) coarse, per MCTS phase /
+per training phase; (2) fine, per line in the hot functions / per allocation site.
+
+### The three memory targets
+
+The OOM that crashed the scaled run was at the **training** step, not in self-play —
+so memory must be profiled across the *whole* lifecycle, not just the search tree:
+
+| Target | What grows | Why it matters |
+|--------|-----------|----------------|
+| **In-episode MCTS tree** | the per-episode node/edge dicts (25→50→75… entries as sims accumulate) | scaling risk for long games / high sim counts; bounded per game |
+| **Self-play → replay buffer** | examples accumulating in `train_examples_history` across generations (board + policy + value per move) | the RAM held *between* phases; duplicates what's already on disk |
+| **Training step** | `train()` materialising the buffer into dense tensors — the gen-3 OOM site | fixed directly in the [OOM fix](../plans/self-play-memory-fix.md); profiled here only to understand memory at scale once that lands |
+
+The training-step target can be measured **cheaply without a full multi-hour run** —
+build a synthetic buffer of realistic size (N examples) and profile a single
+`train()` call. (This is optimisation-track context; the OOM bug itself is being
+fixed directly, not gated on this.)
 
 ### What we already know the hot loop looks like
 
@@ -92,12 +107,15 @@ Part A confirms.
 | P2 | **py-spy** on an 8-worker self-play run (`--subprocesses`, ~30s sample) → flame graph. | The honest coarse split across real parallel execution: % in select / move-gen / get_next_state / inference / backprop. |
 | P3 | **Scalene** on the single-game script. | Per-line CPU, **Python-vs-native split**, and memory — pinpoints interpreter-bound lines (the optimisable ones). |
 | P4 | **line_profiler** on the 3–4 functions P2/P3 flag. | Exact line costs to target and to measure against after a change. |
-| P5 | **tracemalloc** peak + growth over one long game. | Whether tree memory is a scaling risk (informs caps / pruning). |
-| P6 | Write the breakdown into this doc as a table (the "current profile"), with each slice's Amdahl ceiling. | The evidence base for choosing a technique below — and the before-numbers for any change. |
+| P5 | **tracemalloc** peak + growth over one long game (in-episode tree). | Whether tree memory is a scaling risk (informs caps / pruning). |
+| P6 | **tracemalloc/Scalene** on the self-play→replay-buffer accumulation across ≥2 generations. | How much RAM the buffer holds between phases vs what's already on disk. |
+| P7 | Profile a single `train()` call on a synthetic realistic-size buffer — tracemalloc + peak RSS, ranked by component. | Memory behaviour of the training step at scale (after the [OOM fix](../plans/self-play-memory-fix.md) lands). |
+| P8 | Write **both** breakdowns (time + memory) into this doc as tables (the "current profile"), each time-slice annotated with its Amdahl ceiling. | The evidence base for choosing a technique — and the before-numbers for any change. |
 
-Output of Part A: a table like *"select_action 35%, move-gen 20%, get_next_state
-15%, inference 12%, backprop 8%, other 10%"* (numbers TBD) — and from it, the
-shortlist of what's actually worth optimising.
+Output of Part A: a **time** table like *"select_action 35%, move-gen 20%,
+get_next_state 15%, inference 12%, backprop 8%, other 10%"* (numbers TBD) plus a
+**memory** table ranking the buffer / training-step / tree components by bytes —
+and from them, the shortlist of what's worth optimising and the scope of the OOM fix.
 
 ---
 
