@@ -13,6 +13,7 @@ Status legend: **Idea** (raw, unexamined) · **Researching** (actively being inv
 |---|--------|--------|-----------|
 | I1 | [Adaptive simulation budget](#i1-adaptive-simulation-budget) | Idea | Scale `num_mcts_sims` with branching factor / moves-left instead of a flat 300 — mostly to stop wasting sims in the low-branching endgame |
 | I2 | [Evaluation-time search tuning](#i2-evaluation-time-search-tuning) | Idea | Use a stronger/exact search at eval than at train (e.g. K=1 and/or more sims) since eval cares about strength, not throughput |
+| I3 | [Shared-state self-play workers](#i3-shared-state-self-play-workers) | Idea | Cut the ~2.5 GB-per-worker framework duplication so we can use all 20 cores (only 8 used now) — the highest-ceiling speed lever (self-play ≈ 86% of the cycle) |
 
 > Ideas already captured elsewhere (not duplicated here): the conv policy head (F4) and the cross-worker inference server (F5) are done — see the [optimisation menu](plans/archive/full-cycle-optimisation.md#optimisation-menu); MCTS tree reuse, Cython move-gen and cached-valid-moves are in that plan's [Considered and set aside](plans/archive/full-cycle-optimisation.md#considered-and-set-aside) section; mixed-precision / fp16 inference is in its Out-of-scope list. Dirichlet root noise is **implemented** (`dirichlet_epsilon`/`dirichlet_alpha` in `MCTSConfig`, default-off).
 
@@ -52,9 +53,28 @@ So a flat 300 is simultaneously *thin* in the opening and *wasteful* in the endg
 **The idea.** MCTS is a search procedure, not something the network learns, so there's no requirement to search the same way at evaluation as during training. Evaluation (vs Pentobi, arena, Elo) cares about *playing strength*, not throughput, and runs far fewer games — so we can afford a stronger, slower search there.
 
 **Concretely:**
-- Set the batched-inference knob `K = 1` at evaluation for the exact, strongest search (F3's K>1 is a training-throughput trick that trades a little search quality for GPU efficiency — see [`plans/batched-inference.md`](plans/batched-inference.md)).
+- Set the batched-inference knob `K = 1` at evaluation for the exact, strongest search (F3's K>1 is a training-throughput trick that trades a little search quality for GPU efficiency — see [`plans/archive/batched-inference.md`](plans/archive/batched-inference.md)).
 - Optionally *raise* `num_mcts_sims` at evaluation beyond the training value for extra strength (a standard AlphaZero move).
 
 **Status note.** This is less a research avenue than a *configuration decision* to lock once F3 lands and the K=1-vs-K=16 strength comparison is in. Captured here so it isn't forgotten. The strength comparison itself is part of the F3 plan, not this register.
 
-**Related:** [`plans/batched-inference.md`](plans/batched-inference.md), `docs/05-EVALUATION.md`.
+**Related:** [`plans/archive/batched-inference.md`](plans/archive/batched-inference.md), `docs/05-EVALUATION.md`.
+
+---
+
+## I3. Shared-state self-play workers
+
+**The observation (measured 2026-06-05).** Self-play uses 8 worker *processes*, each independently loading the full PyTorch+CUDA stack (CUDA context + cuDNN/cuBLAS libraries + allocator reservations) ≈ **2.5 GB RAM each**. The net itself is 1.5 MB — the 2.5 GB is pure **per-process framework duplication**. Result: 8 workers ≈ 20 GB, which **caps the worker count at 8 even though the PC has 20 cores** — 12 cores sit idle and the run hovers at the 28 GB WSL cap. Since self-play is **~86% of the training cycle** ([profiling report](research/profiling-report.md)), freeing those cores is the **single highest-ceiling speed lever** — up to ~2–2.5× on the whole run (the path to the ≤3 h stretch target).
+
+**Candidate fixes (cheapest → most ambitious):**
+
+1. **CPU-only / lightweight-inference workers.** Workers don't init CUDA — run the (tiny) net's forward pass on CPU, or via a minimal runtime (ONNX / a hand-rolled NumPy conv). Per-worker RAM drops to ~0.5 GB → run ~20 workers on the current Python 3.12 *now*. Cost: slower per-inference, but ~2.5× more game-parallelism likely nets ~1.5× self-play, and it frees the GPU. **Lowest effort.**
+2. **Revisit the cross-worker inference server (F5 — already built).** One process owns the GPU/net; workers are CPU-only and send leaf batches via shared-memory IPC. F5 was parked for *no speed gain* (inference is cheap), but it *does* solve the memory/scaling problem — lightweight workers means more of them. Reuse the existing code for the memory angle.
+3. **Free-threaded Python (no-GIL, 3.13t / 3.14).** The structural fix: CPU-bound MCTS runs as parallel *threads* in one process, sharing one CUDA context + net + tables. Kills the RAM floor, scales to all cores, and makes cross-worker inference batching free (F5's goal, for free). **Caveats:** needs a Python upgrade (we're on 3.12) and every C-extension (torch, numpy) must support free-threading — numpy does; torch's support has been landing through 2025 but isn't guaranteed. **Gated on a spike:** does torch+numpy run on a free-threaded build on the PC? Highest ceiling, speculative. (This is the **B5** lever in [`research/self-play-speed-investigation.md`](research/self-play-speed-investigation.md).)
+4. **On-device vectorised self-play (JAX / `mctx`-style) — the "rewrite the engine" option.** Instead of N OS processes, vectorise hundreds/thousands of games onto the GPU with `vmap`/`jit` (how the big labs run massive self-play — e.g. DeepMind's `mctx`). It eliminates the multi-process model entirely: the parallelism lives on the accelerator, so there's no per-worker duplication. **But** it requires rewriting the Blokus game logic + MCTS in pure-functional, jittable JAX — a ground-up reimplementation of the imperative move-gen + tree search. Enormous effort, highest ceiling; a strategic "next engine" bet, not an incremental fix.
+
+**What doesn't help:** putting the net/tables in shared memory saves little — the 2.5 GB is the **CUDA context + framework libraries**, not the (tiny) net or tables, and CUDA contexts are per-process. The fix has to be "one GPU/framework owner" (1–2), "one process, many threads" (3), or "no processes, vectorise on-device" (4).
+
+**If promoted:** start with the free-threading **spike** (cheap, decides the whole approach) and/or the CPU-only-workers experiment (quick win on 3.12). Sequenced after the first real training run delivers results.
+
+**Related:** [`research/self-play-speed-investigation.md`](research/self-play-speed-investigation.md) (B5 + Amdahl), [`plans/archive/cross-worker-inference-server.md`](plans/archive/cross-worker-inference-server.md) (F5), [profiling report](research/profiling-report.md).
