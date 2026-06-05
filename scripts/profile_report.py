@@ -16,9 +16,9 @@ from pathlib import Path
 
 import plotly.graph_objects as go
 
-_RESEARCH = Path(__file__).resolve().parent.parent / "docs" / "research"
-OUT = _RESEARCH / "profiling-report.html"
-PNG_DIR = _RESEARCH / "profiling"  # static charts for the GitHub-rendered markdown report
+# Build output goes to the gitignored temp/ (same convention as the run HTML reports).
+# The committed, GitHub-readable findings live in docs/research/profiling-report.md (tables).
+OUT = Path(__file__).resolve().parent.parent / "temp" / "profiling-report.html"
 
 # ---- Measured data (source: scripts/profile_self_play.py on the PC, 2026-06-05) ----
 
@@ -124,13 +124,7 @@ def build() -> None:
               "Amdahl ceiling — max whole-cycle speedup if that slice → 0",
               "× speedup ceiling", texts=[f"{c}×" for c in ceil])
 
-    # Static PNGs for the markdown report (renders on GitHub, unlike the HTML).
-    PNG_DIR.mkdir(parents=True, exist_ok=True)
-    for name, fig in [("1-full-cycle", f1), ("2-self-play", f2),
-                      ("3-inference", f3), ("4-amdahl", f4)]:
-        fig.write_image(str(PNG_DIR / f"{name}.png"), width=900, height=360, scale=2)
-    print(f"wrote 4 PNGs to {PNG_DIR}")
-
+    OUT.parent.mkdir(parents=True, exist_ok=True)
     parts = []
     for i, fig in enumerate([f1, f2, f3, f4]):
         parts.append(fig.to_html(full_html=False,

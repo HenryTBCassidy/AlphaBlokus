@@ -1,14 +1,12 @@
 # AlphaBlokus — Training-Cycle Profiling Report
 
-**Measured 2026-06-05** on the RTX 3060 Ti at the production config (`blokus_scaled_15.json`: 300 sims, K=16, conv 64f×4b, CUDA, **F2 move-gen on**), via [`scripts/profile_self_play.py`](../../scripts/profile_self_play.py) — cProfile for function times, the built-in MCTS phase timers for inference-vs-rest, and a synthetic-buffer run for training cost. Charts regenerate with [`scripts/profile_report.py`](../../scripts/profile_report.py). Interactive version: `profiling-report.html` (open locally — GitHub won't render raw HTML).
+**Measured 2026-06-05** on the RTX 3060 Ti at the production config (`blokus_scaled_15.json`: 300 sims, K=16, conv 64f×4b, CUDA, **F2 move-gen on**), via [`scripts/profile_self_play.py`](../../scripts/profile_self_play.py) — cProfile for function times, the built-in MCTS phase timers for inference-vs-rest, and a synthetic-buffer run for training cost. The tables below render on GitHub. For the interactive charts version, regenerate it locally with [`scripts/profile_report.py`](../../scripts/profile_report.py) → `temp/profiling-report.html` (gitignored build output).
 
 > **Headline.** Self-play is **CPU-bound** (GPU idles ~0–30%). No single bottleneck — inference, move-gen, and the UCB loop are three roughly **co-equal thirds**. **Training is ~1% of the cycle.** Surprise: inference's cost is dominated by GPU↔CPU **transfers**, not compute.
 
 ---
 
 ## 1. Where a generation's time goes (~21 min/gen → ~5.3 h for 15 gens)
-
-![Full-cycle phase split](profiling/1-full-cycle.png)
 
 | Phase | Wall / gen | % of cycle | Sped up by MCTS work? |
 |-------|-----------|------------|------------------------|
@@ -21,8 +19,6 @@ Self-play + arena + elo all run the **same MCTS play-loop**, so MCTS work speeds
 
 ## 2. Inside one self-play game (7.93 s)
 
-![Self-play breakdown](profiling/2-self-play.png)
-
 | Slice | % of self-play | Nature |
 |-------|----------------|--------|
 | **NN inference** | ~33% | mostly GPU↔CPU **transfers** > compute (see §3) |
@@ -34,13 +30,9 @@ Self-play + arena + elo all run the **same MCTS play-loop**, so MCTS work speeds
 
 ## 3. The inference slice — transfers, not compute
 
-![Inference decomposition](profiling/3-inference.png)
-
 The kicker: moving the K=16 result tensors GPU↔CPU (`.cpu()` ~14% + `.cuda()` ~3%) costs **~3× the actual conv math** (~7%). So the inference lever is about *transfer overhead*, not a faster net.
 
 ## 4. Amdahl ceilings — how much each lever could ever buy
-
-![Amdahl ceilings](profiling/4-amdahl.png)
 
 Even driven to *zero*, each slice's whole-cycle ceiling is `1/(1-p)`. Training's ceiling is **1.01×** — which is why it's not worth touching.
 
