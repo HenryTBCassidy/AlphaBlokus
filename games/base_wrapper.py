@@ -12,7 +12,7 @@ import torch.nn.functional as F
 from loguru import logger
 from torch import Tensor, optim
 from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler
-from torch.utils.data import DataLoader, TensorDataset
+from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from core.config import RunConfig
@@ -49,6 +49,37 @@ class AverageMeter:
         self.sum += val * n
         self.count += n
         self.avg = self.sum / self.count
+
+
+class _LazyPolicyDataset(Dataset):
+    """Training dataset that densifies sparse policies one item at a time.
+
+    Boards and values are materialised once as tensors; policies are kept in
+    their stored form — sparse ``(indices, values)`` tuples, or dense arrays for
+    resume-loaded / hand-built examples — and densified lazily in
+    ``__getitem__``. This keeps the full dense policy matrix (~71 KB x N
+    examples) from ever existing at once, which is what spiked RAM and OOM'd
+    large multi-generation buffers when it was built up front.
+    """
+
+    def __init__(
+        self,
+        boards: Sequence[np.ndarray],
+        raw_pis: Sequence,
+        values: Sequence[float],
+        action_size: int,
+    ) -> None:
+        self._boards = torch.from_numpy(np.asarray(boards, dtype=np.float32))
+        self._values = torch.from_numpy(np.asarray(values, dtype=np.float32))
+        self._raw_pis = list(raw_pis)
+        self._action_size = action_size
+
+    def __len__(self) -> int:
+        return len(self._raw_pis)
+
+    def __getitem__(self, idx: int) -> tuple[Tensor, Tensor, Tensor]:
+        pi = torch.from_numpy(as_dense(self._raw_pis[idx], self._action_size))
+        return self._boards[idx], pi, self._values[idx]
 
 
 class BaseNNetWrapper(INeuralNetWrapper, ABC):
@@ -114,15 +145,15 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             return
 
         boards_np, raw_pis, vs_np = zip(*examples)
-        # Policies are stored sparse (indices, values) to keep replay-buffer RAM
-        # small; normalise to the dense vector the loss expects (accepts already-
-        # dense too — e.g. resume-loaded or hand-built test examples).
         action_size = self.game.get_action_size()
-        pis_np = [as_dense(p, action_size) for p in raw_pis]
 
-        # Validate training data at the interface boundary
+        # Validate training data at the interface boundary. Policies are stored
+        # sparse (indices, values) to keep replay-buffer RAM small; densify just
+        # this one sample for the check — the rest are densified per mini-batch
+        # inside the dataset below, never the whole buffer at once (that dense
+        # spike OOM'd large multi-generation buffers).
         sample_board = boards_np[0]
-        sample_pi = pis_np[0]
+        sample_pi = as_dense(raw_pis[0], action_size)
         sample_v = vs_np[0]
         expected_board_shape = (sample_board.shape[0], self.board_rows, self.board_cols)
         assert sample_board.shape == expected_board_shape, (
@@ -131,11 +162,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             f"Policy vector sums to {sample_pi.sum()}, expected ~1.0")
         assert -1.0 <= sample_v <= 1.0, (
             f"Value {sample_v} outside [-1, 1]")
-        dataset = TensorDataset(
-            torch.tensor(np.array(boards_np), dtype=torch.float32),
-            torch.tensor(np.array(pis_np), dtype=torch.float32),
-            torch.tensor(np.array(vs_np), dtype=torch.float32),
-        )
+        dataset = _LazyPolicyDataset(boards_np, raw_pis, vs_np, action_size)
 
         for epoch in range(self.net_config.epochs):
             logger.info(f"Epoch {epoch + 1}/{self.net_config.epochs}")

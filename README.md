@@ -37,7 +37,7 @@ Immutable 44-channel board, the 21-piece / 91-orientation system, move generatio
 Remote GPU training over Tailscale + WSL2 to a home RTX 3060 Ti; Weights & Biases dashboard alongside a self-contained interactive HTML report (loss curves, Elo, policy/value diagnostics, arena replay viewer). Reproducible runs via a single global seed; chess-style score-based acceptance; Elo vs a frozen gen-0 baseline; minimax oracle and per-generation symmetry diagnostic.
 
 ### ✅ Phase 4 — Full-cycle performance optimisation (complete, ~14× vs serial)
-A stack of optimisations to make Blokus training practical at scale (see [`docs/plans/full-cycle-optimisation.md`](docs/plans/full-cycle-optimisation.md)):
+A stack of optimisations to make Blokus training practical at scale (see [`docs/plans/archive/full-cycle-optimisation.md`](docs/plans/archive/full-cycle-optimisation.md)):
 
 | | Optimisation | Result |
 |---|---|---|
@@ -173,7 +173,7 @@ Two players, 14×14 board, 21 polyomino pieces each (sizes 1–5). The first mov
 `STYLE-GUIDE.md` (code conventions), `PLAN-FORMAT.md` (how plans are written), `REMOTE-TRAINING.md` (home-GPU runbook), `AI-CONTEXT.md` (extended context for AI assistants).
 
 ### Plans (`docs/plans/`)
-Top-level plans are in-flight; `docs/plans/archive/` is the historical record of shipped work. The master optimisation tracker is [`full-cycle-optimisation.md`](docs/plans/full-cycle-optimisation.md); the current active plans are the first scaled run ([`scaled-training-run.md`](docs/plans/scaled-training-run.md)) and the self-play memory fix ([`self-play-memory-fix.md`](docs/plans/self-play-memory-fix.md)). Candidate-but-uncommitted ideas live in [`docs/IDEAS.md`](docs/IDEAS.md).
+Top-level plans are in-flight; `docs/plans/archive/` is the historical record of shipped work — including the full optimisation stack ([`full-cycle-optimisation.md`](docs/plans/archive/full-cycle-optimisation.md)). The current active plans are the self-play memory fix ([`self-play-memory-fix.md`](docs/plans/self-play-memory-fix.md)) and the first scaled run ([`scaled-training-run.md`](docs/plans/scaled-training-run.md)). Candidate-but-uncommitted ideas live in [`docs/IDEAS.md`](docs/IDEAS.md).
 
 ---
 
