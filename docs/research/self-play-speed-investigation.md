@@ -1,8 +1,8 @@
 # Self-Play Profiling Investigation — Time + Memory
 
-**Status: Phase 0 of the optimisation master plan** ([`../plans/further-full-cycle-optimisation.md`](../plans/further-full-cycle-optimisation.md)). The discipline (F5's lesson): measure where the time *and* memory actually go **before** prescribing any optimisation. This doc's time breakdown populates the optimisation menu; its memory breakdown tells us how the loop behaves at scale and which structural levers (bitboards, threading) are worth it.
+**Status: companion reference for the [profiling investigation](../plans/profiling-investigation.md).** That plan owns the actionable checklist (P1–P8) and the optimise-or-train decision; this doc is the deeper reference it draws on — *why* self-play is now CPU-bound, the **Amdahl analysis** for sizing each lever, the tool rationale, the hot-loop anatomy, and the full **candidate-technique menu** (Part B). The discipline (F5's lesson): measure where time *and* memory actually go **before** prescribing any optimisation.
 
-**Scope note:** the gen-3 training-step OOM is **not** handled here — that's a known bug with a code-confirmed cause, fixed directly in [`../plans/self-play-memory-fix.md`](../plans/self-play-memory-fix.md) (no profiling needed to find a cause we already know). This investigation is the broader "where are all the bottlenecks" dive, done when choosing optimisation attack vectors. Companion: [`../plans/archive/full-cycle-optimisation.md`](../plans/archive/full-cycle-optimisation.md) (F1–F5) and [`../IDEAS.md`](../IDEAS.md).
+**Scope note:** the gen-3 training-step OOM is **not** a topic here — that's a known bug with a code-confirmed cause, fixed directly in [`../plans/self-play-memory-fix.md`](../plans/self-play-memory-fix.md). Companion: [`../plans/archive/full-cycle-optimisation.md`](../plans/archive/full-cycle-optimisation.md) (F1–F5) and [`../IDEAS.md`](../IDEAS.md).
 
 ## Why this exists
 
@@ -99,23 +99,11 @@ Part A confirms.
 | **line_profiler** | Targeted line timings on the specific hot functions py-spy/Scalene flag (`_select_action`, `_descend_to_leaf`, `get_next_state`, `state_key`). Deterministic, exact. | `@profile` decorator on the chosen functions; single-process run. |
 | **tracemalloc** | Memory growth of the search tree within an episode (the per-episode dicts that grow 25→50→75…). Confirms whether long games / many sims risk memory pressure at scale. | Already flagged in `scaled-training-run.md`; quantify it. |
 
-### Proposed steps
+### The steps
 
-| # | Step | What it answers |
-|---|------|-----------------|
-| P1 | Add a `scripts/profile_self_play.py` that plays *one* self-play game single-process (fixed seed, production net + sims) under a `--profiler {pyspy,scalene,lineprofiler,tracemalloc}` switch. | Reproducible, isolated target — no multiprocessing noise. |
-| P2 | **py-spy** on an 8-worker self-play run (`--subprocesses`, ~30s sample) → flame graph. | The honest coarse split across real parallel execution: % in select / move-gen / get_next_state / inference / backprop. |
-| P3 | **Scalene** on the single-game script. | Per-line CPU, **Python-vs-native split**, and memory — pinpoints interpreter-bound lines (the optimisable ones). |
-| P4 | **line_profiler** on the 3–4 functions P2/P3 flag. | Exact line costs to target and to measure against after a change. |
-| P5 | **tracemalloc** peak + growth over one long game (in-episode tree). | Whether tree memory is a scaling risk (informs caps / pruning). |
-| P6 | **tracemalloc/Scalene** on the self-play→replay-buffer accumulation across ≥2 generations. | How much RAM the buffer holds between phases vs what's already on disk. |
-| P7 | Profile a single `train()` call on a synthetic realistic-size buffer — tracemalloc + peak RSS, ranked by component. | Memory behaviour of the training step at scale (after the [OOM fix](../plans/self-play-memory-fix.md) lands). |
-| P8 | Write **both** breakdowns (time + memory) into this doc as tables (the "current profile"), each time-slice annotated with its Amdahl ceiling. | The evidence base for choosing a technique — and the before-numbers for any change. |
+The executable checklist lives in the [profiling plan](../plans/profiling-investigation.md) (P1–P8): build the single-game harness, run py-spy / Scalene / line_profiler for time, tracemalloc for the in-episode tree and the replay buffer, then write up the current profile and decide. The tools above explain *why* each; the plan tracks *doing* them.
 
-Output of Part A: a **time** table like *"select_action 35%, move-gen 20%,
-get_next_state 15%, inference 12%, backprop 8%, other 10%"* (numbers TBD) plus a
-**memory** table ranking the buffer / training-step / tree components by bytes —
-and from them, the shortlist of what's worth optimising and the scope of the OOM fix.
+Output: a **time** table (e.g. *"select_action 35%, move-gen 20%, get_next_state 15%, inference 12%, backprop 8%, other 10%"* — numbers TBD) plus a **memory** table ranking the tree / buffer components by bytes — and from them, the shortlist of what's worth optimising, each sized by its Amdahl ceiling.
 
 ---
 
