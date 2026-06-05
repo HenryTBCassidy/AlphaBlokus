@@ -2,7 +2,7 @@
 
 **Status: companion reference for the [profiling investigation](../plans/profiling-investigation.md).** That plan owns the actionable checklist (P1–P8) and the optimise-or-train decision; this doc is the deeper reference it draws on — *why* self-play is now CPU-bound, the **Amdahl analysis** for sizing each lever, the tool rationale, the hot-loop anatomy, and the full **candidate-technique menu** (Part B). The discipline (F5's lesson): measure where time *and* memory actually go **before** prescribing any optimisation.
 
-**Scope note:** the gen-3 training-step OOM is **not** a topic here — that's a known bug with a code-confirmed cause, fixed directly in [`../plans/self-play-memory-fix.md`](../plans/self-play-memory-fix.md). Companion: [`../plans/archive/full-cycle-optimisation.md`](../plans/archive/full-cycle-optimisation.md) (F1–F5) and [`../IDEAS.md`](../IDEAS.md).
+**Scope note:** the gen-3 training-step OOM is **not** a topic here — that's a known bug with a code-confirmed cause, fixed directly in [`../plans/self-play-memory-fix.md`](../plans/archive/self-play-memory-fix.md). Companion: [`../plans/archive/full-cycle-optimisation.md`](../plans/archive/full-cycle-optimisation.md) (F1–F5) and [`../IDEAS.md`](../IDEAS.md).
 
 ## Why this exists
 
@@ -65,7 +65,7 @@ so memory must be profiled across the *whole* lifecycle, not just the search tre
 |--------|-----------|----------------|
 | **In-episode MCTS tree** | the per-episode node/edge dicts (25→50→75… entries as sims accumulate) | scaling risk for long games / high sim counts; bounded per game |
 | **Self-play → replay buffer** | examples accumulating in `train_examples_history` across generations (board + policy + value per move) | the RAM held *between* phases; duplicates what's already on disk |
-| **Training step** | `train()` materialising the buffer into dense tensors — the gen-3 OOM site | fixed directly in the [OOM fix](../plans/self-play-memory-fix.md); profiled here only to understand memory at scale once that lands |
+| **Training step** | `train()` materialising the buffer into dense tensors — the gen-3 OOM site | fixed directly in the [OOM fix](../plans/archive/self-play-memory-fix.md); profiled here only to understand memory at scale once that lands |
 
 The training-step target can be measured **cheaply without a full multi-hour run** —
 build a synthetic buffer of realistic size (N examples) and profile a single
@@ -97,7 +97,7 @@ Part A confirms.
 | **py-spy** | First look — sampling profiler, **handles multiprocessing** (`--subprocesses`), near-zero overhead, no code changes. Gives a flame graph of where real time goes across the 8 workers. | `cProfile` does **not** work well across our `ProcessPoolExecutor` workers — py-spy is the right coarse tool. |
 | **Scalene** | Line-level CPU truth, and crucially **splits Python time vs native (numpy/torch) time vs system time**, plus per-line memory. Run on a **single-worker** self-play run for clean attribution. | Tells us if a line's cost is Python-interpreter overhead (→ Cython/Numba helps) or already-native numpy (→ won't). |
 | **line_profiler** | Targeted line timings on the specific hot functions py-spy/Scalene flag (`_select_action`, `_descend_to_leaf`, `get_next_state`, `state_key`). Deterministic, exact. | `@profile` decorator on the chosen functions; single-process run. |
-| **tracemalloc** | Memory growth of the search tree within an episode (the per-episode dicts that grow 25→50→75…). Confirms whether long games / many sims risk memory pressure at scale. | Already flagged in `scaled-training-run.md`; quantify it. |
+| **tracemalloc** | Memory growth of the search tree within an episode (the per-episode dicts that grow 25→50→75…). Confirms whether long games / many sims risk memory pressure at scale. | Already flagged in `archive/scaled-training-run.md`; quantify it. |
 
 ### The steps
 

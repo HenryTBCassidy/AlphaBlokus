@@ -2,7 +2,7 @@
 
 The F1→F3 optimisation stack (~14× cumulative vs serial) makes ~1,000 self-play games per generation cost the same wall-clock as the old 80. This plan captures the config + reasoning for the first training run that actually exploits that — and the memory constraints that bite when you scale games this hard.
 
-**Status:** Planned, not launched. Intended to kick off at end of day so it doesn't block daytime F4 benchmarking on the PC. Prepared 2026-06-02.
+**Status: ⚠️ Archived — superseded (2026-06-05).** Prepared 2026-06-02 as the plan for the first scaled run. Overtaken by events: the live run config is now `run_configurations/blokus_scaled_15.json` (15 generations, not 10), the training-step OOM has since been fixed (the memory analysis below predates that fix), and Dirichlet noise is now implemented. Kept for the **rationale** behind the scaled config (why 1000 games, lookback=1, temp=12, epochs=2, …) — the params themselves live in the run config, which is the source of truth. *Original status: planned, not launched.*
 
 ---
 
