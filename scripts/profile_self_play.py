@@ -165,8 +165,14 @@ def main() -> None:
         config = dataclasses.replace(
             config, mcts_config=dataclasses.replace(config.mcts_config, num_mcts_sims=args.sims))
     game, nnet = instantiate_game_and_network(config)
+    # Match production: the Coach/workers call _maybe_enable_f2 to route move-gen
+    # through the precomputed-table generator. instantiate_game does NOT, so do it here.
+    f2_on = getattr(config, "use_optimised_movegen", False)
+    if f2_on and hasattr(game, "enable_optimised_movegen"):
+        game.enable_optimised_movegen()
     print(f"game={config.game} sims={config.mcts_config.num_mcts_sims} "
           f"K={config.mcts_config.mcts_batch_size} cuda={config.net_config.cuda} "
+          f"f2_movegen={f2_on} "
           f"net={config.net_config.num_filters}f×{config.net_config.num_residual_blocks}b "
           f"{config.net_config.policy_head}")
 
