@@ -137,6 +137,36 @@ The three goals (fast results · technical optimality · CV signal) and the hard
 
 ---
 
+## Deep-dive: S1 vs S2 in plain terms, and the hybrid (S6)
+
+### The setup (analogy)
+Self-play = playing ~1000 games to generate training data. Each game needs two things: a **brain** (the neural net, lives on the GPU) to score positions, and a lot of **thinking** (the MCTS tree search + move generation — pure CPU grind). We have **20 CPU cores = 20 desks** for thinkers, and **one GPU = one brain**.
+
+**Today (multiprocessing):** we hire 8 **workers**, and each one is a fully independent person who insists on carrying their *own complete copy of the brain plus all the heavy lab equipment* (the 2.5 GB PyTorch+CUDA stack) into their *own private office*. 8 people × a full equipment set fills the building (RAM) at 8 — even though there are 20 desks. They barely use the brain they're all lugging around. That's the waste, and it's what OOM-crashed us.
+
+### S1 — central brain booth, thin workers
+Put **one expert in a central booth** holding the single brain (one GPU process). The workers become **thin** — they just think (MCTS), and when they need a position scored they **pass a note through a window** to the booth, which answers many notes at once (batched). Each worker now carries almost nothing (~0.5 GB) → **20 thin workers fit easily → all 20 desks used.** They're still separate *people in separate offices* (processes, separate memory), they just stopped lugging the brain. **We already built the booth — that's F5.** No new technology required; works today on every machine.
+
+### S2 — one open-plan office, shared brain
+Instead of separate offices, put **everyone in one open-plan office sharing a single brain + one equipment set on a central table** (one process, many threads). Hugely memory-efficient — one set of everything for all 20 thinkers. The blocker is a Python rule called the **GIL = a single "talking stick": only the person holding it may think at any instant.** In a shared office that means no real parallel thinking — which is *exactly why we were forced into separate offices (processes) in the first place.* **Free-threaded Python removes the talking stick** → everyone in the open office thinks at once, sharing the one brain. The catch (today): **the GPU brain doesn't yet come in a version that works in the no-talking-stick office** — PyTorch has no CUDA + free-threaded build. So you can't put the *GPU* brain on the shared table yet.
+
+### S6 — the hybrid you proposed (open-plan thinkers + a separate brain booth)
+Your idea: *threads instead of processes, but farm the GPU calls out to a dedicated GPU worker.* Combine them — **open-plan office (free-threaded, shared) for the THINKERS, with the GPU brain kept in a SEPARATE booth (its own process).** The thinkers share their CPU equipment on the open table (memory win + all cores); they pass notes to the GPU booth for scoring (S1's central inference). **Why this dodges the blocker:** the GPU brain is *not* on the open-plan table — it lives in its own booth = a separate, *normal* Python process (regular torch+CUDA). So the open-plan office never needs the CUDA-+-free-threaded build that doesn't exist. **So yes — this is feasible on the PC today.** Coordinates: threads (free-threaded) · CPU runtime in-thread · central inference in a separate GPU process.
+- **Cost/wrinkle:** the thinker office (free-threaded Python 3.14t) and the GPU booth (normal Python 3.12 + CUDA) are *different Python interpreters*, so the note-passing between them is cross-version IPC (named shared memory + a simple signal) — an adaptation of the existing F5 channel, not a rewrite, but real extra work.
+
+### The key insight (this is the important bit)
+**The memory/core win comes from "thin workers + a central GPU brain" — NOT from threads-vs-processes.** Threads (free-threading) are *marginally* leaner (one shared equipment set vs ~0.5 GB per process) and skip worker-to-worker note-passing — but **thin PROCESSES already get you to "20 cores used, one GPU, low memory" today, with zero blocker and no cross-version IPC** (S1 flavour b, all on Python 3.12, the F5 channel works as-is). So:
+- **S1 (thin processes) ≈ 90% of the hybrid's benefit, shippable now, nothing to wait for.**
+- **S6 (free-threaded threads) is the elegant polish** on top — worth a *spike* once S1 is in, not a prerequisite.
+
+You were right that there's a feasible GIL-free path on the PC without waiting for a release — and it's even better than "wait for the wheel," because you don't need free-threading at all to use all 20 cores. Free-threading just makes the final form tidier.
+
+### Correction: there *is* a near-universal option — **S1**
+Re-reading the matrix: **S1 is the only strategy with no ❌** — it degrades gracefully on all four targets (best on the PC, fine on AWS-single, modest on Mac, the right seam for the farm). The "no single option works everywhere" impression was overstated; S1 is the universal baseline, and S6 is its upgraded form where free-threading is available.
+
+### Is pure-S2 *really* impossible on the PC today?
+Not "impossible" — **blocked off-the-shelf.** The only ways to put the *GPU* brain in a free-threaded process right now are: (1) build PyTorch from source against `cp314t`+CUDA (multi-day, fragile, in WSL2), or (2) use a non-PyTorch CUDA inference runtime in-thread (e.g. ONNX Runtime's CUDA EP, if it ships free-threaded wheels). Both are spikes, not sure things. **The hybrid (S6) avoids needing either** by keeping the GPU out of the free-threaded process. And we can validate free-threading itself *any time* with a CPU-only spike (free-threaded Python + numpy both exist) — that de-risks S6 cheaply.
+
 ## Sources
 - **S1:** [Triton dynamic batching](https://docs.nvidia.com/deeplearning/triton-inference-server/user-guide/docs/user_guide/batcher.html) · [CUDA MPS](https://docs.nvidia.com/deploy/mps/latest/index.html) · [PyTorch fork+CUDA #40403](https://github.com/pytorch/pytorch/issues/40403) · [MiniZero arXiv:2310.11305](https://arxiv.org/pdf/2310.11305)
 - **S2:** [PyTorch dropping 3.13t](https://dev-discuss.pytorch.org/t/dropping-python-3-13t-free-threaded-support-in-nightlies-and-in-the-future-pytorch-2-13-release/3386) · [no CUDA 3.14 wheels #169929](https://github.com/pytorch/pytorch/issues/169929) · [py-free-threading tracking](https://py-free-threading.github.io/tracking/) · [3.14 free-threading benchmarks](https://www.danilchenko.dev/posts/python-314-free-threading/)
