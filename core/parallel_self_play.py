@@ -153,6 +153,7 @@ def _worker_init_self_play(config: RunConfig, checkpoint_path: str | None) -> No
     global _WORKER_CONFIG, _WORKER_GAME, _WORKER_NNET_A, _WORKER_CUDA
     _WORKER_CONFIG = config
     _WORKER_CUDA = config.worker_cuda
+    torch.set_num_threads(1)  # one torch thread/worker — N workers each grabbing all cores oversubscribes
     _WORKER_GAME, _WORKER_NNET_A = instantiate_game_and_network(_worker_net_config(config))
     if checkpoint_path is not None:
         _WORKER_NNET_A.load_checkpoint(filename=checkpoint_path)
@@ -228,6 +229,7 @@ def _worker_init_self_play_server(config: RunConfig, handles: ChannelHandles, co
     global _WORKER_CONFIG, _WORKER_GAME, _WORKER_NNET_A, _WORKER_CHANNEL, _WORKER_CUDA
     _WORKER_CONFIG = config
     _WORKER_CUDA = False  # server-mode workers hold no net → never touch CUDA
+    torch.set_num_threads(1)  # one torch thread/worker — N workers each grabbing all cores oversubscribes
     _WORKER_GAME = instantiate_game(config)
     with counter.get_lock():  # type: ignore[attr-defined]
         worker_id = counter.value  # type: ignore[attr-defined]
@@ -252,6 +254,7 @@ def _worker_init_two_nets(
     global _WORKER_CONFIG, _WORKER_GAME, _WORKER_NNET_A, _WORKER_NNET_B, _WORKER_CUDA
     _WORKER_CONFIG = config
     _WORKER_CUDA = config.worker_cuda
+    torch.set_num_threads(1)  # one torch thread/worker — N workers each grabbing all cores oversubscribes
     worker_config = _worker_net_config(config)
     _WORKER_GAME, _WORKER_NNET_A = instantiate_game_and_network(worker_config)
     _WORKER_NNET_A.load_checkpoint(filename=checkpoint_a_path)
