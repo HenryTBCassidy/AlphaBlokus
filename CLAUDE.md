@@ -93,10 +93,11 @@ docs/
 │   ├── PLAN-FORMAT.md     # How to write implementation plans
 │   ├── REMOTE-TRAINING.md # Runbook for running training on the home PC over SSH
 │   └── AI-CONTEXT.md      # Extended context, architecture rationale, gotchas
-└── plans/                                # Top-level = in-flight or not-yet-started
-    ├── self-play-memory-fix.md           # Active: sparse storage + per-batch densify + train-from-disk (M1 done)
-    ├── scaled-training-run.md            # Plan for the first ~1000-games/gen training run (not launched)
+└── plans/                                # Top-level = in-flight or not-yet-started (none currently)
     └── archive/                          # Completed plans, retained for context
+        ├── profiling-investigation.md    # Profiled the cycle; decided RUN (report: docs/research/profiling-report.md)
+        ├── self-play-memory-fix.md       # Training-step OOM fix (per-batch densify)
+        ├── scaled-training-run.md        # First scaled-run prep (superseded; rationale kept)
         ├── full-cycle-optimisation.md    # Master optimisation tracker (F1–F5 done; ~14× vs serial)
         ├── cross-worker-inference-server.md # F5: cross-worker inference batching (built; 0.99×, not adopted)
         ├── batched-inference.md          # F3: batched MCTS inference + virtual loss

@@ -53,7 +53,7 @@ Dirichlet root-exploration noise (self-play only), fp16 inference on CUDA, and f
 ### 🔧 Phase 6 — First scaled Blokus run (in progress)
 The optimisation stack makes ~1,000 self-play games/generation cost what 80 used to. Standing up that first real run (config in `run_configurations/blokus_scaled.json`) surfaced two blockers being worked now:
 
-- **Self-play memory blow-up.** The dense 17,837-float policy target × 8 workers exhausts 24 GB RAM and swap-thrashes mid-generation. Fix in review: **sparse policy storage** ([`docs/plans/self-play-memory-fix.md`](docs/plans/self-play-memory-fix.md)).
+- **Self-play memory blow-up — fixed.** The dense 17,837-float policy target × 8 workers used to exhaust 24 GB RAM and OOM mid-run; **fixed** by sparse policy storage + per-batch densification ([`docs/plans/archive/self-play-memory-fix.md`](docs/plans/archive/self-play-memory-fix.md)).
 - **Unattended-run reliability.** WSL2 tears down the distro when no foreground session is attached; long runs currently need a held-open SSH session (see [`docs/guides/REMOTE-TRAINING.md`](docs/guides/REMOTE-TRAINING.md)).
 
 ### ⏭ What's next
@@ -173,7 +173,7 @@ Two players, 14×14 board, 21 polyomino pieces each (sizes 1–5). The first mov
 `STYLE-GUIDE.md` (code conventions), `PLAN-FORMAT.md` (how plans are written), `REMOTE-TRAINING.md` (home-GPU runbook), `AI-CONTEXT.md` (extended context for AI assistants).
 
 ### Plans (`docs/plans/`)
-Top-level plans are in-flight; `docs/plans/archive/` is the historical record of shipped work — including the full optimisation stack ([`full-cycle-optimisation.md`](docs/plans/archive/full-cycle-optimisation.md)). The current active plans are the self-play memory fix ([`self-play-memory-fix.md`](docs/plans/self-play-memory-fix.md)) and the first scaled run ([`scaled-training-run.md`](docs/plans/scaled-training-run.md)). Candidate-but-uncommitted ideas live in [`docs/IDEAS.md`](docs/IDEAS.md).
+Top-level plans are in-flight; `docs/plans/archive/` is the historical record of completed work — the full optimisation stack ([`full-cycle-optimisation.md`](docs/plans/archive/full-cycle-optimisation.md)), the training-step memory fix ([`self-play-memory-fix.md`](docs/plans/archive/self-play-memory-fix.md)), and the profiling investigation ([`profiling-investigation.md`](docs/plans/archive/profiling-investigation.md) — see the visual [**profiling report**](docs/research/profiling-report.md)). No plan is currently in flight: the profile concluded the training cycle already fits comfortably overnight, so the next move is training runs, not further optimisation. Candidate-but-uncommitted ideas live in [`docs/IDEAS.md`](docs/IDEAS.md).
 
 ---
 
