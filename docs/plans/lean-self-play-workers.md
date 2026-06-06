@@ -1,0 +1,68 @@
+# Lean Self-Play Workers — CPU workers + central GPU (S1)
+
+Implements **S1** from the [parallelism options decision doc](../research/parallelism-options.md): make the game-playing pool workers **lightweight (CPU-only, no per-worker CUDA context)** so we can run ~20 of them on the 20-core PC, with the GPU used by training (and optionally a single central inference process). 
+
+**Why:** each worker today loads its own ~2.5 GB PyTorch+CUDA stack (the net is 1.5 MB), so 8 workers ≈ 20 GB — which **caps the worker count at 8 despite 20 cores and OOM-crashed a run at the 28 GB cap** (at gen 4). Self-play is **~86% of the training cycle and CPU-bound** ([profiling report](../research/profiling-report.md)), so the lever is *more concurrent workers* — which this unlocks. Removing the duplication also removes the crash.
+
+**Target outcome:** ~20 lean workers using all cores, RAM flat well under the cap, the OOM gone, and self-play throughput up vs the 8-worker baseline — i.e. a crash-proof run that trains faster.
+
+**The one open question** (settled by measurement in L3): where those CPU workers get inference — **(a)** on the CPU in each worker (simplest, no IPC) vs **(b)** routed to one central GPU process (the existing F5 server). The profile says inference is ~33% of a game and *transfer-bound*, and the tiny 64f×4b net is cheap on CPU — so (a) may well win on simplicity; F5's synchronous round-trip previously gave no speedup. L3 decides on numbers, not faith.
+
+---
+
+## Checklist
+
+| # | Item | Effort | Priority | Done |
+|---|------|--------|----------|------|
+| L1 | **Worker nets on CPU** — pool workers (self-play/arena/elo) build their net on CPU regardless of the global `cuda` flag; training stays on GPU in the main process | 0.5 day | High | |
+| L2 | **Raise worker count** toward core count (e.g. 16 on the 20-core PC) now that workers are ~0.5 GB | 15 min | High | |
+| L3 | **Benchmark the inference path (decision gate)** — s/game + total + peak RAM for: baseline 8 GPU workers · ~16–20 CPU-inference workers · ~16–20 CPU workers + central GPU server (F5). Pick the fastest that fits memory | 0.5 day | High | |
+| L4 | **Finalise the chosen path** — (a) tune CPU inference (pin intra-op threads per worker) **or** (b) relax the F5 gate to "GPU server + CPU workers" and validate. Optional: fork+CoW to share the move-gen tables | 0.5–2 days | High | |
+| L5 | **Correctness gate** — parallel determinism preserved (workers=1 ≡ N at a fixed device/seed); MCTS/game logic unchanged; full suite green | 0.5 day | High | |
+| L6 | **Memory + OOM benchmark** — full config at ~20 workers, run **past gen 3–4** (the crash point): RAM flat, all cores used, OOM gone, throughput vs the 8-worker baseline | 1 hr + run | High | |
+| L7 | **Launch the real 15-gen run** — results + final verification | run | High | |
+
+---
+
+## L1. Worker nets on CPU
+
+Today every pool worker builds its net from `config.net_config.cuda` (`config.py:54`) inside `_worker_init_self_play` (`parallel_self_play.py:130`) and the two-net arena/elo inits — so all 8 workers create a CUDA context. The change: **the game-playing workers always build their net on CPU**, while the **main process keeps the GPU** for the training step (`base_wrapper.train`). Cleanest seam: add a `worker_device`/`self_play_cuda` notion (default CPU) and have the worker inits force `cuda=False` when constructing/loading the worker net, leaving `net_config.cuda` (the training device) untouched. Net is 1.5 MB — loading it to CPU is instant; no CUDA context → ~0.5 GB/worker instead of ~2.5 GB.
+
+## L2. Raise worker count
+
+Bump `num_parallel_workers` (config.py:185; configs currently 8) toward the core count — start at **16** on the 20-core PC (leave a few cores for the main process + OS). Now safe because workers are cheap (16 × ~0.5 GB ≈ 8 GB + the GPU training net, comfortably under 28 GB).
+
+## L3. Benchmark the inference path *(decision gate)*
+
+Use the existing `scripts/benchmark_phases.py` / `scripts/profile_self_play.py` harness to measure **self-play s/game, total wall, and peak RSS** for three configs:
+1. **Baseline:** 8 GPU workers (today).
+2. **(a) CPU-in-worker:** ~16 CPU-only workers, each running inference on its own CPU net.
+3. **(b) Central GPU server:** ~16 CPU-only workers + one GPU process serving batched inference (F5; gate relaxed — see L4).
+
+Decision: pick the **fastest config that fits memory**. Expected (to confirm): (a) likely wins — CPU inference of the tiny net is cheap, ~2× more workers beats the per-call slowdown, and it has zero IPC; (b) only wins if central batching materially beats CPU inference, which F5's prior null-result makes doubtful. Record the numbers + the choice here.
+
+## L4. Finalise the chosen path
+
+- **If (a) CPU-in-worker:** set `torch.set_num_threads(1)` / ORT `intra_op_num_threads=1` per worker so N workers don't oversubscribe the cores; remove the server scaffolding from the self-play path. *Optional extra memory win:* on Linux/WSL, use `fork` for the CPU-only workers so the read-only move-gen tables + interpreter share via copy-on-write (CUDA can't fork, but these workers never touch it).
+- **If (b) central server:** relax `_server_enabled` (`parallel_self_play.py:160`, currently requires `net_config.cuda` on the *workers*) to the **memory mode**: the *server* holds the GPU net, the *workers* are CPU-only/torch-CUDA-free. Validate the channel end-to-end.
+
+## L5. Correctness gate
+
+Switching self-play inference from GPU to CPU changes floats slightly, so games won't be bit-identical to old GPU runs — that's expected and fine. What must hold: **(i)** parallel determinism preserved — `tests/test_core/test_parallel_self_play.py` (workers=1 ≡ workers=N at the same device/seed) still passes; **(ii)** the MCTS + move-gen + game logic is unchanged (only the net's device moved); **(iii)** the full suite is green. Add a check that a 1-worker CPU run and an N-worker CPU run produce identical examples at a fixed seed.
+
+## L6. Memory + OOM benchmark *(the proof)*
+
+Restore the full config at ~16–20 workers and run **past generation 3–4** (where it OOM-crashed). Confirm on W&B: `proc.memory.rssMB` stays flat (≈ workers × ~0.5 GB + the GPU training net, well under 28 GB), `system.memory_percent` never approaches 100, all cores are busy during self-play, and self-play s/game improves vs the 8-worker baseline. This is the evidence the OOM is gone *and* throughput is up — measured, not asserted.
+
+## L7. Launch the real 15-gen run
+
+With L6 green, launch the full 15-gen × 1000-game run (the click-script). It both verifies the fix at scale and delivers the training results the whole effort has been blocked on.
+
+---
+
+## Notes / dependencies
+
+- **Needs the PC reachable** (Tailscale on the PC is currently down) for L3, L6, L7 — they run on the GPU box.
+- **Arena/Elo workers** get the same CPU treatment as self-play (they run the same MCTS play-loop via the pool); only the main-process training net stays on GPU.
+- **Not a free-threading project.** This is plain multiprocessing with cheaper workers — zero new dependencies, works on Python 3.12 today. The free-threaded "S6" upgrade is deliberately deferred until a CUDA + free-threaded PyTorch wheel ships (see the decision doc) — it adds complexity for no net gain while the GPU must live in a separate process.
+- **Scales forward:** the "thin workers + central inference" seam is exactly what a future AWS/Ray (S5) setup would put a network boundary at — so S1 is also the right first step toward the farm case.
