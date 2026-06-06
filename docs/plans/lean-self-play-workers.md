@@ -2,11 +2,15 @@
 
 Implements **S1** from the [parallelism options decision doc](../research/parallelism-options.md): make the game-playing pool workers **lightweight (CPU-only, no per-worker CUDA context)** so we can run ~20 of them on the 20-core PC, with the GPU used by training (and optionally a single central inference process). 
 
-**Why:** each worker today loads its own ~2.5 GB PyTorch+CUDA stack (the net is 1.5 MB), so 8 workers ≈ 20 GB — which **caps the worker count at 8 despite 20 cores and OOM-crashed a run at the 28 GB cap** (at gen 4). Self-play is **~86% of the training cycle and CPU-bound** ([profiling report](../research/profiling-report.md)), so the lever is *more concurrent workers* — which this unlocks. Removing the duplication also removes the crash.
+**Why:** each worker today loads its own ~ 2.5 GB PyTorch+CUDA stack (the net is 1.5 MB), so 8 workers ≈ 20 GB — which **caps the worker count at 8 despite 20 cores and OOM-crashed a run at the 28 GB cap** (at gen 4). Self-play is **~86% of the training cycle and CPU-bound** ([profiling report](../research/profiling-report.md)), so the lever is *more concurrent workers* — which this unlocks. Removing the duplication also removes the crash.
 
 **Target outcome:** ~20 lean workers using all cores, RAM flat well under the cap, the OOM gone, and self-play throughput up vs the 8-worker baseline — i.e. a crash-proof run that trains faster.
 
-**The one open question** (settled by measurement in L3): where those CPU workers get inference — **(a)** on the CPU in each worker (simplest, no IPC) vs **(b)** routed to one central GPU process (the existing F5 server). The profile says inference is ~33% of a game and *transfer-bound*, and the tiny 64f×4b net is cheap on CPU — so (a) may well win on simplicity; F5's synchronous round-trip previously gave no speedup. L3 decides on numbers, not faith.
+**Two supported inference strategies, kept as config flags** (per the design directive — the best choice shifts with net size + hardware, so we maintain *both* and flip the flag, never deleting one):
+- **(a) CPU-in-worker** — `worker_cuda: false`, no server: each worker runs the net on its own CPU. Simplest, zero IPC.
+- **(b) central GPU server** — `inference_server: true`: workers are netless and batch their leaf evaluations to one GPU process.
+
+L3 benchmarks them to pick the sensible **default** for the *current* small 64f×4b net on the PC — but neither is removed. Profile prior: inference is ~33% and transfer-bound and the net is tiny → **(a) likely wins now**; a much bigger net (or a beefier GPU) later likely flips the default to **(b)**. L3 decides the default on numbers, not faith.
 
 ---
 
@@ -16,8 +20,8 @@ Implements **S1** from the [parallelism options decision doc](../research/parall
 |---|------|--------|----------|------|
 | L1 | **Worker nets on CPU** — pool workers (self-play/arena/elo) build their net on CPU regardless of the global `cuda` flag; training stays on GPU in the main process | 0.5 day | High | |
 | L2 | **Raise worker count** toward core count (e.g. 16 on the 20-core PC) now that workers are ~0.5 GB | 15 min | High | |
-| L3 | **Benchmark the inference path (decision gate)** — s/game + total + peak RAM for: baseline 8 GPU workers · ~16–20 CPU-inference workers · ~16–20 CPU workers + central GPU server (F5). Pick the fastest that fits memory | 0.5 day | High | |
-| L4 | **Finalise the chosen path** — (a) tune CPU inference (pin intra-op threads per worker) **or** (b) relax the F5 gate to "GPU server + CPU workers" and validate. Optional: fork+CoW to share the move-gen tables | 0.5–2 days | High | |
+| L3 | **Benchmark to pick the default** — s/game + total + peak RAM for: baseline 8 GPU workers · ~16–20 CPU-in-worker · ~16–20 CPU + central GPU server. Choose the **default**; both paths kept either way | 0.5 day | High | |
+| L4 | **Maintain BOTH inference paths (flag-selectable)** — (a) `worker_cuda` CPU-in-worker (pin intra-op threads/worker) **and** (b) `inference_server` central GPU; ensure both work + are tested. Optional: fork+CoW for the move-gen tables | 0.5–2 days | High | |
 | L5 | **Correctness gate** — parallel determinism preserved (workers=1 ≡ N at a fixed device/seed); MCTS/game logic unchanged; full suite green | 0.5 day | High | |
 | L6 | **Memory + OOM benchmark** — full config at ~20 workers, run **past gen 3–4** (the crash point): RAM flat, all cores used, OOM gone, throughput vs the 8-worker baseline | 1 hr + run | High | |
 | L7 | **Launch the real 15-gen run** — results + final verification | run | High | |
@@ -41,10 +45,13 @@ Use the existing `scripts/benchmark_phases.py` / `scripts/profile_self_play.py` 
 
 Decision: pick the **fastest config that fits memory**. Expected (to confirm): (a) likely wins — CPU inference of the tiny net is cheap, ~2× more workers beats the per-call slowdown, and it has zero IPC; (b) only wins if central batching materially beats CPU inference, which F5's prior null-result makes doubtful. Record the numbers + the choice here.
 
-## L4. Finalise the chosen path
+## L4. Maintain both inference paths (flag-selectable)
 
-- **If (a) CPU-in-worker:** set `torch.set_num_threads(1)` / ORT `intra_op_num_threads=1` per worker so N workers don't oversubscribe the cores; remove the server scaffolding from the self-play path. *Optional extra memory win:* on Linux/WSL, use `fork` for the CPU-only workers so the read-only move-gen tables + interpreter share via copy-on-write (CUDA can't fork, but these workers never touch it).
-- **If (b) central server:** relax `_server_enabled` (`parallel_self_play.py:160`, currently requires `net_config.cuda` on the *workers*) to the **memory mode**: the *server* holds the GPU net, the *workers* are CPU-only/torch-CUDA-free. Validate the channel end-to-end.
+Both strategies stay in the codebase, selected by config — neither is deleted (design directive: the optimal choice shifts with net size + hardware).
+- **(a) CPU-in-worker** (`worker_cuda: false`): set `torch.set_num_threads(1)` per worker so N workers don't oversubscribe the cores. *Optional extra memory win:* on Linux/WSL, `fork` the CPU-only workers so the read-only move-gen tables + interpreter share via copy-on-write (CUDA can't fork, but these workers never touch it).
+- **(b) central GPU server** (`inference_server: true`): the existing F5 server (`inference_server.py`/`inference_channel.py`) owns the GPU net; workers are netless `InferenceClientNet`s. Already wired; the server uses the (GPU) training device, workers build no net. Validate end-to-end.
+
+L3's numbers set the recommended **default** (likely (a) for the current 64f×4b net), but both are kept and tested so we flip the flag when the net grows or the hardware changes — a bigger net / beefier GPU favours (b).
 
 ## L5. Correctness gate
 
