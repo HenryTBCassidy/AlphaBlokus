@@ -156,10 +156,10 @@ Your idea: *threads instead of processes, but farm the GPU calls out to a dedica
 
 ### The key insight (this is the important bit)
 **The memory/core win comes from "thin workers + a central GPU brain" — NOT from threads-vs-processes.** Threads (free-threading) are *marginally* leaner (one shared equipment set vs ~0.5 GB per process) and skip worker-to-worker note-passing — but **thin PROCESSES already get you to "20 cores used, one GPU, low memory" today, with zero blocker and no cross-version IPC** (S1 flavour b, all on Python 3.12, the F5 channel works as-is). So:
-- **S1 (thin processes) ≈ 90% of the hybrid's benefit, shippable now, nothing to wait for.**
-- **S6 (free-threaded threads) is the elegant polish** on top — worth a *spike* once S1 is in, not a prerequisite.
+- **S1 (thin processes) is the whole win, shippable now.**
+- **S6 (free-threaded threads) is NOT worth it until a CUDA + free-threaded PyTorch wheel ships.** The part of free-threading that would be a real win — the GPU net shared *inside* one process, no IPC — is exactly what's blocked. With the GPU stuck in a separate process either way, **S6 collapses to "S1 with threads instead of processes,"** and that swap trades unused memory headroom for a **~5–10% no-GIL single-thread tax** plus extra complexity (Python upgrade + cross-version IPC). Net: wash-to-slightly-negative for us.
 
-You were right that there's a feasible GIL-free path on the PC without waiting for a release — and it's even better than "wait for the wheel," because you don't need free-threading at all to use all 20 cores. Free-threading just makes the final form tidier.
+Free-threading only becomes a genuine win when the wheel lets the GPU net live *inside* the free-threaded process (the blocked pure-S2): then all the IPC and per-worker duplication vanish and the small no-GIL tax is easily repaid. **Until then: just S1.** (We can still cheaply *spike* free-threaded Python + numpy on the CPU side any time, to be ready — but it's not on the critical path.)
 
 ### Correction: there *is* a near-universal option — **S1**
 Re-reading the matrix: **S1 is the only strategy with no ❌** — it degrades gracefully on all four targets (best on the PC, fine on AWS-single, modest on Mac, the right seam for the farm). The "no single option works everywhere" impression was overstated; S1 is the universal baseline, and S6 is its upgraded form where free-threading is available.
