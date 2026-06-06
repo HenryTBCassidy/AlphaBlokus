@@ -31,6 +31,7 @@ and one slow game doesn't block neighbours behind it.
 from __future__ import annotations
 
 from concurrent.futures import ProcessPoolExecutor
+from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -75,6 +76,9 @@ _WORKER_NNET_B: INeuralNetWrapper | None = None
 # cross-worker inference server is enabled. ``None`` when each worker holds its
 # own copy of the network instead.
 _WORKER_CHANNEL: SharedInferenceChannel | None = None
+# Whether this worker's net lives on the GPU. Gates CUDA RNG seeding so a
+# CPU-only worker never creates a CUDA context just to seed it.
+_WORKER_CUDA: bool = False
 
 
 # Phase codes that get mixed into the per-episode seed so the same
@@ -123,8 +127,20 @@ def _seed_worker_rngs(seed: int) -> None:
     """
     np.random.seed(seed)
     torch.manual_seed(seed)
-    if torch.cuda.is_available():
+    if _WORKER_CUDA and torch.cuda.is_available():
         torch.cuda.manual_seed_all(seed)
+
+
+def _worker_net_config(config: RunConfig) -> RunConfig:
+    """Config a pool worker uses to build its net.
+
+    Forces the net device to ``config.worker_cuda`` (CPU by default) so workers
+    don't each create a ~2.5 GB CUDA context; the main process keeps
+    ``net_config.cuda`` for the training step. A no-op when the two already agree.
+    """
+    if config.worker_cuda == config.net_config.cuda:
+        return config
+    return replace(config, net_config=replace(config.net_config, cuda=config.worker_cuda))
 
 
 def _worker_init_self_play(config: RunConfig, checkpoint_path: str | None) -> None:
@@ -134,9 +150,10 @@ def _worker_init_self_play(config: RunConfig, checkpoint_path: str | None) -> No
     ``checkpoint_path`` if provided). Stashes both in module-level
     globals so every per-task call reuses them.
     """
-    global _WORKER_CONFIG, _WORKER_GAME, _WORKER_NNET_A
+    global _WORKER_CONFIG, _WORKER_GAME, _WORKER_NNET_A, _WORKER_CUDA
     _WORKER_CONFIG = config
-    _WORKER_GAME, _WORKER_NNET_A = instantiate_game_and_network(config)
+    _WORKER_CUDA = config.worker_cuda
+    _WORKER_GAME, _WORKER_NNET_A = instantiate_game_and_network(_worker_net_config(config))
     if checkpoint_path is not None:
         _WORKER_NNET_A.load_checkpoint(filename=checkpoint_path)
     _maybe_enable_f2(config, _WORKER_GAME)
@@ -208,8 +225,9 @@ def _worker_init_self_play_server(config: RunConfig, handles: ChannelHandles, co
     an :class:`InferenceClientNet` as the worker's network so MCTS routes its
     leaf evaluations to the server unchanged.
     """
-    global _WORKER_CONFIG, _WORKER_GAME, _WORKER_NNET_A, _WORKER_CHANNEL
+    global _WORKER_CONFIG, _WORKER_GAME, _WORKER_NNET_A, _WORKER_CHANNEL, _WORKER_CUDA
     _WORKER_CONFIG = config
+    _WORKER_CUDA = False  # server-mode workers hold no net → never touch CUDA
     _WORKER_GAME = instantiate_game(config)
     with counter.get_lock():  # type: ignore[attr-defined]
         worker_id = counter.value  # type: ignore[attr-defined]
@@ -231,13 +249,15 @@ def _worker_init_two_nets(
     opponent) are caller-defined; the orchestrator wires them to
     new/prev for arena or new/baseline for Elo.
     """
-    global _WORKER_CONFIG, _WORKER_GAME, _WORKER_NNET_A, _WORKER_NNET_B
+    global _WORKER_CONFIG, _WORKER_GAME, _WORKER_NNET_A, _WORKER_NNET_B, _WORKER_CUDA
     _WORKER_CONFIG = config
-    _WORKER_GAME, _WORKER_NNET_A = instantiate_game_and_network(config)
+    _WORKER_CUDA = config.worker_cuda
+    worker_config = _worker_net_config(config)
+    _WORKER_GAME, _WORKER_NNET_A = instantiate_game_and_network(worker_config)
     _WORKER_NNET_A.load_checkpoint(filename=checkpoint_a_path)
     # Second net shares the already-constructed game; only the wrapper
-    # itself is rebuilt with fresh weights.
-    _WORKER_NNET_B = _WORKER_NNET_A.__class__(_WORKER_GAME, config)
+    # itself is rebuilt with fresh weights (on the same worker device).
+    _WORKER_NNET_B = _WORKER_NNET_A.__class__(_WORKER_GAME, worker_config)
     _WORKER_NNET_B.load_checkpoint(filename=checkpoint_b_path)
     _maybe_enable_f2(config, _WORKER_GAME)
 

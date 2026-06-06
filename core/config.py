@@ -184,6 +184,18 @@ class RunConfig:
     # examples matches the serial path regardless of worker count.
     num_parallel_workers: int = 1
 
+    # Device for the game-playing pool workers (self-play / arena / Elo).
+    # Default False = CPU-only workers: they skip the CUDA context entirely
+    # (~0.5 GB each instead of ~2.5 GB), so we can run ~one-per-core without the
+    # per-worker GPU-stack duplication that caps worker count and OOM'd a run.
+    # The main process keeps ``net_config.cuda`` for the training step. Set True
+    # to put the workers' net on the GPU (the pre-S1 behaviour / benchmark
+    # baseline). Independent of ``inference_server``: that routes inference to a
+    # central GPU process instead (a separate way to keep workers light) — the
+    # two are alternative inference strategies, both supported. See
+    # ``docs/plans/lean-self-play-workers.md``.
+    worker_cuda: bool = False
+
     # Precomputed-move-list move generator: if True, BlokusDuoGame routes
     # ``valid_move_masking`` through the implementation in
     # :mod:`games.blokusduo.movegen_runtime`. Default False to preserve
