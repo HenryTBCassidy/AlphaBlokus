@@ -125,9 +125,15 @@ class MCTS:
         self.q_values: dict[StateAction, float] = {}
         self.visit_counts: dict[StateAction, int] = {}
         self.state_visits: dict[StateKey, int] = {}
+        # Per state, stored SPARSE — only the legal moves, not a dense
+        # action_size vector. ``valid_moves_cache[s]`` is the ascending array of
+        # legal action ids; ``policy_priors[s]`` is the prior for each, aligned
+        # to it (``policy_priors[s][i]`` is the prior for ``valid_moves_cache[s][i]``).
+        # The dense float64[action_size] versions were 99.6% of tree RAM
+        # (docs/plans/mcts-memory-reduction.md).
         self.policy_priors: dict[StateKey, PolicyVector] = {}
         self.game_ended_cache: dict[StateKey, float] = {}
-        self.valid_moves_cache: dict[StateKey, ValidMoves] = {}
+        self.valid_moves_cache: dict[StateKey, NDArray[np.int32]] = {}
 
         # Virtual-loss counters. Maps (state, action) -> in-flight virtual
         # visit count during a batch. Always empty between get_action_prob
@@ -202,7 +208,7 @@ class MCTS:
         # Record per-move stats
         if self._detailed:
             s = self.game.state_key(canonical_board)
-            num_valid = int(self.valid_moves_cache[s].sum()) if s in self.valid_moves_cache else 0
+            num_valid = len(self.valid_moves_cache[s]) if s in self.valid_moves_cache else 0
             self._move_stats.append(MCTSMoveStats(
                 move_number=self._num_moves,
                 num_sims=self._total_sims - pre_sims,
@@ -352,32 +358,34 @@ class MCTS:
         ``virtual_visits`` extra visits each returning value -1, depressing its
         UCB so parallel descents diversify.
         """
-        valids = self.valid_moves_cache[s]
-        priors = self.policy_priors[s]
+        acts = self.valid_moves_cache[s]      # ascending legal action ids
+        priors = self.policy_priors[s]        # priors[i] is the prior for acts[i]
         state_visits = self.state_visits[s]
         cpuct = self.config.cpuct
         cur_best = -float('inf')
         best_act = -1
 
-        for a in np.where(valids)[0]:
+        for i in range(len(acts)):
+            a = int(acts[i])
+            prior_a = priors[i]
             virtual = self.virtual_visits.get((s, a), 0)
             if (s, a) in self.q_values:
                 n = self.visit_counts[(s, a)]
                 if virtual == 0:
                     u = (self.q_values[(s, a)] +
-                         cpuct * priors[a] * math.sqrt(state_visits) / (1 + n))
+                         cpuct * prior_a * math.sqrt(state_visits) / (1 + n))
                 else:
                     effective_n = n + virtual
                     effective_q = (n * self.q_values[(s, a)] - virtual) / effective_n
                     u = (effective_q +
-                         cpuct * priors[a] * math.sqrt(state_visits) / (1 + effective_n))
+                         cpuct * prior_a * math.sqrt(state_visits) / (1 + effective_n))
             else:
                 if virtual == 0:
-                    u = cpuct * priors[a] * math.sqrt(state_visits + EPS)
+                    u = cpuct * prior_a * math.sqrt(state_visits + EPS)
                 else:
                     # No real visits yet, only in-flight: effective Q is -1.
                     u = (-1.0 +
-                         cpuct * priors[a] * math.sqrt(state_visits) / (1 + virtual))
+                         cpuct * prior_a * math.sqrt(state_visits) / (1 + virtual))
 
             if u > cur_best:
                 cur_best = u
@@ -396,17 +404,21 @@ class MCTS:
             self._total_valid_moves_time_s += time.perf_counter() - vm_start
             self._num_valid_moves_calls += 1
 
-        masked = priors * valids
+        # Store sparse: the legal action ids (ascending) and the priors at those
+        # ids only, aligned. ``np.where`` is ascending, matching the order
+        # ``_select_action`` iterates, so the values + order are identical to the
+        # old dense ``priors * valids`` path — just without the zeros.
+        acts = np.where(valids)[0].astype(np.int32)
+        masked = priors[acts]
         sum_priors = np.sum(masked)
         if sum_priors > 0:
             masked = masked / sum_priors
         else:
             logger.error("All valid moves were masked, using uniform distribution.")
-            masked = valids.astype(float)
-            masked = masked / np.sum(masked)
+            masked = np.ones(len(acts), dtype=float) / len(acts)
 
         self.policy_priors[s] = masked
-        self.valid_moves_cache[s] = valids
+        self.valid_moves_cache[s] = acts
         self.state_visits[s] = 0
         self._num_leaf_expansions += 1
 
@@ -470,12 +482,14 @@ class MCTS:
             self._expand_leaf(canonical_board, s, priors)
 
         epsilon = self.config.dirichlet_epsilon
-        legal = np.where(self.valid_moves_cache[s])[0]
+        legal = self.valid_moves_cache[s]  # ascending legal ids; priors[s] is aligned to it
         if len(legal) == 0:
             return
         noise = np.random.dirichlet([self.config.dirichlet_alpha] * len(legal))
+        # Sparse priors are already aligned to ``legal``, so perturb element-wise
+        # (the dense path fancy-indexed ``priors[legal]`` — same values, same order).
         priors = self.policy_priors[s].copy()
-        priors[legal] = (1 - epsilon) * priors[legal] + epsilon * noise
+        priors = (1 - epsilon) * priors + epsilon * noise
         self.policy_priors[s] = priors
 
     def _estimate_tree_memory_bytes(self) -> int:

@@ -76,7 +76,11 @@ def test_noise_perturbs_only_root_legal_priors(tmp_path: Path) -> None:
 
     assert not np.allclose(base_priors, noisy_priors), "noise did not change root priors"
     assert abs(float(noisy_priors.sum()) - 1.0) < 1e-6
-    assert float(noisy_priors[np.asarray(valids) == 0].sum()) == 0.0, "mass on illegal moves"
+    # Priors are stored sparse — only the legal moves — so illegal moves carry no
+    # mass by construction. Check the sparse array covers exactly the legal set.
+    n_legal = int(np.asarray(valids).sum())
+    assert len(noisy_priors) == n_legal, "sparse priors should cover exactly the legal moves"
+    assert len(base_priors) == n_legal
 
 
 def test_noise_is_reproducible_under_seed(tmp_path: Path) -> None:

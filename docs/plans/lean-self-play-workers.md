@@ -76,7 +76,7 @@ With L6 green, launch the full 15-gen × 1000-game run (the click-script). It bo
 
 ## Sub-plans
 
-- **[MCTS memory reduction](mcts-memory-reduction.md)** — benchmarking found the per-worker **MCTS tree (~2 GB)** is the real cap on how many workers fit, and it's the one cost no OS trick can share (private + mutated → CoW/shared-memory can't touch it). Shrinking it in code is **OS-agnostic** and is the biggest remaining lever for "use all the cores." Profile-first (M1–M2) then design the cuts (M3+).
+- **[MCTS memory reduction](archive/mcts-memory-reduction.md)** ✅ **done** — the per-worker **MCTS tree** (dense `float64[17837]` `policy_priors` + `valid_moves_cache`) was the real cap on how many workers fit. Storing both **sparse** (only legal moves) cut the tree **1,874 MB → 19.3 MB (~97×)**, bit-identical. Memory is no longer the worker-count constraint — the limit is now CPU cores.
 
 ## Notes / dependencies
 
