@@ -198,7 +198,7 @@ class RunConfig:
     # baseline). Independent of ``inference_server``: that routes inference to a
     # central GPU process instead (a separate way to keep workers light) — the
     # two are alternative inference strategies, both supported. See
-    # ``docs/plans/lean-self-play-workers.md``.
+    # ``docs/plans/archive/lean-self-play-workers.md``.
     worker_cuda: bool = False
 
     # multiprocessing start method for the worker pool. "auto" (default) =
@@ -209,7 +209,7 @@ class RunConfig:
     # workers from it (no re-import burst, copy-on-write shared pages), which both
     # lifts the worker ceiling and cuts memory. Explicit "spawn"/"forkserver"/
     # "fork" override the auto choice (e.g. for tests). See
-    # ``docs/plans/lean-self-play-workers.md``.
+    # ``docs/plans/archive/lean-self-play-workers.md``.
     worker_start_method: str = "auto"
 
     # Precomputed-move-list move generator: if True, BlokusDuoGame routes

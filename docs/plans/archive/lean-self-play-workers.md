@@ -2,9 +2,19 @@
 
 # Lean Self-Play Workers — CPU workers + central GPU (S1)
 
-Implements **S1** from the [parallelism options decision doc](../research/parallelism-options.md): make the game-playing pool workers **lightweight (CPU-only, no per-worker CUDA context)** so we can run ~20 of them on the 20-core PC, with the GPU used by training (and optionally a single central inference process). 
+> **Status: DONE / SUPERSEDED — archived 2026-06-15.** The concrete deliverables
+> landed: the `worker_cuda` CPU-worker flag (L1), the MCTS-memory sub-plan
+> (✅ sparse tree, 1.9 GB → 19 MB), and the real 15-gen run (L7 — since run on
+> both Windows and Linux). The *throughput thesis* (L2–L3: "more CPU workers =
+> more speed") was **disproven by benchmarking** — `gpu8` ≈ 0.756 games/s beats
+> `cpu16` 0.21 and the central server ~0.49 — and is **superseded by
+> [self-play-throughput.md](../self-play-throughput.md)**, which carries the live
+> P2–P4 work (vectorised UCB, hybrid GPU+CPU workers, clean measurement). Kept
+> for the design rationale and the "maintain both inference paths" directive.
 
-**Why:** each worker today loads its own ~ 2.5 GB PyTorch+CUDA stack (the net is 1.5 MB), so 8 workers ≈ 20 GB — which **caps the worker count at 8 despite 20 cores and OOM-crashed a run at the 28 GB cap** (at gen 4). Self-play is **~86% of the training cycle and CPU-bound** ([profiling report](../research/profiling-report.md)), so the lever is *more concurrent workers* — which this unlocks. Removing the duplication also removes the crash.
+Implements **S1** from the [parallelism options decision doc](../../research/parallelism-options.md): make the game-playing pool workers **lightweight (CPU-only, no per-worker CUDA context)** so we can run ~20 of them on the 20-core PC, with the GPU used by training (and optionally a single central inference process). 
+
+**Why:** each worker today loads its own ~ 2.5 GB PyTorch+CUDA stack (the net is 1.5 MB), so 8 workers ≈ 20 GB — which **caps the worker count at 8 despite 20 cores and OOM-crashed a run at the 28 GB cap** (at gen 4). Self-play is **~86% of the training cycle and CPU-bound** ([profiling report](../../research/profiling-report.md)), so the lever is *more concurrent workers* — which this unlocks. Removing the duplication also removes the crash.
 
 **Target outcome:** ~20 lean workers using all cores, RAM flat well under the cap, the OOM gone, and self-play throughput up vs the 8-worker baseline — i.e. a crash-proof run that trains faster.
 
@@ -76,7 +86,7 @@ With L6 green, launch the full 15-gen × 1000-game run (the click-script). It bo
 
 ## Sub-plans
 
-- **[MCTS memory reduction](archive/mcts-memory-reduction.md)** ✅ **done** — the per-worker **MCTS tree** (dense `float64[17837]` `policy_priors` + `valid_moves_cache`) was the real cap on how many workers fit. Storing both **sparse** (only legal moves) cut the tree **1,874 MB → 19.3 MB (~97×)**, bit-identical. Memory is no longer the worker-count constraint — the limit is now CPU cores.
+- **[MCTS memory reduction](mcts-memory-reduction.md)** ✅ **done** — the per-worker **MCTS tree** (dense `float64[17837]` `policy_priors` + `valid_moves_cache`) was the real cap on how many workers fit. Storing both **sparse** (only legal moves) cut the tree **1,874 MB → 19.3 MB (~97×)**, bit-identical. Memory is no longer the worker-count constraint — the limit is now CPU cores.
 
 ## Notes / dependencies
 
