@@ -5,6 +5,11 @@ from typing import Literal
 
 from dataclass_wizard import fromdict
 
+# Maps a game id (RunConfig.game) to the folder runs are grouped under inside
+# ``<root>/runs/``. Keeps the output root tidy (temp/runs/blokus/…,
+# temp/runs/tictactoe/…) rather than a flat pile. Unknown games → "other".
+_GAME_GROUPS: dict[str, str] = {"blokusduo": "blokus", "tictactoe": "tictactoe"}
+
 
 @dataclass(frozen=True)
 class MCTSConfig:
@@ -224,8 +229,17 @@ class RunConfig:
 
     @property
     def run_directory(self) -> Path:
-        """Base directory for all files related to this training run."""
-        return self.root_directory / self.run_name
+        """Base directory for all files related to this training run.
+
+        Runs are grouped by game under ``<root>/runs/<group>/`` so the output
+        root (e.g. ``temp/``) stays organised instead of becoming a flat dump
+        of every run — a TicTacToe run lands in ``<root>/runs/tictactoe/<name>``,
+        a Blokus run in ``<root>/runs/blokus/<name>``. Every other directory
+        property below hangs off this, so the whole run tree moves with it.
+        Unknown games fall back to ``other``.
+        """
+        group = _GAME_GROUPS.get(self.game, "other")
+        return self.root_directory / "runs" / group / self.run_name
 
     @property
     def log_directory(self) -> Path:
