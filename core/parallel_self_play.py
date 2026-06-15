@@ -30,6 +30,8 @@ and one slow game doesn't block neighbours behind it.
 """
 from __future__ import annotations
 
+import multiprocessing as mp
+import sys
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -195,6 +197,36 @@ def _resolve_server_batch(config: RunConfig, num_workers: int) -> tuple[int, int
     max_leaves = max(1, config.mcts_config.mcts_batch_size)
     max_batch = config.server_max_batch if config.server_max_batch > 0 else num_workers * max_leaves
     return max_leaves, max_batch
+
+
+def _resolve_start_method(config: RunConfig) -> str:
+    """Resolve the pool's multiprocessing start method from config.
+
+    ``"auto"`` picks ``forkserver`` on Linux/WSL (one warm helper imports torch
+    once; workers fork from it — no per-worker re-import burst, copy-on-write
+    shared pages) and ``spawn`` elsewhere (the macOS dev/test box, where the
+    prior behaviour is preserved). An explicit method is honoured verbatim.
+    """
+    method = getattr(config, "worker_start_method", "auto")
+    if method == "auto":
+        return "forkserver" if sys.platform == "linux" else "spawn"
+    return method
+
+
+def _make_worker_context(config: RunConfig):
+    """Build the multiprocessing context for the worker pool.
+
+    For ``forkserver``, preload the heavy shared libraries into the fork-server
+    helper so each forked worker inherits them copy-on-write instead of
+    cold-importing torch (the import burst that wedges WSL at ~16 spawn workers).
+    The helper only *imports* torch — it never initialises CUDA — so its forked
+    children stay CUDA-clean, exactly like spawn.
+    """
+    method = _resolve_start_method(config)
+    ctx = mp.get_context(method)
+    if method == "forkserver":
+        ctx.set_forkserver_preload(["torch", "numpy"])
+    return ctx
 
 
 def _run_inference_server(
@@ -418,12 +450,10 @@ def run_self_play_episodes_parallel(
 
     per_episode_examples: list[list[ProcessedExample]] = []
     per_episode_stats: list[MCTSEpisodeStats] = []
-    # ``ProcessPoolExecutor`` defaults to using the current start method.
-    # On macOS/Linux+CUDA, the safe choice is "spawn" — set via
-    # ``mp_context`` so we don't have to rely on a global setting that
-    # might collide with other code that touched ``multiprocessing``.
-    import multiprocessing as mp
-    ctx = mp.get_context("spawn")
+    # Start method comes from config (forkserver on Linux/WSL by default) — set
+    # via ``mp_context`` so we don't rely on a global setting that might collide
+    # with other code that touched ``multiprocessing``.
+    ctx = _make_worker_context(config)
 
     # When the inference server is enabled, spawn it and point workers at a
     # client net via the server initialiser. Otherwise the per-worker path
@@ -578,8 +608,7 @@ def run_two_player_games_parallel(
     draws = 0
     records: list[GameRecord] = []
 
-    import multiprocessing as mp
-    ctx = mp.get_context("spawn")
+    ctx = _make_worker_context(config)
     with (
         ProcessPoolExecutor(
             max_workers=num_workers,

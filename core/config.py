@@ -201,6 +201,17 @@ class RunConfig:
     # ``docs/plans/lean-self-play-workers.md``.
     worker_cuda: bool = False
 
+    # multiprocessing start method for the worker pool. "auto" (default) =
+    # ``forkserver`` on Linux/WSL, ``spawn`` elsewhere (e.g. the macOS test box).
+    # ``spawn`` cold-starts a fresh interpreter per worker — N simultaneous torch
+    # re-imports (~629 MB each) burst the host's resources and wedge WSL at ~16
+    # workers. ``forkserver`` imports torch once in a warm helper and forks
+    # workers from it (no re-import burst, copy-on-write shared pages), which both
+    # lifts the worker ceiling and cuts memory. Explicit "spawn"/"forkserver"/
+    # "fork" override the auto choice (e.g. for tests). See
+    # ``docs/plans/lean-self-play-workers.md``.
+    worker_start_method: str = "auto"
+
     # Precomputed-move-list move generator: if True, BlokusDuoGame routes
     # ``valid_move_masking`` through the implementation in
     # :mod:`games.blokusduo.movegen_runtime`. Default False to preserve
