@@ -239,7 +239,7 @@ recover. K=8's weak end-to-end number is contention noise, not a plateau: its is
 
 
 def main() -> None:
-    out = build_report(Path("temp/optimisation_progress"))
+    out = build_report(Path("temp/analysis/optimisation_progress"))
     print(f"Report → {out}", file=sys.stderr)
     print(out)
 

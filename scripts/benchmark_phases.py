@@ -17,7 +17,7 @@ Usage::
     uv run python -m scripts.benchmark_phases \\
         --config run_configurations/profile_baseline.json
 
-Output lands at ``temp/<run_name>_benchmark/``.
+Output lands at ``temp/benchmarks/<run_name>_benchmark/``.
 """
 from __future__ import annotations
 
@@ -495,7 +495,7 @@ def main() -> None:
             mcts_config=dc_replace(config.mcts_config, mcts_batch_size=args.mcts_batch_size),
         )
         print(f"[F3] MCTS batch size K={args.mcts_batch_size}", flush=True)
-    output_dir = Path(args.output_dir) if args.output_dir else config.root_directory / f"{config.run_name}_benchmark"
+    output_dir = Path(args.output_dir) if args.output_dir else config.root_directory / "benchmarks" / f"{config.run_name}_benchmark"
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output → {output_dir}")
 

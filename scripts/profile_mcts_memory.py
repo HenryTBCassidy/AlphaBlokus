@@ -285,8 +285,8 @@ def _write_html(config, sims, moves, n_states, total_mb, peak_mb, bps, bd_lines,
 <h2>Per-dict breakdown</h2>{table(["Dict","Entries","Bytes","Per-entry","% tree"], bd_rows)}
 <h2>Top allocation sites (tracemalloc)</h2>{table(["Source line","Size","Allocations"], top_rows)}
 </body></html>"""
-    Path("temp").mkdir(exist_ok=True)
-    Path("temp/mcts-memory-report.html").write_text(html)
+    Path("temp/analysis").mkdir(parents=True, exist_ok=True)
+    Path("temp/analysis/mcts-memory-report.html").write_text(html)
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ import dataclasses as dc
 import subprocess
 import threading
 import time
+from pathlib import Path
 
 import numpy as np
 
@@ -101,7 +102,8 @@ def main(mode: str) -> None:
           f"K={cfg.mcts_config.mcts_batch_size}, {_NUM_EPS} games ===")
     cfg = dc.replace(cfg, inference_server=(mode == "on"), server_max_wait_ms=1.0)
     per_game = _time_run(cfg, checkpoint, f"server-{mode.upper()}")
-    with open(f"temp/bench_{mode}.txt", "w") as fh:
+    Path("temp/benchmarks").mkdir(parents=True, exist_ok=True)
+    with open(f"temp/benchmarks/bench_{mode}.txt", "w") as fh:
         fh.write(f"{per_game:.4f}")
 
 

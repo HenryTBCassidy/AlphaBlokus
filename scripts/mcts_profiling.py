@@ -25,7 +25,7 @@ from games.tictactoe.game import TicTacToeGame
 from games.tictactoe.neuralnets.wrapper import NNetWrapper as TicTacToeNNetWrapper
 from reporting.mcts_profiling import build_single_phase_report
 
-OUTPUT_DIR = Path("temp/mcts_profiling")
+OUTPUT_DIR = Path("temp/analysis/mcts_profiling")
 PIECES_PATH = Path("games/blokusduo/pieces.json")
 
 
