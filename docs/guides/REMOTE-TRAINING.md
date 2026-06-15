@@ -8,6 +8,42 @@ This guide assumes Tailscale + WSL2 + OpenSSH + key auth are already working bet
 
 ---
 
+## ⚠ 2026-06-12 — the box is now native Ubuntu (`gpu-linux`); Mac Tailscale is dead
+
+Two changes supersede much of this guide (full Linux rewrite pending):
+
+1. **The PC dual-boots Ubuntu 24.04** (hostname `gpu-linux`, user `henry`). Everything WSL/PowerShell below applies only when the PC is booted into Windows. On Ubuntu it's plain SSH + `tmux`: no `wsl.exe` hop, no quoting tax, and **detached runs survive** — the entire "unattended long runs are UNSOLVED" section is obsolete on the Linux side (validated during migration and again in a full reboot drill).
+2. **The Mac cannot join the tailnet at all.** The on-device Netskope agent intercepts Tailscale's control-plane handshake (`tailscale debug ts2021` → request redirected to a Netskope IP, dropped after the Noise handshake) on *every* network — home Wi-Fi, corporate VPN, even phone hotspot. No admin rights on the Mac, so it's unfixable locally; the proper fix is a Transak IT ticket allowlisting `controlplane.tailscale.com` (and `login.tailscale.com`) from TLS interception. Don't reach for the MagicSock/`killall` recovery further down — that's a different, older failure mode.
+
+### How to reach gpu-linux now (in order of preference)
+
+| # | Path | Works from | Notes |
+|---|------|-----------|-------|
+| 1 | `ssh gpu-linux` | Mac on home LAN | Direct to 192.168.0.13. Fastest; default at home. |
+| 2 | `ssh gpu-anywhere` | Mac on **any** network | Rides Microsoft dev tunnels over plain HTTPS → immune to Netskope. The box hosts tunnel `gpu-linux-ssh.uks1` (systemd user service `devtunnel-ssh`); the Mac LaunchAgent `com.henrycassidy.devtunnel-ssh` keeps `devtunnel connect` alive, forwarding `localhost:2222` → box `sshd:2222`. Claude Code can drive runs through this from anywhere. |
+| 3 | https://vscode.dev/tunnel/gpu-linux | any browser, any device | VS Code in the browser (GitHub sign-in): editor + terminal on the box. Backed by the `code-tunnel` systemd user service. VS Code **desktop** connects to the same tunnel via the Remote-Tunnels extension. |
+| 4 | Tailscale SSH browser console | any browser, any device | login.tailscale.com → Machines → gpu-linux → ⋯ → SSH. Served by `tailscaled` itself — **independent of sshd**, so it's the recovery path when SSH is broken (proven in anger on day one). |
+
+All four verified 2026-06-12, including after an unattended reboot of the box.
+
+### Box invariants (don't undo these)
+
+- **Sleep is masked**: `systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target` — an unattended box must never doze.
+- **sshd listens on 22 and 2222** (`/etc/ssh/sshd_config.d/10-devtunnel-port.conf`); 2222 is the devtunnel target. Socket activation is **disabled** (`ssh.socket` off, plain always-on `ssh.service`).
+- **`loginctl enable-linger henry`** — the user services (`code-tunnel`, `devtunnel-ssh`) start at boot with nobody logged in.
+- **Real runs always start inside `tmux`** (`tmux new -s train`) — then no dropped connection can kill them. Reattach with `tmux attach -t train`.
+- BIOS is set to power the box back on after a power cut (if not yet done: BIOS → APM → "Restore AC Power Loss: Power On").
+
+### The Mac-side Netskope tax (any Node-based tool)
+
+Netskope re-signs all TLS on the Mac with `ns-swg.ca.transak.goskope.com`. Browsers trust it (it's in the System keychain); **Node tools don't** (bundled CA list) → `self signed certificate in certificate chain`. Fix: the System-keychain export lives at `~/.corp-ca-bundle.pem` and `NODE_EXTRA_CA_CERTS` points at it — set globally for GUI apps by the LaunchAgent `com.henrycassidy.node-extra-ca`, or per-command with `NODE_EXTRA_CA_CERTS="$HOME/.corp-ca-bundle.pem" <cmd>`. This is what makes VS Code desktop's tunnel connection (and its extension installs) work.
+
+### Footgun log (Linux era)
+
+- **Don't restart sshd from inside an SSH session** with a bare `systemctl restart` — on 2026-06-12 an `ssh.socket` restart killed the issuing session mid-command and left sshd down (recovered via the Tailscale browser console). If you must, detach it from the session: `sudo systemd-run --on-active=2 systemctl restart ssh.service`.
+
+---
+
 ## At-a-glance: a normal run, end-to-end
 
 ```bash
@@ -238,6 +274,23 @@ For shell scripts longer than one line: write to a file locally, `scp` to PC, ru
 ## Tailscale connectivity recovery
 
 The Tailscale tunnel between Mac and PC has two failure modes that look superficially the same (SSH times out) but need very different fixes.
+
+### First: is it the tunnel, or is it WSL? (don't conflate them)
+
+These two are easy to confuse — both manifest as "I can't run things on the PC" — but they are independent and need different fixes. **Fixing the tunnel does not fix a wedged WSL, and vice versa.** Triage with one command — a *pure-Windows* SSH that never touches `wsl`:
+
+```bash
+ssh gpu-cmd 'echo ok'
+```
+
+| Result | Diagnosis | Fix |
+|--------|-----------|-----|
+| Hangs / no response | **Tunnel** is down | Tailscale recovery (this section) |
+| Prints `ok`, but `ssh gpu-cmd 'wsl -d Ubuntu -- echo hi'` returns `Catastrophic failure` / `Wsl/Service/E_UNEXPECTED` | **WSL distro is wedged** — not a Tailscale problem at all | `ssh gpu-cmd 'wsl --shutdown'`, wait ~12 s, re-invoke. ⚠ `wsl --shutdown` **wipes `/tmp`** (but not `~`) — keep run logs/results under `~/AlphaBlokus/...`, never `/tmp`. |
+
+WSL also tends to throw `Catastrophic failure` after a heavy spawn burst (e.g. spinning up 16 worker processes at once — watch for "leaked semaphore objects" warnings just before it dies); the shutdown-and-retry above clears it.
+
+> **2026-06-07:** lost ~1 h to this. The Mac *did* have the MagicSock tunnel warning (fixed via `killall` below), but `wsl.exe` kept failing afterwards until a *separate* `wsl --shutdown`. Always check both layers.
 
 ### Read the health check first
 
