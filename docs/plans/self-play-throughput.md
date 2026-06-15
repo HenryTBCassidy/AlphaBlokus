@@ -42,7 +42,7 @@ Three conclusions:
 | # | Phase | Subplan | Effort | Done |
 |---|-------|---------|--------|------|
 | P1 | **Migrate to native Linux** (dual-boot Ubuntu) — clean substrate before tuning | [linux-migration.md](archive/linux-migration.md) | ~half day | ✔ 2026-06-12 |
-| P2 | **B1: vectorise `_select_action`** (UCB) — replace the per-move Python loop with one numpy op; compounds across all configs; OS-agnostic | *(subplan TBD)* | ~0.5 day | |
+| P2 | **B1: vectorise `_select_action`** (UCB) — replace the per-move Python loop with one numpy op; compounds across all configs; OS-agnostic | [p2-vectorise-select-action.md](p2-vectorise-select-action.md) | ~0.5 day | ✔ 2026-06-15 |
 | P3 | **Hybrid GPU+CPU workers** — per-worker device assignment (`num_gpu_workers`); tune the GPU/CPU split + threads-per-worker | *(subplan TBD)* | ~1–2 days | |
 | P4 | **Clean throughput measurement** — warmth-free games/s + minutes-per-1000 for the candidate configs on Linux; pick the production default | *(subplan TBD)* | ~2 hr | |
 
@@ -66,7 +66,8 @@ is `_select_action`'s per-move Python `for`-loop computing a UCB score with
 computation over the (now sparse, post-M5) aligned `acts`/`priors` arrays. Cheap,
 no toolchain, OS-agnostic, and it speeds the CPU work that limits CPU workers
 *and* the tree-search half of GPU workers. Must stay bit-identical (the
-parallel-/movegen-determinism tests are the guard). Subplan written at P2 start.
+parallel-/movegen-determinism tests are the guard). Subplan (complete):
+**[p2-vectorise-select-action.md](p2-vectorise-select-action.md)**.
 
 ## P3. Hybrid GPU + CPU workers
 

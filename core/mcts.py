@@ -352,46 +352,68 @@ class MCTS:
     def _select_action(self, s: StateKey) -> Action:
         """Return the UCB-best valid action at expanded state ``s``.
 
-        When an edge carries no virtual loss (always the case at K=1) the score
-        uses the exact original expression so the choice is bit-identical. When an
-        edge is in-flight (virtual visits > 0) it is scored as if it had
-        ``virtual_visits`` extra visits each returning value -1, depressing its
-        UCB so parallel descents diversify.
+        Vectorised PUCT: the score for every legal move is computed in one numpy
+        pass and the best is taken with ``argmax``. This is bit-identical to the
+        original per-move Python loop — same operation order, same float64
+        promotion, same sqrt values, same tie-break (``argmax`` returns the first
+        max and ``acts`` is ascending, matching the loop's strict ``>``). When an
+        edge carries no virtual loss (always the case at K=1) the score uses the
+        exact original expression. When an edge is in-flight (virtual visits > 0)
+        it is scored as if it had ``virtual_visits`` extra visits each returning
+        value -1, depressing its UCB so parallel descents diversify.
         """
         acts = self.valid_moves_cache[s]      # ascending legal action ids
-        priors = self.policy_priors[s]        # priors[i] is the prior for acts[i]
+        # ``policy_priors`` is float32 (NN output); promote to float64 so the
+        # arithmetic matches the scalar loop, where ``cpuct * prior`` promoted
+        # the float32 scalar to float64 (numpy 2.x NEP-50 would otherwise keep
+        # the array float32, diverging from the golden).
+        priors = self.policy_priors[s].astype(np.float64, copy=False)  # aligned to acts
         state_visits = self.state_visits[s]
         cpuct = self.config.cpuct
-        cur_best = -float('inf')
-        best_act = -1
 
-        for i in range(len(acts)):
-            a = int(acts[i])
-            prior_a = priors[i]
-            virtual = self.virtual_visits.get((s, a), 0)
-            if (s, a) in self.q_values:
-                n = self.visit_counts[(s, a)]
-                if virtual == 0:
-                    u = (self.q_values[(s, a)] +
-                         cpuct * prior_a * math.sqrt(state_visits) / (1 + n))
-                else:
-                    effective_n = n + virtual
-                    effective_q = (n * self.q_values[(s, a)] - virtual) / effective_n
-                    u = (effective_q +
-                         cpuct * prior_a * math.sqrt(state_visits) / (1 + effective_n))
-            else:
-                if virtual == 0:
-                    u = cpuct * prior_a * math.sqrt(state_visits + EPS)
-                else:
-                    # No real visits yet, only in-flight: effective Q is -1.
-                    u = (-1.0 +
-                         cpuct * prior_a * math.sqrt(state_visits) / (1 + virtual))
+        acts_list = acts.tolist()  # python ints, matching the dict key type
+        # n == 0 marks an unvisited edge: a visited edge always has n >= 1.
+        n = np.fromiter(
+            (self.visit_counts.get((s, a), 0) for a in acts_list),
+            dtype=np.float64, count=len(acts_list),
+        )
+        q = np.fromiter(
+            (self.q_values.get((s, a), 0.0) for a in acts_list),
+            dtype=np.float64, count=len(acts_list),
+        )
 
-            if u > cur_best:
-                cur_best = u
-                best_act = a
+        # sqrt terms are loop-invariant; visited edges use sqrt(N), first-visit
+        # edges use sqrt(N + EPS). Both are correctly-rounded doubles == np.sqrt.
+        sqrt_sv = math.sqrt(state_visits)
+        sqrt_sv_eps = math.sqrt(state_visits + EPS)
 
-        return best_act
+        visited = n > 0
+        if self.virtual_visits:
+            # Slow path: some edges carry in-flight virtual loss (K>1 only).
+            v = np.fromiter(
+                (self.virtual_visits.get((s, a), 0) for a in acts_list),
+                dtype=np.float64, count=len(acts_list),
+            )
+            eff_n = n + v
+            # Both ``np.where`` arms are evaluated for every edge, so the unused
+            # arm divides by zero on unvisited/no-virtual lanes (eff_n == 0).
+            # Those results are discarded by ``np.where``; silence the warning.
+            with np.errstate(invalid="ignore", divide="ignore"):
+                # ``v == 0`` visited must use plain q, not (n*q - 0)/n (not bit-equal).
+                base = np.where(v == 0, q, (n * q - v) / eff_n)
+                u_visited = base + cpuct * priors * sqrt_sv / (1 + eff_n)
+                u_unvisited = np.where(
+                    v == 0,
+                    cpuct * priors * sqrt_sv_eps,
+                    -1.0 + cpuct * priors * sqrt_sv / (1 + v),
+                )
+        else:
+            # Fast path: no virtual loss anywhere (always true at K=1).
+            u_visited = q + cpuct * priors * sqrt_sv / (1 + n)
+            u_unvisited = cpuct * priors * sqrt_sv_eps
+
+        scores = np.where(visited, u_visited, u_unvisited)
+        return int(acts[int(np.argmax(scores))])
 
     def _expand_leaf(self, board: IBoard, s: StateKey, priors: PolicyVector) -> None:
         """Expand a freshly evaluated leaf: mask its priors to legal moves,

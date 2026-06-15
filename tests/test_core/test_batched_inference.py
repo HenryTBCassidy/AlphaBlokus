@@ -240,6 +240,93 @@ def test_mcts_visit_counts_deterministic_ttt(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# _select_action vectorisation — bit-identical to the original scalar loop
+# ---------------------------------------------------------------------------
+
+def _scalar_select_action(mcts: MCTS, s: bytes) -> int:
+    """Reference copy of the pre-vectorisation scalar UCB loop (P2/B1).
+
+    Frozen here so the vectorised ``_select_action`` can be pinned against it
+    directly — including the virtual-loss branches the K=1 golden never exercises.
+    """
+    import math
+
+    from core.mcts import EPS
+
+    acts = mcts.valid_moves_cache[s]
+    priors = mcts.policy_priors[s]
+    state_visits = mcts.state_visits[s]
+    cpuct = mcts.config.cpuct
+    cur_best = -float("inf")
+    best_act = -1
+    for i in range(len(acts)):
+        a = int(acts[i])
+        prior_a = priors[i]
+        virtual = mcts.virtual_visits.get((s, a), 0)
+        if (s, a) in mcts.q_values:
+            n = mcts.visit_counts[(s, a)]
+            if virtual == 0:
+                u = mcts.q_values[(s, a)] + cpuct * prior_a * math.sqrt(state_visits) / (1 + n)
+            else:
+                effective_n = n + virtual
+                effective_q = (n * mcts.q_values[(s, a)] - virtual) / effective_n
+                u = effective_q + cpuct * prior_a * math.sqrt(state_visits) / (1 + effective_n)
+        else:
+            if virtual == 0:
+                u = cpuct * prior_a * math.sqrt(state_visits + EPS)
+            else:
+                u = -1.0 + cpuct * prior_a * math.sqrt(state_visits) / (1 + virtual)
+        if u > cur_best:
+            cur_best = u
+            best_act = a
+    return best_act
+
+
+@pytest.mark.parametrize("with_virtual_loss", [False, True])
+def test_select_action_matches_scalar_loop(tmp_path: Path, with_virtual_loss: bool) -> None:
+    """Vectorised ``_select_action`` picks the same action as the scalar loop.
+
+    Populates a synthetic state's caches with randomised stats — a mix of
+    visited/unvisited edges and (optionally) in-flight virtual loss — and
+    compares the chosen action across many seeds. This guards both the fast
+    (no-virtual) path and the slow (virtual-loss) path of the vectorisation,
+    independent of the K=1 TTT golden. priors are float32 (as the NN emits them),
+    so this also pins the float64-promotion fix.
+    """
+    game, nnet = _ttt_wrapper(tmp_path)
+
+    for trial in range(2000):
+        rng = np.random.default_rng(trial)
+        cpuct = float(rng.uniform(0.5, 4.0))
+        mcts = MCTS(game, nnet, MCTSConfig(num_mcts_sims=1, cpuct=cpuct))
+        s = b"state-%d" % trial
+
+        num_legal = int(rng.integers(1, 40))
+        acts = np.sort(
+            rng.choice(np.arange(200), size=num_legal, replace=False)
+        ).astype(np.int32)
+        priors = rng.random(num_legal).astype(np.float32)
+        priors /= priors.sum()
+
+        mcts.valid_moves_cache[s] = acts
+        mcts.policy_priors[s] = priors
+        state_visits = 0
+        for a in acts.tolist():
+            if rng.random() < 0.6:  # visited edge (n >= 1)
+                n = int(rng.integers(1, 30))
+                state_visits += n
+                mcts.visit_counts[(s, a)] = n
+                mcts.q_values[(s, a)] = float(rng.uniform(-1.0, 1.0))
+            if with_virtual_loss and rng.random() < 0.3:
+                mcts.virtual_visits[(s, a)] = 3 * int(rng.integers(1, 4))
+        mcts.state_visits[s] = state_visits
+
+        assert mcts._select_action(s) == _scalar_select_action(mcts, s), (
+            f"trial {trial}: vectorised _select_action diverged from scalar loop"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Batched (K>1) search — determinism and self-consistency
 # ---------------------------------------------------------------------------
 
