@@ -384,25 +384,54 @@ def _make_arena_plot(arena_data: pd.DataFrame, update_threshold: float) -> go.Fi
     df["pct_draws"] = 100 * df["draws"] / total
     df["pct_losses"] = 100 * df["losses"] / total
     df["is_accepted"] = _accepted_mask(df, update_threshold).values
+    # Acceptance compares this SCORE (draws count as ½) to the threshold —
+    # not the raw wins bar. Plot it explicitly, else a gen whose green wins
+    # bar sits below the line but whose draws lift it over reads as wrongly
+    # accepted. acceptance_score() is the very function the training loop's
+    # rule uses, so the chart and the decision cannot diverge.
+    from core.acceptance import acceptance_score
+    df["pct_score"] = 100 * df.apply(
+        lambda r: acceptance_score(int(r["wins"]), int(r["losses"]), int(r["draws"])),
+        axis=1,
+    )
+
+    # Stringify the generation up front and use it as the x for the bars, the
+    # category axis, AND the acceptance annotations. The axis is categorical
+    # (numeric gens used to sort alphabetically under pandas category dtype),
+    # and on a category axis Plotly keys positions by the *exact* value: a bar
+    # placed at int 3 and an annotation placed at str "3" are treated as two
+    # different categories, so the labels drifted off their bars. Sharing one
+    # string key keeps every label glued to its own bar.
+    df["gen_label"] = df["generation"].astype(int).astype(str)
 
     fig = go.Figure()
     fig.add_trace(go.Bar(
-        x=df["generation"], y=df["pct_wins"],
+        x=df["gen_label"], y=df["pct_wins"],
         name="Wins", marker_color=_COLORS["positive"],
         customdata=df["wins"],
         hovertemplate="Wins: %{customdata} (%{y:.0f}%)<extra></extra>",
     ))
     fig.add_trace(go.Bar(
-        x=df["generation"], y=df["pct_draws"],
+        x=df["gen_label"], y=df["pct_draws"],
         name="Draws", marker_color=_COLORS["neutral"],
         customdata=df["draws"],
         hovertemplate="Draws: %{customdata} (%{y:.0f}%)<extra></extra>",
     ))
     fig.add_trace(go.Bar(
-        x=df["generation"], y=df["pct_losses"],
+        x=df["gen_label"], y=df["pct_losses"],
         name="Losses", marker_color=_COLORS["negative"],
         customdata=df["losses"],
         hovertemplate="Losses: %{customdata} (%{y:.0f}%)<extra></extra>",
+    ))
+
+    # The actual acceptance metric, drawn as a tick on each bar so it can be
+    # read directly against the threshold line (accepted ⇔ tick on/above line).
+    fig.add_trace(go.Scatter(
+        x=df["gen_label"], y=df["pct_score"],
+        name="Score (wins + ½ draws)", mode="markers",
+        marker={"symbol": "line-ew", "size": 26,
+                "line": {"width": 3, "color": "#111111"}},
+        hovertemplate="Score: %{y:.0f}% — the value compared to threshold<extra></extra>",
     ))
 
     fig.add_hline(
@@ -412,25 +441,23 @@ def _make_arena_plot(arena_data: pd.DataFrame, update_threshold: float) -> go.Fi
     )
 
     # Only annotate ACCEPTED generations — rejected is the default expectation
-    # and labelling every bar caused overlap with 30+ generations.
-    #
-    # The x-axis is a categorical axis (categoryarray = stringified gens)
-    # because numerically-typed generation values used to sort
-    # alphabetically due to pandas category dtype. With type="category",
-    # annotations need their x value as a string matching a category —
-    # passing an int would put labels at the *index* (off-by-one from the
-    # generation number) instead of the bar position. Hence ``str(...)``.
+    # and labelling every bar caused overlap with 30+ generations. Each label
+    # sits directly above its own bar (bars always stack to 100%, so the top is
+    # at y=100) and is rotated vertical: the horizontal "✓ Accepted" text was
+    # wider than a bar, so consecutive accepted gens (e.g. 13/14/15) smeared
+    # into each other and bled over neighbouring rejected bars.
     for _, row in df[df["is_accepted"]].iterrows():
         fig.add_annotation(
-            x=str(row["generation"]), y=108, text="✓ Accepted", showarrow=False,
-            font={"size": 11, "color": _COLORS["positive"], "family": "monospace"},
+            x=row["gen_label"], y=101, text="✓ Accepted", showarrow=False,
+            textangle=-90, xanchor="center", yanchor="bottom",
+            font={"size": 10, "color": _COLORS["positive"], "family": "monospace"},
         )
 
     fig.update_layout(
         barmode="stack",
-        xaxis_title="Generation", yaxis_title="Percentage", yaxis_range=[0, 120],
+        xaxis_title="Generation", yaxis_title="Percentage", yaxis_range=[0, 135],
         xaxis={"type": "category", "categoryorder": "array",
-               "categoryarray": [str(g) for g in df["generation"]]},
+               "categoryarray": list(df["gen_label"])},
         title="Arena: New Net vs Predecessor",
     )
     return _apply_defaults(fig)
@@ -1682,7 +1709,7 @@ def create_html_report(config: RunConfig) -> None:
 
     network_entropy_html = ""  # rolled into diagnostics_html above
 
-    with open(filename, "w") as f:
+    with open(filename, "w", encoding="utf-8") as f:
         f.write(f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -1725,8 +1752,9 @@ def create_html_report(config: RunConfig) -> None:
 <section>
 <h2>Arena</h2>
 <p class="section-desc">
-    Each generation's new network plays the incumbent.
-    It must win &gt;{config.update_threshold:.0%} to be accepted.
+    Each generation's new network plays the incumbent. It is accepted when its
+    score &mdash; wins plus half of draws &mdash; reaches {config.update_threshold:.0%}
+    (the black tick on each bar), not on raw wins alone.
 </p>
 {_chart(fig_arena)}
 </section>
