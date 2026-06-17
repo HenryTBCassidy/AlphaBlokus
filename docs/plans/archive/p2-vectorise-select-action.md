@@ -5,7 +5,7 @@ per-legal-move Python `for`-loop in `MCTS._select_action` (`core/mcts.py`) with 
 vectorised numpy UCB computation, then `argmax`. `_select_action` runs on every descent at
 every internal node and scales with Blokus's large branching factor, so it is the prime
 CPU hot-spot in self-play (B1 in
-[self-play-speed-investigation.md](../research/self-play-speed-investigation.md)). The win
+[self-play-speed-investigation.md](../../research/self-play-speed-investigation.md)). The win
 compounds across *every* worker config (CPU and GPU), is OS-agnostic, and needs no new
 toolchain.
 
@@ -51,14 +51,32 @@ the whole search trajectory, so any float drift cascades into different games. T
 | B1.1 | Vectorise `_select_action` — gather aligned `n`/`q`/`virtual` arrays, compute all four UCB branches with numpy, `argmax`; preserve the empty-virtual fast path | 2 hr | High | ✅ |
 | B1.2 | Add a direct scalar-vs-vectorised equivalence test (randomised stats + virtual loss) and confirm the full determinism suite is green | 1 hr | High | ✅ |
 
-> **Result (2026-06-15):** Bit-identical confirmed — the K=1 golden, the
+> **Result — correctness (2026-06-15):** Bit-identical confirmed — the K=1 golden, the
 > 1-vs-4-worker trajectory tests, and the new randomised scalar-vs-vectorised
 > equivalence test (2000 trials × {with, without} virtual loss) all pass; full
 > non-slow suite green (273 passed). Microbenchmark on this function: **2.0× at
 > 150 legal moves, 2.3× at 400** (Blokus-scale); ~0.55× at TTT's 9 moves
-> (numpy overhead, negligible for self-play). The per-edge dict gather is now the
-> residual cost — the Amdahl ceiling the roadmap notes; further gains need an
-> aligned-array storage refactor, out of P2 scope.
+> (numpy overhead, negligible for self-play).
+>
+> **Result — end-to-end throughput (2026-06-15, Linux re-baseline): ~0% — the
+> function was not the bottleneck.** Same-substrate before/after on the box
+> (pre-P2 `79f03f5` vs +P2 `6cfa88e`, 150-episode self-play each):
+>
+> | Config | Linux pre-P2 (g/s) | Linux +P2 (g/s) | Δ |
+> |--------|--------------------|------------------|----|
+> | gpu8 | 1.154 | 1.194 | +3.4% |
+> | cpu16 | 0.723 | 0.714 | −1.2% (noise) |
+> | server16 | 1.189 | 1.195 | +0.5% |
+>
+> The 2× function speedup vanished at the self-play level: `_select_action` is
+> only ~6% of self-play wall-clock (not the suspected 22–35%), so Amdahl caps the
+> end-to-end gain near zero. The per-edge dict gather (kept here) is the residual
+> cost inside the function; only the arithmetic got cheaper, and the arithmetic
+> wasn't the bottleneck. **Decision: keep P2** — it's bit-identical and not slower,
+> so there's no reason to revert, but it is *not* a throughput lever. The real
+> ceiling/bottleneck on Linux is re-characterised in **P3**
+> ([p3-linux-rebaseline.md](p3-linux-rebaseline.md)). *(The big numbers vs the
+> Windows baseline — 1.58×/3.38× — were the P1 OS migration, not P2.)*
 
 ---
 
