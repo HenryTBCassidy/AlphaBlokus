@@ -35,11 +35,17 @@ MCTS already carries detailed per-phase timers (`MCTSEpisodeStats`). Tool ration
 
 | # | Item | Effort | Priority | Output | Done |
 |---|------|--------|----------|--------|------|
-| 1 | **Harness + scenario matrix** — confirm tools on Linux; pin the configs to profile (net sizes × worker setup) and the single- vs multi-worker split | ~2 hr | High | run scripts + matrix table | |
-| 2 | **Time report** — fine-grained (cProfile/Scalene/line_profiler, single worker) + real-contention (py-spy `--subprocesses`, 16 workers), across net sizes; charts | ~0.5 day | High | `docs/research/linux-time-profile.md` (+ HTML) | |
-| 3 | **Memory report** — in-episode tree + replay-buffer growth + training-step peak, at 1K **and 10K** games/gen, across net sizes; charts + OOM go/no-go | ~0.5 day | High | `docs/research/linux-memory-profile.md` (+ HTML) | |
-| 4 | **Scale & net-size projection** — wall-clock/gen + peak-RAM for {1K, 10K, higher} × {current, bigger} net; time-bound vs memory-bound verdict | ~2 hr | High | projection table (in both reports) | |
-| 5 | **Bottleneck shortlist + optimisation recommendations** — rank levers by Amdahl ceiling × effort; what to fix before the serious runs | ~2 hr | High | recommendation section + follow-on plan stub | |
+| 1 | **Harness + scenario matrix** — confirm tools on Linux; pin the configs to profile (net sizes × worker setup) and the single- vs multi-worker split | ~2 hr | High | run scripts + matrix table | ✅ |
+| 2 | **Time report** — fine-grained (cProfile/Scalene/line_profiler, single worker) + real-contention (py-spy `--subprocesses`, 16 workers), across net sizes; charts | ~0.5 day | High | [linux-time-profile.md](../research/linux-time-profile.md) | ✅ |
+| 3 | **Memory report** — in-episode tree + replay-buffer growth + training-step peak, at 1K **and 10K** games/gen, across net sizes; charts + OOM go/no-go | ~0.5 day | High | [linux-memory-profile.md](../research/linux-memory-profile.md) | ✅ |
+| 4 | **Scale & net-size projection** — wall-clock/gen + peak-RAM for {1K, 10K, higher} × {current, bigger} net; time-bound vs memory-bound verdict | ~2 hr | High | projection tables (in both reports) | ✅ |
+| 5 | **Bottleneck shortlist + optimisation recommendations** — rank levers by Amdahl ceiling × effort; what to fix before the serious runs | ~2 hr | High | [linux-performance-findings.md](../research/linux-performance-findings.md) | ✅ |
+
+> **Outcome (2026-06-18):** profiling complete; reports + recommendations delivered (see
+> Output column). Headline: **speed optimisation is not worth it before serious runs**; the
+> one gating issue is **training-step memory — 10k games/gen OOMs**, fixable with lazy board
+> encoding in the training `Dataset` (~½ day). Full verdict + decision tree in
+> [linux-performance-findings.md](../research/linux-performance-findings.md).
 
 ---
 
