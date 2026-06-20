@@ -9,7 +9,7 @@
   "max_queue_length": 70000,
   "root_directory": "./temp/",
   "load_model": false,
-  "max_generations_lookback": 1,
+  "max_generations_lookback": 8,
   "num_parallel_workers": 16,
   "worker_cuda": true,
   "use_optimised_movegen": true,

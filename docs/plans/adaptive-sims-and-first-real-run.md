@@ -50,3 +50,12 @@ Applies the priors: **64f×4b net, 16 GPU workers, K=16, Dirichlet on**, and:
 
 Open dial to confirm at launch: the **sim cap** (400 balanced; 300 = conservative
 endgame-only taper; 600–800 = aggressive deeper opening, ~more compute).
+
+> **Lookback fix (2026-06-20):** `max_generations_lookback` was **1** — and given the
+> growing-window logic in `_generation_window_size` (designed to grow 5→max for
+> later-training stability), a max of 1 makes the window *shrink* 5→1, so from gen 6 the
+> net trains on only the current generation (~17k examples) and discards the rest —
+> contrary to the code's intent and far below standard practice (`alpha-zero-general`
+> default 20; AGZ ~20-iter window). Set to **8** — memory-safe at 300 games/gen (~29 GB
+> peak; the dense-board buffer caps us ~8, vs ~36 GB → OOM at 20). The standard ~20
+> window is gated on the lazy-board memory fix.
