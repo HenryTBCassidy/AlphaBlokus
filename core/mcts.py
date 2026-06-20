@@ -195,7 +195,7 @@ class MCTS:
             sim_start = time.perf_counter()
 
         batch_size = max(1, self.config.mcts_batch_size)
-        sims_remaining = self.config.num_mcts_sims
+        sims_remaining = self._move_sim_budget(canonical_board)
         while sims_remaining > 0:
             k = min(batch_size, sims_remaining)
             self._simulate_batch(canonical_board, k)
@@ -245,6 +245,28 @@ class MCTS:
         counts = [x ** (1. / temp) for x in counts]
         counts_sum = float(sum(counts))
         return [x / counts_sum for x in counts]
+
+    def _move_sim_budget(self, canonical_board: IBoard) -> int:
+        """Simulations to spend on this move (IDEAS.md I1).
+
+        ``"flat"`` (default) returns ``num_mcts_sims`` unchanged. ``"branching"``
+        scales with the root's legal-move count, clamped to
+        ``[sims_min, num_mcts_sims]`` — thinning the wasteful endgame (few moves)
+        while capping the expensive opening at ``num_mcts_sims``. The branching
+        count is read from the cache when the root is already expanded (the
+        self-play case, where Dirichlet noise expands it), else computed with one
+        move-gen call (no network).
+        """
+        cfg = self.config
+        if cfg.sim_schedule != "branching":
+            return cfg.num_mcts_sims
+        s = self.game.state_key(canonical_board)
+        if s in self.valid_moves_cache:
+            branching = len(self.valid_moves_cache[s])
+        else:
+            branching = int(np.count_nonzero(self.game.valid_move_masking(canonical_board, 1)))
+        scaled = round(cfg.sim_branching_scale * branching)
+        return max(cfg.sims_min, min(cfg.num_mcts_sims, scaled))
 
     def search(self, canonical_board: IBoard) -> float:
         """Perform one MCTS simulation (selection → expansion → evaluation → backprop).

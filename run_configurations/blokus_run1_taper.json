@@ -1,0 +1,54 @@
+{
+  "game": "blokusduo",
+  "run_name": "blokus_run1_taper",
+  "seed": 42,
+  "num_generations": 150,
+  "num_eps": 300,
+  "temp_threshold": 12,
+  "update_threshold": 0.55,
+  "max_queue_length": 70000,
+  "root_directory": "./temp/",
+  "load_model": false,
+  "max_generations_lookback": 1,
+  "num_parallel_workers": 16,
+  "worker_cuda": true,
+  "use_optimised_movegen": true,
+  "elo_games_per_gen": 20,
+  "minimax_games_per_gen": 0,
+  "symmetry_diagnostic_positions": 50,
+  "num_arena_matches": 50,
+  "mcts_config": {
+    "num_mcts_sims": 400,
+    "cpuct": 2.5,
+    "mcts_batch_size": 16,
+    "dirichlet_epsilon": 0.25,
+    "dirichlet_alpha": 0.03,
+    "sim_schedule": "branching",
+    "sims_min": 60,
+    "sim_branching_scale": 1.0
+  },
+  "net_config": {
+    "learning_rate": 0.001,
+    "dropout": 0.3,
+    "epochs": 2,
+    "batch_size": 256,
+    "cuda": true,
+    "num_filters": 64,
+    "num_residual_blocks": 4,
+    "lr_scheduler": "cosine",
+    "policy_head": "conv",
+    "fp16_inference": true
+  },
+  "wandb": {
+    "project": "alphablokus-poc",
+    "entity": null,
+    "tags": [
+      "run1",
+      "adaptive-sims",
+      "linux",
+      "16workers",
+      "dirichlet"
+    ],
+    "mode": "online"
+  }
+}

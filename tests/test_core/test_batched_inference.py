@@ -428,3 +428,39 @@ def test_fp16_inference_flag_noop_on_cpu(tmp_path: Path) -> None:
     pol_on, val_on = predict_with(True)
     np.testing.assert_array_equal(pol_off, pol_on)
     assert float(np.asarray(val_off).reshape(-1)[0]) == float(np.asarray(val_on).reshape(-1)[0])
+
+
+# ---------------------------------------------------------------------------
+# Adaptive simulation budget (IDEAS.md I1)
+# ---------------------------------------------------------------------------
+
+def test_move_sim_budget_schedules(tmp_path: Path) -> None:
+    """``flat`` spends num_mcts_sims; ``branching`` clamps to [sims_min, cap]."""
+    game, nnet = _ttt_wrapper(tmp_path)
+    board = game.get_canonical_form(game.initialise_board(), 1)
+    legal = int(np.count_nonzero(game.valid_move_masking(board, 1)))
+    assert legal > 1, "empty TTT should have several legal moves"
+
+    # flat (default): always the configured count, regardless of branching.
+    flat = MCTS(game, nnet, MCTSConfig(num_mcts_sims=50, cpuct=1.0))
+    assert flat._move_sim_budget(board) == 50
+
+    # branching, scale 1: budget == legal-move count when inside [min, cap].
+    branch = MCTS(game, nnet, MCTSConfig(
+        num_mcts_sims=50, cpuct=1.0, sim_schedule="branching", sims_min=1))
+    assert branch._move_sim_budget(board) == min(50, max(1, legal))
+
+    # floor dominates when the branching factor is below sims_min.
+    floored = MCTS(game, nnet, MCTSConfig(
+        num_mcts_sims=50, cpuct=1.0, sim_schedule="branching", sims_min=legal + 5))
+    assert floored._move_sim_budget(board) == legal + 5
+
+    # cap (num_mcts_sims) dominates when scaled branching exceeds it.
+    capped = MCTS(game, nnet, MCTSConfig(
+        num_mcts_sims=7, cpuct=1.0, sim_schedule="branching", sim_branching_scale=100.0))
+    assert capped._move_sim_budget(board) == 7
+
+    # The schedule still yields a well-formed policy end-to-end.
+    np.random.seed(0)
+    probs = branch.get_action_prob(board, temp=1)
+    assert abs(sum(probs) - 1.0) < 1e-9

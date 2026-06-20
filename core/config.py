@@ -44,6 +44,17 @@ class MCTSConfig:
     # GPU utilisation.
     mcts_batch_size: int = 1
 
+    # Adaptive per-move simulation budget (IDEAS.md I1). ``"flat"`` (default)
+    # spends ``num_mcts_sims`` every move — bit-identical to pre-taper behaviour.
+    # ``"branching"`` scales the budget with the root's legal-move count:
+    # ``sims = clamp(round(sim_branching_scale * branching), sims_min, num_mcts_sims)``
+    # — so ``num_mcts_sims`` becomes the early-game cap and ``sims_min`` the
+    # endgame floor. Blokus branching swings ~450 (opening) → <10 (endgame), so a
+    # flat count is thin in the opening and wasteful in the endgame.
+    sim_schedule: str = "flat"
+    sims_min: int = 1
+    sim_branching_scale: float = 1.0
+
 
 @dataclass(frozen=True)
 class NetConfig:
