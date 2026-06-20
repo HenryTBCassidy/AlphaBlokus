@@ -22,9 +22,22 @@ MCTS golden/parallel-determinism tests are the safety net.
 |---|------|--------|----------|------|
 | 1 | **Standardise the benchmark** — one command, fixed suite, one self-contained HTML report (time pie + top-function bars + worker-sweep games/s + memory charts) | ~0.5 day | High | ✅ |
 | 2 | **Baseline run** — run the new benchmark on current `main`-equivalent code; save the "before" report | ~0.5 hr | High | ✅ |
-| 3 | **Quick win A — game-ended via F2** — replace the old-generator existence check in `get_game_ended` with an F2 early-exit `has_any_move`; bit-identical | ~0.5 day | High | |
-| 4 | **Quick win B — retire the old generator from production** — move `_generate_valid_moves`/`_valid_moves`/`_placements_at_point`/`_all_cells_valid` to a reference module used only as the test oracle; production routes through F2 everywhere | ~0.5 day | Medium | |
-| 5 | **Re-benchmark + compare** — rerun the standard suite; before/after report; decide if the Cython move-gen loop is worth pursuing (separate plan) based on the measured gain + GPU-utilisation headroom | ~0.5 hr | High | |
+| 3 | **Quick win A — game-ended via F2** — replace the old-generator existence check in `get_game_ended` with an F2 early-exit `has_any_move`; bit-identical | ~0.5 day | High | ✅ |
+| 4 | **Quick win B — retire the old generator from production** — move `_generate_valid_moves`/`_valid_moves`/`_placements_at_point`/`_all_cells_valid` to a reference module used only as the test oracle; production routes through F2 everywhere | ~0.5 day | Medium | ⏸ Deferred |
+| 5 | **Re-benchmark + compare** — rerun the standard suite; before/after report; decide if the Cython move-gen loop is worth pursuing (separate plan) based on the measured gain + GPU-utilisation headroom | ~0.5 hr | High | ✅ |
+
+> **Step 3 result (2026-06-20):** routing `get_game_ended` through F2's early-exit
+> `has_any_move` (commit `07a199d`) gave **single-worker 5.13 → 4.21 s/game (1.22×)** and
+> **16-worker 1.449 → 1.646 games/s (1.14×)** on the standardised benchmark — bit-identical
+> (guarded by the new `has_any_move` equivalence test). Reports: `temp/benchmarks/baseline_6cfa88e.html`
+> and `after_step3_07a199d.html`.
+>
+> **Step 4 deferred:** step 3 already removed the old generator from the *hot path* (the win
+> above). Fully retiring it to a reference module is blocked on reimplementing the **first-move**
+> path in F2 (`_fill_first_move_mask` + the first-move branch of `has_any_move` still use the old
+> generator) — a **cold, one-off-per-game path with no performance value**. Deferred as low-value
+> hygiene; the old generator is now confined to (a) the cold first-move path and (b) the
+> equivalence-test oracle. Revisit only if we want the full cleanup.
 
 ---
 
