@@ -262,9 +262,11 @@ class BlokusDuoGame(IGame):
             if ins_i < 0 or ins_j < 0 or ins_i + p_len > n or ins_j + p_wid > n:
                 continue
 
-            if board_2d is not None and side_danger is not None:
-                if not self._all_cells_valid(filled_cells, ins_i, ins_j, board_2d, side_danger):
-                    continue
+            if (
+                board_2d is not None and side_danger is not None
+                and not self._all_cells_valid(filled_cells, ins_i, ins_j, board_2d, side_danger)
+            ):
+                continue
 
             coord = self._coordinate_index_decoder.to_coordinate((ins_i, ins_j))
             yield Action(piece_id, orientation, coord[0], coord[1])
@@ -374,7 +376,14 @@ class BlokusDuoGame(IGame):
         return perm
 
     def _has_valid_moves(self, board: BlokusDuoBoard, player: PlayerSide) -> bool:
-        """Check if a player has at least one legal move. Short-circuits on first find."""
+        """Check if a player has at least one legal move. Short-circuits on first find.
+
+        Routes through the F2 generator's early-exit existence check when enabled
+        (the production path); falls back to the reference generator otherwise.
+        Both give the same verdict — guarded by the move-gen equivalence tests.
+        """
+        if self._f2_generator is not None:
+            return self._f2_generator.has_any_move(self, board, player)
         return next(self._generate_valid_moves(board, player), None) is not None
 
     def _valid_moves(self, board: BlokusDuoBoard, player: PlayerSide) -> list[Action]:

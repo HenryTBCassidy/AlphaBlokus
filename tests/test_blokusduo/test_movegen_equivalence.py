@@ -207,6 +207,44 @@ def test_movegen_equivalence_dev_cache(blokus_game_module: BlokusDuoGame) -> Non
         )
 
 
+def test_has_any_move_equivalence_dev_cache(blokus_game_module: BlokusDuoGame) -> None:
+    """F2 ``has_any_move`` must match the reference generator's existence verdict.
+
+    ``get_game_ended`` now uses F2's early-exit ``has_any_move`` instead of the old
+    ``_generate_valid_moves``. The terminal test only stays correct if the two agree
+    on "does this player have any legal move?" for every position — checked here for
+    both players across the dev cache.
+    """
+    from games.blokusduo.movegen_runtime import get_default_generator
+
+    f2 = get_default_generator()
+    actions_array, n_moves_array = load_cache(DEV_CACHE)
+    mismatches: list[str] = []
+
+    for i in range(len(n_moves_array)):
+        n_moves = int(n_moves_array[i])
+        sequence = actions_array[i, :n_moves]
+        board, _player = replay_to_board_and_player(blokus_game_module, sequence)
+        for p in (1, -1):
+            reference = next(
+                blokus_game_module._generate_valid_moves(board, p), None,  # noqa: SLF001
+            ) is not None
+            f2_exists = f2.has_any_move(blokus_game_module, board, p)
+            if reference != f2_exists:
+                mismatches.append(
+                    f"Position {i} (after {n_moves} moves), player {p}: "
+                    f"reference={reference}, f2.has_any_move={f2_exists}",
+                )
+        if len(mismatches) >= 5:
+            break
+
+    if mismatches:
+        pytest.fail(
+            "has_any_move disagreed with the reference existence check:\n"
+            + "\n".join(mismatches),
+        )
+
+
 @pytest.mark.slow
 def test_movegen_equivalence_gauntlet(blokus_game_module: BlokusDuoGame) -> None:
     """The 50,000-position gauntlet — runs only before the switch-over.
