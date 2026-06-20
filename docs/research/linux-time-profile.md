@@ -15,7 +15,7 @@ K=16, F2 move-gen on, conv policy head. Two views:
 
 ## 1. Single-worker: where the CPU time goes (64f×4b, the production net)
 
-![time breakdown](assets/time_breakdown_64f4b.png)
+_(Time-split pie — chart generated locally, not committed; the breakdown is in the own-time table below.)_
 
 cProfile, 1 game (7.21 s total), **own time** (the optimisation targets):
 
@@ -42,7 +42,7 @@ arithmetic was ~0%: it didn't touch the gather).
 
 ## 2. How the breakdown shifts with net size
 
-![cost vs net size](assets/cost_vs_netsize.png)
+_(Cost-vs-net-size chart — generated locally, not committed; numbers in the table below.)_
 
 | net | params | single-worker s/game | inference share |
 |-----|--------|----------------------|-----------------|
@@ -67,9 +67,8 @@ games/s under py-spy (sampling adds overhead — real values are the ~1.6 from t
 | 128f×8b | 0.94 |
 | 256f×10b | 0.45 |
 
-Flamegraphs (open in a browser): [`assets/pyspy_64f4b.svg`](assets/pyspy_64f4b.svg) ·
-[`assets/pyspy_128f8b.svg`](assets/pyspy_128f8b.svg) ·
-[`assets/pyspy_256f10b.svg`](assets/pyspy_256f10b.svg).
+Flamegraphs (16-worker, per net size) are generated locally, not committed — regenerate
+with `uvx py-spy record --subprocesses` over a multi-worker self-play run.
 
 At 16 workers we're between CPU-core saturation and GPU-round-trip contention: single
 worker is 4.91 s/game → 16 perfectly-parallel workers would give 3.3 games/s, but we see

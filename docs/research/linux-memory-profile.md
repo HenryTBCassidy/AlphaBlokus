@@ -30,7 +30,7 @@ Self-play is *not* the memory risk.
 
 ## 2. Training step — the memory wall
 
-![training memory ramp](assets/train_memory_ramp.png)
+_(Training-step RSS-vs-buffer-size ramp — chart generated locally, not committed; the numbers are in the table below.)_
 
 `train()` on a synthetic buffer, 64f×4b:
 

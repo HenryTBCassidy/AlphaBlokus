@@ -63,6 +63,5 @@ makes the all-GPU/K=16 batching even more important (inference share 10% → 25%
 
 ## Artifacts
 - Reports: [linux-time-profile.md](linux-time-profile.md), [linux-memory-profile.md](linux-memory-profile.md)
-- Charts: `assets/time_breakdown_64f4b.png`, `assets/train_memory_ramp.png`, `assets/cost_vs_netsize.png`
-- Flamegraphs (16-worker, open in browser): `assets/pyspy_{64f4b,128f8b,256f10b}.svg`
+- Charts & flamegraphs: generated locally, **not committed** (binary artifacts) — the underlying numbers are in the tables of the time/memory reports; regenerate via `scripts/benchmark.py` and `uvx py-spy`.
 - Raw log: `temp/prof/allprof.log` (gitignored)

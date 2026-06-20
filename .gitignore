@@ -12,3 +12,11 @@ wandb/
 # Generated HTML reports (research docs are .md; the rendered HTML is a build artifact)
 docs/research/*.html
 
+# Image / binary artifacts — generated charts, flamegraphs, plots (regenerable, not in git)
+*.png
+*.svg
+*.jpg
+*.jpeg
+*.gif
+*.webp
+
