@@ -38,12 +38,14 @@ def test_play_genmove_and_score() -> None:
         assert score[0] in ("B", "W") or score == "0"  # e.g. "B+5"
 
 
-def test_illegal_pass_raises() -> None:
-    """Pentobi only allows a pass when there are no legal moves — passing with moves
-    available is rejected, and the adapter surfaces it as GtpError (the desync guard)."""
+def test_play_pass_is_rejected() -> None:
+    """Pentobi has no ``play <c> pass`` — passes are expressed only via ``genmove``
+    returning ``pass``. A play-pass always errors; the adapter surfaces it as GtpError.
+    (PentobiPlayer relies on this: it never sends a pass, it just skips telling the
+    engine, since a pass places nothing.)"""
     with PentobiGtp(level=1, seed=1) as engine, pytest.raises(GtpError):
         engine.clear_board()
-        engine.play("b", "pass")  # illegal: blue has legal moves on an empty board
+        engine.play("b", "pass")
 
 
 def test_bad_command_raises() -> None:
