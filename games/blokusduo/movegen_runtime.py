@@ -166,6 +166,45 @@ class F2MoveGenerator:
             out[game.action_codec.pass_action_index] = True
         return out
 
+    def has_any_move(
+        self, game: BlokusDuoGame, board: BlokusDuoBoard, player: int,
+    ) -> bool:
+        """Return True iff ``player`` has at least one legal placement.
+
+        Early-exit existence check sharing :meth:`valid_move_mask`'s logic —
+        builds the forbidden array, walks attach points, and returns at the
+        **first** piece-orientation that fits (no enumeration, no dedup). Used by
+        ``get_game_ended`` so the terminal test runs on the F2 path instead of the
+        old generator. Equivalent to ``valid_move_mask(...).any()`` over the
+        non-pass entries (guarded by the move-gen equivalence tests).
+        """
+        # First move is a cold one-off per colour; defer to the existing path.
+        if len(board.remaining_piece_ids(player)) == 21:
+            return next(game._generate_valid_moves(board, player), None) is not None  # noqa: SLF001
+
+        forbidden = self._build_forbidden_array(board, player)
+        remaining = board.remaining_piece_ids(player)
+        for (anchor_row, anchor_col) in board.placement_points(player):
+            anchor = anchor_row * BOARD_SIZE + anchor_col
+            if forbidden[anchor]:
+                continue
+            adj_status = self._compute_adj_status(forbidden, anchor)
+            for piece_id in remaining:
+                piece_idx = piece_id - 1
+                begin = int(self._lookup_begin[anchor, adj_status, piece_idx])
+                size = int(self._lookup_size[anchor, adj_status, piece_idx])
+                for offset in range(size):
+                    cells = self._move_cells[int(self._lookup_move_ids[begin + offset])]
+                    if not (
+                        forbidden[cells[0]]
+                        | forbidden[cells[1]]
+                        | forbidden[cells[2]]
+                        | forbidden[cells[3]]
+                        | forbidden[cells[4]]
+                    ):
+                        return True
+        return False
+
     # -- Hot-path helpers ------------------------------------------------------
 
     def _build_forbidden_array(

@@ -4,7 +4,7 @@
 > the box now dual-boots Ubuntu 24.04 (`gpu-linux`) and a full training run has
 > since completed on it. Retained as the migration record.
 
-Subplan of [self-play-throughput.md](../self-play-throughput.md) **P1**. Move the training
+Subplan of [self-play-throughput.md](self-play-throughput.md) **P1**. Move the training
 box from Windows to a native **Ubuntu dual-boot**, for: clean warmup-free
 benchmarking, `forkserver` (cheap workers), stable unattended multi-hour runs over
 SSH+tmux, and PyTorch's first-class platform. Windows stays installed and bootable;

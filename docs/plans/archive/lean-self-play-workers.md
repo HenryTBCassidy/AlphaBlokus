@@ -8,7 +8,7 @@
 > both Windows and Linux). The *throughput thesis* (L2–L3: "more CPU workers =
 > more speed") was **disproven by benchmarking** — `gpu8` ≈ 0.756 games/s beats
 > `cpu16` 0.21 and the central server ~0.49 — and is **superseded by
-> [self-play-throughput.md](../self-play-throughput.md)**, which carries the live
+> [self-play-throughput.md](self-play-throughput.md)**, which carries the live
 > P2–P4 work (vectorised UCB, hybrid GPU+CPU workers, clean measurement). Kept
 > for the design rationale and the "maintain both inference paths" directive.
 
