@@ -49,7 +49,7 @@ board and Pentobi's `showboard` must agree, or it's a bug.
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| H1 | **Translation layer** — coord converter + `Action`↔cell-list + board text renderer; round-trip tests over all 91 orientations | ~2.5 hr | High | |
+| H1 | **Translation layer** — coord converter + `Action`↔cell-list + board text renderer; round-trip tests over all 91 orientations | ~2.5 hr | High | ✅ |
 | H2 | **Build `pentobi-gtp` on the box + verify the GTP interface** — Duo variant, colour mapping, command set — against the *real* binary (pins the 06-INTERFACES ⚠️s) | ~1 hr | High | |
 | H3 | **GTP subprocess adapter** — spawn / send / read-to-double-newline / parse `=`/`?` / close; handle buffering, stderr drain, `pass` | ~1 hr | High | |
 | H4 | **`PentobiPlayer(Player)` + reuse the `Arena`** — wrap the GTP adapter as a `Player` so net-vs-Pentobi runs through the *existing* `Arena.play_games(record=True)`; per-move board cross-validation | ~1 hr | High | |
