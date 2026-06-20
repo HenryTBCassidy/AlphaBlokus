@@ -50,7 +50,7 @@ board and Pentobi's `showboard` must agree, or it's a bug.
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
 | H1 | **Translation layer** — coord converter + `Action`↔cell-list + board text renderer; round-trip tests over all 91 orientations | ~2.5 hr | High | ✅ |
-| H2 | **Build `pentobi-gtp` on the box + verify the GTP interface** — Duo variant, colour mapping, command set — against the *real* binary (pins the 06-INTERFACES ⚠️s) | ~1 hr | High | |
+| H2 | **Build `pentobi-gtp` + verify the GTP interface** — Duo variant, colour mapping, command set — against the *real* binary (pins the 06-INTERFACES ⚠️s) | ~1 hr | High | ✅ |
 | H3 | **GTP subprocess adapter** — spawn / send / read-to-double-newline / parse `=`/`?` / close; handle buffering, stderr drain, `pass` | ~1 hr | High | |
 | H4 | **`PentobiPlayer(Player)` + reuse the `Arena`** — wrap the GTP adapter as a `Player` so net-vs-Pentobi runs through the *existing* `Arena.play_games(record=True)`; per-move board cross-validation | ~1 hr | High | |
 | H5 | **Benchmark CLI + report (stats + replays)** — `--net`, `--level` or `--sweep`, `--games`; reuse Arena → `GameRecord`s → `ArenaReplays`-style parquet; stats + Pentobi metrics + **replays via the existing renderer** | ~2 hr | High | |
@@ -87,6 +87,25 @@ Build on the **box** (Linux, has the toolchain) per [06-INTERFACES.md §2 "Build
 - the command set we rely on (`clear_board`, `play`, `genmove`, `showboard`, `final_score`, `quit`).
 
 Record the verified facts in the adapter's docstring (supersedes the doc's guesses).
+
+### ✅ Verified interface (2026-06-21, Pentobi v31.0, built on the Mac)
+
+Binary: `~/code/pentobi/build/pentobi_gtp/pentobi-gtp` (built locally — CMake via `uv tool`,
+GUI off, Release; *not* in the repo). Launch: `pentobi-gtp --game duo --level N --quiet
+[--threads 1] [--seed S]`.
+
+- **Colour mapping (the ⚠️, now pinned by the start squares):** our **White (+1) ↔ `b`**
+  (Pentobi "Purple", starts **E10** = our `white_start` array (4,4)); our **Black (−1) ↔ `w`**
+  (Pentobi "Orange", starts **J5** = our `black_start`). **The naive White→`w` guess is WRONG** —
+  `reg_genmove b` played on e10, `reg_genmove w` on j5. Valid colour tokens are only `b`/`w`
+  (`blue`/`white` also accepted); `x`/`o`/`purple`/`g`/`p` are rejected.
+- **Board / coords:** 14×14, columns `a`–`n`, rows 1–14, bottom-left origin — matches our
+  translation (H1) exactly. Moves are comma-separated **lowercase** cells, e.g. `h7,g8,h8,f9,g9`;
+  pass is `pass`.
+- **Commands confirmed:** `clear_board`, `play <c> <cells>`, `genmove <c>`, `reg_genmove <c>`
+  (generate w/o committing), `showboard`, `final_score`, `all_legal <c>`, `undo`, `quit`.
+- **`final_score` format:** `B+N` / `W+N` (margin), where **`B` = our White (+1)**, **`W` = our
+  Black (−1)** — same b/w mapping. Parse accordingly.
 
 ## H3. GTP subprocess adapter
 
