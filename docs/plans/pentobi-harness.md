@@ -53,7 +53,7 @@ board and Pentobi's `showboard` must agree, or it's a bug.
 | H2 | **Build `pentobi-gtp` + verify the GTP interface** — Duo variant, colour mapping, command set — against the *real* binary (pins the 06-INTERFACES ⚠️s) | ~1 hr | High | ✅ |
 | H3 | **GTP subprocess adapter** — spawn / send / read-to-double-newline / parse `=`/`?` / close; handle buffering, stderr drain, `pass` | ~1 hr | High | ✅ |
 | H4 | **`PentobiPlayer(Player)` + reuse the `Arena`** — wrap the GTP adapter as a `Player` so net-vs-Pentobi runs through the *existing* `Arena.play_games(record=True)`; per-move board cross-validation | ~1 hr | High | ✅ |
-| H5 | **Benchmark CLI + report (stats + replays)** — `--net`, `--level` or `--sweep`, `--games`; reuse Arena → `GameRecord`s → `ArenaReplays`-style parquet; stats + Pentobi metrics + **replays via the existing renderer** | ~2 hr | High | |
+| H5 | **Benchmark CLI + report (stats + replays)** — `--net`, `--level` or `--sweep`, `--games`; reuse Arena → `GameRecord`s; stats + Pentobi metrics + **replays via the existing renderer** (embedded directly via `build_game_replay_html` — the `ArenaReplays` parquet round-trip proved unnecessary) | ~2 hr | High | ✅ |
 | H6 | **(As-we-go) periodic Pentobi eval in the training cycle** — current net vs Pentobi every *N* generations, logged to W&B alongside Elo/arena | ~2 hr | Medium | |
 
 H1–H5 deliver the standalone benchmark (the immediate need). H6 is the training-loop
