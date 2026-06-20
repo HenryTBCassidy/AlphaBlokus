@@ -1,6 +1,6 @@
 # Self-Play Quick Wins + Standardised Benchmark
 
-Two things, driven by the [Linux profiling](../research/linux-performance-findings.md):
+Two things, driven by the [Linux profiling](../../research/linux-performance-findings.md):
 (1) land the cheap self-play speedups the profiling surfaced, and (2) build a **single
 standardised benchmark command** that emits **one self-contained HTML report** (time +
 memory, charts) so we stop specifying benchmark runs ad hoc and can do clean before/after.
