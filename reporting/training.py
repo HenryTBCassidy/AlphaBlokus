@@ -377,87 +377,83 @@ def _make_per_gen_loss_curves(df: pd.DataFrame) -> go.Figure:
 # ---------------------------------------------------------------------------
 
 def _make_arena_plot(arena_data: pd.DataFrame, update_threshold: float) -> go.Figure:
-    """Stacked bar (wins/draws/losses) with acceptance annotations and threshold line."""
+    """Line chart of the per-generation acceptance score vs the threshold.
+
+    The score (wins + ½ draws) is drawn as a continuous line and each
+    generation is marked accepted (filled) or rejected (hollow), so the trend
+    and the accept/reject pattern read at a glance even over hundreds of
+    generations — the old stacked-bar-per-generation became an unreadable
+    picket fence past ~30 gens. The full Wins/Losses composition is available
+    as faint lines, hidden by default (toggle them on via the legend).
+    """
     df = arena_data.sort_values("generation").copy()
     total = df["wins"] + df["losses"] + df["draws"]
     df["pct_wins"] = 100 * df["wins"] / total
-    df["pct_draws"] = 100 * df["draws"] / total
     df["pct_losses"] = 100 * df["losses"] / total
     df["is_accepted"] = _accepted_mask(df, update_threshold).values
-    # Acceptance compares this SCORE (draws count as ½) to the threshold —
-    # not the raw wins bar. Plot it explicitly, else a gen whose green wins
-    # bar sits below the line but whose draws lift it over reads as wrongly
-    # accepted. acceptance_score() is the very function the training loop's
-    # rule uses, so the chart and the decision cannot diverge.
+    # Acceptance compares this SCORE (draws count as ½) to the threshold, not
+    # raw wins. acceptance_score() is the very function the training loop uses,
+    # so the chart and the decision cannot diverge.
     from core.acceptance import acceptance_score
     df["pct_score"] = 100 * df.apply(
         lambda r: acceptance_score(int(r["wins"]), int(r["losses"]), int(r["draws"])),
         axis=1,
     )
-
-    # Stringify the generation up front and use it as the x for the bars, the
-    # category axis, AND the acceptance annotations. The axis is categorical
-    # (numeric gens used to sort alphabetically under pandas category dtype),
-    # and on a category axis Plotly keys positions by the *exact* value: a bar
-    # placed at int 3 and an annotation placed at str "3" are treated as two
-    # different categories, so the labels drifted off their bars. Sharing one
-    # string key keeps every label glued to its own bar.
-    df["gen_label"] = df["generation"].astype(int).astype(str)
+    # Numeric x-axis (not categorical): Plotly then spaces gens evenly and
+    # auto-thins the tick labels, which is what makes this scale to 150+ gens.
+    gens = df["generation"].astype(int)
 
     fig = go.Figure()
-    fig.add_trace(go.Bar(
-        x=df["gen_label"], y=df["pct_wins"],
-        name="Wins", marker_color=_COLORS["positive"],
-        customdata=df["wins"],
-        hovertemplate="Wins: %{customdata} (%{y:.0f}%)<extra></extra>",
-    ))
-    fig.add_trace(go.Bar(
-        x=df["gen_label"], y=df["pct_draws"],
-        name="Draws", marker_color=_COLORS["neutral"],
-        customdata=df["draws"],
-        hovertemplate="Draws: %{customdata} (%{y:.0f}%)<extra></extra>",
-    ))
-    fig.add_trace(go.Bar(
-        x=df["gen_label"], y=df["pct_losses"],
-        name="Losses", marker_color=_COLORS["negative"],
-        customdata=df["losses"],
-        hovertemplate="Losses: %{customdata} (%{y:.0f}%)<extra></extra>",
-    ))
-
-    # The actual acceptance metric, drawn as a tick on each bar so it can be
-    # read directly against the threshold line (accepted ⇔ tick on/above line).
+    # Composition lines — full W/L picture, off by default to keep it clean.
     fig.add_trace(go.Scatter(
-        x=df["gen_label"], y=df["pct_score"],
-        name="Score (wins + ½ draws)", mode="markers",
-        marker={"symbol": "line-ew", "size": 26,
-                "line": {"width": 3, "color": "#111111"}},
-        hovertemplate="Score: %{y:.0f}% — the value compared to threshold<extra></extra>",
+        x=gens, y=df["pct_wins"], name="Wins %", mode="lines",
+        line={"color": _COLORS["positive"], "width": 1}, opacity=0.5,
+        visible="legendonly",
+        hovertemplate="Gen %{x} — Wins %{y:.0f}%<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=gens, y=df["pct_losses"], name="Losses %", mode="lines",
+        line={"color": _COLORS["negative"], "width": 1}, opacity=0.5,
+        visible="legendonly",
+        hovertemplate="Gen %{x} — Losses %{y:.0f}%<extra></extra>",
+    ))
+    # Primary: the acceptance-score line.
+    fig.add_trace(go.Scatter(
+        x=gens, y=df["pct_score"], name="Score (wins + ½ draws)", mode="lines",
+        line={"color": "#333333", "width": 1.5},
+        customdata=df[["wins", "losses", "draws"]].to_numpy(),
+        hovertemplate=(
+            "Gen %{x}<br>Score %{y:.0f}%<br>"
+            "W%{customdata[0]} · L%{customdata[1]} · D%{customdata[2]}<extra></extra>"
+        ),
+    ))
+    # Accept / reject markers on the score line — replaces the per-bar "✓
+    # Accepted" text (which smeared together once accepts got dense).
+    acc, rej = df[df["is_accepted"]], df[~df["is_accepted"]]
+    fig.add_trace(go.Scatter(
+        x=acc["generation"].astype(int), y=acc["pct_score"], name="Accepted",
+        mode="markers",
+        marker={"symbol": "circle", "size": 8, "color": _COLORS["positive"],
+                "line": {"width": 1, "color": "#222222"}},
+        hovertemplate="Gen %{x} ACCEPTED — score %{y:.0f}%<extra></extra>",
+    ))
+    fig.add_trace(go.Scatter(
+        x=rej["generation"].astype(int), y=rej["pct_score"], name="Rejected",
+        mode="markers",
+        marker={"symbol": "circle-open", "size": 7, "color": _COLORS["negative"],
+                "line": {"width": 1.5}},
+        hovertemplate="Gen %{x} rejected — score %{y:.0f}%<extra></extra>",
     ))
 
     fig.add_hline(
         y=update_threshold * 100, line_dash="dash", line_color=_COLORS["primary"],
-        annotation_text=f"Threshold ({update_threshold:.0%})",
+        annotation_text=f"Accept threshold ({update_threshold:.0%})",
         annotation_position="top left",
     )
 
-    # Only annotate ACCEPTED generations — rejected is the default expectation
-    # and labelling every bar caused overlap with 30+ generations. Each label
-    # sits directly above its own bar (bars always stack to 100%, so the top is
-    # at y=100) and is rotated vertical: the horizontal "✓ Accepted" text was
-    # wider than a bar, so consecutive accepted gens (e.g. 13/14/15) smeared
-    # into each other and bled over neighbouring rejected bars.
-    for _, row in df[df["is_accepted"]].iterrows():
-        fig.add_annotation(
-            x=row["gen_label"], y=101, text="✓ Accepted", showarrow=False,
-            textangle=-90, xanchor="center", yanchor="bottom",
-            font={"size": 10, "color": _COLORS["positive"], "family": "monospace"},
-        )
-
     fig.update_layout(
-        barmode="stack",
-        xaxis_title="Generation", yaxis_title="Percentage", yaxis_range=[0, 135],
-        xaxis={"type": "category", "categoryorder": "array",
-               "categoryarray": list(df["gen_label"])},
+        xaxis_title="Generation", yaxis_title="Score / win-rate (%)",
+        yaxis_range=[0, 105],
         title="Arena: New Net vs Predecessor",
     )
     return _apply_defaults(fig)
@@ -534,6 +530,25 @@ def _make_network_entropy_plot(entropy_data: pd.DataFrame) -> go.Figure:
     return _apply_defaults(fig)
 
 
+# The replay viewer renders a full board-by-board card per move. A long run
+# (e.g. 150 generations × 50 arena games × ~30 moves ≈ 230k cards) explodes
+# report-gen memory — it OOM-killed run1's report during the live run. So we
+# render a representative *sample*: generations spread evenly across the run
+# (always keeping the first and last) and the first few games of each. The
+# full record stays in the ArenaReplays parquets either way.
+_REPLAY_MAX_GENERATIONS = 16
+_REPLAY_MAX_GAMES_PER_GEN = 6
+
+
+def _evenly_sample(values: list[int], n: int) -> list[int]:
+    """Pick up to ``n`` values spread evenly across ``values`` (sorted),
+    always including the first and last. Returns all of them if ``len <= n``."""
+    if n <= 0 or len(values) <= n:
+        return list(values)
+    idxs = {round(i * (len(values) - 1) / (n - 1)) for i in range(n)}
+    return sorted(values[i] for i in idxs)
+
+
 def _make_arena_replays_section(
     df: pd.DataFrame,
     config: RunConfig,
@@ -566,6 +581,22 @@ def _make_arena_replays_section(
 
     df = df.copy()
     df["generation"] = df["generation"].astype(int)
+
+    # Bound the volume rendered (see module constants above) so long runs
+    # don't OOM report generation. Sample generations evenly, cap games/gen.
+    all_gens = sorted(df["generation"].unique())
+    sampled_gens = _evenly_sample(all_gens, _REPLAY_MAX_GENERATIONS)
+    df = df[
+        df["generation"].isin(sampled_gens)
+        & (df["game_idx"] < _REPLAY_MAX_GAMES_PER_GEN)
+    ]
+    if len(sampled_gens) < len(all_gens) or _REPLAY_MAX_GAMES_PER_GEN < 50:
+        logger.info(
+            "Arena replays: rendering {} of {} generations (evenly sampled) "
+            "× up to {} games/gen to bound report size",
+            len(sampled_gens), len(all_gens), _REPLAY_MAX_GAMES_PER_GEN,
+        )
+
     df = df.sort_values(["generation", "game_idx", "move_idx"])
 
     games_by_gen: dict[int, list[dict]] = {}
