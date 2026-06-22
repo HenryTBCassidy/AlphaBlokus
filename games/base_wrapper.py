@@ -52,14 +52,17 @@ class AverageMeter:
 
 
 class _LazyPolicyDataset(Dataset):
-    """Training dataset that densifies sparse policies one item at a time.
+    """Training dataset that materialises boards and policies one item at a time.
 
-    Boards and values are materialised once as tensors; policies are kept in
-    their stored form — sparse ``(indices, values)`` tuples, or dense arrays for
-    resume-loaded / hand-built examples — and densified lazily in
-    ``__getitem__``. This keeps the full dense policy matrix (~71 KB x N
-    examples) from ever existing at once, which is what spiked RAM and OOM'd
-    large multi-generation buffers when it was built up front.
+    Both boards and policies are kept in their stored form and turned into
+    tensors lazily in ``__getitem__``; only the (tiny) values are held as one
+    tensor. This matters because the replay buffer already holds every board as
+    a dense ``(44, 14, 14)`` float32 array (~34.5 KB) — stacking them into a
+    second up-front tensor here *doubled* board RAM and OOM-killed large
+    multi-generation windows (run2: ~11 GB buffer + ~11 GB copy → >31 GB at
+    gen 15). Holding references and densifying per item means only one
+    ``DataLoader`` batch of boards (and one of policies, ~71 KB each) is ever
+    dense at once.
     """
 
     def __init__(
@@ -69,7 +72,8 @@ class _LazyPolicyDataset(Dataset):
         values: Sequence[float],
         action_size: int,
     ) -> None:
-        self._boards = torch.from_numpy(np.asarray(boards, dtype=np.float32))
+        # Reference the buffer's board arrays rather than stacking a full copy.
+        self._boards = list(boards)
         self._values = torch.from_numpy(np.asarray(values, dtype=np.float32))
         self._raw_pis = list(raw_pis)
         self._action_size = action_size
@@ -78,8 +82,13 @@ class _LazyPolicyDataset(Dataset):
         return len(self._raw_pis)
 
     def __getitem__(self, idx: int) -> tuple[Tensor, Tensor, Tensor]:
+        # ascontiguousarray is a no-op for fresh self-play boards (already
+        # contiguous float32) and only copies for the odd resume-loaded array.
+        board = torch.from_numpy(
+            np.ascontiguousarray(self._boards[idx], dtype=np.float32),
+        )
         pi = torch.from_numpy(as_dense(self._raw_pis[idx], self._action_size))
-        return self._boards[idx], pi, self._values[idx]
+        return board, pi, self._values[idx]
 
 
 class BaseNNetWrapper(INeuralNetWrapper, ABC):
