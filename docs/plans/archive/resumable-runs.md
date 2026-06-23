@@ -95,6 +95,17 @@ silent drop — is intentionally deferred; Henry is reconsidering replay bufferi
 - Existing `tests/test_core` + determinism tests still pass (the loop change is a no-op at the
   default `start_generation=1`).
 
+## Outcome
+
+Shipped in commit `e08a0a1`. All of R1–R8 done: `--resume` continues a run in place from the
+last completed generation (marker + `latest.pth.tar`), reusing the frozen Elo baseline and W&B
+run, and the end-of-run report is wrapped so it can't sink a finished run. The resume mechanics
+are covered by an automated in-process test (2 gens → resume to 4: numbering continues, baseline
+byte-identical, gens 1–2 untouched, marker advances) plus a marker round-trip unit test — both
+green, 3× no flake. The only thing not yet exercised is `--resume` against a *real* multi-hour
+run; that'll happen incidentally on the next big-config run (paused for now). Archived as
+code-complete.
+
 ## Out of scope (deferred)
 
 - **`max_queue_length` silent-drop warning** (earlier item 2) — Henry is rethinking replay
