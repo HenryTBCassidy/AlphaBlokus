@@ -127,6 +127,9 @@ class MetricsCollector:
     """
 
     config: RunConfig | None = None
+    # When set, a resumed run re-attaches to this existing W&B run id instead of
+    # starting a second run for the same logical training run.
+    resume_wandb_run_id: str | None = None
 
     _training_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _arena_records: list[dict] = field(default_factory=list, init=False, repr=False)
@@ -163,6 +166,11 @@ class MetricsCollector:
             return
         self._init_wandb()
 
+    @property
+    def wandb_run_id(self) -> str | None:
+        """The active W&B run id (for persisting in the resume marker), or None."""
+        return getattr(self._wandb_run, "id", None) if self._wandb_run else None
+
     def _init_wandb(self) -> None:
         """Initialise a W&B run using the active ``WandbConfig``.
 
@@ -186,6 +194,12 @@ class MetricsCollector:
         assert self.config is not None and self.config.wandb is not None  # narrowed by caller
         wandb_config = self.config.wandb
         run_name = f"{self.config.run_name}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
+        # On resume, re-attach to the original run id so the dashboard shows one
+        # continuous run; resume="allow" creates it if the id isn't found.
+        resume_kwargs = (
+            {"id": self.resume_wandb_run_id, "resume": "allow"}
+            if self.resume_wandb_run_id else {}
+        )
         self._wandb_run = wandb.init(
             project=wandb_config.project,
             entity=wandb_config.entity,
@@ -193,6 +207,7 @@ class MetricsCollector:
             mode=wandb_config.mode,
             name=run_name,
             config=_dataclass_to_jsonable(self.config),
+            **resume_kwargs,
         )
         if self._wandb_run is not None and getattr(self._wandb_run, "url", None):
             logger.info("Initialised W&B run: {}", self._wandb_run.url)

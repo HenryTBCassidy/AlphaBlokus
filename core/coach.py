@@ -1,4 +1,6 @@
+import json
 import math
+import os
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -45,6 +47,24 @@ def _compute_elo(wins: int, losses: int, draws: int) -> tuple[float, float]:
 # Type aliases for improved readability
 TrainingExample: TypeAlias = tuple[IBoard, int, NDArray, float | None]  # (board, player, policy, value)
 TrainingHistory: TypeAlias = list[deque[ProcessedExample]]  # List of examples per generation
+
+# Resume marker: written atomically at the end of every completed generation and
+# read by ``main.py --resume`` to continue a crashed run in place. Lives in the
+# run's log directory (already created early in ``main``).
+PROGRESS_MARKER_FILENAME = "progress.json"
+
+
+def read_progress_marker(config: RunConfig) -> dict | None:
+    """Return the resume marker for ``config``'s run, or ``None`` if absent.
+
+    The marker records the last *fully completed* generation (and the W&B run id,
+    if any), so resume continues from the next generation without re-running or
+    overwriting completed work.
+    """
+    path = config.log_directory / PROGRESS_MARKER_FILENAME
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 @dataclass(frozen=True)
@@ -93,7 +113,15 @@ class Coach:
     but only if the new version proves stronger than the previous one.
     """
 
-    def __init__(self, game: IGame, nnet: INeuralNetWrapper, config: RunConfig) -> None:
+    def __init__(
+        self,
+        game: IGame,
+        nnet: INeuralNetWrapper,
+        config: RunConfig,
+        *,
+        resume: bool = False,
+        resume_wandb_run_id: str | None = None,
+    ) -> None:
         """
         Initialize the training coordinator.
 
@@ -101,7 +129,13 @@ class Coach:
             game: Game implementation providing rules and mechanics
             nnet: Neural network for policy and value predictions
             config: Configuration parameters for the training process
+            resume: When True, this is a continuation of a crashed/stopped run —
+                the existing frozen Elo baseline is reused rather than re-frozen
+                from the (already-trained) net, keeping the Elo curve comparable.
+            resume_wandb_run_id: W&B run id to re-attach to (from the resume
+                marker), so the dashboard shows one continuous run.
         """
+        self.resume = resume
         # Seed everything FIRST — before any wrapper / MCTS instance is built,
         # so weight init, replay shuffles, MCTS tie-breaks and the global
         # ``np.random`` calls scattered through self-play all see the same
@@ -123,7 +157,7 @@ class Coach:
         # Training state
         self.train_examples_history: TrainingHistory = []
         self.skip_first_self_play = False  # Can be set by load_train_examples()
-        self.metrics = MetricsCollector(config=config)
+        self.metrics = MetricsCollector(config=config, resume_wandb_run_id=resume_wandb_run_id)
         self._self_play_store = SelfPlayStore(config.self_play_history_directory)
 
         # Frozen held-out positions for per-epoch network diagnostics (policy
@@ -143,7 +177,14 @@ class Coach:
         # Saved to disk under ``Nets/elo_baseline.pth.tar`` so resumed runs use
         # the same baseline.
         if self.config.elo_games_per_gen > 0:
-            self.nnet.save_checkpoint(filename="elo_baseline.pth.tar")
+            baseline_path = self.config.net_directory / "elo_baseline.pth.tar"
+            # On resume, reuse the original gen-0 baseline if it's on disk —
+            # re-saving here would re-anchor it to the already-trained net and
+            # make the resumed Elo numbers incomparable to the pre-crash portion.
+            if not (self.resume and baseline_path.exists()):
+                self.nnet.save_checkpoint(filename="elo_baseline.pth.tar")
+            elif self.resume:
+                logger.info("Resume: reusing existing Elo baseline {}", baseline_path)
             self.elo_baseline_net: INeuralNetWrapper | None = self.nnet.__class__(self.game, config)
             self.elo_baseline_net.load_checkpoint(filename="elo_baseline.pth.tar")
         else:
@@ -164,7 +205,7 @@ class Coach:
             self.game, self.mcts, self.config.temp_threshold,
         )
 
-    def learn(self) -> None:
+    def learn(self, start_generation: int = 1) -> None:
         """
         Execute the main training loop for a specified number of generations.
 
@@ -182,14 +223,19 @@ class Coach:
             - Timing information is collected for performance analysis
         """
         try:
-            self._learn_loop()
+            self._learn_loop(start_generation=start_generation)
         finally:
             # Ensure W&B (if active) is finalised even on crash/interrupt.
             self.metrics.close()
 
-    def _learn_loop(self) -> None:
-        """Inner training loop. Separated so ``learn`` can wrap it in try/finally."""
-        for generation in range(1, self.config.num_generations + 1):
+    def _learn_loop(self, start_generation: int = 1) -> None:
+        """Inner training loop. Separated so ``learn`` can wrap it in try/finally.
+
+        ``start_generation`` is 1 for a fresh run and ``last_completed + 1`` when
+        resuming; every per-generation artifact is keyed by generation number, so
+        starting partway through appends rather than overwriting earlier work.
+        """
+        for generation in range(start_generation, self.config.num_generations + 1):
             logger.info(f'Starting Generation #{generation} ...')
             generation_start = time.perf_counter()
             self.metrics.log_progress(generation, self.config.num_generations)
@@ -314,6 +360,50 @@ class Coach:
             generation_end = time.perf_counter()
             self.metrics.log_timing(generation, CycleStage.WHOLE_CYCLE, generation_end - generation_start)
             self.metrics.flush(self.config, generation)
+
+            # Mark this generation fully complete — written last, after all of
+            # its data is on disk, so `--resume` always restarts from a clean
+            # boundary (never a half-finished generation).
+            self._write_progress_marker(generation)
+
+    def _write_progress_marker(self, generation: int) -> None:
+        """Persist the carried-forward net + record the last completed generation.
+
+        At this point ``self.nnet`` is the network carried into the next
+        generation (the just-accepted net, or the reverted previous best). Saved
+        as ``latest.pth.tar`` so ``--resume`` always has the exact continuation
+        net — unlike ``best.pth.tar``, which doesn't exist until the first accept.
+
+        The marker is written last, write-to-temp + ``os.replace`` (atomic on the
+        same filesystem), so a crash mid-write can never leave a truncated marker
+        and resume always restarts from a clean generation boundary.
+        """
+        self.nnet.save_checkpoint(filename="latest.pth.tar")
+        path = self.config.log_directory / PROGRESS_MARKER_FILENAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "last_completed_generation": generation,
+            "wandb_run_id": self.metrics.wandb_run_id,
+        }
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp, path)
+
+    def load_self_play_history_for_resume(self, last_completed_generation: int) -> None:
+        """Refill the replay buffer to resume training at ``last_completed + 1``.
+
+        Self-play parquet files are 0-indexed (file ``k`` holds generation
+        ``k+1``'s data — see ``save_self_play_history``), so generation ``G``'s
+        data lives in file index ``G-1``. We load the window the *next*
+        generation will train on; ``_manage_training_window`` trims any overshoot
+        on the first post-resume generation.
+        """
+        next_generation = last_completed_generation + 1
+        window = self._generation_window_size(next_generation)
+        last_file_index = last_completed_generation - 1
+        self.train_examples_history = self._self_play_store.load_window(
+            last_file_index, window,
+        )
 
     def _run_self_play_serial(
         self, generation: int, iteration_examples: deque,

@@ -3,7 +3,7 @@ import time
 
 from loguru import logger
 
-from core.coach import Coach
+from core.coach import Coach, read_progress_marker
 from core.config import load_args
 from core.game_factory import instantiate_game_and_network
 from reporting import create_html_report
@@ -21,6 +21,12 @@ def main():
         "--report-only",
         action="store_true",
         help="Regenerate the HTML report from existing data without training",
+    )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        help="Continue a crashed/stopped run from its last completed generation "
+             "(reuses the frozen Elo baseline; continues generation numbering).",
     )
     cli_args = parser.parse_args()
     args = load_args(cli_args.config)
@@ -41,23 +47,47 @@ def main():
     logger.info(f"Loading game: {args.game}")
     game, nnet = instantiate_game_and_network(args)
 
-    if args.load_model:
-        logger.info("Loading checkpoint from best.pth.tar...")
-        nnet.load_checkpoint('best.pth.tar')
+    if cli_args.resume:
+        marker = read_progress_marker(args)
+        if marker is None:
+            raise SystemExit(
+                f"--resume: no progress marker at {log_dir / 'progress.json'} — "
+                "nothing to resume.",
+            )
+        last_gen = int(marker["last_completed_generation"])
+        logger.info("Resuming run after generation {} (loading latest.pth.tar)", last_gen)
+        nnet.load_checkpoint('latest.pth.tar')
+        c = Coach(game, nnet, args, resume=True, resume_wandb_run_id=marker.get("wandb_run_id"))
+        c.load_self_play_history_for_resume(last_gen)
+        start_generation = last_gen + 1
     else:
-        logger.warning('Not loading a checkpoint!')
+        if args.load_model:
+            logger.info("Loading checkpoint from best.pth.tar...")
+            nnet.load_checkpoint('best.pth.tar')
+        else:
+            logger.warning('Not loading a checkpoint!')
 
-    logger.info('Loading the Coach...')
-    c = Coach(game, nnet, args)
+        logger.info('Loading the Coach...')
+        c = Coach(game, nnet, args)
 
-    if args.load_model:
-        logger.info("Loading self-play history...")
-        c.load_self_play_history(up_to_generation=0)
+        if args.load_model:
+            logger.info("Loading self-play history...")
+            c.load_self_play_history(up_to_generation=0)
+        start_generation = 1
 
     logger.info('Starting the learning process')
+    c.learn(start_generation=start_generation)
 
-    c.learn()
-    create_html_report(args)
+    # A finished training run must not be sunk by report rendering (R7): all data
+    # is already on disk, so log and continue — regenerate later with --report-only.
+    try:
+        create_html_report(args)
+    except Exception:
+        logger.exception(
+            "Report generation failed, but training data is intact. "
+            "Regenerate with: --report-only.",
+        )
+
     end = time.perf_counter()
     logger.info(f"Total time elapsed: {end - start}")
 
