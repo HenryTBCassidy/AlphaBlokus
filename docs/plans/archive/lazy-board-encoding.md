@@ -41,7 +41,7 @@ from its gen-14 checkpoint + self-play history.
 |---|------|------|
 | L1 | `_LazyPolicyDataset` holds board *references*; materialises board float32 tensor per item in `__getitem__` (mirror the policy treatment) | ✅ |
 | L2 | Validate: existing training tests pass (4/4); synthetic window confirms boards referenced not copied (`np.shares_memory` True) + identical `__getitem__` output | ✅ |
-| L3 | (After review/commit) resume `blokus_run2_bignet` from gen-14 on the box; watch gen-15 training clear without OOM | |
+| L3 | Live confirmation on the box: a big-config run clears the generation that used to OOM (the training-step window densification) | ⏳ next run |
 
 ## Validation
 
@@ -49,6 +49,15 @@ from its gen-14 checkpoint + self-play history.
   — behaviour must be identical (same tensors out, just built lazily).
 - Memory check: construct `_LazyPolicyDataset` over a synthetic buffer sized like the run2
   window and confirm constructing it no longer allocates a second full board copy.
+
+## Outcome
+
+The fix landed in commit `1ac3630`: `_LazyPolicyDataset` now references the buffer's board
+arrays and materialises one batch at a time, removing the ~11 GB up-front copy that OOM-killed
+run2 at gen-15 training. Verified in tests (boards referenced not copied; identical
+`__getitem__` output; full suite green). **L3 is the only open item** — it's just live
+confirmation, which will come for free on the next big-config run (paused for now); if that run
+clears the previously-fatal generation, the fix is proven end-to-end. Archived as code-complete.
 
 ## Out of scope (deferred)
 
