@@ -18,9 +18,6 @@ support:
   Pentobi Level/Score/Weighted metrics) **and viewable game replays** rendered the *same way*
   as training-run arena replays.
 
-Plus (final step H6) the "as-we-go" integration: periodically pit the *current* net against
-Pentobi during a training run.
-
 **Reuse, don't reinvent (the core design choice).** The training code already has everything
 except the Pentobi connection:
 - `core/arena.py` — `Arena.play_games(..., record=True)` plays any two `core.players.Player`
@@ -54,10 +51,14 @@ board and Pentobi's `showboard` must agree, or it's a bug.
 | H3 | **GTP subprocess adapter** — spawn / send / read-to-double-newline / parse `=`/`?` / close; handle buffering, stderr drain, `pass` | ~1 hr | High | ✅ |
 | H4 | **`PentobiPlayer(Player)` + reuse the `Arena`** — wrap the GTP adapter as a `Player` so net-vs-Pentobi runs through the *existing* `Arena.play_games(record=True)`; per-move board cross-validation | ~1 hr | High | ✅ |
 | H5 | **Benchmark CLI + report (stats + replays)** — `--net`, `--level` or `--sweep`, `--games`; reuse Arena → `GameRecord`s; stats + Pentobi metrics + **replays via the existing renderer** (embedded directly via `build_game_replay_html` — the `ArenaReplays` parquet round-trip proved unnecessary) | ~2 hr | High | ✅ |
-| H6 | **(As-we-go) periodic Pentobi eval in the training cycle** — current net vs Pentobi every *N* generations, logged to W&B alongside Elo/arena | ~2 hr | Medium | |
 
-H1–H5 deliver the standalone benchmark (the immediate need). H6 is the training-loop
-integration you asked about; it builds on H1–H5 and can follow once they're solid.
+H1–H5 deliver the standalone benchmark — the goal of this branch — and are complete.
+
+> **Set aside (no longer scoped):** periodic in-training Pentobi eval (current net vs Pentobi
+> every *N* generations, logged to W&B). Was a possible "as-we-go" stretch; dropped because the
+> standalone benchmark already covers absolute-strength measurement, and the early nets aren't
+> close enough to Pentobi for an in-loop eval to be informative yet. Revisit if a future run gets
+> competitive.
 
 ---
 
@@ -152,10 +153,12 @@ uv run python -m scripts.pentobi_benchmark --net <checkpoint> --sweep --games 10
 
 First use: point `--net` at the best accepted `run1` checkpoint and sweep levels 1–9.
 
-## H6. (As-we-go) periodic Pentobi eval in the training cycle
+---
 
-The "arena battles vs Pentobi as we go": every *N* generations (05-EVALUATION suggests 10–20),
-play the current net vs Pentobi (a subset of levels, fewer games for cheapness) and log the
-result to W&B beside the existing Elo-vs-baseline and arena metrics — so we watch absolute
-strength climb during the run, not just after. Gated by a config flag (off by default; the
-standalone H5 benchmark stays the rigorous 100-game measurement). Builds on H1–H5.
+## Outcome
+
+H1–H5 complete (commits up to `b11085f`). The harness works end-to-end: benchmarked
+`blokus_linux_15` and `blokus_run1_taper` across levels 1–9 — both scored **0/36** (no wins at
+any level) while beating a random player 8–0, i.e. the nets learned real play but are still far
+below Pentobi's weakest level. The standalone benchmark is the strength-measurement tool going
+forward; the in-training periodic eval (former H6) is set aside, as noted above.
