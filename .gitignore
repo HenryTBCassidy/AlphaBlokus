@@ -4,6 +4,7 @@ iframe_figures/
 .idea/
 app.log
 running_args
+todo.txt
 **/__pycache__/
 .DS_Store
 local/
