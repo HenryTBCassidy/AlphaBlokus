@@ -57,10 +57,12 @@ subsequent calls.
 """
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
+from numba import njit
 
 from games.blokusduo.movegen_tables import (
     BOARD_SIZE,
@@ -77,6 +79,102 @@ if TYPE_CHECKING:
 
     from games.blokusduo.board import BlokusDuoBoard
     from games.blokusduo.game import BlokusDuoGame
+
+
+# Set ``ALPHABLOKUS_NUMBA_MOVEGEN=0`` to force the pure-Python F2 loop (the A/B
+# baseline the Numba kernels are measured against and validated for equivalence).
+_USE_NUMBA = os.environ.get("ALPHABLOKUS_NUMBA_MOVEGEN", "1") != "0"
+
+
+# ---------------------------------------------------------------------------
+# Numba kernels — the compiled hot loop (N2)
+# ---------------------------------------------------------------------------
+#
+# These compile the exact logic of ``_fill_legal_actions_for_anchor`` /
+# ``has_any_move`` into nopython machine code, working directly on the
+# precomputed numpy tables. They are bit-identical to the pure-Python path
+# (integer/boolean only — no float rounding), guarded by the 5,000-position
+# equivalence suite. ``cache=True`` persists the compiled code to
+# ``__pycache__`` so the 16 self-play workers spawned each generation load it
+# instead of recompiling (warmed once via ``F2MoveGenerator.warm_up``).
+
+
+@njit(cache=True)
+def _fill_mask_kernel(
+    forbidden, anchors, adj_status_cells,
+    lookup_begin, lookup_size, lookup_move_ids,
+    move_cells, move_action_id, remaining, out, seen,
+):
+    """Fill ``out`` (bool action mask) with every legal move across ``anchors``.
+
+    Mirrors ``_fill_legal_actions_for_anchor`` exactly: per anchor, compute the
+    6-bit ``adj`` status, then for each remaining piece walk its candidate list,
+    dedup via the ``seen`` scratch array, and mark surviving moves. A move is
+    only marked ``seen`` once its 5-cell forbidden check passes, matching the
+    Python set semantics (a move that fails is re-checked at the next anchor —
+    same verdict, since ``forbidden`` is anchor-independent).
+    """
+    for ai in range(anchors.shape[0]):
+        anchor = anchors[ai]
+        if forbidden[anchor]:
+            continue
+        adj = (forbidden[adj_status_cells[anchor, 0]]
+               | (forbidden[adj_status_cells[anchor, 1]] << 1)
+               | (forbidden[adj_status_cells[anchor, 2]] << 2)
+               | (forbidden[adj_status_cells[anchor, 3]] << 3)
+               | (forbidden[adj_status_cells[anchor, 4]] << 4)
+               | (forbidden[adj_status_cells[anchor, 5]] << 5))
+        for pi in range(remaining.shape[0]):
+            piece_idx = remaining[pi] - 1
+            begin = lookup_begin[anchor, adj, piece_idx]
+            size = lookup_size[anchor, adj, piece_idx]
+            for off in range(size):
+                mid = lookup_move_ids[begin + off]
+                if seen[mid]:
+                    continue
+                if not (forbidden[move_cells[mid, 0]]
+                        | forbidden[move_cells[mid, 1]]
+                        | forbidden[move_cells[mid, 2]]
+                        | forbidden[move_cells[mid, 3]]
+                        | forbidden[move_cells[mid, 4]]):
+                    seen[mid] = True
+                    out[move_action_id[mid]] = True
+
+
+@njit(cache=True)
+def _has_any_move_kernel(
+    forbidden, anchors, adj_status_cells,
+    lookup_begin, lookup_size, lookup_move_ids,
+    move_cells, remaining,
+):
+    """Return True at the first legal move found — early-exit, no dedup.
+
+    Mirrors ``has_any_move``'s loop exactly (the ``get_game_ended`` terminal
+    test). No ``seen`` array: existence doesn't need deduplication.
+    """
+    for ai in range(anchors.shape[0]):
+        anchor = anchors[ai]
+        if forbidden[anchor]:
+            continue
+        adj = (forbidden[adj_status_cells[anchor, 0]]
+               | (forbidden[adj_status_cells[anchor, 1]] << 1)
+               | (forbidden[adj_status_cells[anchor, 2]] << 2)
+               | (forbidden[adj_status_cells[anchor, 3]] << 3)
+               | (forbidden[adj_status_cells[anchor, 4]] << 4)
+               | (forbidden[adj_status_cells[anchor, 5]] << 5))
+        for pi in range(remaining.shape[0]):
+            piece_idx = remaining[pi] - 1
+            begin = lookup_begin[anchor, adj, piece_idx]
+            size = lookup_size[anchor, adj, piece_idx]
+            for off in range(size):
+                mid = lookup_move_ids[begin + off]
+                if not (forbidden[move_cells[mid, 0]]
+                        | forbidden[move_cells[mid, 1]]
+                        | forbidden[move_cells[mid, 2]]
+                        | forbidden[move_cells[mid, 3]]
+                        | forbidden[move_cells[mid, 4]]):
+                    return True
+    return False
 
 
 # ---------------------------------------------------------------------------
@@ -102,6 +200,11 @@ class F2MoveGenerator:
         self._lookup_size = lookup.size
         self._lookup_move_ids = lookup.move_ids
         self._adj_status_cells = lookup.adj_status_cells
+        # Number of distinct moves — size of the per-call ``seen`` dedup array.
+        self._num_moves = int(self._move_cells.shape[0])
+        # Route the hot loop through the Numba kernels (default) or the
+        # pure-Python loop (``ALPHABLOKUS_NUMBA_MOVEGEN=0``, the A/B baseline).
+        self._use_numba = _USE_NUMBA
 
     @classmethod
     def from_pieces_json(cls, pieces_path: Path) -> F2MoveGenerator:
@@ -143,24 +246,39 @@ class F2MoveGenerator:
 
         # Hot path: build the forbidden mask, then iterate attach points.
         forbidden = self._build_forbidden_array(board, player)
-        remaining = board.remaining_piece_ids(player)
 
-        # Dedup set — a single move can be emitted by multiple attach
-        # points (one for each of its footprint cells that's an attach
-        # point). Pentobi calls this MoveMarker; we use a plain Python
-        # set since action_size is only ~17k.
-        seen: set[int] = set()
-
-        for (anchor_row, anchor_col) in board.placement_points(player):
-            anchor = anchor_row * BOARD_SIZE + anchor_col
-            if forbidden[anchor]:
-                # Attach point itself has become forbidden since it was
-                # added (a later edge-adjacent piece covered it). Skip.
-                continue
-            adj_status = self._compute_adj_status(forbidden, anchor)
-            self._fill_legal_actions_for_anchor(
-                anchor, adj_status, remaining, forbidden, out, seen,
+        if self._use_numba:
+            # Compiled path: marshal the dynamic inputs to arrays and let the
+            # kernel walk every anchor in nopython code. ``seen`` is a fresh
+            # bool scratch array (vs the Python set); anchor order is
+            # irrelevant — the output is the union of legal moves.
+            anchors = self._marshal_anchors(board, player)
+            remaining = np.fromiter(
+                board.remaining_piece_ids(player), dtype=np.int32,
             )
+            seen = np.zeros(self._num_moves, dtype=np.bool_)
+            _fill_mask_kernel(
+                forbidden, anchors, self._adj_status_cells,
+                self._lookup_begin, self._lookup_size, self._lookup_move_ids,
+                self._move_cells, self._move_action_id, remaining, out, seen,
+            )
+        else:
+            # Dedup set — a single move can be emitted by multiple attach
+            # points (one for each of its footprint cells that's an attach
+            # point). Pentobi calls this MoveMarker; we use a plain Python
+            # set since action_size is only ~17k.
+            remaining = board.remaining_piece_ids(player)
+            seen: set[int] = set()
+            for (anchor_row, anchor_col) in board.placement_points(player):
+                anchor = anchor_row * BOARD_SIZE + anchor_col
+                if forbidden[anchor]:
+                    # Attach point itself has become forbidden since it was
+                    # added (a later edge-adjacent piece covered it). Skip.
+                    continue
+                adj_status = self._compute_adj_status(forbidden, anchor)
+                self._fill_legal_actions_for_anchor(
+                    anchor, adj_status, remaining, forbidden, out, seen,
+                )
 
         if not out.any():
             out[game.action_codec.pass_action_index] = True
@@ -183,6 +301,18 @@ class F2MoveGenerator:
             return next(game._generate_valid_moves(board, player), None) is not None  # noqa: SLF001
 
         forbidden = self._build_forbidden_array(board, player)
+
+        if self._use_numba:
+            anchors = self._marshal_anchors(board, player)
+            remaining = np.fromiter(
+                board.remaining_piece_ids(player), dtype=np.int32,
+            )
+            return bool(_has_any_move_kernel(
+                forbidden, anchors, self._adj_status_cells,
+                self._lookup_begin, self._lookup_size, self._lookup_move_ids,
+                self._move_cells, remaining,
+            ))
+
         remaining = board.remaining_piece_ids(player)
         for (anchor_row, anchor_col) in board.placement_points(player):
             anchor = anchor_row * BOARD_SIZE + anchor_col
@@ -224,6 +354,47 @@ class F2MoveGenerator:
         forbidden = np.zeros(NUM_CELLS + 1, dtype=np.uint8)
         forbidden[:NUM_CELLS] = forbidden_2d.ravel().astype(np.uint8)
         return forbidden
+
+    def _marshal_anchors(self, board: BlokusDuoBoard, player: int) -> NDArray:
+        """Flatten the player's attach points to an ``int32`` cell-index array.
+
+        ``placement_points`` keys are ``(row, col)``; the kernel wants
+        ``row * BOARD_SIZE + col``. Anchors that have since become forbidden are
+        left in — the kernel skips them (``if forbidden[anchor]``), matching the
+        Python loop.
+        """
+        points = board.placement_points(player)
+        anchors = np.empty(len(points), dtype=np.int32)
+        for i, (row, col) in enumerate(points):
+            anchors[i] = row * BOARD_SIZE + col
+        return anchors
+
+    def warm_up(self) -> None:
+        """Trigger one compile-or-cache-load of the Numba kernels.
+
+        Called once per process (from :func:`get_default_generator`) so the
+        first real ``valid_move_mask`` doesn't pay JIT latency. With
+        ``cache=True`` this loads the on-disk cache when present (the 16
+        per-generation self-play workers all hit the warm cache rather than
+        recompiling). A no-op when the Numba path is disabled.
+        """
+        if not self._use_numba:
+            return
+        forbidden = np.zeros(NUM_CELLS + 1, dtype=np.uint8)
+        anchors = np.zeros(0, dtype=np.int32)  # empty → kernels return immediately
+        remaining = np.zeros(0, dtype=np.int32)
+        out = np.zeros(1, dtype=np.bool_)
+        seen = np.zeros(self._num_moves, dtype=np.bool_)
+        _fill_mask_kernel(
+            forbidden, anchors, self._adj_status_cells,
+            self._lookup_begin, self._lookup_size, self._lookup_move_ids,
+            self._move_cells, self._move_action_id, remaining, out, seen,
+        )
+        _has_any_move_kernel(
+            forbidden, anchors, self._adj_status_cells,
+            self._lookup_begin, self._lookup_size, self._lookup_move_ids,
+            self._move_cells, remaining,
+        )
 
     def _compute_adj_status(self, forbidden: NDArray, anchor: int) -> int:
         """Read 6 forbidden bytes and pack into the 6-bit adj_status."""
@@ -306,4 +477,8 @@ def get_default_generator() -> F2MoveGenerator:
     global _default_generator
     if _default_generator is None:
         _default_generator = F2MoveGenerator.from_pieces_json(_DEFAULT_PIECES_PATH)
+        # Warm the Numba kernels once per process so the first real move-gen
+        # call (and the 16 workers spawned each generation) loads the on-disk
+        # cache instead of recompiling.
+        _default_generator.warm_up()
     return _default_generator
