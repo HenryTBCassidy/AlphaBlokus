@@ -68,7 +68,7 @@ The split exists because self-play data contains numpy arrays serialised as raw 
 
 | Column | Type | Description |
 |--------|------|-------------|
-| `board` | `bytes` | Flattened numpy array of the board state |
+| `board` | `bytes` | Flattened numpy array of the **compact** board (`IBoard.to_compact()`) |
 | `policy` | `bytes` | Flattened numpy array of the MCTS-improved policy vector |
 | `value` | `float` | Game outcome from this position's perspective (+1 win, -1 loss) |
 
@@ -78,18 +78,21 @@ Shape and dtype information is stored in the parquet file's schema metadata (not
 
 | Key | Example Value | Description |
 |-----|---------------|-------------|
-| `board_shape` | `"44,14,14"` (Blokus) / `"2,3,3"` (TicTacToe) | Comma-separated dimensions |
-| `board_dtype` | `"float32"` | Numpy dtype string (board planes are float32) |
+| `board_kind` | `"compact_v1"` | Storage-format marker. Its **absence** means a legacy file holding the dense `(C,N,N)` encoding — `load()` refuses these rather than misreading the bytes. |
+| `board_shape` | `"14,14"` (Blokus) / `"3,3"` (TicTacToe) | Comma-separated dimensions of the compact board |
+| `board_dtype` | `"int8"` | Numpy dtype string (compact placement board is int8) |
 | `policy_size` | `"17837"` (Blokus) / `"10"` (TicTacToe) | Length of the policy vector |
 | `policy_dtype` | `"float32"` | Numpy dtype string (policy cast to float32 in self-play to halve buffer footprint) |
+| `game_sizes` | `"61,57,…"` | Per-game position counts (in row order). Lets `load_games()` split the flat rows back into per-game lists so the games-sized replay buffer can be reconstructed on resume. |
 
 ### Notes
 
-- One file per generation, not one file per episode. All episodes within a generation are concatenated.
+- One file per generation, holding that generation's **fresh** games only (not the whole buffer). All episodes within a generation are concatenated, in game order, with boundaries recorded in `game_sizes`.
+- Boards are stored compact (e.g. Blokus's 196-byte int8 placement board) and re-encoded to the dense `(C,N,N)` network input lazily at batch time via `IGame.encode_compact` — ~175× less buffer RAM than storing the dense planes.
 - Data includes symmetry-augmented positions (rotations/reflections added by `IGame.get_symmetries()`).
-- Old generations are pruned from memory by a sliding window (`Coach._generation_window_size()`), but parquet files on disk are never deleted.
-- Cannot be read with a plain `pd.read_parquet()` — use `SelfPlayStore.load()` or `SelfPlayStore.load_window()` from `core.storage`.
-- The Blokus board encoding is `44×14×14` (44-channel per-piece spatial planes). TicTacToe uses `2×3×3` (2-channel player split). Both are built by `board.as_multi_channel(player)`.
+- The rolling replay buffer keeps the last `replay_buffer_games` games in memory (oldest auto-evict); parquet files on disk are never deleted. On resume, `SelfPlayStore.load_recent_games()` refills the buffer newest-first.
+- Cannot be read with a plain `pd.read_parquet()` — use `SelfPlayStore.load()` / `load_games()` / `load_recent_games()` from `core.storage`.
+- **Legacy dense files** (pre-`compact_v1`, e.g. run2's parquets) cannot be loaded into the compact buffer; resume such runs from their checkpoints before this refactor.
 
 ---
 

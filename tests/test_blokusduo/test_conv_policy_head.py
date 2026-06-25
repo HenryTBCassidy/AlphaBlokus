@@ -48,8 +48,8 @@ def _wrapper(
     )
     run_cfg = RunConfig(
         game="blokusduo", run_name="test_conv", num_generations=1, num_eps=2,
-        temp_threshold=5, update_threshold=0.55, max_queue_length=10, num_arena_matches=2,
-        max_generations_lookback=1, root_directory=tmp_path, load_model=False,
+        temp_threshold=5, update_threshold=0.55, num_arena_matches=2,
+        root_directory=tmp_path, load_model=False,
         mcts_config=MCTSConfig(num_mcts_sims=2, cpuct=1.0), net_config=net_cfg,
     )
     return game, NNetWrapper(game, run_cfg)
@@ -225,11 +225,15 @@ def test_conv_net_trains_and_loss_drops(tmp_path: Path) -> None:
         if valids.sum() == 0:
             break
         target_pi = valids / valids.sum()
-        examples.append((canonical.as_multi_channel(1), target_pi, float((-1) ** i) * 0.5))
+        # train() now consumes compact boards and re-encodes lazily, so store
+        # the compact form; encode below for the direct forward-pass check.
+        examples.append((canonical.to_compact(), target_pi, float((-1) ** i) * 0.5))
         action = int(rng.choice(np.where(valids > 0)[0]))
         board, player = game.get_next_state(board, player, action)
 
-    boards_t = torch.tensor(np.array([e[0] for e in examples]), dtype=torch.float32)
+    boards_t = torch.tensor(
+        np.array([game.encode_compact(e[0]) for e in examples]), dtype=torch.float32,
+    )
     targets_pi = torch.tensor(np.array([e[1] for e in examples]), dtype=torch.float32)
 
     def batch_pi_loss() -> float:

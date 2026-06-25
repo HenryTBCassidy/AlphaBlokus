@@ -14,6 +14,7 @@ Status legend: **Idea** (raw, unexamined) · **Researching** (actively being inv
 | I1 | [Adaptive simulation budget](#i1-adaptive-simulation-budget) | Idea | Scale `num_mcts_sims` with branching factor / moves-left instead of a flat 300 — mostly to stop wasting sims in the low-branching endgame |
 | I2 | [Evaluation-time search tuning](#i2-evaluation-time-search-tuning) | Idea | Use a stronger/exact search at eval than at train (e.g. K=1 and/or more sims) since eval cares about strength, not throughput |
 | I3 | [Shared-state self-play workers](#i3-shared-state-self-play-workers) | Idea | Cut the ~2.5 GB-per-worker framework duplication so we can use all 20 cores (only 8 used now) — the highest-ceiling speed lever (self-play ≈ 86% of the cycle) |
+| I4 | [Continuous (non-gated) training](#i4-continuous-non-gated-training) | Promoted | First step (rolling game-sized replay buffer + compact storage, full-pass training) promoted to [`plans/archive/replay-buffer-refactor.md`](plans/archive/replay-buffer-refactor.md); full async actor/learner stays parked |
 
 > Ideas already captured elsewhere (not duplicated here): the conv policy head (F4) and the cross-worker inference server (F5) are done — see the [optimisation menu](plans/archive/full-cycle-optimisation.md#optimisation-menu); MCTS tree reuse, Cython move-gen and cached-valid-moves are in that plan's [Considered and set aside](plans/archive/full-cycle-optimisation.md#considered-and-set-aside) section; mixed-precision / fp16 inference is in its Out-of-scope list. Dirichlet root noise is **implemented** (`dirichlet_epsilon`/`dirichlet_alpha` in `MCTSConfig`, default-off).
 
@@ -78,3 +79,21 @@ So a flat 300 is simultaneously *thin* in the opening and *wasteful* in the endg
 **If promoted:** start with the free-threading **spike** (cheap, decides the whole approach) and/or the CPU-only-workers experiment (quick win on 3.12). Sequenced after the first real training run delivers results.
 
 **Related:** [`research/self-play-speed-investigation.md`](research/self-play-speed-investigation.md) (B5 + Amdahl), [`plans/archive/cross-worker-inference-server.md`](plans/archive/cross-worker-inference-server.md) (F5), [profiling report](research/profiling-report.md).
+
+---
+
+## I4. Continuous (non-gated) training
+
+**The observation.** Our pipeline (alpha-zero-general lineage) is the *AlphaGo Zero* model: a synchronous loop of generate `num_eps` games with the **best** net → train a **candidate** → play a 50-game arena → promote the candidate only if it scores ≥ `update_threshold` (the "gate"). **AlphaZero (2018) deleted this entirely**: one neural network, updated continuously by the learner; self-play actors always pull the latest weights and stream finished games into a rolling **replay buffer** (last ~500k games for AGZ-Go, 1M for MuZero); no best-vs-candidate, no arena gate. They found the gating machinery wasn't worth its cost once the pipeline was stable, and it parallelises perfectly (actors and learner never block each other).
+
+**Why it could help us.** Removes the arena/Elo eval games spent purely on gating (~100 games/gen here), removes the wasted compute of training candidates that get rejected, and keeps self-play always on the freshest weights (continuous improvement vs discrete gated jumps). Decouples "how much data we hold" (buffer size) from "how often we train on each position" (sample rate) — which the current `epochs × window` design welds together.
+
+**Why we're NOT doing it yet (the case against, for us specifically):**
+
+- **The gate is cheap insurance in our noisy small-scale regime.** With few games, a small net, and noisy MCTS/value targets, the net genuinely *can* regress; without the gate a worse net pollutes the self-play data and can spiral. AlphaZero could drop the gate because at their scale learning was stable and the buffer huge. We're in exactly the regime the gate was designed to protect.
+- **True async continuous training is hard on one GPU.** It needs self-play inference *and* the training loop contending for the same card, plus a shared cross-process replay buffer and live weight hot-reload in workers — a real rewrite that fights our synchronous `Coach` loop and its per-episode seeded reproducibility.
+- **The cheap 90%** of the benefit (rolling buffer + fresh-weight self-play + an independently-tunable reuse rate) can be captured *inside* the existing synchronous loop by switching training from "E epochs over the last L generations" to "draw a fixed number of random mini-batches per generation from a rolling buffer of the last W games" — and that same change is the lazy-encoding fix that lifts the training-step OOM ceiling. So the buffer-sampling refactor is the pragmatic first step; full async continuous is the speculative end-state.
+
+**Promoted (2026-06-23).** The replay-buffer refactor — rolling game-sized buffer + compact board storage + full-pass epoch training (use all the data), keeping the gate — is now a plan: [`plans/archive/replay-buffer-refactor.md`](plans/archive/replay-buffer-refactor.md). (A `target_reuse` sampling variant was considered and reversed on 2026-06-25 — wrong fit for a data-poor regime.) It's also the OOM fix and gives an independent reuse dial. True async continuous generation stays **parked**: it's the wrong move for a game-limited single-GPU project and only worth revisiting on hardware that can run actors and the learner concurrently. Discussed at length 2026-06-21; promoted after the storage/sampling investigation 2026-06-23.
+
+**Related:** the data-reuse / replay-window discussion, [I1](#i1-adaptive-simulation-budget) (sims budget), and the DeepMind run-config comparison (AlphaGo → AlphaGo Zero → AlphaZero → MuZero).

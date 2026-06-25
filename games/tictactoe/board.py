@@ -63,6 +63,14 @@ class Board(IBoard):
         """Hashable key that uniquely identifies this board state."""
         return self.as_2d.tobytes()
 
+    def to_compact(self) -> NDArray:
+        """Return the 3×3 int8 grid — the compact encoding source.
+
+        ``TicTacToeGame.encode_compact`` rebuilds the 2-channel planes from this
+        grid; the result equals ``as_multi_channel(1)``.
+        """
+        return self.as_2d.astype(np.int8)
+
     def canonical(self, player: int) -> Board:
         """Return the board in canonical form (player 1 perspective)."""
         if player == 1:

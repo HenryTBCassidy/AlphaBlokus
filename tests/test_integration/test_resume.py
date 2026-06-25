@@ -38,9 +38,10 @@ def test_resume_continues_without_clobber(
     - the progress marker advances to the last completed generation.
     """
     # elo_games_per_gen > 0 so the baseline checkpoint is created (and must be
-    # preserved on resume); lookback 2 so the resume history reload is exercised.
+    # preserved on resume); a small games-sized buffer (num_eps=2 → 2 games/gen)
+    # forces the resume reload to span multiple generation files.
     cfg = replace(
-        test_config, num_generations=2, elo_games_per_gen=2, max_generations_lookback=2,
+        test_config, num_generations=2, elo_games_per_gen=2, replay_buffer_games=3,
     )
 
     # --- initial run: 2 generations ---------------------------------------

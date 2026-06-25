@@ -4,13 +4,12 @@
   "seed": 42,
   "num_generations": 10,
   "num_eps": 100,
+  "replay_buffer_games": 500,
   "temp_threshold": 3,
   "update_threshold": 0.55,
-  "max_queue_length": 1000,
   "num_arena_matches": 50,
   "root_directory": "./temp/",
   "load_model": false,
-  "max_generations_lookback": 10,
   "minimax_games_per_gen": 30,
   "mcts_config": {
     "num_mcts_sims": 25,
@@ -28,7 +27,14 @@
   "wandb": {
     "project": "alphablokus-poc",
     "entity": null,
-    "tags": ["ttt", "pc", "64f3b", "seed42", "score-acceptance", "25-sims"],
+    "tags": [
+      "ttt",
+      "pc",
+      "64f3b",
+      "seed42",
+      "score-acceptance",
+      "25-sims"
+    ],
     "mode": "online"
   }
 }

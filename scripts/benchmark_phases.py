@@ -136,7 +136,7 @@ def _run_self_play_phase_serial(
     per_game_stats: list[MCTSEpisodeStats] = []
     phase_start = time.perf_counter()
 
-    iteration_examples: deque = deque([], maxlen=config.max_queue_length)
+    iteration_examples: deque = deque()  # benchmark harness: only the count matters
     for _ep in range(config.num_eps):
         mcts = MCTS(game, nnet, config.mcts_config)
         examples_count = _play_one_self_play_episode(game, mcts, config)

@@ -20,11 +20,14 @@ if TYPE_CHECKING:
     from core.interfaces import IGame
     from core.mcts import MCTS
 
-# (board_array, sparse_policy, value) — the shape Coach passes to
-# ``nnet.train`` after a generation of self-play. The policy is stored
-# **sparse** as ``(indices, values)`` (see :mod:`core.sparse_policy`) because
-# the dense 17,837-vector dominated replay-buffer RAM; the trainer densifies it.
-# Kept untyped at runtime (board is an NDArray from ``IBoard.as_multi_channel``,
+# (compact_board, sparse_policy, value) — the shape Coach passes to
+# ``nnet.train`` after a generation of self-play. The board is stored
+# **compact** (``IBoard.to_compact`` — e.g. the 196-byte int8 placement board
+# for Blokus, vs the ~34.5 KB dense ``(44,14,14)`` encoding); the trainer
+# re-encodes it lazily per mini-batch via ``IGame.encode_compact``. The policy
+# is stored **sparse** as ``(indices, values)`` (see :mod:`core.sparse_policy`)
+# because the dense 17,837-vector dominated replay-buffer RAM; the trainer
+# densifies it. Kept untyped at runtime (compact board is an int8 NDArray,
 # value is a float ∈ [-1, 1]).
 ProcessedExample = tuple[np.ndarray, tuple[np.ndarray, np.ndarray], float]
 
@@ -88,9 +91,14 @@ def play_self_play_episode(
         game_result = game.get_game_ended(board, current_player)
         if game_result != 0:
             # End of game: convert (board_obj, player, pi, _) into the
-            # (NDArray, pi, value) shape the network trainer expects.
+            # (compact_board, pi, value) shape the network trainer expects.
             # The value sign flips for each position where the player to
             # move differs from the player at game end.
+            #
+            # The board is stored **compact** (``to_compact()`` — the minimal
+            # canonical array, game-agnostic via the IBoard seam) rather than the
+            # dense ``as_multi_channel(1)`` planes; the trainer re-encodes it
+            # lazily per mini-batch. This keeps the replay buffer ~175× smaller.
             #
             # The policy is stored sparse (nonzero ``(indices, values)``): the
             # MCTS visit distribution is sparse, but a dense float32 vector is
@@ -100,7 +108,7 @@ def play_self_play_episode(
             # unaffected; we only sparsify the final stored result here.
             return [
                 (
-                    x[0].as_multi_channel(1),
+                    x[0].to_compact(),
                     sparsify(np.asarray(x[2], dtype=np.float32)),
                     game_result * ((-1) ** (x[1] != current_player)),
                 )

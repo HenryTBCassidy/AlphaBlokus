@@ -223,8 +223,8 @@ This single function is the source of truth for the episode loop — both the se
 
 Each example is `(board_state, policy_vector, value)`:
 
-- **Board state** — canonical multi-channel encoding (current player's planes first).
-- **Policy vector** — the MCTS visit-count distribution (the improved target the network is trained toward).
+- **Board state** — stored **compact** (`IBoard.to_compact()` — the minimal canonical int8 array, e.g. Blokus's 196-byte placement board) and re-encoded to the dense multi-channel network input lazily at batch time via `IGame.encode_compact`. Storing compact instead of dense cuts replay-buffer RAM ~175× (run2's ~12 GB → ~70 MB), removing the training-step OOM ceiling.
+- **Policy vector** — the MCTS visit-count distribution (the improved target the network is trained toward), stored sparse `(indices, values)` and densified per mini-batch.
 - **Value** — `+1` if the player to move at that position eventually won, `−1` if lost, ~0 for a draw.
 
 ### Symmetry augmentation
@@ -234,21 +234,24 @@ Each visited position is stored once per symmetry of the game — free data augm
 - **Tic-Tac-Toe:** 8 symmetries (the full D₄ group: 4 rotations × 2 reflections).
 - **Blokus Duo:** 2 (identity + main-diagonal reflection). The fixed starting squares at array indices (4,4) and (9,9) lie on the main diagonal, so only the transpose preserves them; every other rigid motion of the square either moves a start square off the diagonal or swaps the two (which the first-mover rule forbids). The policy is reindexed under transposition via a precomputed action permutation. (See `games/blokusduo/game.py` `get_symmetries` / `transpose_policy`.)
 
-### Training window
+### Rolling replay buffer (B / F / epochs)
 
-Not all history is used. A sliding window controls how many recent generations of self-play feed each training step:
+Training uses a single rolling buffer sized in **games**, not a generation-keyed window. This replaced the old generation-window machinery, whose window could never shrink below 5 generations — a bug that made `max_generations_lookback` a silent no-op. We still **train on all the data** (full-pass epoch training, as before — the project is game-limited, so we use every game we generate). The model has two data-regime knobs plus the familiar `epochs`:
 
-```python
-def window_size(generation, max_lookback):
-    if generation <= 5:
-        return 5
-    # grows linearly from 5 toward max_lookback, then plateaus there
-    if 2 * max_lookback > generation:
-        return round(generation * (max_lookback - 5) / (2 * max_lookback) + 5)
-    return max_lookback
-```
+| Knob | Field | Controls |
+|---|---|---|
+| Buffer size **B** (games) | `replay_buffer_games` | How much history is held. Sets **staleness** (oldest game is `B/F` gens old). |
+| Fresh games / gen **F** | `num_eps` | How fast the buffer turns over. |
+| Epochs **E** | `epochs` | Full passes over the whole buffer per generation. |
 
-Early generations are random and low-quality; as the network improves, old data becomes less representative. The growing-then-plateauing window balances **recency** (recent, stronger games) against **diversity** (enough data to avoid overfitting recent patterns).
+**Per-generation loop** (steady state): generate `F` fresh games with the current net → push into the buffer (a `deque(maxlen=B)` of per-game position lists; oldest `F` games auto-evict) → train **`E` full, shuffled-minibatch passes over the whole buffer** (`DataLoader(..., shuffle=True)` looped `E` times). No sampling, no `train_steps` — every position is trained on exactly `E` times.
+
+**Reuse is emergent, not a knob.** Each position lives in the buffer for `B/F` generations and sees `E` passes per generation, so its lifetime reuse is `E × B/F`. We **log** this (and staleness `B/F`) every generation so the regime is visible, but you set it indirectly via `B` and `E`:
+
+- **Staleness** = `B/F` generations. e.g. `B=5000, F=1000` ⇒ nothing older than 5 net-versions.
+- **Reuse** = `E × B/F`. e.g. `B=5000, F=1000, E=1` ⇒ reuse 5 (run2's winning regime); `B=2000, F=1000, E=1` ⇒ reuse 2.
+
+The buffer starts empty and self-fills over the first `B/F` generations before it begins sliding — no warmup special-casing. (An earlier draft used a `target_reuse` sampling knob to decouple reuse from `B`; we reversed that — it only helps in a data-rich regime and would *skip* part of the buffer each generation, the opposite of "use all the data." It slots back in as a sampler swap if a future data-rich run needs it.) See `docs/plans/archive/replay-buffer-refactor.md` for the full rationale (and [IDEAS I4](IDEAS.md#i4-continuous-non-gated-training) for the continuous-training direction this is the first step of).
 
 ---
 
@@ -301,17 +304,19 @@ Generation N:
    ├── Fresh MCTS tree per game (reused across that game's moves)
    ├── Play num_eps games (serial, or across worker processes if num_parallel_workers > 1)
    │   └── Each move: MCTS search → sample by temperature → augment with symmetries
-   └── Save the generation's examples to SelfPlayHistory/self_play_{N}.parquet
+   ├── Push the generation's fresh games into the rolling buffer (oldest auto-evict)
+   └── Save the generation's fresh games to SelfPlayHistory/self_play_{N}.parquet
 
 2. TRAINING
    ├── Snapshot current net → temp.pth.tar (the previous-best for the arena)
-   ├── Combine + shuffle examples from the last window_size(N) generations
-   ├── Train num_epochs:
-   │   ├── Forward: board → (log-policy, value)
+   ├── Flatten the whole rolling buffer to a shuffled position pool
+   ├── Train `epochs` full passes (DataLoader shuffle=True), using all the data:
+   │   ├── Forward: compact board → encode_compact → (log-policy, value)
    │   ├── Policy loss: KL(target_pi ‖ predicted) ;  Value loss: MSE(target_v, predicted)
    │   ├── Backward + Adam step
+   │   ├── Per-epoch LR-scheduler step
    │   └── Per-epoch held-out diagnostics (entropy, top-1/5 accuracy, value calibration)
-   └── Log loss + throughput metrics
+   └── Log loss + throughput + emergent reuse (E×B/F) / buffer / staleness
 
 3. ARENA                             (new vs previous-best, both MCTS @ temp 0)
    ├── num_arena_matches games, colours swapped halfway, replays recorded

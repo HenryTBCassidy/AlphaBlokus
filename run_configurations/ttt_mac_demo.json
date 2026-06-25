@@ -3,13 +3,12 @@
   "run_name": "ttt_mac_demo",
   "num_generations": 25,
   "num_eps": 40,
+  "replay_buffer_games": 200,
   "temp_threshold": 6,
   "update_threshold": 0.55,
-  "max_queue_length": 400,
   "num_arena_matches": 15,
   "root_directory": "./temp/",
   "load_model": false,
-  "max_generations_lookback": 15,
   "mcts_config": {
     "num_mcts_sims": 60,
     "cpuct": 1.0
@@ -26,7 +25,12 @@
   "wandb": {
     "project": "alphablokus-poc",
     "entity": null,
-    "tags": ["ttt", "mac", "demo", "calibration"],
+    "tags": [
+      "ttt",
+      "mac",
+      "demo",
+      "calibration"
+    ],
     "mode": "online"
   }
 }

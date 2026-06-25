@@ -64,8 +64,8 @@ def _run_config(tmp_path: Path, *, game: str, num_filters: int, blocks: int) -> 
     )
     return RunConfig(
         game=game, run_name="test_batched", num_generations=1, num_eps=2,
-        temp_threshold=5, update_threshold=0.55, max_queue_length=10,
-        num_arena_matches=2, max_generations_lookback=1, root_directory=tmp_path,
+        temp_threshold=5, update_threshold=0.55,
+        num_arena_matches=2, root_directory=tmp_path,
         load_model=False, mcts_config=MCTSConfig(num_mcts_sims=8, cpuct=1.0),
         net_config=net_config,
     )
@@ -417,8 +417,8 @@ def test_fp16_inference_flag_noop_on_cpu(tmp_path: Path) -> None:
         )
         run_config = RunConfig(
             game="tictactoe", run_name="t", num_generations=1, num_eps=2, temp_threshold=5,
-            update_threshold=0.55, max_queue_length=10, num_arena_matches=2,
-            max_generations_lookback=1, root_directory=tmp_path, load_model=False,
+            update_threshold=0.55, num_arena_matches=2,
+            root_directory=tmp_path, load_model=False,
             mcts_config=MCTSConfig(num_mcts_sims=2, cpuct=1.0), net_config=net_config,
         )
         from games.tictactoe.neuralnets.wrapper import NNetWrapper

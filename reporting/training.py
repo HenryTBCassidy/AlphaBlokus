@@ -1498,7 +1498,10 @@ def _make_config_table(config: RunConfig) -> str:
         ("CPUCT", config.mcts_config.cpuct),
         ("Arena matches", config.num_arena_matches),
         ("Update threshold", config.update_threshold),
-        ("Max lookback", config.max_generations_lookback),
+        ("Replay buffer (games)", config.replay_buffer_games),
+        ("Buffer staleness (gens)", round(config.replay_buffer_games / max(config.num_eps, 1), 1)),
+        ("Emergent reuse (E×B/F)", round(
+            config.net_config.epochs * config.replay_buffer_games / max(config.num_eps, 1), 1)),
         ("Learning rate", config.net_config.learning_rate),
         ("Batch size", config.net_config.batch_size),
         ("Epochs", config.net_config.epochs),

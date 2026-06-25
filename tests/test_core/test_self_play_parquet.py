@@ -96,6 +96,54 @@ def test_load_missing_file_returns_none(store: SelfPlayStore):
     assert result is None
 
 
+def test_save_writes_board_kind_marker(store: SelfPlayStore, test_config: RunConfig):
+    """save should stamp the compact-board schema marker."""
+    store.save(_make_dummy_examples(), generation=0)
+
+    filepath = test_config.self_play_history_directory / "self_play_0.parquet"
+    table = pq.read_table(filepath)
+    metadata = {k.decode(): v.decode() for k, v in table.schema.metadata.items()}
+    assert metadata["board_kind"] == SelfPlayStore.BOARD_KIND
+
+
+def test_load_refuses_legacy_dense_file(store: SelfPlayStore, test_config: RunConfig):
+    """A file without the board_kind marker (legacy dense) must be refused."""
+    import pandas as pd
+    import pyarrow as pa
+
+    store._directory.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame({"board": [b""], "policy": [b""], "value": [0.0]})
+    table = pa.Table.from_pandas(df).replace_schema_metadata({
+        b"board_shape": b"44,14,14", b"board_dtype": b"float32",
+        b"policy_size": b"10", b"policy_dtype": b"float64",
+    })
+    pq.write_table(table, store._directory / "self_play_0.parquet")
+
+    with pytest.raises(ValueError, match="board_kind"):
+        store.load(generation=0)
+
+
+def test_compact_board_roundtrip_reencodes(blokus_game, test_config: RunConfig):
+    """A real compact Blokus board survives save→load and re-encodes exactly."""
+    store = SelfPlayStore(test_config.self_play_history_directory)
+    board = blokus_game.initialise_board()
+    board, _ = blokus_game.get_next_state(
+        board, 1, int(np.where(blokus_game.valid_move_masking(board, 1))[0][0]),
+    )
+    compact = board.to_compact()
+    policy = np.zeros(blokus_game.get_action_size(), dtype=np.float64)
+    policy[0] = 1.0
+    store.save(deque([(compact, policy, 1.0)]), generation=0)
+
+    loaded = store.load(generation=0)
+    assert loaded is not None
+    loaded_compact = loaded[0][0]
+    assert np.array_equal(loaded_compact, compact)
+    assert np.array_equal(
+        blokus_game.encode_compact(loaded_compact), board.as_multi_channel(1),
+    )
+
+
 def test_load_window_missing_directory(tmp_path):
     """load_window should return [] when the directory doesn't exist."""
     store = SelfPlayStore(tmp_path / "does_not_exist")
@@ -131,6 +179,36 @@ def test_load_window_skips_missing(store: SelfPlayStore):
     assert total_examples == 6  # 2 from gen 0 + 4 from gen 2
 
 
+def test_load_games_splits_by_game_sizes(store: SelfPlayStore):
+    """load_games should restore per-game boundaries from game_sizes metadata."""
+    # One generation: 3 games of sizes 2, 1, 3 (flat in game order).
+    flat = _make_dummy_examples(6)
+    store.save(flat, generation=0, game_sizes=[2, 1, 3])
+
+    games = store.load_games(generation=0)
+    assert games is not None
+    assert [len(g) for g in games] == [2, 1, 3]
+
+
+def test_load_games_without_sizes_returns_one_game(store: SelfPlayStore):
+    """A file saved without game_sizes is treated as a single game."""
+    store.save(_make_dummy_examples(4), generation=0)
+    games = store.load_games(generation=0)
+    assert games is not None
+    assert len(games) == 1
+    assert len(games[0]) == 4
+
+
+def test_load_recent_games_keeps_newest_n(store: SelfPlayStore):
+    """load_recent_games should return the newest ``num_games`` games across files."""
+    # Three generation files, 2 games each (sizes 1 each) → 6 games total.
+    for gen in range(3):
+        store.save(_make_dummy_examples(2), generation=gen, game_sizes=[1, 1])
+
+    buffer = store.load_recent_games(last_file_index=2, num_games=3)
+    assert len(buffer) == 3  # capped at num_games, newest kept
+
+
 # ---------------------------------------------------------------------------
 # Coach integration test (verifies thin wrappers still work end-to-end)
 # ---------------------------------------------------------------------------
@@ -144,15 +222,16 @@ def test_coach_save_load_roundtrip(ttt_game, test_config: RunConfig):
     nnet = NNetWrapper(ttt_game, test_config)
     coach = Coach(ttt_game, nnet, test_config)
 
-    original = _make_dummy_examples(3)
-    coach.train_examples_history = [original]
-    coach.save_self_play_history(generation=0)
+    # One generation's fresh games: a single game of 3 positions.
+    original = list(_make_dummy_examples(3))
+    coach._fresh_games_this_gen = [original]
+    coach.save_self_play_history(file_index=0)
 
-    coach.train_examples_history = []
+    coach.replay_buffer.clear()
     coach.load_self_play_history(up_to_generation=0)
 
-    assert len(coach.train_examples_history) == 1
-    loaded = coach.train_examples_history[0]
+    assert len(coach.replay_buffer) == 1  # one game
+    loaded = coach.replay_buffer[0]
     assert len(loaded) == 3
 
     for (orig_b, orig_p, orig_v), (load_b, load_p, load_v) in zip(original, loaded):

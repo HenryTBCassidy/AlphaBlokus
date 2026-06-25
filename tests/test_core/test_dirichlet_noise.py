@@ -29,8 +29,8 @@ def _nnet(tmp_path: Path) -> tuple[TicTacToeGame, NNetWrapper]:
     )
     run_cfg = RunConfig(
         game="tictactoe", run_name="t", num_generations=1, num_eps=2, temp_threshold=5,
-        update_threshold=0.55, max_queue_length=10, num_arena_matches=2,
-        max_generations_lookback=1, root_directory=tmp_path, load_model=False,
+        update_threshold=0.55, num_arena_matches=2,
+        root_directory=tmp_path, load_model=False,
         mcts_config=MCTSConfig(num_mcts_sims=2, cpuct=1.0), net_config=net_cfg,
     )
     return game, NNetWrapper(game, run_cfg)

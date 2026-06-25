@@ -110,6 +110,30 @@ class ActionCodec:
         return index == self.pass_action_index
 
 
+def encode_planes_from_placement(ppb: NDArray) -> NDArray:
+    """Build the 44-channel float32 encoding of a canonical placement board.
+
+    Pure function of the int8 placement board ``ppb`` (player-1 perspective):
+    identical to ``BlokusDuoBoard.as_multi_channel(1)``. Lives at module level
+    so both the board's ``as_multi_channel`` and ``BlokusDuoGame.encode_compact``
+    can share one implementation.
+
+    Args:
+        ppb: Signed int8 placement board, shape (14, 14). ``+piece_id`` for the
+            current player, ``-piece_id`` for the opponent, 0 for empty.
+
+    Returns:
+        NDArray of shape (44, 14, 14) with float32 dtype.
+    """
+    rep = np.zeros((44, BlokusDuoBoard.N, BlokusDuoBoard.N), dtype=np.float32)
+    for piece_id in range(1, 22):
+        rep[piece_id - 1] = (ppb == piece_id)
+        rep[21 + piece_id - 1] = (ppb == -piece_id)
+    rep[42] = ppb > 0   # Aggregate: current player
+    rep[43] = ppb < 0   # Aggregate: opponent
+    return rep
+
+
 class BlokusDuoBoard(IBoard):
     """
     Immutable game board for Blokus Duo. Implements the IBoard protocol.
@@ -174,16 +198,11 @@ class BlokusDuoBoard(IBoard):
         Returns:
             NDArray of shape (44, 14, 14) with float32 dtype.
         """
-        ppb = self._piece_placement_board
-        rep = np.zeros((44, self.N, self.N), dtype=np.float32)
-
-        for piece_id in range(1, 22):
-            rep[piece_id - 1] = (ppb == piece_id * current_player)
-            rep[21 + piece_id - 1] = (ppb == -piece_id * current_player)
-
-        rep[42] = (ppb * current_player > 0)   # Aggregate: current player
-        rep[43] = (ppb * current_player < 0)    # Aggregate: opponent
-        return rep
+        if current_player == 1:
+            return encode_planes_from_placement(self._piece_placement_board)
+        # Non-canonical view: flip signs so the current player's pieces read as
+        # positive, then encode identically to the canonical path.
+        return encode_planes_from_placement((self._piece_placement_board * current_player).astype(np.int8))
 
     @property
     def num_channels(self) -> int:
@@ -198,6 +217,15 @@ class BlokusDuoBoard(IBoard):
         fully deterministic, encodes which piece is where for both players.
         """
         return self._piece_placement_board.tobytes()
+
+    def to_compact(self) -> NDArray:
+        """Return the int8 14×14 placement board — the compact encoding source.
+
+        ``BlokusDuoGame.encode_compact`` rebuilds the full 44-channel planes from
+        this array; the result equals ``as_multi_channel(1)``. The board is already
+        in player-1 (canonical) sign convention, so no transformation is needed.
+        """
+        return self._piece_placement_board
 
     def canonical(self, player: int) -> BlokusDuoBoard:
         """Return the board in canonical form (player 1 perspective).

@@ -3,13 +3,12 @@
   "run_name": "smoke_test",
   "num_generations": 3,
   "num_eps": 15,
+  "replay_buffer_games": 75,
   "temp_threshold": 10,
   "update_threshold": 0.55,
-  "max_queue_length": 200,
   "num_arena_matches": 6,
   "root_directory": "./temp/",
   "load_model": false,
-  "max_generations_lookback": 2,
   "mcts_config": {
     "num_mcts_sims": 25,
     "cpuct": 1
@@ -26,7 +25,11 @@
   "wandb": {
     "project": "alphablokus-poc",
     "entity": null,
-    "tags": ["smoke", "ttt", "cpu"],
+    "tags": [
+      "smoke",
+      "ttt",
+      "cpu"
+    ],
     "mode": "online"
   }
 }
