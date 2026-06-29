@@ -152,8 +152,8 @@ def main() -> None:
     value_info = {n: _vinfo(n) for n in ("policy_priors", "valid_moves_cache")}
     unique_total = _unique_total(mcts)
     peak_bytes = max((b for _, b in curve), default=unique_total)
-    n_states = len(mcts.state_visits)
-    n_state_actions = len(mcts.q_values)
+    n_states = mcts.num_states()
+    n_state_actions = mcts.num_edges()
     moves = len(curve)
 
     # Pass 2: tracemalloc authoritative top allocation sites (same seed).

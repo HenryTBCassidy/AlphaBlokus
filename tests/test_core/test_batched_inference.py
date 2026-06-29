@@ -150,6 +150,27 @@ def test_predict_batch_matches_serial_blokus(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Node-introspection helpers — snapshot the real ``mcts.nodes`` storage directly
+# (white-box), replacing the old read-only ``visit_counts``/``virtual_visits``
+# compat views once production stopped depending on them (N4.2).
+# ---------------------------------------------------------------------------
+
+def _tree_snapshot(mcts: MCTS) -> dict:
+    """Per-node visit-count snapshot for determinism comparison.
+
+    Two runs are identical iff their trees visited the same states with the same
+    per-edge counts — a faithful (stronger) replacement for the old whole-tree
+    ``dict(mcts.visit_counts)``.
+    """
+    return {s: tuple(node.n.tolist()) for s, node in mcts.nodes.items()}
+
+
+def _no_virtual_loss(mcts: MCTS) -> bool:
+    """True iff every node's virtual loss is fully unwound (all zero)."""
+    return all(not node.virtual.any() for node in mcts.nodes.values())
+
+
+# ---------------------------------------------------------------------------
 # MCTS determinism contract — the invariant the batched-inference refactor must preserve
 # ---------------------------------------------------------------------------
 
@@ -207,8 +228,7 @@ def test_k1_matches_pre_f3_golden(tmp_path: Path, label: str) -> None:
     canonical = game.get_canonical_form(board, player)
     probs = mcts.get_action_prob(canonical, temp=1)
 
-    s = game.state_key(canonical)
-    visit_counts = [mcts.visit_counts.get((s, a), 0) for a in range(game.get_action_size())]
+    visit_counts = mcts.root_visit_counts(canonical).tolist()
     assert visit_counts == case["visit_counts"], (
         f"[{label}] visit counts diverged from pre-F3 golden:\n"
         f"  expected {case['visit_counts']}\n  got      {visit_counts}"
@@ -231,12 +251,13 @@ def test_mcts_visit_counts_deterministic_ttt(tmp_path: Path) -> None:
         np.random.seed(1234)
         mcts = MCTS(game, nnet, config)
         mcts.get_action_prob(board, temp=1)
-        return dict(mcts.visit_counts)
+        return _tree_snapshot(mcts)
 
     first = run()
     second = run()
     assert first == second, "MCTS visit counts diverged across identical runs"
-    assert sum(first.values()) > 0, "search recorded no visits"
+    # Snapshot values are per-edge count tuples; sum across all edges of all nodes.
+    assert sum(sum(counts) for counts in first.values()) > 0, "search recorded no visits"
 
 
 # ---------------------------------------------------------------------------
@@ -345,8 +366,8 @@ def test_batched_search_deterministic_ttt(tmp_path: Path, batch_size: int) -> No
         mcts = MCTS(game, nnet, config)
         mcts.get_action_prob(board, temp=1)
         # Virtual loss must net to zero once a batch is fully backpropped.
-        assert not mcts.virtual_visits, "virtual loss left dangling after search"
-        return dict(mcts.visit_counts)
+        assert _no_virtual_loss(mcts), "virtual loss left dangling after search"
+        return _tree_snapshot(mcts)
 
     assert run() == run(), f"K={batch_size} batched search diverged across runs"
 
@@ -378,7 +399,7 @@ def test_batched_search_self_consistent_blokus(tmp_path: Path, batch_size: int) 
     mcts = MCTS(game, nnet, config)
     probs = np.asarray(mcts.get_action_prob(canonical, temp=1))
 
-    assert not mcts.virtual_visits, "virtual loss left dangling after search"
+    assert _no_virtual_loss(mcts), "virtual loss left dangling after search"
     assert abs(probs.sum() - 1.0) < 1e-9, f"policy sums to {probs.sum()}, expected 1.0"
 
     valids = game.valid_move_masking(canonical, 1)
@@ -387,8 +408,7 @@ def test_batched_search_self_consistent_blokus(tmp_path: Path, batch_size: int) 
 
     # Total root visits = num_sims minus the first cold-start batch of size
     # min(K, num_sims) whose descents all land on the still-unexpanded root.
-    s = game.state_key(canonical)
-    root_visits = sum(mcts.visit_counts.get((s, a), 0) for a in range(game.get_action_size()))
+    root_visits = int(mcts.root_visit_counts(canonical).sum())
     expected = num_sims - min(batch_size, num_sims)
     assert root_visits == expected, (
         f"K={batch_size}: root visits {root_visits}, expected {expected}"

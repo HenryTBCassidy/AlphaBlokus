@@ -1,8 +1,7 @@
-import numpy as np
 import pytest
 
 from core.config import MCTSConfig, RunConfig
-from core.mcts import MCTS, MCTSEpisodeStats
+from core.mcts import MCTS
 from games.tictactoe.game import TicTacToeGame
 from games.tictactoe.neuralnets.wrapper import NNetWrapper
 
@@ -79,10 +78,10 @@ def test_mcts_inference_time_less_than_search(
 def test_mcts_tree_size_matches_state_visits(
     ttt_game: TicTacToeGame, mcts_instance: MCTS,
 ):
-    """tree_size should equal the number of unique states in state_visits."""
+    """tree_size should equal the number of expanded states in the search tree."""
     board = ttt_game.initialise_board()
     canonical = ttt_game.get_canonical_form(board, 1)
     mcts_instance.get_action_prob(canonical, temp=1)
 
     stats = mcts_instance.get_episode_stats()
-    assert stats.tree_size == len(mcts_instance.state_visits)
+    assert stats.tree_size == mcts_instance.num_states()

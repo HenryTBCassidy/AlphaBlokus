@@ -24,8 +24,6 @@ VIRTUAL_LOSS: Final[int] = 3
 
 # Type aliases for improved readability
 StateKey: TypeAlias = bytes  # Hashable key uniquely identifying a game state
-Action: TypeAlias = int  # Integer index into the action space
-StateAction: TypeAlias = tuple[StateKey, Action]  # (state, action) pair
 PolicyVector: TypeAlias = NDArray[np.float64]  # Probability distribution over actions
 ValidMoves: TypeAlias = NDArray[np.bool_]  # Binary mask of legal moves
 
@@ -149,11 +147,10 @@ class MCTS:
         # per-edge stats (N/Q/virtual) and per-state priors/acts/total, stored
         # SPARSE — aligned to the node's legal-move array, never a dense
         # action_size vector (the dense versions were 99.6% of tree RAM, see
-        # docs/plans/mcts-memory-reduction.md). This replaces the old global
-        # ``(state, action)`` dicts; the read-only ``q_values`` / ``visit_counts``
-        # / ``state_visits`` / ``policy_priors`` / ``valid_moves_cache`` /
-        # ``virtual_visits`` properties below reconstruct the old views for
-        # external consumers during the N3→N4 migration.
+        # docs/plans/mcts-memory-reduction.md). This replaced the old global
+        # ``(state, action)`` dicts; consumers that need the raw visit
+        # distribution use :meth:`root_visit_counts` / :meth:`num_states` /
+        # :meth:`num_edges` rather than reaching into the tree.
         self.nodes: dict[StateKey, _Node] = {}
         self.game_ended_cache: dict[StateKey, float] = {}
 
@@ -171,44 +168,6 @@ class MCTS:
         self._num_game_ended_calls: int = 0
         self._move_stats: list[MCTSMoveStats] = []
         self._policy_entropies: list[float] = []
-
-    # -- Read-only compatibility views -----------------------------------------
-    # Reconstruct the pre-N3 dict surfaces from ``self.nodes`` so external
-    # readers (core/players.py, scripts, tests) keep working during the
-    # migration. These are READ-ONLY — N4 routes consumers onto dedicated
-    # accessors and deletes them. Each rebuilds on access; only used off the
-    # hot path. An edge is "present" iff visited (``n > 0``), matching the old
-    # dicts where ``.get((s, a), default)`` returned the default for unvisited.
-
-    @property
-    def visit_counts(self) -> dict[StateAction, int]:
-        return {(s, int(node.acts[i])): int(node.n[i])
-                for s, node in self.nodes.items()
-                for i in range(node.acts.shape[0]) if node.n[i] > 0}
-
-    @property
-    def q_values(self) -> dict[StateAction, float]:
-        return {(s, int(node.acts[i])): float(node.q[i])
-                for s, node in self.nodes.items()
-                for i in range(node.acts.shape[0]) if node.n[i] > 0}
-
-    @property
-    def virtual_visits(self) -> dict[StateAction, int]:
-        return {(s, int(node.acts[i])): int(node.virtual[i])
-                for s, node in self.nodes.items()
-                for i in range(node.acts.shape[0]) if node.virtual[i] != 0}
-
-    @property
-    def state_visits(self) -> dict[StateKey, int]:
-        return {s: node.n_total for s, node in self.nodes.items()}
-
-    @property
-    def policy_priors(self) -> dict[StateKey, PolicyVector]:
-        return {s: node.priors for s, node in self.nodes.items()}
-
-    @property
-    def valid_moves_cache(self) -> dict[StateKey, NDArray[np.int32]]:
-        return {s: node.acts for s, node in self.nodes.items()}
 
     # -- Public methods --------------------------------------------------------
 
