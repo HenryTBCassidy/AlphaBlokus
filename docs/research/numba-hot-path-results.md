@@ -41,7 +41,9 @@ correct and bit-identical, just small.
 The inference share climbing 18.9% → 44.2% is the headline: the bottleneck has **crossed over
 from CPU search to GPU inference**. The CPU well is essentially dry — N5's marginal return
 confirms further CPU micro-opt isn't worth it. The next real lever is the GPU side
-(batched-inference re-architecture), not more of this.
+(batched-inference re-architecture), not more of this — and the cheap IPC version of that
+(the cross-worker server) is ruled out at this config too: see
+[inference-server-bignet.md](inference-server-bignet.md). It must be **in-process** batching.
 
 Earlier cross-session readings (2026-06-23) were 8.13 s / 4.93 s wall/game for baseline / N2 —
 consistent with the same-session run; the box is stable.
