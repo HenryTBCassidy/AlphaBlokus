@@ -42,8 +42,8 @@ which Numba handles cleanly. Recommend Numba.
 |---|------|--------|----------|------|-------|
 | N1 | Add `numba` dep; prove `@njit(cache=True)` hits across forkserver workers + torch coexists; warm-compile at worker init | 0.5 day | High | ✅ | `pyproject.toml`, `games/blokusduo/movegen_runtime.py` |
 | N2 | Numba move-gen kernel (`_fill_mask` + `has_any_move` kernel) behind the F2 flag; bit-identical on the dev-5000 cache | 2–4 days | High | ✅ | `games/blokusduo/movegen_runtime.py`, `tests/test_blokusduo/test_movegen_equivalence.py` |
-| N3 | Add per-node array record in MCTS; migrate `_select_action`/descent/expand/backprop to it (gather killed); keep dict attrs as read-only compat | 2–3 days | High | | `core/mcts.py`, `tests/test_core/test_mcts.py` |
-| N4 | Flip authority to node arrays; retire `(s,a)` dicts; add `root_visit_counts()` accessor; migrate `players.py` + rewrite the white-box test | 2–3 days | High | | `core/mcts.py`, `core/players.py`, `tests/test_core/test_batched_inference.py`, `scripts/*` |
+| N3 | Add per-node array record in MCTS; migrate `_select_action`/descent/expand/backprop to it (gather killed); keep dict attrs as read-only compat | 2–3 days | High | ✅ | `core/mcts.py`, `tests/test_core/test_batched_inference.py` |
+| N4 | Flip authority to node arrays; retire `(s,a)` dicts; add `root_visit_counts()` accessor; migrate `players.py` + rewrite the white-box test | 2–3 days | High | ✅ N4.1 / N4.2 deferred | `core/mcts.py`, `core/players.py`, `tests/test_core/test_batched_inference.py` |
 | N5 | Incremental board transition (side-danger halo + array placement points) — the ~10% slice | 1–2 days | Medium | | `games/blokusduo/board.py` |
 | N6 | Re-profile on the box (cprofile + 16-worker games/s) before/after; write up the delta | 0.5 day | High | | `docs/research/numba-hot-path-results.md` |
 
@@ -62,7 +62,22 @@ High-priority path (N1→N4 + N6): **~1.5–2 weeks** solo. N5 optional, promote
 >   (32 passed) all green; ruff clean. **Speed: `valid_move_masking` 244 µs → 10.3 µs
 >   (~24×)** on a mid-game position (Mac CPU). `get_game_ended` flat on move-rich
 >   positions (early-exit hides the kernel; its win is the near-terminal "no-move" scans).
->   Not yet committed; diff awaiting review.
+>   Committed (`0497201`, `6f4e642`).
+> - **N3 ✅** — MCTS storage migrated from the `(state, action)` dicts to per-state
+>   `_Node` arrays (`acts`/`priors`/`n`/`q`/`virtual`/`n_total`); `_select_action` reads
+>   them directly (the ~32% gather is gone). Read-only compat properties retained for
+>   tests. Bit-identical at a fixed seed: full `tests/test_core/` + `tests/test_blokusduo/`
+>   (254 passed), incl. the rewritten white-box `test_select_action_matches_scalar_loop`
+>   (2,000 randomised trials, both virtual-loss paths), the K=1/K=16 search-equivalence,
+>   and `test_parallel_self_play` worker determinism. ruff clean. **Box benchmark
+>   PENDING — box unreachable 2026-06-25 (off-LAN; devtunnel host service down).**
+> - **N4.1 ✅** — `root_visit_counts()` / `num_states()` / `num_edges()` accessors added;
+>   `get_action_prob` and `core/players.py` routed through `root_visit_counts` (no more
+>   dict-surface dependency in production). **N4.2 deferred (deliberate):** the read-only
+>   `visit_counts`/`q_values`/… properties are retained — they're off the hot path, no
+>   production consumer depends on them, and the determinism tests use them for whole-tree
+>   snapshots, so deleting them is churn with no perf benefit.
+> - **N3 + N4.1 left UNCOMMITTED** in the working tree for review (per request).
 
 ### Safety nets (the bit-identical contract)
 

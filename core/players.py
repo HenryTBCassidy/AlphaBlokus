@@ -85,12 +85,7 @@ class NetworkPlayer:
         # the policy looks like before temperature is applied). This is the
         # informative record for replays — at temp=0 the play distribution is
         # one-hot and useless for "what was the model considering?" analysis.
-        s = self._game.state_key(board)
-        n_actions = self._game.get_action_size()
-        counts = np.array(
-            [self._mcts.visit_counts.get((s, a), 0) for a in range(n_actions)],
-            dtype=float,
-        )
+        counts = self._mcts.root_visit_counts(board).astype(float)
         total = counts.sum()
         if total > 0:
             self._last_pi = counts / total
