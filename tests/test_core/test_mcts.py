@@ -73,12 +73,13 @@ def test_search_returns_value(
 def test_mcts_tree_grows(
     ttt_game: TicTacToeGame, mcts_instance: MCTS,
 ):
-    """After simulations, state_visits dict should be non-empty."""
+    """After simulations, the search tree (nodes) should be non-empty and every
+    node should carry its priors."""
     board = ttt_game.initialise_board()
     canonical = ttt_game.get_canonical_form(board, 1)
     # Run several simulations
     for _ in range(mcts_instance.config.num_mcts_sims):
         mcts_instance.search(canonical)
 
-    assert len(mcts_instance.state_visits) > 0
-    assert len(mcts_instance.policy_priors) > 0
+    assert mcts_instance.num_states() > 0
+    assert all(node.priors.size > 0 for node in mcts_instance.nodes.values())

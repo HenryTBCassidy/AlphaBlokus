@@ -24,7 +24,7 @@ import numpy as np
 import pytest
 
 from core.config import MCTSConfig, NetConfig, RunConfig
-from core.mcts import MCTS
+from core.mcts import MCTS, _Node
 from games.blokusduo.game import BlokusDuoGame
 from games.tictactoe.game import TicTacToeGame
 from tests.fixtures.blokus_positions import load_cache, replay_to_board_and_player
@@ -150,6 +150,27 @@ def test_predict_batch_matches_serial_blokus(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Node-introspection helpers — snapshot the real ``mcts.nodes`` storage directly
+# (white-box), replacing the old read-only ``visit_counts``/``virtual_visits``
+# compat views once production stopped depending on them (N4.2).
+# ---------------------------------------------------------------------------
+
+def _tree_snapshot(mcts: MCTS) -> dict:
+    """Per-node visit-count snapshot for determinism comparison.
+
+    Two runs are identical iff their trees visited the same states with the same
+    per-edge counts — a faithful (stronger) replacement for the old whole-tree
+    ``dict(mcts.visit_counts)``.
+    """
+    return {s: tuple(node.n.tolist()) for s, node in mcts.nodes.items()}
+
+
+def _no_virtual_loss(mcts: MCTS) -> bool:
+    """True iff every node's virtual loss is fully unwound (all zero)."""
+    return all(not node.virtual.any() for node in mcts.nodes.values())
+
+
+# ---------------------------------------------------------------------------
 # MCTS determinism contract — the invariant the batched-inference refactor must preserve
 # ---------------------------------------------------------------------------
 
@@ -207,8 +228,7 @@ def test_k1_matches_pre_f3_golden(tmp_path: Path, label: str) -> None:
     canonical = game.get_canonical_form(board, player)
     probs = mcts.get_action_prob(canonical, temp=1)
 
-    s = game.state_key(canonical)
-    visit_counts = [mcts.visit_counts.get((s, a), 0) for a in range(game.get_action_size())]
+    visit_counts = mcts.root_visit_counts(canonical).tolist()
     assert visit_counts == case["visit_counts"], (
         f"[{label}] visit counts diverged from pre-F3 golden:\n"
         f"  expected {case['visit_counts']}\n  got      {visit_counts}"
@@ -231,45 +251,44 @@ def test_mcts_visit_counts_deterministic_ttt(tmp_path: Path) -> None:
         np.random.seed(1234)
         mcts = MCTS(game, nnet, config)
         mcts.get_action_prob(board, temp=1)
-        return dict(mcts.visit_counts)
+        return _tree_snapshot(mcts)
 
     first = run()
     second = run()
     assert first == second, "MCTS visit counts diverged across identical runs"
-    assert sum(first.values()) > 0, "search recorded no visits"
+    # Snapshot values are per-edge count tuples; sum across all edges of all nodes.
+    assert sum(sum(counts) for counts in first.values()) > 0, "search recorded no visits"
 
 
 # ---------------------------------------------------------------------------
 # _select_action vectorisation — bit-identical to the original scalar loop
 # ---------------------------------------------------------------------------
 
-def _scalar_select_action(mcts: MCTS, s: bytes) -> int:
+def _scalar_select_action(node: _Node, cpuct: float) -> int:
     """Reference copy of the pre-vectorisation scalar UCB loop (P2/B1).
 
     Frozen here so the vectorised ``_select_action`` can be pinned against it
     directly — including the virtual-loss branches the K=1 golden never exercises.
+    Returns the **index** into ``node.acts`` (matching ``_select_action``'s
+    return), reading the node's aligned arrays instead of the old per-edge dicts.
     """
     import math
 
     from core.mcts import EPS
 
-    acts = mcts.valid_moves_cache[s]
-    priors = mcts.policy_priors[s]
-    state_visits = mcts.state_visits[s]
-    cpuct = mcts.config.cpuct
+    state_visits = node.n_total
     cur_best = -float("inf")
-    best_act = -1
-    for i in range(len(acts)):
-        a = int(acts[i])
-        prior_a = priors[i]
-        virtual = mcts.virtual_visits.get((s, a), 0)
-        if (s, a) in mcts.q_values:
-            n = mcts.visit_counts[(s, a)]
+    best_idx = -1
+    for i in range(len(node.acts)):
+        prior_a = node.priors[i]
+        virtual = int(node.virtual[i])
+        n = int(node.n[i])
+        if n != 0:  # visited edge (was "(s, a) in q_values")
             if virtual == 0:
-                u = mcts.q_values[(s, a)] + cpuct * prior_a * math.sqrt(state_visits) / (1 + n)
+                u = node.q[i] + cpuct * prior_a * math.sqrt(state_visits) / (1 + n)
             else:
                 effective_n = n + virtual
-                effective_q = (n * mcts.q_values[(s, a)] - virtual) / effective_n
+                effective_q = (n * node.q[i] - virtual) / effective_n
                 u = effective_q + cpuct * prior_a * math.sqrt(state_visits) / (1 + effective_n)
         else:
             if virtual == 0:
@@ -278,20 +297,20 @@ def _scalar_select_action(mcts: MCTS, s: bytes) -> int:
                 u = -1.0 + cpuct * prior_a * math.sqrt(state_visits) / (1 + virtual)
         if u > cur_best:
             cur_best = u
-            best_act = a
-    return best_act
+            best_idx = i
+    return best_idx
 
 
 @pytest.mark.parametrize("with_virtual_loss", [False, True])
 def test_select_action_matches_scalar_loop(tmp_path: Path, with_virtual_loss: bool) -> None:
     """Vectorised ``_select_action`` picks the same action as the scalar loop.
 
-    Populates a synthetic state's caches with randomised stats — a mix of
+    Builds a synthetic :class:`_Node` with randomised stats — a mix of
     visited/unvisited edges and (optionally) in-flight virtual loss — and
-    compares the chosen action across many seeds. This guards both the fast
+    compares the chosen edge index across many seeds. This guards both the fast
     (no-virtual) path and the slow (virtual-loss) path of the vectorisation,
-    independent of the K=1 TTT golden. priors are float32 (as the NN emits them),
-    so this also pins the float64-promotion fix.
+    independent of the K=1 TTT golden. ``priors`` are float32 (as the NN emits
+    them), so this also pins the float64-promotion fix.
     """
     game, nnet = _ttt_wrapper(tmp_path)
 
@@ -299,7 +318,6 @@ def test_select_action_matches_scalar_loop(tmp_path: Path, with_virtual_loss: bo
         rng = np.random.default_rng(trial)
         cpuct = float(rng.uniform(0.5, 4.0))
         mcts = MCTS(game, nnet, MCTSConfig(num_mcts_sims=1, cpuct=cpuct))
-        s = b"state-%d" % trial
 
         num_legal = int(rng.integers(1, 40))
         acts = np.sort(
@@ -308,20 +326,21 @@ def test_select_action_matches_scalar_loop(tmp_path: Path, with_virtual_loss: bo
         priors = rng.random(num_legal).astype(np.float32)
         priors /= priors.sum()
 
-        mcts.valid_moves_cache[s] = acts
-        mcts.policy_priors[s] = priors
-        state_visits = 0
-        for a in acts.tolist():
+        n = np.zeros(num_legal, dtype=np.int32)
+        q = np.zeros(num_legal, dtype=np.float64)
+        virtual = np.zeros(num_legal, dtype=np.int32)
+        n_total = 0
+        for i in range(num_legal):
             if rng.random() < 0.6:  # visited edge (n >= 1)
-                n = int(rng.integers(1, 30))
-                state_visits += n
-                mcts.visit_counts[(s, a)] = n
-                mcts.q_values[(s, a)] = float(rng.uniform(-1.0, 1.0))
+                cnt = int(rng.integers(1, 30))
+                n_total += cnt
+                n[i] = cnt
+                q[i] = float(rng.uniform(-1.0, 1.0))
             if with_virtual_loss and rng.random() < 0.3:
-                mcts.virtual_visits[(s, a)] = 3 * int(rng.integers(1, 4))
-        mcts.state_visits[s] = state_visits
+                virtual[i] = 3 * int(rng.integers(1, 4))
+        node = _Node(acts=acts, priors=priors, n=n, q=q, virtual=virtual, n_total=n_total)
 
-        assert mcts._select_action(s) == _scalar_select_action(mcts, s), (
+        assert mcts._select_action(node) == _scalar_select_action(node, cpuct), (
             f"trial {trial}: vectorised _select_action diverged from scalar loop"
         )
 
@@ -347,8 +366,8 @@ def test_batched_search_deterministic_ttt(tmp_path: Path, batch_size: int) -> No
         mcts = MCTS(game, nnet, config)
         mcts.get_action_prob(board, temp=1)
         # Virtual loss must net to zero once a batch is fully backpropped.
-        assert not mcts.virtual_visits, "virtual loss left dangling after search"
-        return dict(mcts.visit_counts)
+        assert _no_virtual_loss(mcts), "virtual loss left dangling after search"
+        return _tree_snapshot(mcts)
 
     assert run() == run(), f"K={batch_size} batched search diverged across runs"
 
@@ -380,7 +399,7 @@ def test_batched_search_self_consistent_blokus(tmp_path: Path, batch_size: int) 
     mcts = MCTS(game, nnet, config)
     probs = np.asarray(mcts.get_action_prob(canonical, temp=1))
 
-    assert not mcts.virtual_visits, "virtual loss left dangling after search"
+    assert _no_virtual_loss(mcts), "virtual loss left dangling after search"
     assert abs(probs.sum() - 1.0) < 1e-9, f"policy sums to {probs.sum()}, expected 1.0"
 
     valids = game.valid_move_masking(canonical, 1)
@@ -389,8 +408,7 @@ def test_batched_search_self_consistent_blokus(tmp_path: Path, batch_size: int) 
 
     # Total root visits = num_sims minus the first cold-start batch of size
     # min(K, num_sims) whose descents all land on the still-unexpanded root.
-    s = game.state_key(canonical)
-    root_visits = sum(mcts.visit_counts.get((s, a), 0) for a in range(game.get_action_size()))
+    root_visits = int(mcts.root_visit_counts(canonical).sum())
     expected = num_sims - min(batch_size, num_sims)
     assert root_visits == expected, (
         f"K={batch_size}: root visits {root_visits}, expected {expected}"
