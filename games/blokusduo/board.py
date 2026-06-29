@@ -283,9 +283,19 @@ class BlokusDuoBoard(IBoard):
         BlokusDuoBoard._update_placement_points(
             new_black_points, -1, (length_idx, width_idx), piece_orientation, board_2d)
 
-        # Recompute side danger zones from the updated board
-        new_white_danger = BlokusDuoBoard._compute_side_danger(board_2d, 1)
-        new_black_danger = BlokusDuoBoard._compute_side_danger(board_2d, -1)
+        # Side-danger only grows for the player who just moved (it's "adjacent to
+        # a *friendly* piece"), so the opponent's zone is carried over unchanged by
+        # reference (boards are immutable; nothing mutates it in place) and the
+        # mover's zone gets the placed piece's halo OR'd in — bit-identical to a
+        # full recompute, but O(piece) instead of O(board) for both colours.
+        new_cells = new_ppb == np.int8(action.piece_id * player_side)
+        halo = BlokusDuoBoard._danger_from_mask(new_cells)
+        if player_side == 1:
+            new_white_danger = self._white_side_danger | halo
+            new_black_danger = self._black_side_danger
+        else:
+            new_white_danger = self._white_side_danger
+            new_black_danger = self._black_side_danger | halo
 
         return BlokusDuoBoard._from_state(
             piece_placement_board=new_ppb,
@@ -410,19 +420,32 @@ class BlokusDuoBoard(IBoard):
         return self._white_side_danger if player_side == 1 else self._black_side_danger
 
     @staticmethod
-    def _compute_side_danger(board_2d: BoardArray, player: PlayerSide) -> NDArray:
-        """Compute the side-adjacency danger zone for a player.
+    def _danger_from_mask(friendly: NDArray) -> NDArray:
+        """Orthogonal-neighbour dilation of a boolean ``friendly`` mask.
 
-        Returns a boolean array where True = orthogonally adjacent to a friendly piece.
-        Uses numpy shifts (no Python loops).
+        Returns a boolean array where True = orthogonally adjacent to a set cell
+        of ``friendly``. The shared primitive behind :meth:`_compute_side_danger`
+        and the incremental update in :meth:`with_piece`. Because the four shifts
+        distribute over ``|`` (``dilate(A | B) == dilate(A) | dilate(B)``), the
+        danger of a board equals ``dilate(old_friendly) | dilate(new_cells)`` —
+        which is what lets ``with_piece`` OR in just the placed piece's halo
+        instead of recomputing the whole board (bit-identical).
         """
-        friendly = (board_2d == player)
         danger = np.zeros_like(friendly)
         danger[1:, :] |= friendly[:-1, :]   # piece above
         danger[:-1, :] |= friendly[1:, :]   # piece below
         danger[:, 1:] |= friendly[:, :-1]   # piece left
         danger[:, :-1] |= friendly[:, 1:]   # piece right
         return danger
+
+    @classmethod
+    def _compute_side_danger(cls, board_2d: BoardArray, player: PlayerSide) -> NDArray:
+        """Compute the side-adjacency danger zone for a player.
+
+        Returns a boolean array where True = orthogonally adjacent to a friendly piece.
+        Uses numpy shifts (no Python loops).
+        """
+        return cls._danger_from_mask(board_2d == player)
 
     @classmethod
     def _no_sides(cls, i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:
