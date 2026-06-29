@@ -69,15 +69,16 @@ High-priority path (N1→N4 + N6): **~1.5–2 weeks** solo. N5 optional, promote
 >   tests. Bit-identical at a fixed seed: full `tests/test_core/` + `tests/test_blokusduo/`
 >   (254 passed), incl. the rewritten white-box `test_select_action_matches_scalar_loop`
 >   (2,000 randomised trials, both virtual-loss paths), the K=1/K=16 search-equivalence,
->   and `test_parallel_self_play` worker determinism. ruff clean. **Box benchmark
->   PENDING — box unreachable 2026-06-25 (off-LAN; devtunnel host service down).**
+>   and `test_parallel_self_play` worker determinism. ruff clean. **Box benchmark done
+>   (2026-06-29, same-session ladder): 3.78 s/game = 2.12× vs baseline (N3 step +1.37× over
+>   N2); inference share now 43.6% — the bottleneck has crossed over to the GPU.**
 > - **N4.1 ✅** — `root_visit_counts()` / `num_states()` / `num_edges()` accessors added;
 >   `get_action_prob` and `core/players.py` routed through `root_visit_counts` (no more
 >   dict-surface dependency in production). **N4.2 deferred (deliberate):** the read-only
 >   `visit_counts`/`q_values`/… properties are retained — they're off the hot path, no
 >   production consumer depends on them, and the determinism tests use them for whole-tree
 >   snapshots, so deleting them is churn with no perf benefit.
-> - **N3 + N4.1 left UNCOMMITTED** in the working tree for review (per request).
+> - **N3 + N4.1 committed** (`5342f15`, tag `bench/n3-n4.1`) after review.
 
 ### Safety nets (the bit-identical contract)
 

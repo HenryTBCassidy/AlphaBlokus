@@ -14,18 +14,26 @@ is noisy; averages shown).
 
 ## Single-worker wall/game (the tracker)
 
-| Stage | wall/game | speedup vs baseline | inference share | notes |
-|-------|-----------|---------------------|-----------------|-------|
-| **Baseline** (pre-Numba, prod F2 path) | **8.13 s** | 1.00× | 19% | 2026-06-23, box |
-| **+ N2** Numba move-gen kernel | **4.93 s** | **1.65×** | 33% | 2026-06-23, box |
-| + N3 kill select gather | *(bench pending)* | *(proj ~2.5×)* | *(proj ~45%)* | code done + bit-identical (254 tests); box unreachable 2026-06-25 |
+**Authoritative ladder — same-session run on 2026-06-29** (all three checkpoints checked out
+and measured back-to-back on the box, so no cross-session drift; bignet config, seed 42, 2
+games each):
+
+| Stage | wall/game | speedup vs baseline | step gain | inference share |
+|-------|-----------|---------------------|-----------|-----------------|
+| **Baseline** (`bench/baseline`, pre-Numba: pure-Python F2 + dict MCTS) | **8.01 s** | 1.00× | — | 18.9% |
+| **+ N2** (`bench/n2`, Numba move-gen kernel) | **5.18 s** | **1.55×** | 1.55× | 32.1% |
+| **+ N3/N4.1** (`bench/n3-n4.1`, per-node arrays, select gather removed) | **3.78 s** | **2.12×** | 1.37× | 43.6% |
 | + N5 board transition (optional) | *(pending)* | — | — | — |
 
-> **N3 benchmark owed.** N3 (per-node array storage, select gather removed) is code-complete
-> and bit-identical, but the box was unreachable on 2026-06-25/26 (off-LAN; devtunnel host
-> service down; Tailscale Netskope-blocked). Re-run the timing benchmark once access is
-> restored — same command, same config — to fill the N3 row. Expected: the ~65% "other
-> search" from the N2 run drops sharply as the ~32%-of-original select gather disappears.
+**Total so far: 2.12× single-worker** (within the plan's ~2.5–3.5× projection). The inference
+share climbed 18.9% → 32.1% → 43.6% across the ladder — by N3 it's the **single largest slice**,
+i.e. the bottleneck has crossed over from CPU search to GPU inference, exactly as forecast.
+That's the signal the *next* big lever is the batched-inference re-architecture rather than more
+CPU micro-opt; the remaining CPU "other search" (54.9%) is now backprop/transition/expand, not
+the select gather (gone) or move-gen (kernel'd).
+
+Earlier cross-session readings (2026-06-23) were 8.13 s / 4.93 s for baseline / N2 — within ~2–5%
+of the same-session numbers, confirming the box is stable run-to-run.
 
 ## Benchmark checkpoints (git refs)
 
@@ -35,18 +43,17 @@ config/seed). Tags are local to the `worktree-numba-hot-path` branch (not pushed
 
 | Stage | Tag | Commit | wall/game | Benchmarked? |
 |-------|-----|--------|-----------|--------------|
-| Baseline (pre-Numba) | `bench/baseline` | `a17ea94` | 8.13 s | ✅ 2026-06-23 |
-| N1+N2 (Numba move-gen) | `bench/n2` | `6f4e642` | 4.93 s | ✅ 2026-06-23 |
-| N3+N4.1 (per-node arrays) | `bench/n3-n4.1` | *(this commit)* | — | ⏳ box access |
+| Baseline (pre-Numba) | `bench/baseline` | `a17ea94` | 8.01 s | ✅ 2026-06-29 (same-session) |
+| N1+N2 (Numba move-gen) | `bench/n2` | `6f4e642` | 5.18 s | ✅ 2026-06-29 (same-session) |
+| N3+N4.1 (per-node arrays) | `bench/n3-n4.1` | `5342f15` | 3.78 s | ✅ 2026-06-29 (same-session) |
 
 **To benchmark a checkpoint later** (from this worktree):
 
 ```bash
 git checkout <tag>                       # e.g. bench/n3-n4.1  (detached HEAD)
 rsync -az --delete --exclude .venv --exclude .git --exclude temp --exclude __pycache__ \
-      ./ gpu-linux:/tmp/numba-bench/      # or via gpu-anywhere once the tunnel is up
-ssh gpu-linux 'cd ~/AlphaBlokus && uv pip install numba; \
-   cp run_configurations/blokus_run2_bignet.json /tmp/numba-bench/run_configurations/'
+      ./ gpu-linux:/tmp/numba-bench/      # carries the untracked bench config too
+ssh gpu-linux 'export PATH=$HOME/.local/bin:$PATH; cd ~/AlphaBlokus && uv pip install -q numba'
 ssh gpu-linux 'cd /tmp/numba-bench && PYTHONPATH=/tmp/numba-bench \
    ALPHABLOKUS_NUMBA_MOVEGEN=1 ~/AlphaBlokus/.venv/bin/python \
    scripts/profile_self_play.py --config run_configurations/blokus_run2_bignet.json \
@@ -54,10 +61,13 @@ ssh gpu-linux 'cd /tmp/numba-bench && PYTHONPATH=/tmp/numba-bench \
 git checkout worktree-numba-hot-path      # return
 ```
 
-The baseline checkpoint has no Numba code (pure-Python F2 + dict MCTS), so it needs no flag;
-the N2/N3 checkpoints toggle the kernel with `ALPHABLOKUS_NUMBA_MOVEGEN` (1 = on). Behaviour
-is identical across checkpoints at a fixed seed, so the only thing that changes row-to-row is
-the wall-clock — exactly the attribution we want.
+The benchmark config (`run_configurations/blokus_run2_bignet.json`) is kept as an **untracked
+file in the worktree** so it survives `git checkout` and rsyncs to the box with every checkpoint
+(the box's own copy had drifted — missing fields — so don't `cp` from `~/AlphaBlokus`). The
+baseline checkpoint has no Numba code (pure-Python F2 + dict MCTS), so the flag is a no-op there;
+the N2/N3 checkpoints toggle the kernel with `ALPHABLOKUS_NUMBA_MOVEGEN` (1 = on). Behaviour is
+identical across checkpoints at a fixed seed, so the only thing that changes row-to-row is the
+wall-clock — exactly the attribution we want.
 
 Single-worker wall/game is what we track step-to-step; the production figure is the
 16-worker games/s (measured in N6). Because self-play is CPU-bound, the single-worker ratio
