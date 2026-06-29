@@ -46,6 +46,31 @@ confirms further CPU micro-opt isn't worth it. The next real lever is the GPU si
 Earlier cross-session readings (2026-06-23) were 8.13 s / 4.93 s wall/game for baseline / N2 —
 consistent with the same-session run; the box is stable.
 
+## 16-worker production throughput (the number that matters)
+
+Single-worker per-sim speed is *not* the production figure. Production self-play runs
+**16 all-GPU workers** (`run_self_play_episodes_parallel`, the exact path Coach uses). Measured
+via `scripts/bench_parallel.py` (one seeded checkpoint reused across runs → **identical games**:
+both ran exactly 2,265 moves / 887,130 sims, so this is a pristine apples-to-apples comparison),
+bignet config, 80 episodes, pool/spawn overhead included:
+
+| Stage | games/s | sims/s | speedup |
+|-------|---------|--------|---------|
+| Baseline (pre-Numba) | 0.751 | 8,331 | 1.00× |
+| **N5 (full N1–N5 stack)** | **0.947** | **10,499** | **1.26×** |
+
+**Production speedup is 1.26× — far below the 2.33× single-worker per-sim.** Why: at 16 workers
+the box is no longer CPU-bound — 16 processes contend for the one GPU, and at the bignet config
+inference is ~44% of the single-worker wall. So a 2.3× faster CPU search only buys 1.26× more
+games/s, because the **GPU is now the bottleneck**. This is the CPU→GPU crossover the plan
+predicted, quantified at scale: the CPU-side well is dry, and the **next real lever is the GPU
+side** (cross-game batched inference / native engine), not more CPU micro-opt.
+
+It is still a real win — **+26% games/s** at production scale (the per-sim gains also matter more
+as the net/sim count grow, and they free CPU for the eventual GPU re-architecture). The identical
+move/sim counts across baseline and N5 are also an **end-to-end bit-identical proof** of the whole
+N1–N5 stack across 16 workers.
+
 ## Benchmark checkpoints (git refs)
 
 Each body of work is captured as a commit + lightweight tag so its speed gain can be
