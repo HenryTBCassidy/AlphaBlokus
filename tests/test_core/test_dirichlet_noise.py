@@ -36,6 +36,12 @@ def _nnet(tmp_path: Path) -> tuple[TicTacToeGame, NNetWrapper]:
     return game, NNetWrapper(game, run_cfg)
 
 
+def _tree_snapshot(mcts: MCTS) -> dict:
+    """Per-node visit-count snapshot for determinism comparison — white-box read of
+    the real ``mcts.nodes`` storage (replaces the old ``dict(mcts.visit_counts)``)."""
+    return {s: tuple(node.n.tolist()) for s, node in mcts.nodes.items()}
+
+
 def test_epsilon_zero_is_a_noop(tmp_path: Path) -> None:
     """With ε=0, requesting root noise must change nothing — the search stays
     bit-identical to no-noise (so arena/Elo and existing behaviour are safe)."""
@@ -47,7 +53,7 @@ def test_epsilon_zero_is_a_noop(tmp_path: Path) -> None:
         np.random.seed(7)
         mcts = MCTS(game, nnet, config)
         mcts.get_action_prob(board, temp=1, add_root_noise=add_noise)
-        return dict(mcts.visit_counts)
+        return _tree_snapshot(mcts)
 
     assert run(add_noise=True) == run(add_noise=False)
 
@@ -65,14 +71,14 @@ def test_noise_perturbs_only_root_legal_priors(tmp_path: Path) -> None:
     # Baseline priors (no noise).
     plain = MCTS(game, nnet, MCTSConfig(num_mcts_sims=4, cpuct=1.0, dirichlet_epsilon=0.0))
     plain.get_action_prob(canonical, temp=1, add_root_noise=False)
-    base_priors = plain.policy_priors[s].copy()
+    base_priors = plain.nodes[s].priors.copy()
 
     # Noised priors.
     np.random.seed(1)
     noised = MCTS(game, nnet, MCTSConfig(num_mcts_sims=4, cpuct=1.0,
                                          dirichlet_epsilon=0.25, dirichlet_alpha=0.3))
     noised.get_action_prob(canonical, temp=1, add_root_noise=True)
-    noisy_priors = noised.policy_priors[s]
+    noisy_priors = noised.nodes[s].priors
 
     assert not np.allclose(base_priors, noisy_priors), "noise did not change root priors"
     assert abs(float(noisy_priors.sum()) - 1.0) < 1e-6
@@ -93,6 +99,6 @@ def test_noise_is_reproducible_under_seed(tmp_path: Path) -> None:
         np.random.seed(42)
         mcts = MCTS(game, nnet, config)
         mcts.get_action_prob(board, temp=1, add_root_noise=True)
-        return dict(mcts.visit_counts)
+        return _tree_snapshot(mcts)
 
     assert run() == run()

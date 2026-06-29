@@ -83,7 +83,7 @@ def measure_timing(game, nnet, config: RunConfig, n_games: int) -> dict:
         ex = play_self_play_episode(game, mcts, config.temp_threshold)
         per_game.append(time.perf_counter() - t0)
         examples.append(len(ex))
-        tree.append(len(mcts.state_visits))
+        tree.append(mcts.num_states())
     return {
         "n_games": n_games,
         "per_game_s": per_game,
@@ -148,7 +148,7 @@ def measure_memory_tree(game, nnet, config: RunConfig) -> dict:
     play_self_play_episode(game, mcts, config.temp_threshold)
     _cur, peak = tracemalloc.get_traced_memory()
     tracemalloc.stop()
-    return {"peak_heap_mb": peak / 1e6, "tree_states": len(mcts.state_visits)}
+    return {"peak_heap_mb": peak / 1e6, "tree_states": mcts.num_states()}
 
 
 def measure_train_ramp(config_path: str, sizes) -> dict:

@@ -334,3 +334,62 @@ def test_canonical_player_neg1_swaps_perspective(
     assert np.sum(rep[21:42]) > 0, "White's piece should appear as opponent"
 
     assert np.all(canonical.as_2d == -board.as_2d)
+
+
+# -- Incremental side-danger equivalence --------------------------------------
+
+def _brute_force_side_danger(board_2d: np.ndarray, player: int) -> np.ndarray:
+    """Independent reference for the side-danger zone.
+
+    A cell is in ``player``'s danger zone iff at least one of its four orthogonal
+    neighbours holds a ``player`` piece. Deliberately a dead-simple cell-by-cell
+    loop — no numpy shifts, no shared code with ``with_piece`` /
+    ``_danger_from_mask`` — so it independently pins the incremental update
+    introduced in N5 (carry the opponent's zone, OR the placed piece's halo).
+    """
+    n = board_2d.shape[0]
+    danger = np.zeros((n, n), dtype=bool)
+    for i in range(n):
+        for j in range(n):
+            if ((i > 0 and board_2d[i - 1, j] == player)
+                    or (i < n - 1 and board_2d[i + 1, j] == player)
+                    or (j > 0 and board_2d[i, j - 1] == player)
+                    or (j < n - 1 and board_2d[i, j + 1] == player)):
+                danger[i, j] = True
+    return danger
+
+
+def test_incremental_side_danger_matches_brute_force(pieces_path) -> None:
+    """The incrementally-maintained side-danger must equal a full from-scratch
+    recompute at *every* position of many random games, for *both* colours.
+
+    This is the independent guard the move-gen equivalence suite can't provide
+    (that suite reads the same ``board.side_danger_zone`` on both sides, so a bug
+    in the danger update would pass unnoticed). Here we compare the stored zone
+    against ``_brute_force_side_danger`` — wholly independent code.
+    """
+    game = BlokusDuoGame(pieces_config_path=pieces_path)
+    game.enable_optimised_movegen()  # fast move-gen; the danger check is independent
+    rng = np.random.default_rng(0)
+
+    checks = 0
+    for _ in range(40):
+        board = game.initialise_board()
+        player = 1
+        for _ply in range(80):
+            mask = game.valid_move_masking(board, player)
+            legal = np.flatnonzero(mask)
+            if legal.size == 0:
+                break
+            board, player = game.get_next_state(board, player, int(rng.choice(legal)))
+            board_2d = board.as_2d
+            for colour in (1, -1):
+                assert np.array_equal(
+                    board.side_danger_zone(colour),
+                    _brute_force_side_danger(board_2d, colour),
+                ), f"incremental side-danger diverged from brute force for player {colour}"
+                checks += 1
+            if game.get_game_ended(board, player) != 0:
+                break
+
+    assert checks > 500, f"test didn't exercise enough positions (only {checks})"

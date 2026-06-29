@@ -24,8 +24,6 @@ VIRTUAL_LOSS: Final[int] = 3
 
 # Type aliases for improved readability
 StateKey: TypeAlias = bytes  # Hashable key uniquely identifying a game state
-Action: TypeAlias = int  # Integer index into the action space
-StateAction: TypeAlias = tuple[StateKey, Action]  # (state, action) pair
 PolicyVector: TypeAlias = NDArray[np.float64]  # Probability distribution over actions
 ValidMoves: TypeAlias = NDArray[np.bool_]  # Binary mask of legal moves
 
@@ -75,6 +73,28 @@ class MCTSEpisodeStats:
     mean_policy_entropy: float = 0.0
 
 
+@dataclass
+class _Node:
+    """Per-expanded-state search statistics, all aligned to ``acts``.
+
+    Replaces the old global ``(state, action)`` dicts (``q_values``,
+    ``visit_counts``, ``virtual_visits``) and per-state dicts (``state_visits``,
+    ``policy_priors``, ``valid_moves_cache``): each expanded state owns one
+    record whose per-edge arrays are indexed by position in ``acts`` (the
+    ascending legal action ids). ``_select_action`` reads these arrays directly,
+    eliminating the per-edge ``dict.get`` gather that was ~32% of self-play time
+    (see ``docs/plans/numba-hot-path.md`` N3). Not frozen — ``n``/``q``/
+    ``virtual`` are mutated in place during backprop and ``n_total`` is bumped.
+    """
+
+    acts: NDArray[np.int32]      # ascending legal action ids
+    priors: PolicyVector         # priors aligned to acts (float32; float64 after Dirichlet)
+    n: NDArray[np.int32]         # visit counts per edge (0 == unvisited)
+    q: NDArray[np.float64]       # running-mean Q per edge
+    virtual: NDArray[np.int32]   # in-flight virtual loss per edge (0 between batches)
+    n_total: int = 0             # total visits through this node (old state_visits[s])
+
+
 @dataclass(frozen=True)
 class _Descent:
     """Result of one root-to-leaf descent within a batch.
@@ -82,12 +102,14 @@ class _Descent:
     ``needs_eval`` distinguishes an unexpanded leaf (``board`` set, awaiting a
     batched network evaluation) from a terminal leaf (``value`` set to the cached
     game-ended value, no network call). ``path`` is the list of traversed
-    ``(state, action)`` edges, used for backprop and virtual-loss removal.
+    ``(node, edge_index)`` pairs — ``edge_index`` is the position into
+    ``node.acts`` of the chosen action — used for backprop and virtual-loss
+    removal without re-keying a dict.
     """
 
     key: StateKey
     board: IBoard | None
-    path: list[StateAction]
+    path: list[tuple[_Node, int]]
     value: float | None
     needs_eval: bool
 
@@ -121,24 +143,16 @@ class MCTS:
         self._detailed = config.profiling_level == "detailed"
         self._profiling = config.profiling_level != "none"
 
-        # Tree statistics
-        self.q_values: dict[StateAction, float] = {}
-        self.visit_counts: dict[StateAction, int] = {}
-        self.state_visits: dict[StateKey, int] = {}
-        # Per state, stored SPARSE — only the legal moves, not a dense
-        # action_size vector. ``valid_moves_cache[s]`` is the ascending array of
-        # legal action ids; ``policy_priors[s]`` is the prior for each, aligned
-        # to it (``policy_priors[s][i]`` is the prior for ``valid_moves_cache[s][i]``).
-        # The dense float64[action_size] versions were 99.6% of tree RAM
-        # (docs/plans/mcts-memory-reduction.md).
-        self.policy_priors: dict[StateKey, PolicyVector] = {}
+        # Tree statistics. One :class:`_Node` per expanded state holds all the
+        # per-edge stats (N/Q/virtual) and per-state priors/acts/total, stored
+        # SPARSE — aligned to the node's legal-move array, never a dense
+        # action_size vector (the dense versions were 99.6% of tree RAM, see
+        # docs/plans/mcts-memory-reduction.md). This replaced the old global
+        # ``(state, action)`` dicts; consumers that need the raw visit
+        # distribution use :meth:`root_visit_counts` / :meth:`num_states` /
+        # :meth:`num_edges` rather than reaching into the tree.
+        self.nodes: dict[StateKey, _Node] = {}
         self.game_ended_cache: dict[StateKey, float] = {}
-        self.valid_moves_cache: dict[StateKey, NDArray[np.int32]] = {}
-
-        # Virtual-loss counters. Maps (state, action) -> in-flight virtual
-        # visit count during a batch. Always empty between get_action_prob
-        # calls (every increment is matched by a decrement after backprop).
-        self.virtual_visits: dict[StateAction, int] = {}
 
         # Standard profiling counters
         self._total_search_time_s: float = 0.0
@@ -208,7 +222,7 @@ class MCTS:
         # Record per-move stats
         if self._detailed:
             s = self.game.state_key(canonical_board)
-            num_valid = len(self.valid_moves_cache[s]) if s in self.valid_moves_cache else 0
+            num_valid = len(self.nodes[s].acts) if s in self.nodes else 0
             self._move_stats.append(MCTSMoveStats(
                 move_number=self._num_moves,
                 num_sims=self._total_sims - pre_sims,
@@ -220,9 +234,12 @@ class MCTS:
                 num_valid_moves=num_valid,
             ))
 
-        # Extract visit counts for all actions
-        s = self.game.state_key(canonical_board)
-        counts = [self.visit_counts.get((s, a), 0) for a in range(self.game.get_action_size())]
+        # Extract visit counts for all actions — the dense root distribution.
+        # Same integer values as the old ``visit_counts.get((s, a), 0)`` probe
+        # over the whole action space, but scattered from the root node's arrays
+        # (no per-action dict lookup); ``.tolist()`` restores the plain-int list
+        # the temperature/entropy code below expects.
+        counts = self.root_visit_counts(canonical_board).tolist()
 
         # Record search-confidence entropy on the *raw* visit distribution
         # (before temperature sampling). Temperature controls how we *sample*
@@ -246,6 +263,29 @@ class MCTS:
         counts_sum = float(sum(counts))
         return [x / counts_sum for x in counts]
 
+    def root_visit_counts(self, board: IBoard) -> NDArray[np.int64]:
+        """Dense visit-count vector over the full action space for ``board``'s root.
+
+        ``counts[a]`` is the MCTS visit count of action ``a`` at this root — 0 for
+        unvisited or illegal actions and for an unexpanded root. The single source
+        of the raw visit distribution, shared by :meth:`get_action_prob` and
+        :class:`core.players.NetworkPlayer`; replaces the old
+        ``[visit_counts.get((s, a), 0) for a in range(action_size)]`` probe.
+        """
+        counts = np.zeros(self.game.get_action_size(), dtype=np.int64)
+        root = self.nodes.get(self.game.state_key(board))
+        if root is not None:
+            counts[root.acts] = root.n
+        return counts
+
+    def num_states(self) -> int:
+        """Number of expanded states in the search tree (old ``len(state_visits)``)."""
+        return len(self.nodes)
+
+    def num_edges(self) -> int:
+        """Number of visited edges (N > 0) across the tree (old ``len(q_values)``)."""
+        return sum(int(np.count_nonzero(node.n)) for node in self.nodes.values())
+
     def _move_sim_budget(self, canonical_board: IBoard) -> int:
         """Simulations to spend on this move (IDEAS.md I1).
 
@@ -261,8 +301,8 @@ class MCTS:
         if cfg.sim_schedule != "branching":
             return cfg.num_mcts_sims
         s = self.game.state_key(canonical_board)
-        if s in self.valid_moves_cache:
-            branching = len(self.valid_moves_cache[s])
+        if s in self.nodes:
+            branching = len(self.nodes[s].acts)
         else:
             branching = int(np.count_nonzero(self.game.valid_move_masking(canonical_board, 1)))
         scaled = round(cfg.sim_branching_scale * branching)
@@ -320,7 +360,7 @@ class MCTS:
                 eval_keys, eval_boards, priors_list, values_list, strict=True,
             ):
                 values_by_key[key] = value
-                if key not in self.policy_priors:
+                if key not in self.nodes:
                     self._expand_leaf(board, key, priors)
 
         # Backprop every descent in descent order (deterministic), removing the
@@ -336,13 +376,14 @@ class MCTS:
         """Descend from the root picking the UCB-best action (with virtual loss)
         at each expanded node until reaching a terminal or unexpanded leaf.
 
-        Applies virtual loss to each traversed ``(state, action)`` edge as it
-        descends, so a subsequent descent in the same batch is biased toward a
-        different path. Returns the leaf plus the path taken so the caller can
-        backprop and later undo the virtual loss.
+        Applies virtual loss to each traversed edge as it descends (by index into
+        the node's ``virtual`` array), so a subsequent descent in the same batch
+        is biased toward a different path. Returns the leaf plus the path taken
+        (a list of ``(node, edge_index)``) so the caller can backprop and later
+        undo the virtual loss.
         """
         board = root_board
-        path: list[StateAction] = []
+        path: list[tuple[_Node, int]] = []
         while True:
             s = self.game.state_key(board)
 
@@ -360,49 +401,44 @@ class MCTS:
                                 value=self.game_ended_cache[s], needs_eval=False)
 
             # Unexpanded leaf — defer evaluation to the batched NN call.
-            if s not in self.policy_priors:
+            node = self.nodes.get(s)
+            if node is None:
                 return _Descent(key=s, board=board, path=path,
                                 value=None, needs_eval=True)
 
             # Internal node — pick a child and descend, depositing virtual loss.
-            a = self._select_action(s)
-            self.virtual_visits[(s, a)] = self.virtual_visits.get((s, a), 0) + VIRTUAL_LOSS
-            path.append((s, a))
+            idx = self._select_action(node)
+            a = int(node.acts[idx])
+            node.virtual[idx] += VIRTUAL_LOSS
+            path.append((node, idx))
             next_s, next_player = self.game.get_next_state(board, 1, a)
             board = self.game.get_canonical_form(next_s, next_player)
 
-    def _select_action(self, s: StateKey) -> Action:
-        """Return the UCB-best valid action at expanded state ``s``.
+    def _select_action(self, node: _Node) -> int:
+        """Return the index (into ``node.acts``) of the UCB-best valid action.
 
-        Vectorised PUCT: the score for every legal move is computed in one numpy
-        pass and the best is taken with ``argmax``. This is bit-identical to the
-        original per-move Python loop — same operation order, same float64
-        promotion, same sqrt values, same tie-break (``argmax`` returns the first
-        max and ``acts`` is ascending, matching the loop's strict ``>``). When an
-        edge carries no virtual loss (always the case at K=1) the score uses the
-        exact original expression. When an edge is in-flight (virtual visits > 0)
-        it is scored as if it had ``virtual_visits`` extra visits each returning
-        value -1, depressing its UCB so parallel descents diversify.
+        Vectorised PUCT over the node's aligned per-edge arrays — no per-edge
+        ``dict.get`` gather (that gather was ~32% of self-play; see
+        ``docs/plans/numba-hot-path.md`` N3). Bit-identical to the previous
+        gather-then-score version: same operation order, same float64 promotion,
+        same sqrt values, same ``argmax`` first-max tie-break (``acts`` is
+        ascending). When no edge of this node carries virtual loss (always the
+        case at K=1) the score uses the exact original expression; when some do
+        (K>1, mid-batch) the in-flight edges are scored as if they had ``virtual``
+        extra visits each returning value -1, depressing their UCB so parallel
+        descents diversify.
         """
-        acts = self.valid_moves_cache[s]      # ascending legal action ids
-        # ``policy_priors`` is float32 (NN output); promote to float64 so the
-        # arithmetic matches the scalar loop, where ``cpuct * prior`` promoted
-        # the float32 scalar to float64 (numpy 2.x NEP-50 would otherwise keep
-        # the array float32, diverging from the golden).
-        priors = self.policy_priors[s].astype(np.float64, copy=False)  # aligned to acts
-        state_visits = self.state_visits[s]
+        # ``priors`` is float32 (NN output); promote to float64 so the arithmetic
+        # matches the original scalar loop, where ``cpuct * prior`` promoted the
+        # float32 scalar to float64 (numpy 2.x NEP-50 would otherwise keep the
+        # array float32, diverging from the golden).
+        priors = node.priors.astype(np.float64, copy=False)  # aligned to acts
+        state_visits = node.n_total
         cpuct = self.config.cpuct
 
-        acts_list = acts.tolist()  # python ints, matching the dict key type
         # n == 0 marks an unvisited edge: a visited edge always has n >= 1.
-        n = np.fromiter(
-            (self.visit_counts.get((s, a), 0) for a in acts_list),
-            dtype=np.float64, count=len(acts_list),
-        )
-        q = np.fromiter(
-            (self.q_values.get((s, a), 0.0) for a in acts_list),
-            dtype=np.float64, count=len(acts_list),
-        )
+        n = node.n.astype(np.float64)
+        q = node.q  # float64, aligned to acts; read-only here (not mutated)
 
         # sqrt terms are loop-invariant; visited edges use sqrt(N), first-visit
         # edges use sqrt(N + EPS). Both are correctly-rounded doubles == np.sqrt.
@@ -410,12 +446,12 @@ class MCTS:
         sqrt_sv_eps = math.sqrt(state_visits + EPS)
 
         visited = n > 0
-        if self.virtual_visits:
-            # Slow path: some edges carry in-flight virtual loss (K>1 only).
-            v = np.fromiter(
-                (self.virtual_visits.get((s, a), 0) for a in acts_list),
-                dtype=np.float64, count=len(acts_list),
-            )
+        if node.virtual.any():
+            # Slow path: some of this node's edges carry in-flight virtual loss
+            # (K>1 only). Scoping the check to this node (vs the old global "any
+            # virtual loss anywhere") is bit-identical: when ``v`` is all zero the
+            # ``np.where`` arms reduce exactly to the fast-path expressions.
+            v = node.virtual.astype(np.float64)
             eff_n = n + v
             # Both ``np.where`` arms are evaluated for every edge, so the unused
             # arm divides by zero on unvisited/no-virtual lanes (eff_n == 0).
@@ -430,12 +466,12 @@ class MCTS:
                     -1.0 + cpuct * priors * sqrt_sv / (1 + v),
                 )
         else:
-            # Fast path: no virtual loss anywhere (always true at K=1).
+            # Fast path: no virtual loss on this node (always true at K=1).
             u_visited = q + cpuct * priors * sqrt_sv / (1 + n)
             u_unvisited = cpuct * priors * sqrt_sv_eps
 
         scores = np.where(visited, u_visited, u_unvisited)
-        return int(acts[int(np.argmax(scores))])
+        return int(np.argmax(scores))
 
     def _expand_leaf(self, board: IBoard, s: StateKey, priors: PolicyVector) -> None:
         """Expand a freshly evaluated leaf: mask its priors to legal moves,
@@ -461,42 +497,47 @@ class MCTS:
             logger.error("All valid moves were masked, using uniform distribution.")
             masked = np.ones(len(acts), dtype=float) / len(acts)
 
-        self.policy_priors[s] = masked
-        self.valid_moves_cache[s] = acts
-        self.state_visits[s] = 0
+        m = len(acts)
+        self.nodes[s] = _Node(
+            acts=acts,
+            priors=masked,
+            n=np.zeros(m, dtype=np.int32),
+            q=np.zeros(m, dtype=np.float64),
+            virtual=np.zeros(m, dtype=np.int32),
+            n_total=0,
+        )
         self._num_leaf_expansions += 1
 
-    def _backprop(self, path: list[StateAction], leaf_value: float) -> float:
+    def _backprop(self, path: list[tuple[_Node, int]], leaf_value: float) -> float:
         """Propagate ``leaf_value`` (leaf-perspective) back up ``path``, flipping
-        sign at each ply. Updates Q-values, visit counts and state visits with
-        the same running-mean arithmetic as the original recursive unwind. Returns
-        the value as seen above the root (the negated leaf value for an empty
-        path), matching the old ``search`` return value."""
+        sign at each ply. Updates each edge's Q/N and the node's total with the
+        same running-mean arithmetic as the original recursive unwind — now by
+        index into the node's arrays instead of a ``(state, action)`` dict.
+        ``n[idx] == 0`` is the first-visit sentinel (equivalent to the edge being
+        absent from the old ``q_values`` dict). Returns the value as seen above
+        the root (the negated leaf value for an empty path), matching the old
+        ``search`` return value."""
         value = -leaf_value
-        for s, a in reversed(path):
-            if (s, a) in self.q_values:
-                self.q_values[(s, a)] = (
-                    (self.visit_counts[(s, a)] * self.q_values[(s, a)] + value)
-                    / (self.visit_counts[(s, a)] + 1)
+        for node, idx in reversed(path):
+            if node.n[idx] != 0:
+                node.q[idx] = (
+                    (node.n[idx] * node.q[idx] + value)
+                    / (node.n[idx] + 1)
                 )
-                self.visit_counts[(s, a)] += 1
+                node.n[idx] += 1
             else:
-                self.q_values[(s, a)] = value
-                self.visit_counts[(s, a)] = 1
-            self.state_visits[s] += 1
+                node.q[idx] = value
+                node.n[idx] = 1
+            node.n_total += 1
             value = -value
         return value
 
-    def _remove_virtual_loss(self, path: list[StateAction]) -> None:
+    def _remove_virtual_loss(self, path: list[tuple[_Node, int]]) -> None:
         """Undo the virtual loss a descent deposited along ``path``. Every
-        increment in ``_descend_to_leaf`` is matched here, so ``virtual_visits``
-        returns to empty once a batch is fully backpropped."""
-        for s, a in path:
-            remaining = self.virtual_visits.get((s, a), 0) - VIRTUAL_LOSS
-            if remaining > 0:
-                self.virtual_visits[(s, a)] = remaining
-            else:
-                self.virtual_visits.pop((s, a), None)
+        increment in ``_descend_to_leaf`` is matched here, so each node's
+        ``virtual`` array returns to all-zero once a batch is fully backpropped."""
+        for node, idx in path:
+            node.virtual[idx] -= VIRTUAL_LOSS
 
     def _apply_root_dirichlet_noise(self, canonical_board: IBoard) -> None:
         """Mix Dirichlet noise into the root's priors (AlphaZero exploration).
@@ -517,7 +558,7 @@ class MCTS:
 
         # Ensure the root is expanded so its priors exist (mirrors the leaf path:
         # NN eval → mask → store). Cheap one-off per move; the sims then reuse it.
-        if s not in self.policy_priors:
+        if s not in self.nodes:
             if self._profiling:
                 infer_start = time.perf_counter()
             priors, _ = self.nnet.predict(canonical_board)
@@ -525,37 +566,29 @@ class MCTS:
                 self._total_inference_time_s += time.perf_counter() - infer_start
             self._expand_leaf(canonical_board, s, priors)
 
+        node = self.nodes[s]
         epsilon = self.config.dirichlet_epsilon
-        legal = self.valid_moves_cache[s]  # ascending legal ids; priors[s] is aligned to it
+        legal = node.acts  # ascending legal ids; node.priors is aligned to it
         if len(legal) == 0:
             return
         noise = np.random.dirichlet([self.config.dirichlet_alpha] * len(legal))
         # Sparse priors are already aligned to ``legal``, so perturb element-wise
         # (the dense path fancy-indexed ``priors[legal]`` — same values, same order).
-        priors = self.policy_priors[s].copy()
+        priors = node.priors.copy()
         priors = (1 - epsilon) * priors + epsilon * noise
-        self.policy_priors[s] = priors
+        node.priors = priors
 
     def _estimate_tree_memory_bytes(self) -> int:
-        """Estimate memory used by MCTS tree dictionaries.
+        """Estimate memory used by the MCTS search tree.
 
-        Counts the approximate size of all cached state data: Q-values,
-        visit counts, policy priors, valid moves masks, and game-ended cache.
+        Counts the per-node aligned arrays (acts/priors/n/q/virtual) plus the
+        ``nodes`` and ``game_ended_cache`` dict overhead. Approximate — used only
+        for the profiling report.
         """
-        total = 0
-        # Dict overhead + entries
-        total += sys.getsizeof(self.q_values)
-        total += sys.getsizeof(self.visit_counts)
-        total += sys.getsizeof(self.state_visits)
-        total += sys.getsizeof(self.game_ended_cache)
-        # Policy priors: each is a numpy array (action_size floats)
-        for arr in self.policy_priors.values():
-            total += arr.nbytes
-        total += sys.getsizeof(self.policy_priors)
-        # Valid moves cache: each is a numpy array (action_size bools)
-        for arr in self.valid_moves_cache.values():
-            total += arr.nbytes
-        total += sys.getsizeof(self.valid_moves_cache)
+        total = sys.getsizeof(self.nodes) + sys.getsizeof(self.game_ended_cache)
+        for node in self.nodes.values():
+            total += (node.acts.nbytes + node.priors.nbytes + node.n.nbytes
+                      + node.q.nbytes + node.virtual.nbytes)
         return total
 
     def get_episode_stats(self) -> MCTSEpisodeStats:
@@ -567,7 +600,7 @@ class MCTS:
             total_search_time_s=self._total_search_time_s,
             total_inference_time_s=self._total_inference_time_s,
             num_leaf_expansions=self._num_leaf_expansions,
-            tree_size=len(self.state_visits),
+            tree_size=len(self.nodes),
             total_valid_moves_time_s=self._total_valid_moves_time_s,
             total_game_ended_time_s=self._total_game_ended_time_s,
             num_valid_moves_calls=self._num_valid_moves_calls,
