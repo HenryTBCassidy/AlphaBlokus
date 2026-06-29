@@ -127,6 +127,9 @@ class MetricsCollector:
     """
 
     config: RunConfig | None = None
+    # When set, a resumed run re-attaches to this existing W&B run id instead of
+    # starting a second run for the same logical training run.
+    resume_wandb_run_id: str | None = None
 
     _training_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _arena_records: list[dict] = field(default_factory=list, init=False, repr=False)
@@ -163,6 +166,11 @@ class MetricsCollector:
             return
         self._init_wandb()
 
+    @property
+    def wandb_run_id(self) -> str | None:
+        """The active W&B run id (for persisting in the resume marker), or None."""
+        return getattr(self._wandb_run, "id", None) if self._wandb_run else None
+
     def _init_wandb(self) -> None:
         """Initialise a W&B run using the active ``WandbConfig``.
 
@@ -186,6 +194,12 @@ class MetricsCollector:
         assert self.config is not None and self.config.wandb is not None  # narrowed by caller
         wandb_config = self.config.wandb
         run_name = f"{self.config.run_name}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
+        # On resume, re-attach to the original run id so the dashboard shows one
+        # continuous run; resume="allow" creates it if the id isn't found.
+        resume_kwargs = (
+            {"id": self.resume_wandb_run_id, "resume": "allow"}
+            if self.resume_wandb_run_id else {}
+        )
         self._wandb_run = wandb.init(
             project=wandb_config.project,
             entity=wandb_config.entity,
@@ -193,6 +207,7 @@ class MetricsCollector:
             mode=wandb_config.mode,
             name=run_name,
             config=_dataclass_to_jsonable(self.config),
+            **resume_kwargs,
         )
         if self._wandb_run is not None and getattr(self._wandb_run, "url", None):
             logger.info("Initialised W&B run: {}", self._wandb_run.url)
@@ -768,6 +783,37 @@ class MetricsCollector:
             "epoch": epoch,
         })
 
+    def log_training_dynamics(
+        self,
+        generation: int,
+        epochs: int,
+        buffer_games: int,
+        buffer_capacity_games: int,
+        buffer_positions: int,
+        staleness_gens: float,
+        emergent_reuse: float,
+    ) -> None:
+        """Publish the per-generation rolling-buffer data regime to W&B.
+
+        Surfaces how the data is being used so over-reuse / staleness are
+        visible at a glance: the buffer fill (``buffer_games`` vs capacity), the
+        staleness in generations (``B/F``), and the *emergent* reuse
+        (``epochs × B/F``) — reuse is not a knob, just the consequence of full-
+        pass training over a games-sized buffer. W&B-only; the HTML report shows
+        the governing knobs in its config summary instead.
+        """
+        self._publish({
+            "training_per_gen/epochs": epochs,
+            "training_per_gen/emergent_reuse": emergent_reuse,
+            "training_per_gen/staleness_gens": staleness_gens,
+            "training_per_gen/buffer_games": buffer_games,
+            "training_per_gen/buffer_positions": buffer_positions,
+            "training_per_gen/buffer_fill_fraction": (
+                buffer_games / buffer_capacity_games if buffer_capacity_games > 0 else 0.0
+            ),
+            "generation": generation,
+        })
+
     def flush(self, config: RunConfig, generation: int) -> None:
         """Write buffered metrics for the current generation and clear buffers.
 
@@ -1030,19 +1076,41 @@ class SelfPlayStore:
     arrays are serialised as raw bytes, with shape and dtype metadata stored
     in the parquet file-level schema so they can be reconstructed on load.
 
+    Boards are stored in their **compact** form (``IBoard.to_compact`` — e.g.
+    the int8 14×14 placement board for Blokus, the 3×3 grid for TicTacToe), and
+    the schema carries a ``board_kind`` marker (``BOARD_KIND``). Files written
+    before this scheme have no marker and held the dense ``(C, N, N)`` encoding;
+    they cannot be loaded into the compact buffer (the loader refuses them
+    rather than silently misreading the bytes). Such runs must be resumed from
+    their dense checkpoints before this refactor, not after.
+
     Args:
         directory: Root directory for self-play history files.
     """
 
+    # Schema marker for the compact-board storage format. Its absence means a
+    # legacy dense-encoding file, which ``load`` refuses (see class docstring).
+    BOARD_KIND: str = "compact_v1"
+
     def __init__(self, directory: Path) -> None:
         self._directory = directory
 
-    def save(self, examples: deque[ProcessedExample], generation: int) -> None:
+    def save(
+        self,
+        examples: deque[ProcessedExample],
+        generation: int,
+        game_sizes: list[int] | None = None,
+    ) -> None:
         """Save one generation's self-play examples to a parquet file.
 
         Args:
-            examples: The generation's training examples.
+            examples: The generation's training examples (flat, in game order).
             generation: Generation number (used in the filename).
+            game_sizes: Per-game position counts, in the same order the examples
+                are laid out. When provided, ``load_games`` uses them to split the
+                flat positions back into per-game lists so the rolling
+                games-sized replay buffer can be reconstructed on resume. When
+                ``None``, game boundaries are not recorded.
         """
         if not examples:
             return
@@ -1060,11 +1128,14 @@ class SelfPlayStore:
         sample_board = boards[0]
         sample_policy = policies[0]
         metadata = {
+            "board_kind": self.BOARD_KIND,
             "board_shape": ",".join(str(d) for d in sample_board.shape),
             "board_dtype": str(sample_board.dtype),
             "policy_size": str(sample_policy.shape[0]),
             "policy_dtype": str(sample_policy.dtype),
         }
+        if game_sizes is not None:
+            metadata["game_sizes"] = ",".join(str(s) for s in game_sizes)
 
         table = pa.Table.from_pandas(df)
         merged_metadata = {
@@ -1096,6 +1167,17 @@ class SelfPlayStore:
 
         table = pq.read_table(filepath)
         metadata = {k.decode(): v.decode() for k, v in table.schema.metadata.items()}
+
+        # Refuse legacy dense files explicitly rather than misreading their bytes
+        # as a compact array (a (44,14,14) float32 blob is not a (14,14) int8 one).
+        board_kind = metadata.get("board_kind")
+        if board_kind != self.BOARD_KIND:
+            raise ValueError(
+                f"{filepath.name} has board_kind={board_kind!r}, expected "
+                f"{self.BOARD_KIND!r}. Legacy dense self-play files cannot be "
+                "loaded into the compact replay buffer — resume such runs from "
+                "their checkpoints before the replay-buffer refactor.",
+            )
 
         board_shape = tuple(int(d) for d in metadata["board_shape"].split(","))
         board_dtype = np.dtype(metadata["board_dtype"])
@@ -1148,6 +1230,88 @@ class SelfPlayStore:
             f"from {len(history)} generations"
         )
         return history
+
+    def load_games(self, generation: int) -> list[list[ProcessedExample]] | None:
+        """Load a generation's examples split back into per-game lists.
+
+        Uses the ``game_sizes`` schema metadata written by :meth:`save` to
+        restore the game boundaries the flat parquet rows would otherwise lose.
+        Returns ``None`` if the file is missing. A file saved without
+        ``game_sizes`` is returned as a single game (logged), so the buffer can
+        still be refilled, just at coarser eviction granularity.
+        """
+        flat = self.load(generation)
+        if flat is None:
+            return None
+
+        game_sizes = self._read_game_sizes(generation)
+        if game_sizes is None:
+            logger.warning(
+                "No game_sizes metadata in self-play file {} — treating its "
+                "{} positions as one game.", generation, len(flat),
+            )
+            return [list(flat)]
+
+        games: list[list[ProcessedExample]] = []
+        iterator = iter(flat)
+        for size in game_sizes:
+            games.append([next(iterator) for _ in range(size)])
+        return games
+
+    def load_recent_games(
+        self, last_file_index: int, num_games: int,
+    ) -> deque[list[ProcessedExample]]:
+        """Reconstruct the rolling replay buffer from recent generation files.
+
+        Loads per-generation files newest-first starting at ``last_file_index``,
+        accumulating games until at least ``num_games`` are gathered (or files
+        run out), then returns the newest ``num_games`` games as a
+        ``deque(maxlen=num_games)`` — exactly what a fresh run would hold at that
+        point. This is the resume path for the games-sized buffer.
+
+        Args:
+            last_file_index: Newest generation file index to load from.
+            num_games: Buffer capacity in games (``replay_buffer_games``).
+        """
+        buffer: deque[list[ProcessedExample]] = deque(maxlen=num_games)
+        if not self._directory.exists():
+            logger.warning(f"Self-play history directory not found: {self._directory}")
+            return buffer
+
+        # Collect newest-first, then replay oldest→newest into the maxlen deque
+        # so it keeps the newest ``num_games`` games (older overshoot evicts).
+        collected_newest_first: list[list[list[ProcessedExample]]] = []
+        total_games = 0
+        file_index = last_file_index
+        while file_index >= 0 and total_games < num_games:
+            games = self.load_games(file_index)
+            if games is not None:
+                collected_newest_first.append(games)
+                total_games += len(games)
+            file_index -= 1
+
+        for gen_games in reversed(collected_newest_first):
+            buffer.extend(gen_games)
+
+        logger.info(
+            "Reconstructed replay buffer: {} games ({} positions) from files ≤ {}",
+            len(buffer), sum(len(g) for g in buffer), last_file_index,
+        )
+        return buffer
+
+    def _read_game_sizes(self, generation: int) -> list[int] | None:
+        """Read the per-game position counts from a file's schema metadata.
+
+        Reads only the parquet footer (not the row data), so it's cheap.
+        """
+        filepath = self._directory / self._filename(generation)
+        if not filepath.exists():
+            return None
+        metadata = pq.read_schema(filepath).metadata or {}
+        raw = metadata.get(b"game_sizes")
+        if raw is None:
+            return None
+        return [int(s) for s in raw.decode().split(",")]
 
     @staticmethod
     def _filename(generation: int) -> str:

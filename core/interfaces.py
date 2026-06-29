@@ -61,6 +61,21 @@ class IBoard(Protocol):
         """
         ...
 
+    def to_compact(self) -> NDArray:
+        """Return the minimal compact array this board can be re-encoded from.
+
+        This is the canonical (player-1 perspective) int8 representation that
+        ``IGame.encode_compact`` rebuilds the full ``as_multi_channel(1)`` planes
+        from. Storing this instead of the dense multi-channel tensor lets the
+        training buffer hold positions at a fraction of the memory cost and
+        re-encode lazily at batch time.
+
+        Returns:
+            A compact int8 NDArray (e.g. the 14×14 placement board for Blokus,
+            the 3×3 grid for TicTacToe).
+        """
+        ...
+
     def canonical(self, player: int) -> IBoard:
         """Return the board in canonical form (player 1 perspective).
 
@@ -154,6 +169,22 @@ class IGame(Protocol):
         """
         ...
 
+    def encode_compact(self, compact: NDArray) -> NDArray:
+        """Rebuild the full neural-net input planes from a compact board array.
+
+        Inverse of ``IBoard.to_compact``: takes the compact int8 array produced
+        by ``board.to_compact()`` and returns the dense ``(C, H, W)`` float32
+        tensor. The result must be exactly equal to ``board.as_multi_channel(1)``
+        for the board the compact array came from.
+
+        Args:
+            compact: Compact int8 array from ``IBoard.to_compact``.
+
+        Returns:
+            NDArray of shape ``(C, H, W)`` with float32 dtype.
+        """
+        ...
+
     def get_symmetries(self, board: IBoard, pi: NDArray) -> list[tuple[IBoard, NDArray]]:
         """Generate all symmetric forms of the board state and policy vector.
 
@@ -192,10 +223,11 @@ class INeuralNetWrapper(Protocol):
         generation: int,
         metrics: MetricsCollector | None = None,
     ) -> None:
-        """Train the neural network on a batch of examples from self-play games.
+        """Train the neural network with full passes over the replay buffer.
 
         Args:
-            examples: List of (board_state, policy_vector, value) tuples.
+            examples: The whole replay buffer flattened to (board, policy, value)
+                tuples — every position is trained on ``epochs`` times.
             generation: Current iteration in the self-play training cycle.
             metrics: Optional metrics collector for recording training loss data.
         """

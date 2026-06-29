@@ -4,13 +4,12 @@
   "seed": 42,
   "num_generations": 5,
   "num_eps": 80,
+  "replay_buffer_games": 400,
   "temp_threshold": 6,
   "update_threshold": 0.55,
-  "max_queue_length": 5000,
   "num_arena_matches": 50,
   "root_directory": "./temp/",
   "load_model": false,
-  "max_generations_lookback": 10,
   "elo_games_per_gen": 20,
   "minimax_games_per_gen": 0,
   "symmetry_diagnostic_positions": 3,
@@ -30,7 +29,14 @@
   "wandb": {
     "project": "alphablokus-poc",
     "entity": null,
-    "tags": ["blokus", "pc", "second", "300-sims", "80-eps", "5-gens"],
+    "tags": [
+      "blokus",
+      "pc",
+      "second",
+      "300-sims",
+      "80-eps",
+      "5-gens"
+    ],
     "mode": "online"
   }
 }

@@ -1,4 +1,6 @@
+import json
 import math
+import os
 import time
 from collections import deque
 from dataclasses import dataclass
@@ -44,7 +46,26 @@ def _compute_elo(wins: int, losses: int, draws: int) -> tuple[float, float]:
 
 # Type aliases for improved readability
 TrainingExample: TypeAlias = tuple[IBoard, int, NDArray, float | None]  # (board, player, policy, value)
-TrainingHistory: TypeAlias = list[deque[ProcessedExample]]  # List of examples per generation
+# One game's worth of positions; the rolling replay buffer is a deque of these.
+GameExamples: TypeAlias = list[ProcessedExample]
+
+# Resume marker: written atomically at the end of every completed generation and
+# read by ``main.py --resume`` to continue a crashed run in place. Lives in the
+# run's log directory (already created early in ``main``).
+PROGRESS_MARKER_FILENAME = "progress.json"
+
+
+def read_progress_marker(config: RunConfig) -> dict | None:
+    """Return the resume marker for ``config``'s run, or ``None`` if absent.
+
+    The marker records the last *fully completed* generation (and the W&B run id,
+    if any), so resume continues from the next generation without re-running or
+    overwriting completed work.
+    """
+    path = config.log_directory / PROGRESS_MARKER_FILENAME
+    if not path.exists():
+        return None
+    return json.loads(path.read_text(encoding="utf-8"))
 
 
 @dataclass(frozen=True)
@@ -93,7 +114,15 @@ class Coach:
     but only if the new version proves stronger than the previous one.
     """
 
-    def __init__(self, game: IGame, nnet: INeuralNetWrapper, config: RunConfig) -> None:
+    def __init__(
+        self,
+        game: IGame,
+        nnet: INeuralNetWrapper,
+        config: RunConfig,
+        *,
+        resume: bool = False,
+        resume_wandb_run_id: str | None = None,
+    ) -> None:
         """
         Initialize the training coordinator.
 
@@ -101,7 +130,13 @@ class Coach:
             game: Game implementation providing rules and mechanics
             nnet: Neural network for policy and value predictions
             config: Configuration parameters for the training process
+            resume: When True, this is a continuation of a crashed/stopped run —
+                the existing frozen Elo baseline is reused rather than re-frozen
+                from the (already-trained) net, keeping the Elo curve comparable.
+            resume_wandb_run_id: W&B run id to re-attach to (from the resume
+                marker), so the dashboard shows one continuous run.
         """
+        self.resume = resume
         # Seed everything FIRST — before any wrapper / MCTS instance is built,
         # so weight init, replay shuffles, MCTS tie-breaks and the global
         # ``np.random`` calls scattered through self-play all see the same
@@ -120,10 +155,15 @@ class Coach:
         self.config = config
         self.mcts = MCTS(self.game, self.nnet, self.config.mcts_config)
 
-        # Training state
-        self.train_examples_history: TrainingHistory = []
-        self.skip_first_self_play = False  # Can be set by load_train_examples()
-        self.metrics = MetricsCollector(config=config)
+        # Training state: a single rolling replay buffer holding the last
+        # ``replay_buffer_games`` games' worth of positions (one inner list per
+        # game). Oldest games auto-evict via ``maxlen``. ``_fresh_games_this_gen``
+        # tracks just this generation's self-play games — used to persist them
+        # and to count fresh positions for the reuse-driven training step count.
+        self.replay_buffer: deque[GameExamples] = deque(maxlen=config.replay_buffer_games)
+        self._fresh_games_this_gen: list[GameExamples] = []
+        self.skip_first_self_play = False  # Reserved for a future warm-start path
+        self.metrics = MetricsCollector(config=config, resume_wandb_run_id=resume_wandb_run_id)
         self._self_play_store = SelfPlayStore(config.self_play_history_directory)
 
         # Frozen held-out positions for per-epoch network diagnostics (policy
@@ -143,7 +183,14 @@ class Coach:
         # Saved to disk under ``Nets/elo_baseline.pth.tar`` so resumed runs use
         # the same baseline.
         if self.config.elo_games_per_gen > 0:
-            self.nnet.save_checkpoint(filename="elo_baseline.pth.tar")
+            baseline_path = self.config.net_directory / "elo_baseline.pth.tar"
+            # On resume, reuse the original gen-0 baseline if it's on disk —
+            # re-saving here would re-anchor it to the already-trained net and
+            # make the resumed Elo numbers incomparable to the pre-crash portion.
+            if not (self.resume and baseline_path.exists()):
+                self.nnet.save_checkpoint(filename="elo_baseline.pth.tar")
+            elif self.resume:
+                logger.info("Resume: reusing existing Elo baseline {}", baseline_path)
             self.elo_baseline_net: INeuralNetWrapper | None = self.nnet.__class__(self.game, config)
             self.elo_baseline_net.load_checkpoint(filename="elo_baseline.pth.tar")
         else:
@@ -164,7 +211,7 @@ class Coach:
             self.game, self.mcts, self.config.temp_threshold,
         )
 
-    def learn(self) -> None:
+    def learn(self, start_generation: int = 1) -> None:
         """
         Execute the main training loop for a specified number of generations.
 
@@ -182,29 +229,32 @@ class Coach:
             - Timing information is collected for performance analysis
         """
         try:
-            self._learn_loop()
+            self._learn_loop(start_generation=start_generation)
         finally:
             # Ensure W&B (if active) is finalised even on crash/interrupt.
             self.metrics.close()
 
-    def _learn_loop(self) -> None:
-        """Inner training loop. Separated so ``learn`` can wrap it in try/finally."""
-        for generation in range(1, self.config.num_generations + 1):
+    def _learn_loop(self, start_generation: int = 1) -> None:
+        """Inner training loop. Separated so ``learn`` can wrap it in try/finally.
+
+        ``start_generation`` is 1 for a fresh run and ``last_completed + 1`` when
+        resuming; every per-generation artifact is keyed by generation number, so
+        starting partway through appends rather than overwriting earlier work.
+        """
+        for generation in range(start_generation, self.config.num_generations + 1):
             logger.info(f'Starting Generation #{generation} ...')
             generation_start = time.perf_counter()
             self.metrics.log_progress(generation, self.config.num_generations)
 
             # PHASE 1: Generate new training data through self-play
             if not self.skip_first_self_play or generation > 1:
-                iteration_examples = deque([], maxlen=self.config.max_queue_length)
-
                 logger.info(f'Starting Self-Play For Generation #{generation} ...')
                 self_play_start = time.perf_counter()
 
                 if self.config.num_parallel_workers > 1:
-                    self._run_self_play_parallel(generation, iteration_examples)
+                    fresh_games = self._run_self_play_parallel(generation)
                 else:
-                    self._run_self_play_serial(generation, iteration_examples)
+                    fresh_games = self._run_self_play_serial(generation)
 
                 self_play_end = time.perf_counter()
                 self.metrics.log_timing(generation, CycleStage.SELF_PLAY, self_play_end - self_play_start)
@@ -216,11 +266,16 @@ class Coach:
                     snapshot.process_rss_bytes, snapshot.gpu_bytes,
                 )
 
-                self.train_examples_history.append(iteration_examples)
+                # Push this generation's fresh games into the rolling buffer
+                # (oldest games auto-evict via maxlen), tracking them separately
+                # for persistence and the fresh-position count.
+                self._fresh_games_this_gen = fresh_games
+                self.replay_buffer.extend(fresh_games)
+            else:
+                self._fresh_games_this_gen = []
 
-            # Save generated data and manage training window
+            # Persist this generation's fresh games (file index = generation - 1).
             self.save_self_play_history(generation - 1)
-            self._manage_training_window(generation)
 
             # PHASE 2: Train neural network
             train_examples = self._prepare_training_data()
@@ -234,7 +289,10 @@ class Coach:
             self.pnet.load_checkpoint(filename='temp.pth.tar')
             MCTS(self.game, self.pnet, self.config.mcts_config)
 
-            # Train network on accumulated data
+            # Train network on the whole buffer (epochs full passes — use all the
+            # data). Log the emergent reuse (epochs × B/F) and staleness (B/F) so
+            # the data regime is visible without it being a tunable knob.
+            self._log_training_dynamics(generation, len(train_examples))
             logger.info(f'Starting Training For Generation #{generation} ...')
             training_start = time.perf_counter()
             self.nnet.train(
@@ -315,16 +373,60 @@ class Coach:
             self.metrics.log_timing(generation, CycleStage.WHOLE_CYCLE, generation_end - generation_start)
             self.metrics.flush(self.config, generation)
 
-    def _run_self_play_serial(
-        self, generation: int, iteration_examples: deque,
-    ) -> None:
+            # Mark this generation fully complete — written last, after all of
+            # its data is on disk, so `--resume` always restarts from a clean
+            # boundary (never a half-finished generation).
+            self._write_progress_marker(generation)
+
+    def _write_progress_marker(self, generation: int) -> None:
+        """Persist the carried-forward net + record the last completed generation.
+
+        At this point ``self.nnet`` is the network carried into the next
+        generation (the just-accepted net, or the reverted previous best). Saved
+        as ``latest.pth.tar`` so ``--resume`` always has the exact continuation
+        net — unlike ``best.pth.tar``, which doesn't exist until the first accept.
+
+        The marker is written last, write-to-temp + ``os.replace`` (atomic on the
+        same filesystem), so a crash mid-write can never leave a truncated marker
+        and resume always restarts from a clean generation boundary.
+        """
+        self.nnet.save_checkpoint(filename="latest.pth.tar")
+        path = self.config.log_directory / PROGRESS_MARKER_FILENAME
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "last_completed_generation": generation,
+            "wandb_run_id": self.metrics.wandb_run_id,
+        }
+        tmp = path.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(payload), encoding="utf-8")
+        os.replace(tmp, path)
+
+    def load_self_play_history_for_resume(self, last_completed_generation: int) -> None:
+        """Refill the rolling replay buffer to resume training at ``last + 1``.
+
+        Self-play parquet files are 0-indexed (file ``k`` holds generation
+        ``k+1``'s data — see ``save_self_play_history``), so generation ``G``'s
+        data lives in file index ``G-1``. We reconstruct the games-sized buffer
+        the next generation would hold by loading recent files newest-first until
+        ``replay_buffer_games`` games are gathered.
+        """
+        last_file_index = last_completed_generation - 1
+        self.replay_buffer = self._self_play_store.load_recent_games(
+            last_file_index, self.config.replay_buffer_games,
+        )
+
+    def _run_self_play_serial(self, generation: int) -> list[GameExamples]:
         """Sequential self-play loop: same MCTS instance lifecycle, same
         per-episode logging, same tqdm. The parallel codepath is opt-in
         via ``config.num_parallel_workers > 1``.
+
+        Returns one list of positions per game (game boundaries preserved so the
+        games-sized buffer can evict whole games).
         """
+        fresh_games: list[GameExamples] = []
         for episode_idx in tqdm(range(self.config.num_eps), desc="Self Play"):
             self.mcts = MCTS(self.game, self.nnet, self.config.mcts_config)
-            iteration_examples.extend(self.execute_episode())
+            fresh_games.append(self.execute_episode())
 
             stats = self.mcts.get_episode_stats()
             self.metrics.log_self_play_profiling(
@@ -342,18 +444,17 @@ class Coach:
                 num_valid_moves_calls=stats.num_valid_moves_calls,
                 num_game_ended_calls=stats.num_game_ended_calls,
             )
+        return fresh_games
 
-    def _run_self_play_parallel(
-        self, generation: int, iteration_examples: deque,
-    ) -> None:
+    def _run_self_play_parallel(self, generation: int) -> list[GameExamples]:
         """Parallel self-play across a process pool.
 
         Saves the current ``self.nnet`` to a fixed checkpoint workers
         load at pool startup, dispatches ``num_eps`` per-episode tasks,
-        then extends ``iteration_examples`` with the returned examples
-        in submission order. Per-episode MCTS stats are logged via
-        ``metrics.log_self_play_profiling`` to match the serial
-        codepath's schema — downstream reports don't care which path
+        then returns one list of positions per game in submission order
+        (game boundaries preserved for games-sized eviction). Per-episode MCTS
+        stats are logged via ``metrics.log_self_play_profiling`` to match the
+        serial codepath's schema — downstream reports don't care which path
         produced the data.
         """
         from core.parallel_self_play import run_self_play_episodes_parallel
@@ -368,8 +469,9 @@ class Coach:
             num_workers=self.config.num_parallel_workers,
         )
 
+        fresh_games: list[GameExamples] = []
         for episode_idx, (examples, stats) in enumerate(zip(per_ep_examples, per_ep_stats, strict=False)):
-            iteration_examples.extend(examples)
+            fresh_games.append(examples)
             self.metrics.log_self_play_profiling(
                 generation=generation,
                 episode=episode_idx,
@@ -385,6 +487,7 @@ class Coach:
                 num_valid_moves_calls=stats.num_valid_moves_calls,
                 num_game_ended_calls=stats.num_game_ended_calls,
             )
+        return fresh_games
 
     def _run_arena_serial(
         self, top_k_to_record: int,
@@ -669,22 +772,24 @@ class Coach:
             return
 
         # Sample positions from the training examples (capped to actual size).
-        # Policies are stored sparse (indices, values) — densify to the full
-        # action-space vector the eval set holds.
+        # Boards are stored **compact** (``to_compact()``); the eval set feeds
+        # boards straight to the network, so encode the sampled compact boards
+        # to dense planes here. Policies are stored sparse (indices, values) —
+        # densify to the full action-space vector the eval set holds.
         action_size = self.game.get_action_size()
-        boards_all = np.array([ex[0] for ex in train_examples])
-        policies_all = np.array([as_dense(ex[1], action_size) for ex in train_examples])
-        values_all = np.array([ex[2] for ex in train_examples])
-        n = min(self._eval_set_size, len(boards_all))
+        n = min(self._eval_set_size, len(train_examples))
         rng = np.random.default_rng(seed=self.config.seed or 0)
-        idx = rng.choice(len(boards_all), size=n, replace=False)
-        sampled_boards = boards_all[idx]
-        target_policies = policies_all[idx]
-        target_values = values_all[idx]
+        idx = rng.choice(len(train_examples), size=n, replace=False)
+        sampled = [train_examples[i] for i in idx]
+        sampled_compact = [ex[0] for ex in sampled]
+        sampled_boards = np.array([self.game.encode_compact(b) for b in sampled_compact])
+        target_policies = np.array([as_dense(ex[1], action_size) for ex in sampled])
+        target_values = np.array([ex[2] for ex in sampled])
 
         if self.config.game == "tictactoe":
+            # The minimax oracle decodes positions from the compact grid directly.
             target_policies, target_values = self._minimax_targets_for_eval_set(
-                sampled_boards, action_size=target_policies.shape[1],
+                sampled_compact, action_size=action_size,
             )
 
         self._eval_set = EvalSet(
@@ -702,29 +807,27 @@ class Coach:
                     n, expected_kind, eval_dir)
 
     def _minimax_targets_for_eval_set(
-        self, boards: NDArray, action_size: int,
+        self, compact_boards: list[NDArray], action_size: int,
     ) -> tuple[NDArray, NDArray]:
         """Overwrite eval-set targets with a perfect-play oracle (TTT only).
 
         Each row of ``target_policies`` becomes a uniform distribution over
         all minimax-optimal actions; each ``target_values`` entry becomes the
-        position's true game-theoretic value. Boards are decoded from the
-        2-channel canonical encoding back into a :class:`Board` so we can
-        query the minimax solver.
+        position's true game-theoretic value. Boards arrive as the compact 3×3
+        canonical grid (``Board.to_compact()``), so a :class:`Board` is rebuilt
+        directly from it before querying the minimax solver.
         """
         from games.tictactoe.board import Board
         from games.tictactoe.minimax import MinimaxTicTacToePlayer
 
         minimax = MinimaxTicTacToePlayer(self.game)
-        n = len(boards)
+        n = len(compact_boards)
         new_policies = np.zeros((n, action_size), dtype=np.float32)
         new_values = np.zeros(n, dtype=np.float32)
 
-        for i, encoded in enumerate(boards):
-            # Decode canonical 2-channel encoding back into a canonical Board.
-            # encoded[0]: side-to-move stones (=+1), encoded[1]: opponent (=-1).
-            grid = (encoded[0] - encoded[1]).astype(int)
-            canonical_board = Board._from_pieces(grid.tolist())
+        for i, grid in enumerate(compact_boards):
+            # Compact form is the canonical 3×3 grid (+1 side-to-move, -1 opponent).
+            canonical_board = Board._from_pieces(np.asarray(grid).astype(int).tolist())
 
             new_values[i] = float(minimax.evaluate_position(canonical_board))
             optimal = minimax.optimal_actions(canonical_board)
@@ -735,49 +838,47 @@ class Coach:
 
         return new_policies, new_values
 
-    def _generation_window_size(self, generation: int) -> int:
-        """
-        Calculate the number of past generations to retain for training.
-
-        The window size grows linearly from 5 to max_generations_lookback,
-        allowing the network to:
-        - Learn quickly from recent games in early training
-        - Maintain stability from more games in later training
-
-        Args:
-            generation: Current training iteration
-
-        Returns:
-            int: Number of past generations to use for training
-        """
-        if generation <= 5:
-            return 5
-            
-        max_val = self.config.max_generations_lookback
-        if 2 * max_val > generation:
-            # Linear growth: y = mx + b
-            # Points: (0,5) and (2*max_val, max_val)
-            return round(generation * (max_val - 5) / (2 * max_val) + 5)
-            
-        return max_val
-
-    def _manage_training_window(self, generation: int) -> None:
-        """Remove old training data that falls outside the current window."""
-        window_size = self._generation_window_size(generation)
-        if len(self.train_examples_history) > window_size:
-            logger.warning(
-                f"Removing oldest training examples. "
-                f"History size: {len(self.train_examples_history)}"
-            )
-            self.train_examples_history.pop(0)
-
     def _prepare_training_data(self) -> list[ProcessedExample]:
-        """Combine and shuffle training examples from all retained generations."""
-        examples = []
-        for generation_examples in self.train_examples_history:
-            examples.extend(generation_examples)
+        """Flatten the whole rolling buffer to a shuffled list of positions.
+
+        Every position across all games currently in the buffer is used for
+        training (``epochs`` full passes); the per-game structure only governs
+        eviction, not training.
+        """
+        examples = [example for game in self.replay_buffer for example in game]
         shuffle(examples)
         return examples
+
+    def _log_training_dynamics(self, generation: int, buffer_positions: int) -> None:
+        """Log the emergent reuse / staleness of the rolling-buffer data regime.
+
+        Reuse is not a knob: every position is trained ``epochs`` times per
+        generation and lives in the buffer for ``B/F`` generations, so its
+        lifetime reuse is ``epochs × B/F``. Staleness (oldest game's age) is
+        ``B/F`` generations. Both are computed from config and the current buffer
+        fill, then surfaced to the console and W&B.
+        """
+        epochs = self.config.net_config.epochs
+        buffer_capacity_games = self.config.replay_buffer_games
+        fresh_games = max(self.config.num_eps, 1)
+        staleness_gens = buffer_capacity_games / fresh_games
+        emergent_reuse = epochs * staleness_gens
+        buffer_games = len(self.replay_buffer)
+        logger.info(
+            "Gen {} data regime: epochs={} buffer={}/{} games ({} positions), "
+            "staleness ≈{:.1f} gens, emergent reuse ≈{:.1f} (epochs × B/F)",
+            generation, epochs, buffer_games, buffer_capacity_games,
+            buffer_positions, staleness_gens, emergent_reuse,
+        )
+        self.metrics.log_training_dynamics(
+            generation=generation,
+            epochs=epochs,
+            buffer_games=buffer_games,
+            buffer_capacity_games=buffer_capacity_games,
+            buffer_positions=buffer_positions,
+            staleness_gens=staleness_gens,
+            emergent_reuse=emergent_reuse,
+        )
 
     def _should_accept_new_network(
         self, new_wins: int, prev_wins: int, draws: int = 0,
@@ -795,32 +896,37 @@ class Coach:
             threshold=self.config.update_threshold,
         )
 
-    def save_self_play_history(self, generation: int) -> None:
-        """Save the current generation's self-play data to a parquet file.
+    def save_self_play_history(self, file_index: int) -> None:
+        """Save this generation's fresh self-play games to a parquet file.
 
-        Delegates to :meth:`SelfPlayStore.save`.
+        Persists ``_fresh_games_this_gen`` (the games this generation produced,
+        not the whole buffer) with their per-game sizes so the games-sized buffer
+        can be reconstructed on resume. Delegates to :meth:`SelfPlayStore.save`.
         """
-        if not self.train_examples_history:
+        if not self._fresh_games_this_gen:
             return
-        latest = self.train_examples_history[-1]
-        if not latest:
+        game_sizes = [len(game) for game in self._fresh_games_this_gen]
+        flat = [example for game in self._fresh_games_this_gen for example in game]
+        if not flat:
             return
         # In-RAM examples hold sparse policies (indices, values); the on-disk
         # store keeps dense, so densify a transient copy here. By this point the
         # self-play worker pool is torn down, so the memory is free.
         action_size = self.game.get_action_size()
-        dense_latest = deque(
+        dense = deque(
             (board, as_dense(pi, action_size), value)
-            for board, pi, value in latest
+            for board, pi, value in flat
         )
-        self._self_play_store.save(dense_latest, generation)
+        self._self_play_store.save(dense, file_index, game_sizes=game_sizes)
 
     def load_self_play_history(self, up_to_generation: int) -> None:
-        """Load self-play examples from parquet files for recent generations.
+        """Refill the rolling replay buffer from parquet files on disk.
 
-        Delegates to :meth:`SelfPlayStore.load_window`.
+        Loads recent generation files (newest at file index ``up_to_generation``)
+        until ``replay_buffer_games`` games are gathered. Used by the
+        ``--load_model`` warm-start path. Delegates to
+        :meth:`SelfPlayStore.load_recent_games`.
         """
-        window = self._generation_window_size(up_to_generation)
-        self.train_examples_history = self._self_play_store.load_window(
-            up_to_generation, window,
+        self.replay_buffer = self._self_play_store.load_recent_games(
+            up_to_generation, self.config.replay_buffer_games,
         )

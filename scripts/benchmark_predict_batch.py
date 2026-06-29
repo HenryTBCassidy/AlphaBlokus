@@ -96,8 +96,8 @@ def main() -> None:
     )
     run_cfg = RunConfig(
         game="blokusduo", run_name="microbench", num_generations=1, num_eps=2,
-        temp_threshold=5, update_threshold=0.55, max_queue_length=10, num_arena_matches=2,
-        max_generations_lookback=1, root_directory=Path("/tmp/microbench"), load_model=False,
+        temp_threshold=5, update_threshold=0.55, num_arena_matches=2,
+        root_directory=Path("/tmp/microbench"), load_model=False,
         mcts_config=MCTSConfig(num_mcts_sims=1, cpuct=1.0), net_config=net_cfg,
     )
     nnet = NNetWrapper(game, run_cfg)

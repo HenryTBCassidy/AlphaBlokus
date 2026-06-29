@@ -3,13 +3,12 @@
   "run_name": "test_run",
   "num_generations": 2,
   "num_eps": 10,
+  "replay_buffer_games": 50,
   "temp_threshold": 15,
   "update_threshold": 0.55,
-  "max_queue_length": 10,
   "num_arena_matches": 2,
   "root_directory": "./temp/",
   "load_model": false,
-  "max_generations_lookback": 1,
   "mcts_config": {
     "num_mcts_sims": 2,
     "cpuct": 1

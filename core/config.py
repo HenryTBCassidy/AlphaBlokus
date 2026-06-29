@@ -65,7 +65,7 @@ class NetConfig:
     """
     learning_rate: float  # Learning rate for the optimizer
     dropout: float  # Dropout probability for regularisation (0 to 1)
-    epochs: int  # Number of training epochs per generation
+    epochs: int  # Number of full passes over the replay buffer per generation
     batch_size: int  # Number of positions per training batch
     cuda: bool  # Whether to use CUDA for GPU acceleration
     num_filters: int  # Number of convolutional filters per layer (power of 2)
@@ -125,20 +125,34 @@ class RunConfig:
     # Training process parameters
     run_name: str  # Unique identifier for this training run
     num_generations: int  # Number of complete self-play -> train -> evaluate cycles
-    num_eps: int  # Number of complete self-play games per generation
+    num_eps: int  # Number of complete self-play games per generation (fresh games F)
     temp_threshold: int  # Move number after which temperature is set to ~0
     update_threshold: float  # Win rate required for new network to be accepted (0 to 1)
-    max_queue_length: int  # Maximum number of game positions to keep in memory
     num_arena_matches: int  # Number of evaluation games between old/new networks
-    max_generations_lookback: int  # Maximum number of past generations to train on
-    
+
     # Model and file management
     root_directory: Path  # Root directory for all output files
     load_model: bool  # Whether to load a pre-existing model
-    
+
     # Component configurations
     mcts_config: MCTSConfig  # Monte Carlo Tree Search parameters
     net_config: NetConfig  # Neural network parameters
+
+    # Rolling replay buffer (replaces the old generation-window machinery).
+    #
+    # The buffer holds the last ``replay_buffer_games`` *games* worth of
+    # positions; oldest games auto-evict. This is the staleness knob **B** — the
+    # oldest game is ``B / num_eps`` net-versions old — independent of how fast
+    # the buffer turns over (``num_eps``, the fresh games F). Sizing in games
+    # (not generations or positions) is invariant to ``num_eps`` and to
+    # positions-per-game variance, matching how AlphaZero/MuZero/KataGo describe
+    # buffers. Default 5000 reproduces run2's healthy regime (≈5 gens × 1000 eps).
+    #
+    # Training uses **all** the data: ``net_config.epochs`` full passes over the
+    # whole buffer each generation. Reuse is therefore the *emergent* quantity
+    # ``epochs × (B / num_eps)`` — logged, not a knob. e.g. ``B=5000``,
+    # ``num_eps=1000``, ``epochs=1`` ⇒ reuse 5 (run2's regime).
+    replay_buffer_games: int = 5000
 
     # Optional reporting backends
     wandb: WandbConfig | None = None  # If set, mirror metrics to Weights & Biases

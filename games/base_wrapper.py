@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import nullcontext
 
 import numpy as np
@@ -52,14 +52,19 @@ class AverageMeter:
 
 
 class _LazyPolicyDataset(Dataset):
-    """Training dataset that densifies sparse policies one item at a time.
+    """Training dataset that materialises boards and policies one item at a time.
 
-    Boards and values are materialised once as tensors; policies are kept in
-    their stored form — sparse ``(indices, values)`` tuples, or dense arrays for
-    resume-loaded / hand-built examples — and densified lazily in
-    ``__getitem__``. This keeps the full dense policy matrix (~71 KB x N
-    examples) from ever existing at once, which is what spiked RAM and OOM'd
-    large multi-generation buffers when it was built up front.
+    Boards are held in their **compact** stored form (``IBoard.to_compact`` —
+    e.g. the 196-byte int8 placement board for Blokus) and re-encoded to the
+    dense ``(C, N, N)`` network input lazily in ``__getitem__`` via the game's
+    ``encode_compact``; policies are densified per item; only the (tiny) values
+    are held as one tensor. This matters because holding the dense encoding for
+    every position OOM-killed large buffers (run2: ~12 GB at gen 15). Storing
+    compact boards and encoding per item means only one ``DataLoader`` batch of
+    boards (and one of policies, ~71 KB each) is ever dense at once.
+
+    ``encode_fn`` is passed in (``game.encode_compact``) so this stays
+    game-agnostic — it never imports a game-specific symbol.
     """
 
     def __init__(
@@ -68,18 +73,28 @@ class _LazyPolicyDataset(Dataset):
         raw_pis: Sequence,
         values: Sequence[float],
         action_size: int,
+        encode_fn: Callable[[np.ndarray], np.ndarray],
     ) -> None:
-        self._boards = torch.from_numpy(np.asarray(boards, dtype=np.float32))
+        # Reference the buffer's compact board arrays rather than stacking a copy.
+        self._boards = list(boards)
         self._values = torch.from_numpy(np.asarray(values, dtype=np.float32))
         self._raw_pis = list(raw_pis)
         self._action_size = action_size
+        self._encode_fn = encode_fn
 
     def __len__(self) -> int:
         return len(self._raw_pis)
 
     def __getitem__(self, idx: int) -> tuple[Tensor, Tensor, Tensor]:
+        # Re-encode the compact board to dense planes here — one item at a time,
+        # so the dense form only ever exists for the current DataLoader batch.
+        # ascontiguousarray is a no-op when encode_fn already returns contiguous
+        # float32 (the common case).
+        board = torch.from_numpy(
+            np.ascontiguousarray(self._encode_fn(self._boards[idx]), dtype=np.float32),
+        )
         pi = torch.from_numpy(as_dense(self._raw_pis[idx], self._action_size))
-        return self._boards[idx], pi, self._values[idx]
+        return board, pi, self._values[idx]
 
 
 class BaseNNetWrapper(INeuralNetWrapper, ABC):
@@ -126,10 +141,17 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         metrics: MetricsCollector | None = None,
         eval_set: EvalSet | None = None,
     ) -> None:
-        """Train the neural network using provided examples.
+        """Train with ``epochs`` full, shuffled passes over the whole buffer.
+
+        Every position in ``examples`` (the entire rolling replay buffer) is
+        trained on exactly ``net_config.epochs`` times per generation — we use
+        all the data we have rather than sampling a subset (the project is
+        game-limited). Reuse over a position's life is the emergent quantity
+        ``epochs × (replay_buffer_games / num_eps)``, logged by the Coach.
 
         Args:
-            examples: Training examples produced from self-play.
+            examples: The whole replay buffer flattened to (board, policy, value)
+                tuples.
             generation: Current training generation (for logging).
             metrics: Optional metrics collector for parquet/W&B logging.
             eval_set: Optional frozen held-out positions. When provided, three
@@ -147,23 +169,30 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         boards_np, raw_pis, vs_np = zip(*examples)
         action_size = self.game.get_action_size()
 
-        # Validate training data at the interface boundary. Policies are stored
-        # sparse (indices, values) to keep replay-buffer RAM small; densify just
-        # this one sample for the check — the rest are densified per mini-batch
-        # inside the dataset below, never the whole buffer at once (that dense
-        # spike OOM'd large multi-generation buffers).
-        sample_board = boards_np[0]
+        # Validate training data at the interface boundary. Boards are stored
+        # **compact** (``to_compact()``) and re-encoded lazily, so check the
+        # shape of the *encoded* sample (what the network actually sees), not the
+        # compact array. Policies are stored sparse (indices, values) to keep
+        # replay-buffer RAM small; densify just this one sample for the check —
+        # the rest are densified per mini-batch inside the dataset below, never
+        # the whole buffer at once (that dense spike OOM'd large buffers).
+        encode_fn = self.game.encode_compact
+        sample_board = encode_fn(boards_np[0])
         sample_pi = as_dense(raw_pis[0], action_size)
         sample_v = vs_np[0]
         expected_board_shape = (sample_board.shape[0], self.board_rows, self.board_cols)
         assert sample_board.shape == expected_board_shape, (
-            f"Board shape {sample_board.shape} != expected {expected_board_shape}")
+            f"Encoded board shape {sample_board.shape} != expected {expected_board_shape}")
         assert abs(sample_pi.sum() - 1.0) < 0.01, (
             f"Policy vector sums to {sample_pi.sum()}, expected ~1.0")
         assert -1.0 <= sample_v <= 1.0, (
             f"Value {sample_v} outside [-1, 1]")
-        dataset = _LazyPolicyDataset(boards_np, raw_pis, vs_np, action_size)
+        dataset = _LazyPolicyDataset(boards_np, raw_pis, vs_np, action_size, encode_fn)
 
+        # Full-pass training: every position in the buffer is trained on exactly
+        # ``epochs`` times this generation (use all the data). Reuse over a
+        # position's life is the emergent ``epochs × (B / num_eps)``, logged by
+        # the Coach — not a sampler knob.
         for epoch in range(self.net_config.epochs):
             logger.info(f"Epoch {epoch + 1}/{self.net_config.epochs}")
             epoch_start = time.perf_counter()

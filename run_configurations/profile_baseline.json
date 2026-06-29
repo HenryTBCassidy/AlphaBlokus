@@ -4,13 +4,12 @@
   "seed": 42,
   "num_generations": 1,
   "num_eps": 16,
+  "replay_buffer_games": 80,
   "temp_threshold": 6,
   "update_threshold": 0.55,
-  "max_queue_length": 5000,
   "num_arena_matches": 10,
   "root_directory": "./temp/",
   "load_model": false,
-  "max_generations_lookback": 10,
   "elo_games_per_gen": 10,
   "minimax_games_per_gen": 0,
   "symmetry_diagnostic_positions": 0,
@@ -30,7 +29,10 @@
   "wandb": {
     "project": "alphablokus-poc",
     "entity": null,
-    "tags": ["benchmark", "profile-baseline"],
+    "tags": [
+      "benchmark",
+      "profile-baseline"
+    ],
     "mode": "disabled"
   }
 }

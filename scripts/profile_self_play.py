@@ -131,11 +131,12 @@ def run_memory(game, nnet, config, seed: int) -> None:
 def run_train(game, nnet, config, n_examples: int, seed: int) -> None:
     rng = np.random.default_rng(seed)
     action_size = game.get_action_size()
-    board_shape = game.initialise_board().as_multi_channel(1).shape
-    print(f"building {n_examples} synthetic examples (board {board_shape}, sparse pi)...")
+    # Boards are stored compact now; the trainer re-encodes lazily.
+    board_shape = game.initialise_board().to_compact().shape
+    print(f"building {n_examples} synthetic examples (compact board {board_shape}, sparse pi)...")
     examples = []
     for _ in range(n_examples):
-        board = rng.integers(0, 2, board_shape).astype(np.float32)
+        board = rng.integers(-21, 22, board_shape).astype(np.int8)
         idx = rng.choice(action_size, size=150, replace=False).astype(np.int32)
         val = rng.random(150).astype(np.float32)
         val /= val.sum()

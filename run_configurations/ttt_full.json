@@ -3,13 +3,12 @@
   "run_name": "ttt_full",
   "num_generations": 30,
   "num_eps": 50,
+  "replay_buffer_games": 250,
   "temp_threshold": 6,
   "update_threshold": 0.55,
-  "max_queue_length": 500,
   "num_arena_matches": 20,
   "root_directory": "./temp/",
   "load_model": false,
-  "max_generations_lookback": 15,
   "mcts_config": {
     "num_mcts_sims": 80,
     "cpuct": 1.0
@@ -26,7 +25,12 @@
   "wandb": {
     "project": "alphablokus-poc",
     "entity": null,
-    "tags": ["ttt", "pc", "gpu", "full"],
+    "tags": [
+      "ttt",
+      "pc",
+      "gpu",
+      "full"
+    ],
     "mode": "online"
   }
 }

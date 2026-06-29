@@ -13,6 +13,7 @@ from games.blokusduo.board import (
     BoardArray,
     CoordinateIndexDecoder,
     PlayerSide,
+    encode_planes_from_placement,
 )
 from games.blokusduo.pieces import Orientation, PieceManager, pieces_loader
 
@@ -168,6 +169,15 @@ class BlokusDuoGame(IGame):
         in channels 0-20.
         """
         return board.canonical(player)
+
+    def encode_compact(self, compact: NDArray) -> NDArray:
+        """Rebuild the 44-channel float32 planes from a compact placement board.
+
+        Inverse of ``BlokusDuoBoard.to_compact``: ``compact`` is the int8 14×14
+        canonical placement board, and the result equals ``as_multi_channel(1)``
+        for the board it came from.
+        """
+        return encode_planes_from_placement(compact)
 
     def get_symmetries(
         self, board: BlokusDuoBoard, pi: NDArray,

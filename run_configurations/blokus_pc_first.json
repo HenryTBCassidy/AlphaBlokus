@@ -4,13 +4,12 @@
   "seed": 42,
   "num_generations": 2,
   "num_eps": 25,
+  "replay_buffer_games": 125,
   "temp_threshold": 6,
   "update_threshold": 0.55,
-  "max_queue_length": 2000,
   "num_arena_matches": 20,
   "root_directory": "./temp/",
   "load_model": false,
-  "max_generations_lookback": 5,
   "elo_games_per_gen": 10,
   "minimax_games_per_gen": 0,
   "symmetry_diagnostic_positions": 3,
@@ -30,7 +29,12 @@
   "wandb": {
     "project": "alphablokus-poc",
     "entity": null,
-    "tags": ["blokus", "pc", "first-real", "cpuct-2.5"],
+    "tags": [
+      "blokus",
+      "pc",
+      "first-real",
+      "cpuct-2.5"
+    ],
     "mode": "online"
   }
 }
