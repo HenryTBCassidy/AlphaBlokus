@@ -1,8 +1,8 @@
 # Numba Hot-Path — Speedup Tracker
 
-Running before/after for the [numba-hot-path](../plans/numba-hot-path.md) plan. Updated as
-each step lands so we can watch the self-play speedup climb. Companion to the plan and the
-[MCTS subplan](../plans/numba-hot-path-mcts-subplan.md).
+Running before/after for the [numba-hot-path](../plans/archive/numba-hot-path.md) plan (archived,
+complete). Companion to the plan and the
+[MCTS subplan](../plans/archive/numba-hot-path-mcts-subplan.md).
 
 **Method.** `scripts/profile_self_play.py --mode timing --games 2 --seed 42`, single-process
 (no worker pool — clean per-game attribution, no IPC/contention noise). Box `gpu-linux`
