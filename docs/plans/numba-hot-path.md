@@ -43,9 +43,9 @@ which Numba handles cleanly. Recommend Numba.
 | N1 | Add `numba` dep; prove `@njit(cache=True)` hits across forkserver workers + torch coexists; warm-compile at worker init | 0.5 day | High | ✅ | `pyproject.toml`, `games/blokusduo/movegen_runtime.py` |
 | N2 | Numba move-gen kernel (`_fill_mask` + `has_any_move` kernel) behind the F2 flag; bit-identical on the dev-5000 cache | 2–4 days | High | ✅ | `games/blokusduo/movegen_runtime.py`, `tests/test_blokusduo/test_movegen_equivalence.py` |
 | N3 | Add per-node array record in MCTS; migrate `_select_action`/descent/expand/backprop to it (gather killed); keep dict attrs as read-only compat | 2–3 days | High | ✅ | `core/mcts.py`, `tests/test_core/test_batched_inference.py` |
-| N4 | Flip authority to node arrays; retire `(s,a)` dicts; add `root_visit_counts()` accessor; migrate `players.py` + rewrite the white-box test | 2–3 days | High | ✅ N4.1 / N4.2 deferred | `core/mcts.py`, `core/players.py`, `tests/test_core/test_batched_inference.py` |
-| N5 | Incremental board transition (side-danger halo + array placement points) — the ~10% slice | 1–2 days | Medium | | `games/blokusduo/board.py` |
-| N6 | Re-profile on the box (cprofile + 16-worker games/s) before/after; write up the delta | 0.5 day | High | | `docs/research/numba-hot-path-results.md` |
+| N4 | Flip authority to node arrays; retire `(s,a)` dicts; add `root_visit_counts()` accessor; migrate `players.py` + rewrite the white-box test | 2–3 days | High | ✅ (N4.1 + N4.2) | `core/mcts.py`, `core/players.py`, `tests/test_core/*`, `scripts/*` |
+| N5 | Incremental side-danger in `with_piece` (carry opponent's zone, OR the placed piece's halo) — the ~10% slice | 1–2 days | Medium | ✅ | `games/blokusduo/board.py` |
+| N6 | Re-profile on the box (per-sim ladder) before/after; write up the delta | 0.5 day | High | ✅ | `docs/research/numba-hot-path-results.md` |
 
 High-priority path (N1→N4 + N6): **~1.5–2 weeks** solo. N5 optional, promote only if N6 shows board-transition is then the top remaining slice.
 

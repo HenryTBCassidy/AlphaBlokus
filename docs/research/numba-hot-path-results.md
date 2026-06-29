@@ -12,28 +12,39 @@ disabled (`ALPHABLOKUS_NUMBA_MOVEGEN=0`, i.e. today's pure-Python F2 path); "aft
 Same machine, same torch, same seed → the **ratio** is the trustworthy number (per-game wall
 is noisy; averages shown).
 
-## Single-worker wall/game (the tracker)
+## Single-worker speed (the tracker)
 
-**Authoritative ladder — same-session run on 2026-06-29** (all three checkpoints checked out
-and measured back-to-back on the box, so no cross-session drift; bignet config, seed 42, 2
-games each):
+Same-session run on 2026-06-29/30 (checkpoints measured back-to-back on the box; bignet
+config, seed 42, 2 games each).
 
-| Stage | wall/game | speedup vs baseline | step gain | inference share |
-|-------|-----------|---------------------|-----------|-----------------|
-| **Baseline** (`bench/baseline`, pre-Numba: pure-Python F2 + dict MCTS) | **8.01 s** | 1.00× | — | 18.9% |
-| **+ N2** (`bench/n2`, Numba move-gen kernel) | **5.18 s** | **1.55×** | 1.55× | 32.1% |
-| **+ N3/N4.1** (`bench/n3-n4.1`, per-node arrays, select gather removed) | **3.78 s** | **2.12×** | 1.37× | 43.6% |
-| + N5 board transition (optional) | *(pending)* | — | — | — |
+> **Methodology caveat (found 2026-06-30).** `profile_self_play.py` seeds numpy but **not
+> torch**, so each process gets a different random-init net → different games → different
+> move/sim counts run-to-run (baseline 55 moves / 21.1k sims, N5 60 / 21.5k, etc.). That makes
+> raw **wall/game** noisy across checkpoints. The confound-free metric is **wall per sim**
+> (normalises out game length + sim count); it's the authoritative attribution below. Raw
+> wall/game is kept as the "feel" number but read the µs/sim column for code-speed gains.
+> A proper fix — seed the net in the profiler for reproducible games — is logged as a harness
+> to-do; until then, µs/sim is the honest comparison.
 
-**Total so far: 2.12× single-worker** (within the plan's ~2.5–3.5× projection). The inference
-share climbed 18.9% → 32.1% → 43.6% across the ladder — by N3 it's the **single largest slice**,
-i.e. the bottleneck has crossed over from CPU search to GPU inference, exactly as forecast.
-That's the signal the *next* big lever is the batched-inference re-architecture rather than more
-CPU micro-opt; the remaining CPU "other search" (54.9%) is now backprop/transition/expand, not
-the select gather (gone) or move-gen (kernel'd).
+| Stage | wall/game | total sims | **µs/sim** | speedup (µs/sim) | step | inference share |
+|-------|-----------|-----------|------------|------------------|------|-----------------|
+| **Baseline** (`bench/baseline`, pre-Numba) | 8.01 s | 21,102 | **759** | 1.00× | — | 18.9% |
+| **+ N2** (`bench/n2`, Numba move-gen) | 5.18 s | 22,788 | **455** | **1.67×** | 1.67× | 32.1% |
+| **+ N3/N4.1** (`bench/n3-n4.1`, per-node arrays) | 3.78 s | 22,732 | **332** | **2.29×** | 1.37× | 43.6% |
+| **+ N5** (incremental side-danger) | 3.50 s | 21,516 | **325** | **2.33×** | **1.02×** | 44.2% |
 
-Earlier cross-session readings (2026-06-23) were 8.13 s / 4.93 s for baseline / N2 — within ~2–5%
-of the same-session numbers, confirming the box is stable run-to-run.
+**Total: 2.33× single-worker per sim.** The big wins are N2 (move-gen kernel, 1.67×) and N3
+(select-gather removal, 1.37×). **N5 is marginal — ~1.02× (~2%)** — exactly the ~10%-slice /
+≤1.1×-ceiling prediction (side-danger was ~1.4% of the wall; N5 removes roughly half). It's
+correct and bit-identical, just small.
+
+The inference share climbing 18.9% → 44.2% is the headline: the bottleneck has **crossed over
+from CPU search to GPU inference**. The CPU well is essentially dry — N5's marginal return
+confirms further CPU micro-opt isn't worth it. The next real lever is the GPU side
+(batched-inference re-architecture), not more of this.
+
+Earlier cross-session readings (2026-06-23) were 8.13 s / 4.93 s wall/game for baseline / N2 —
+consistent with the same-session run; the box is stable.
 
 ## Benchmark checkpoints (git refs)
 
@@ -43,9 +54,10 @@ config/seed). Tags are local to the `worktree-numba-hot-path` branch (not pushed
 
 | Stage | Tag | Commit | wall/game | Benchmarked? |
 |-------|-----|--------|-----------|--------------|
-| Baseline (pre-Numba) | `bench/baseline` | `a17ea94` | 8.01 s | ✅ 2026-06-29 (same-session) |
-| N1+N2 (Numba move-gen) | `bench/n2` | `6f4e642` | 5.18 s | ✅ 2026-06-29 (same-session) |
-| N3+N4.1 (per-node arrays) | `bench/n3-n4.1` | `5342f15` | 3.78 s | ✅ 2026-06-29 (same-session) |
+| Baseline (pre-Numba) | `bench/baseline` | `a17ea94` | 759 µs/sim | ✅ 2026-06-29 |
+| N1+N2 (Numba move-gen) | `bench/n2` | `6f4e642` | 455 µs/sim | ✅ 2026-06-29 |
+| N3+N4.1 (per-node arrays) | `bench/n3-n4.1` | `5342f15` | 332 µs/sim | ✅ 2026-06-29 |
+| N4.2+N5 (shim removal + incremental danger) | *(tag on commit)* | *(uncommitted)* | 325 µs/sim | ✅ 2026-06-30 |
 
 **To benchmark a checkpoint later** (from this worktree):
 
