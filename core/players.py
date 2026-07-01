@@ -65,7 +65,21 @@ class NetworkPlayer:
         nnet: INeuralNetWrapper,
         mcts_config: MCTSConfig,
         temp: float = 0.0,
+        opening_temp: float = 0.0,
+        opening_moves: int = 0,
     ) -> None:
+        """Create a network-backed player.
+
+        Args:
+            temp: Play temperature after the opening (0 → deterministic argmax).
+            opening_temp: Temperature applied to the first ``opening_moves`` plies
+                of each game. Set >0 to diversify openings so repeated deterministic
+                games against a fixed opponent aren't near-identical (evaluation
+                independence — see ``scripts/pentobi_benchmark``). The move counter
+                resets each game via :meth:`startGame`.
+            opening_moves: Number of the player's own opening plies to which
+                ``opening_temp`` applies before reverting to ``temp``.
+        """
         # Local import to avoid a cycle (mcts imports from core.interfaces).
         from core.mcts import MCTS
 
@@ -73,13 +87,21 @@ class NetworkPlayer:
         self._nnet = nnet
         self._mcts_config = mcts_config
         self._temp = temp
+        self._opening_temp = opening_temp
+        self._opening_moves = opening_moves
+        self._move_count = 0
         self._mcts = MCTS(game, nnet, mcts_config)
         self._last_pi: np.ndarray | None = None
 
     def __call__(self, board: IBoard) -> int:
-        # Run MCTS + get the action distribution at the configured temperature
-        # for actual play (temp=0 → one-hot deterministic; temp=1 → sampled).
-        pi_play = self._mcts.get_action_prob(board, temp=self._temp)
+        # Opening moves use ``opening_temp`` (sampling for position diversity),
+        # then revert to the configured play temperature.
+        temp = self._opening_temp if self._move_count < self._opening_moves else self._temp
+        self._move_count += 1
+
+        # Run MCTS + get the action distribution at the effective temperature
+        # for actual play (temp=0 → one-hot deterministic; temp>0 → sampled).
+        pi_play = self._mcts.get_action_prob(board, temp=temp)
 
         # Separately, extract the *raw visit-count distribution* (i.e. what
         # the policy looks like before temperature is applied). This is the
@@ -92,7 +114,7 @@ class NetworkPlayer:
         else:
             self._last_pi = np.asarray(pi_play, dtype=float)
 
-        if self._temp == 0:
+        if temp == 0:
             return int(np.argmax(pi_play))
         return int(np.random.choice(len(pi_play), p=pi_play))
 
@@ -115,6 +137,7 @@ class NetworkPlayer:
     # leak state.
     def startGame(self) -> None:  # noqa: N802 — Arena's pre-existing camelCase hook
         self.reset_search_tree()
+        self._move_count = 0
 
 
 # Note: ``load_network_player`` (a path-based factory that builds a wrapper

@@ -38,11 +38,16 @@ EVAL_SIMS_DEFAULT = 400
 REPLAYS_PER_LEVEL = 4  # games embedded per level in the report (keeps it readable)
 
 
-def _eval_mcts_config(base, sims: int):
+def _eval_mcts_config(base, sims: int, batch: int = 1):
     """Evaluation search (IDEAS I2): strong + deterministic — flat sim schedule,
-    K=1 (exact, no virtual-loss approximation), no Dirichlet noise, temp=0 at the player."""
+    no Dirichlet noise, temp=0 at the player.
+
+    ``batch`` is the MCTS leaf batch size (K). K=1 is exact (no virtual-loss
+    approximation); K>1 batches leaf evaluations, which is dramatically faster on
+    a GPU/MPS backend (see the CPU-vs-MPS gap) at the cost of the same virtual-loss
+    approximation the net trained under."""
     return replace(
-        base, num_mcts_sims=sims, mcts_batch_size=1,
+        base, num_mcts_sims=sims, mcts_batch_size=batch,
         dirichlet_epsilon=0.0, sim_schedule="flat",
     )
 
@@ -165,8 +170,17 @@ def main() -> None:
     group.add_argument("--sweep", action="store_true", help="Sweep all levels 1-9")
     ap.add_argument("--games", type=int, default=20, help="Games per level (split half/half by colour)")
     ap.add_argument("--sims", type=int, default=EVAL_SIMS_DEFAULT, help="Eval MCTS simulations")
-    ap.add_argument("--seed", type=int, default=1, help="Pentobi engine seed")
+    ap.add_argument("--seed", type=int, default=1, help="Pentobi engine base seed (per-game reseed)")
+    ap.add_argument("--opening-temp", type=float, default=1.0,
+                    help="Temperature for the net's opening plies (diversifies games; 0 = deterministic)")
+    ap.add_argument("--opening-moves", type=int, default=4,
+                    help="Number of the net's opening plies sampled at --opening-temp before temp=0")
+    ap.add_argument("--batch", type=int, default=16,
+                    help="MCTS leaf batch size K (1 = exact; >1 batches leaf evals, far faster on GPU/MPS)")
     ap.add_argument("--out", default=None, help="Report path (default temp/benchmarks/pentobi_<net>.html)")
+    ap.add_argument("--mps", dest="mps", action="store_true", default=True,
+                    help="Use Apple MPS (Metal) for inference when available (default on)")
+    ap.add_argument("--no-mps", dest="mps", action="store_false", help="Force CPU instead of MPS")
     args = ap.parse_args()
 
     if find_pentobi_gtp() is None:
@@ -175,11 +189,15 @@ def main() -> None:
             "or set $PENTOBI_GTP_PATH.",
         )
 
+    if args.mps:
+        import os
+        os.environ["ALPHABLOKUS_MPS"] = "1"  # opt into MPS in the wrapper (eval-only)
+
     config: RunConfig = load_args(args.config)
     import torch
     if config.net_config.cuda and not torch.cuda.is_available():
         config = replace(config, net_config=replace(config.net_config, cuda=False))
-        print("[benchmark] CUDA unavailable — running the net on CPU.", flush=True)
+        print("[benchmark] CUDA unavailable — using MPS/CPU for the net.", flush=True)
 
     game, nnet = instantiate_game_and_network(config)
     if args.net:
@@ -188,7 +206,10 @@ def main() -> None:
     else:
         print("[benchmark] no --net given: benchmarking a fresh random-init net.", flush=True)
 
-    net_player = NetworkPlayer(game, nnet, _eval_mcts_config(config.mcts_config, args.sims), temp=0.0)
+    net_player = NetworkPlayer(
+        game, nnet, _eval_mcts_config(config.mcts_config, args.sims, args.batch), temp=0.0,
+        opening_temp=args.opening_temp, opening_moves=args.opening_moves,
+    )
     levels = list(range(1, 10)) if args.sweep else [args.level if args.level else 1]
 
     per_level = []

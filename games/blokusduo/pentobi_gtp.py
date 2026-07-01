@@ -112,6 +112,14 @@ class PentobiGtp:
     def clear_board(self) -> None:
         self.send("clear_board")
 
+    def set_random_seed(self, seed: int) -> None:
+        """Reseed the engine's RNG (GTP ``set_random_seed``).
+
+        ``clear_board`` resets the position but *not* the RNG, so a reused engine
+        replays one continuous random stream across games. Reseeding per game makes
+        each game an independent draw (evaluation independence)."""
+        self.send(f"set_random_seed {seed}")
+
     def play(self, color: str, move: str) -> None:
         """Inform the engine of a move. ``color`` is 'b'/'w'; ``move`` is cells or 'pass'."""
         self.send(f"play {color} {move}")
