@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import time
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Sequence
@@ -112,11 +113,29 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         self.board_rows: int = self.nnet.board_rows
         self.board_cols: int = self.nnet.board_cols
 
-        if self.net_config.cuda:
-            self.nnet.cuda()
+        self._device = self._resolve_device()
+        self.nnet.to(self._device)
 
         self.optimizer = optim.Adam(self.nnet.parameters(), lr=self.net_config.learning_rate)
         self.scheduler: LRScheduler | None = self._create_scheduler()
+
+    def _resolve_device(self) -> torch.device:
+        """Pick the compute device.
+
+        ``net_config.cuda`` selects CUDA (the box). Otherwise CPU — *unless*
+        ``ALPHABLOKUS_MPS=1`` is set and Apple's MPS (Metal) backend is available,
+        in which case use MPS (batched inference is far faster than CPU on Apple
+        Silicon). MPS is opt-in and scoped to eval: training/tests stay on CPU on
+        the Mac (the MPS training path is unvalidated), so default behaviour is
+        unchanged. ``PYTORCH_ENABLE_MPS_FALLBACK=1`` lets any unimplemented op fall
+        back to CPU rather than erroring.
+        """
+        if self.net_config.cuda and torch.cuda.is_available():
+            return torch.device("cuda")
+        if os.environ.get("ALPHABLOKUS_MPS") == "1" and torch.backends.mps.is_available():
+            os.environ.setdefault("PYTORCH_ENABLE_MPS_FALLBACK", "1")
+            return torch.device("mps")
+        return torch.device("cpu")
 
     def _create_scheduler(self) -> LRScheduler | None:
         """Create LR scheduler based on config. Returns None if no schedule configured."""
@@ -203,10 +222,9 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             loader = DataLoader(dataset, batch_size=self.net_config.batch_size, shuffle=True)
             t = tqdm(loader, desc='Training Net')
             for batch_number, (boards, target_pis, target_vs) in enumerate(t):
-                if self.net_config.cuda:
-                    boards, target_pis, target_vs = (boards.cuda(),
-                                                   target_pis.cuda(),
-                                                   target_vs.cuda())
+                boards, target_pis, target_vs = (boards.to(self._device),
+                                                 target_pis.to(self._device),
+                                                 target_vs.to(self._device))
 
                 out_pi, out_v = self.nnet(boards)
                 l_pi = self.loss_pi(target_pis, out_pi)
@@ -299,8 +317,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 end = chunk_start + self.net_config.batch_size
                 boards_chunk = eval_set.boards[chunk_start:end]
                 tensor = torch.tensor(boards_chunk, dtype=torch.float32)
-                if self.net_config.cuda:
-                    tensor = tensor.cuda()
+                tensor = tensor.to(self._device)
                 log_pi, v = self.nnet(tensor)
                 pi = torch.exp(log_pi)
 
@@ -380,8 +397,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             ``(N,)`` value array, both float32 on the CPU.
         """
         tensor = torch.from_numpy(np.ascontiguousarray(planes, dtype=np.float32))
-        if self.net_config.cuda:
-            tensor = tensor.cuda()
+        tensor = tensor.to(self._device)
         self.nnet.eval()
         with torch.no_grad(), self._inference_autocast():
             log_pi, v = self.nnet(tensor)

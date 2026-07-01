@@ -47,6 +47,8 @@ class PentobiPlayer:
     ) -> None:
         self._translator = PentobiMoveTranslator(game)
         self._engine = PentobiGtp(level, binary=binary, threads=threads, seed=seed)
+        self._base_seed = seed
+        self._game_index = 0
         self._my_color: str | None = None
         self._opp_color: str | None = None
 
@@ -57,8 +59,14 @@ class PentobiPlayer:
     # -- Arena hooks -----------------------------------------------------------
 
     def startGame(self) -> None:  # noqa: N802 — Arena hook name
-        """Reset for a new game (called by the Arena before each game)."""
+        """Reset for a new game (called by the Arena before each game).
+
+        Reseeds the engine per game (when a base seed was given) so reused-process
+        games are independent draws rather than one continuous RNG stream."""
         self._engine.clear_board()
+        if self._base_seed is not None:
+            self._engine.set_random_seed(self._base_seed + self._game_index)
+            self._game_index += 1
         self._my_color = None
         self._opp_color = None
 
