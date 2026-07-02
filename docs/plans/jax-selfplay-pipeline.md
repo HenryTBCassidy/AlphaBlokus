@@ -32,7 +32,7 @@ Prerequisites: PR #19 (the spike) merged — this plan builds directly on
 | G7 | Backend-vs-backend throughput benchmark (games/s, sims/s, VRAM) on the box; extend the spike harness | 1 day | High | |
 | G8 | A/B validation: two ~15-gen training runs (python vs jax backend, same config); compare Elo trajectory, final-net head-to-head arena, Pentobi L1; research note | 1 day + box time | High | |
 | G9 | Flip Blokus default to `selfplay_backend: "jax"`; docs (CLAUDE.md, README, REMOTE-TRAINING, training estimates) | 0.5 day | High | |
-| G10 | Gumbel mode (`search_policy: "gumbel"`, opt-in): mctx `gumbel_muzero_policy`, n≈32–64 sims; validation run — the known ~6× sims lever | 1–2 days | Medium | |
+| G10 | Gumbel mode (`search_policy: "gumbel"`, opt-in): mctx `gumbel_muzero_policy`, n≈32–64 sims; validation run — the known ~6× sims lever | 1–2 days | Medium | ✅ |
 
 Total: ~3–4 working weeks solo. G1→G6 are sequential; G7 depends on G6; G8 on G7; G10 is
 independent after G6 and can be dropped from this plan without affecting the flip (G9).

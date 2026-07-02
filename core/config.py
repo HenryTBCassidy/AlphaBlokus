@@ -55,6 +55,16 @@ class MCTSConfig:
     sims_min: int = 1
     sim_branching_scale: float = 1.0
 
+    # Search policy — jax backend only (the python backend is PUCT-only and
+    # warns if this is set to "gumbel"). "puct" = classic AlphaZero (Dirichlet
+    # root noise + PUCT selection); "gumbel" = mctx's Gumbel AlphaZero
+    # (Sequential Halving root, no Dirichlet/temperature, policy target =
+    # completed-Q improved policy). Gumbel achieves equal-or-better policy
+    # improvement at far fewer sims (n≈16–64) — the plan's G10 lever. This is a
+    # deliberate behavioural change, opt-in and validated by its own A/B run.
+    search_policy: Literal["puct", "gumbel"] = "puct"
+    gumbel_max_considered: int = 16  # root actions Sequential Halving considers
+
 
 @dataclass(frozen=True)
 class JaxSelfPlayConfig:

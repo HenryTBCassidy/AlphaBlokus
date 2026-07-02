@@ -136,6 +136,11 @@ class Coach:
             resume_wandb_run_id: W&B run id to re-attach to (from the resume
                 marker), so the dashboard shows one continuous run.
         """
+        if config.mcts_config.search_policy == "gumbel" and config.selfplay_backend != "jax":
+            raise ValueError(
+                "search_policy 'gumbel' is only implemented by the jax self-play backend "
+                "(the python MCTS is PUCT-only); set selfplay_backend: 'jax' or search_policy: 'puct'."
+            )
         self.resume = resume
         # Seed everything FIRST — before any wrapper / MCTS instance is built,
         # so weight init, replay shuffles, MCTS tie-breaks and the global

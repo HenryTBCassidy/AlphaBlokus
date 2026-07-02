@@ -69,6 +69,7 @@ def make_actor(
     batch_size: int,
     temp_threshold: int,
     wave_plies: int,
+    use_search_action: bool = False,
 ):
     """Build ``(initial_carry, run_wave)`` for a fixed batch size.
 
@@ -95,12 +96,17 @@ def make_actor(
             result = search(params, search_key, carry.games)
             weights = result.action_weights  # (B, K)
 
-            sampled = jax.random.categorical(sample_key, jnp.log(jnp.maximum(weights, 1e-30)))
-            is_max = weights == weights.max(axis=-1, keepdims=True)
-            tie_noise = jax.random.uniform(tie_key, weights.shape)
-            greedy = jnp.argmax(jnp.where(is_max, tie_noise, -1.0), axis=-1)
-            compact = jnp.where(carry.move_counts < temp_threshold, sampled, greedy)
-            global_action = result.topk_ids[batch_index, compact]
+            if use_search_action:
+                # Gumbel mode: play the Sequential-Halving winner — exploration
+                # comes from the Gumbel noise inside the search itself.
+                global_action = result.chosen_global
+            else:
+                sampled = jax.random.categorical(sample_key, jnp.log(jnp.maximum(weights, 1e-30)))
+                is_max = weights == weights.max(axis=-1, keepdims=True)
+                tie_noise = jax.random.uniform(tie_key, weights.shape)
+                greedy = jnp.argmax(jnp.where(is_max, tie_noise, -1.0), axis=-1)
+                compact = jnp.where(carry.move_counts < temp_threshold, sampled, greedy)
+                global_action = result.topk_ids[batch_index, compact]
 
             new_games = kernels.step_batch(carry.games, global_action)
             result_white = kernels.game_result_batch(new_games, jnp.int8(1))

@@ -52,6 +52,7 @@ def _artefacts(config: RunConfig) -> dict[str, Any]:
     key = (
         jax_config.batch_size, jax_config.top_k, jax_config.dtype, jax_config.wave_plies,
         mcts.num_mcts_sims, mcts.cpuct, mcts.dirichlet_epsilon, mcts.dirichlet_alpha,
+        mcts.search_policy, mcts.gumbel_max_considered,
         config.temp_threshold,
     )
     if key not in _ARTEFACT_CACHE:
@@ -70,12 +71,15 @@ def _artefacts(config: RunConfig) -> dict[str, Any]:
             dirichlet_epsilon=mcts.dirichlet_epsilon,
             dirichlet_alpha=mcts.dirichlet_alpha,
             dtype=jax_config.dtype,
+            policy=mcts.search_policy,
+            gumbel_max_considered=mcts.gumbel_max_considered,
         ))
         initial_carry, run_wave = make_actor(
             kernels, search,
             batch_size=jax_config.batch_size,
             temp_threshold=config.temp_threshold,
             wave_plies=jax_config.wave_plies,
+            use_search_action=mcts.search_policy == "gumbel",
         )
         _ARTEFACT_CACHE[key] = {
             "game": game,

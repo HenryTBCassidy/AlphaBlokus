@@ -73,22 +73,31 @@ class SearchConfig:
     dirichlet_alpha: float = 0.03
     qtransform: str = "raw"
     dtype: str = "float32"
+    policy: str = "puct"  # "puct" | "gumbel" (mctx gumbel_muzero_policy — G10)
+    gumbel_max_considered: int = 16
 
 
 class SearchResult(NamedTuple):
     """Per-game outputs of one batched search.
 
     Attributes:
-        action_weights: ``(B, K)`` root visit distribution over compact slots.
+        action_weights: ``(B, K)`` policy target over compact slots — the root
+            visit distribution under PUCT, the completed-Q improved policy
+            under Gumbel.
         topk_ids: ``(B, K)`` global action id per compact slot.
         root_value: ``(B,)`` tree value estimate of the root.
         visit_counts: ``(B, K)`` raw root visit counts.
+        chosen_global: ``(B,)`` the search's own selected action as a global
+            id. Under Gumbel this is the Sequential-Halving winner and is what
+            self-play should play; under PUCT the actor's temperature sampling
+            supersedes it.
     """
 
     action_weights: jnp.ndarray
     topk_ids: jnp.ndarray
     root_value: jnp.ndarray
     visit_counts: jnp.ndarray
+    chosen_global: jnp.ndarray
 
 
 def qtransform_raw_value(tree: mctx.Tree, node_index: jnp.ndarray) -> jnp.ndarray:
@@ -176,28 +185,51 @@ def make_search(kernels: JaxKernels, config: SearchConfig) -> Callable[..., Sear
     def search(params: dict[str, Any], rng_key: jnp.ndarray, states: GameState) -> SearchResult:
         noise_key, search_key = jax.random.split(rng_key)
         log_pi, root_value = policy_value(params, states)
-        root_logits, root_ids = topk_legal(masked_root_logits(states, log_pi, noise_key))
+        # Gumbel supplies its own root exploration (Gumbel noise + Sequential
+        # Halving); Dirichlet pre-mixing is a PUCT-only concept.
+        root_log_pi = log_pi if config.policy == "gumbel" else masked_root_logits(states, log_pi, noise_key)
+        if config.policy == "gumbel":
+            masks = kernels.legal_mask_batch(states)
+            root_log_pi = jnp.where(masks, root_log_pi, -jnp.inf)
+        root_logits, root_ids = topk_legal(root_log_pi)
         root = mctx.RootFnOutput(
             prior_logits=root_logits, value=root_value, embedding=(states, root_ids),
         )
-        policy_output = mctx.muzero_policy(
-            params=params,
-            rng_key=search_key,
-            root=root,
-            recurrent_fn=recurrent_fn,
-            num_simulations=config.num_simulations,
-            invalid_actions=jnp.isneginf(root_logits),
-            dirichlet_fraction=0.0,  # noise pre-mixed before top-K, see module docstring
-            pb_c_init=config.cpuct,
-            pb_c_base=1e9,
-            qtransform=qtransform,
-        )
+        if config.policy == "gumbel":
+            policy_output = mctx.gumbel_muzero_policy(
+                params=params,
+                rng_key=search_key,
+                root=root,
+                recurrent_fn=recurrent_fn,
+                num_simulations=config.num_simulations,
+                invalid_actions=jnp.isneginf(root_logits),
+                max_num_considered_actions=config.gumbel_max_considered,
+            )
+            # Gumbel's action_weights (softmax of prior + completed Q) is the
+            # paper's policy-improvement target — not the visit distribution.
+            action_weights = policy_output.action_weights
+        else:
+            policy_output = mctx.muzero_policy(
+                params=params,
+                rng_key=search_key,
+                root=root,
+                recurrent_fn=recurrent_fn,
+                num_simulations=config.num_simulations,
+                invalid_actions=jnp.isneginf(root_logits),
+                dirichlet_fraction=0.0,  # noise pre-mixed before top-K, see module docstring
+                pb_c_init=config.cpuct,
+                pb_c_base=1e9,
+                qtransform=qtransform,
+            )
+            action_weights = None  # visit distribution, filled from the summary below
         summary = policy_output.search_tree.summary()
+        batch_index = jnp.arange(root_ids.shape[0])
         return SearchResult(
-            action_weights=summary.visit_probs,
+            action_weights=summary.visit_probs if action_weights is None else action_weights,
             topk_ids=root_ids,
             root_value=summary.value,
             visit_counts=summary.visit_counts,
+            chosen_global=root_ids[batch_index, policy_output.action],
         )
 
     return jax.jit(search)
