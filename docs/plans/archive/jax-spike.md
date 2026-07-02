@@ -1,5 +1,11 @@
 # JAX De-Risk Spike — GPU-Native Legality, Step, and Throughput Ceiling
 
+> **Completed 2026-07-02.** All rows ✅. Results and the go/no-go verdict live in
+> [`docs/research/jax-spike-findings.md`](../../research/jax-spike-findings.md):
+> parity exact everywhere; env solved (570k steps/s); pipeline purely inference-bound at
+> ~3× production on the 3060 Ti — criterion 2 not met on current hardware; **conditional
+> go** (JAX/mctx + Gumbel low-sim search + RTX 5070 Ti clears 10× multiplicatively).
+
 Before committing to a full JAX/mctx rewrite of self-play, prove (or kill) the core hypothesis: **Blokus Duo legality and board transitions can be expressed as fixed-shape JAX array ops that are bit-identical to the Python engine and, batched on the RTX 3060 Ti, fast enough to project ≥10× self-play throughput.** The spike produces parity-validated kernels, throughput measurements, and a written go/no-go decision — no mctx integration, no training, no changes to the production pipeline.
 
 Context: `docs/research/numba-hot-path-results.md` (the numba plan landed 2.33× single-worker per-sim but only **1.26× production** — 0.947 games/s / ~10.5k sims/s at 16 workers — because inference is now ~44% of the wall and the **GPU is the new bottleneck**; CPU micro-opt is exhausted), `docs/research/deepmind-run-configs.md` (we are data/net/sims-poor vs every reference config), and the run3 Pentobi benchmarks (best 25% at level 1; no visible gain gen 30 → gen 82). A GPU-native pipeline attacks both remaining walls at once: dense large-batch inference *and* zero CPU-side game logic. The full-rewrite plan is deliberately *not* written yet — it depends on this spike's numbers.
@@ -16,9 +22,9 @@ Prerequisites: none (independent of the training pipeline; run3 can keep running
 | J2 | Static table builder: derive `(17837, 196)` cover/edge/corner matrices + per-action metadata from `build_move_tables()` | 3 h | High | ✅ |
 | J3 | JAX legality kernel `legal_mask(state, player)`; exact parity vs reference on all 5,000 dev-cache positions | 1 day | High | ✅ |
 | J4 | JAX board step, game-end detection, and scoring; parity by replaying the dev-cache action sequences | 1 day | High | ✅ |
-| J5 | Batched random-rollout throughput benchmark (Mac CPU + box GPU), batch-size sweep, HTML report | 0.5–1 day | High | |
-| J6 | Dummy 128f×8b JAX net; mask+forward+sample "pseudo-self-play" step throughput on the box | 0.5–1 day | Medium | |
-| J7 | Findings report `docs/research/jax-spike-findings.md` + go/no-go decision against the pre-registered criteria | 2 h | High | |
+| J5 | Batched random-rollout throughput benchmark (Mac CPU + box GPU), batch-size sweep, HTML report | 0.5–1 day | High | ✅ |
+| J6 | Dummy 128f×8b JAX net; mask+forward+sample "pseudo-self-play" step throughput on the box | 0.5–1 day | Medium | ✅ |
+| J7 | Findings report `docs/research/jax-spike-findings.md` + go/no-go decision against the pre-registered criteria | 2 h | High | ✅ |
 
 Total: ~4–5 working days. J1→J4 are strictly sequential; J5/J6 depend on J4; J6 can be dropped if J5 already settles the decision either way.
 
