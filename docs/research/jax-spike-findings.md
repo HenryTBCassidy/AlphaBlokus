@@ -106,10 +106,10 @@ the way a no-go was expected to fail:
   the JAX pipeline simply collects that 3× and removes the CPU from the equation entirely.
 - Post-rewrite, throughput scales with exactly two levers, both multiplicative and both
   already on the table:
-  - **Sims per move.** Run3 spends ~392 sims/move (887,130/2,265, N6 data). mctx's Gumbel
+  - **Sims per move.** Run3 spends ~ 392 sims/move (887,130/2,265, N6 data). mctx's Gumbel
     AlphaZero achieves equal-or-better policy improvement at 16–64 sims/move in published
-    results (Danihelka et al.; the pgx training runs use it). At n=64 that's ~6× fewer
-    sims → **~18 games/s projected (≈19× production)** on the 3060 Ti alone.
+    results (Danihelka et al.; the pgx training runs use it). At n=64 that's ~ 6× fewer
+    sims → **~ 18 games/s projected (≈19× production)** on the 3060 Ti alone.
   - **Tensor compute.** RTX 5070 Ti ≈ 2.5–2.7× tensor throughput and 16 GB (unlocks the
     OOM'd bf16 large-batch configs) → **~45 games/s projected (≈47×)** combined with Gumbel.
     Cloud A100/H100 or a second GPU scale the same way — self-play actors are embarrassingly
@@ -117,7 +117,7 @@ the way a no-go was expected to fail:
 
 **Recommendation:** treat this as a **conditional go**. The rewrite is only worth doing as
 the package *JAX/mctx pipeline + Gumbel low-sim search + the 5070 Ti* (any two of the three
-levers clear the 10× bar; all three land ~30–50×). A rewrite that keeps 392-sims PUCT search
+levers clear the 10× bar; all three land ~ 30–50×). A rewrite that keeps 392-sims PUCT search
 on the 3060 Ti buys 3× and is not worth weeks of work. If the 5070 Ti is not purchased and
 Gumbel is off the table, the honest fallback is the plan's stated no-go path: incremental
 inference work on the current pipeline (bf16/torch.compile, larger K) for ≲1.5×.
