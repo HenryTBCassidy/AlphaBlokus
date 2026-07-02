@@ -57,6 +57,22 @@ class MCTSConfig:
 
 
 @dataclass(frozen=True)
+class JaxSelfPlayConfig:
+    """Knobs for the GPU-native jax self-play backend (``selfplay_backend: "jax"``).
+
+    Search hyperparameters (sims, cpuct, Dirichlet noise) come from
+    ``MCTSConfig`` — same source of truth as the python backend; these are the
+    jax-only execution knobs. Defaults chosen from the G4/G7 box sweeps
+    (docs/plans/jax-selfplay-pipeline.md).
+    """
+
+    batch_size: int = 256  # parallel game slots searched in lockstep
+    top_k: int = 128  # compact per-node action space (tree memory ∝ top_k)
+    dtype: str = "bfloat16"  # net inference dtype: "bfloat16" or "float32"
+    wave_plies: int = 32  # scan horizon between host-side harvests
+
+
+@dataclass(frozen=True)
 class NetConfig:
     """Configuration parameters for the neural network.
 
@@ -153,6 +169,17 @@ class RunConfig:
     # ``epochs × (B / num_eps)`` — logged, not a knob. e.g. ``B=5000``,
     # ``num_eps=1000``, ``epochs=1`` ⇒ reuse 5 (run2's regime).
     replay_buffer_games: int = 5000
+
+    # Which engine generates self-play games. ``"python"`` is the original
+    # CPU-worker path (serial or ``num_parallel_workers``-way parallel);
+    # ``"jax"`` is the GPU-native batched pipeline (games/blokusduo/jaxenv +
+    # core/jaxplay — Blokus only, requires the ``jax``/``jax-cuda`` extra).
+    # Arena/Elo/Pentobi evaluation always uses the python path regardless.
+    # Plan: docs/plans/jax-selfplay-pipeline.md.
+    selfplay_backend: Literal["python", "jax"] = "python"
+
+    # Execution knobs for the jax backend; ignored by the python backend.
+    jax_selfplay: JaxSelfPlayConfig = field(default_factory=JaxSelfPlayConfig)
 
     # Optional reporting backends
     wandb: WandbConfig | None = None  # If set, mirror metrics to Weights & Biases

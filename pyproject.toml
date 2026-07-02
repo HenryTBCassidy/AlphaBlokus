@@ -26,10 +26,12 @@ dev = [
 # install the accelerated variant instead: uv sync --extra jax-cuda
 jax = [
     "jax>=0.6.0",
+    "mctx>=0.0.5",
     "matplotlib>=3.8.0",
 ]
 jax-cuda = [
     "jax[cuda12]>=0.6.0",
+    "mctx>=0.0.5",
     "matplotlib>=3.8.0",
 ]
 

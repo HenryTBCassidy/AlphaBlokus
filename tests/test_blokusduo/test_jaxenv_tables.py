@@ -10,8 +10,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from experiments.jax_spike.tables import JaxTables, build_jax_tables
 from games.blokusduo.board import Action
+from games.blokusduo.jaxenv.tables import JaxTables, build_jax_tables
 from games.blokusduo.movegen_tables import build_move_tables
 from games.blokusduo.pieces import Orientation
 

@@ -23,12 +23,12 @@ Prerequisites: PR #19 (the spike) merged — this plan builds directly on
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| G1 | Backend seam: `selfplay_backend` config field + Coach dispatch + `PythonSelfPlayBackend` wrapping the existing path (pure refactor, zero behaviour change) | 1 day | High | |
-| G2 | Promote spike code: `experiments/jax_spike/` → `games/blokusduo/jaxenv/`; tests → `tests/test_blokusduo/`; benchmark → `scripts/benchmark_jax_env.py` | 0.5 day | High | |
-| G3 | Inference-only JAX net: exact port of `AlphaBlokusDuo` (plain jnp, eval-mode BN), torch→jax weight converter, forward-equivalence test, bf16 option | 2–3 days | High | |
+| G1 | Backend seam: `selfplay_backend` config field + Coach dispatch + `PythonSelfPlayBackend` wrapping the existing path (pure refactor, zero behaviour change) | 1 day | High | ✅ |
+| G2 | Promote spike code: `experiments/jax_spike/` → `games/blokusduo/jaxenv/`; tests → `tests/test_blokusduo/`; benchmark → `scripts/benchmark_jax_env.py` | 0.5 day | High | ✅ |
+| G3 | Inference-only JAX net: exact port of `AlphaBlokusDuo` (plain jnp, eval-mode BN), torch→jax weight converter, forward-equivalence test, bf16 option | 2–3 days | High | ✅ |
 | G4 | Search core: mctx `muzero_policy` behind a top-K action-compaction layer; PUCT/noise/temp parameter mapping; validation vs Python MCTS on fixed positions; VRAM/throughput sweep → choose K, B, S defaults | 4–5 days | High | |
-| G5 | Batched actor loop (pgx auto-reset pattern): temp schedule per slot, action sampling, game harvesting, value backfill, host-side symmetry augmentation, `ProcessedExample` assembly | 3–4 days | High | |
-| G6 | `JaxSelfPlayBackend`: Coach integration, per-generation torch→jax weight sync, stats reporting, 1-generation integration test | 2 days | High | |
+| G5 | Batched actor loop (pgx auto-reset pattern): temp schedule per slot, action sampling, game harvesting, value backfill, host-side symmetry augmentation, `ProcessedExample` assembly | 3–4 days | High | ✅ |
+| G6 | `JaxSelfPlayBackend`: Coach integration, per-generation torch→jax weight sync, stats reporting, 1-generation integration test | 2 days | High | ✅ |
 | G7 | Backend-vs-backend throughput benchmark (games/s, sims/s, VRAM) on the box; extend the spike harness | 1 day | High | |
 | G8 | A/B validation: two ~15-gen training runs (python vs jax backend, same config); compare Elo trajectory, final-net head-to-head arena, Pentobi L1; research note | 1 day + box time | High | |
 | G9 | Flip Blokus default to `selfplay_backend: "jax"`; docs (CLAUDE.md, README, REMOTE-TRAINING, training estimates) | 0.5 day | High | |
@@ -101,11 +101,14 @@ class ISelfPlayBackend(Protocol):
     def generate(self, generation: int) -> tuple[list[GameExamples], list[MCTSEpisodeStats]]: ...
 ```
 
-`PythonSelfPlayBackend` wraps the existing serial/parallel dispatch currently inlined in
-`Coach._learn_loop` (coach.py:254-257) — moved, not rewritten; `run_self_play_episodes_parallel`
-and `play_self_play_episode` are untouched. Coach selects the backend once in `__init__`;
-`"jax"` raises `NotImplementedError` until G6. All 316 tests must stay green; the
-1-worker-vs-4-worker determinism test pins that the wrapper changed nothing.
+> **As built:** lighter than the Protocol sketch — the existing serial/parallel runners stay
+> as Coach methods (they are metrics-coupled anyway); the seam is a three-way dispatch in
+> `_learn_loop` plus `Coach._run_self_play_jax`, which mirrors `_run_self_play_parallel`'s
+> exact contract (save checkpoint → call `core.jaxplay.backend.generate_self_play_games(config,
+> generation, checkpoint_path)` → log per-game stats through a shared `_log_self_play_stats`
+> helper that de-triplicates the logging). Jax import is deferred inside the branch. Config
+> field lands with parse tests (`tests/test_core/test_selfplay_backend_config.py`); the
+> 1-worker-vs-4-worker determinism test pins that the python path is untouched.
 
 ## G2. Promote the spike code
 

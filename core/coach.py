@@ -251,7 +251,9 @@ class Coach:
                 logger.info(f'Starting Self-Play For Generation #{generation} ...')
                 self_play_start = time.perf_counter()
 
-                if self.config.num_parallel_workers > 1:
+                if self.config.selfplay_backend == "jax":
+                    fresh_games = self._run_self_play_jax(generation)
+                elif self.config.num_parallel_workers > 1:
                     fresh_games = self._run_self_play_parallel(generation)
                 else:
                     fresh_games = self._run_self_play_serial(generation)
@@ -415,6 +417,26 @@ class Coach:
             last_file_index, self.config.replay_buffer_games,
         )
 
+    def _log_self_play_stats(self, generation: int, episode_idx: int, stats) -> None:
+        """One episode's MCTS profiling → metrics, identical schema for every
+        self-play backend so downstream reports don't care which path produced
+        the data."""
+        self.metrics.log_self_play_profiling(
+            generation=generation,
+            episode=episode_idx,
+            num_moves=stats.num_moves,
+            total_sims=stats.total_sims,
+            total_search_time_s=stats.total_search_time_s,
+            total_inference_time_s=stats.total_inference_time_s,
+            num_leaf_expansions=stats.num_leaf_expansions,
+            tree_size=stats.tree_size,
+            mean_policy_entropy=stats.mean_policy_entropy,
+            total_valid_moves_time_s=stats.total_valid_moves_time_s,
+            total_game_ended_time_s=stats.total_game_ended_time_s,
+            num_valid_moves_calls=stats.num_valid_moves_calls,
+            num_game_ended_calls=stats.num_game_ended_calls,
+        )
+
     def _run_self_play_serial(self, generation: int) -> list[GameExamples]:
         """Sequential self-play loop: same MCTS instance lifecycle, same
         per-episode logging, same tqdm. The parallel codepath is opt-in
@@ -427,23 +449,32 @@ class Coach:
         for episode_idx in tqdm(range(self.config.num_eps), desc="Self Play"):
             self.mcts = MCTS(self.game, self.nnet, self.config.mcts_config)
             fresh_games.append(self.execute_episode())
+            self._log_self_play_stats(generation, episode_idx, self.mcts.get_episode_stats())
+        return fresh_games
 
-            stats = self.mcts.get_episode_stats()
-            self.metrics.log_self_play_profiling(
-                generation=generation,
-                episode=episode_idx,
-                num_moves=stats.num_moves,
-                total_sims=stats.total_sims,
-                total_search_time_s=stats.total_search_time_s,
-                total_inference_time_s=stats.total_inference_time_s,
-                num_leaf_expansions=stats.num_leaf_expansions,
-                tree_size=stats.tree_size,
-                mean_policy_entropy=stats.mean_policy_entropy,
-                total_valid_moves_time_s=stats.total_valid_moves_time_s,
-                total_game_ended_time_s=stats.total_game_ended_time_s,
-                num_valid_moves_calls=stats.num_valid_moves_calls,
-                num_game_ended_calls=stats.num_game_ended_calls,
-            )
+    def _run_self_play_jax(self, generation: int) -> list[GameExamples]:
+        """GPU-native batched self-play (``selfplay_backend: "jax"``).
+
+        Mirrors ``_run_self_play_parallel``'s contract: saves the current net to
+        a checkpoint the backend loads, returns one list of positions per game,
+        and logs per-game stats through the shared schema. The jax import is
+        deferred so python-backend runs never require the ``jax`` extra.
+        """
+        from core.jaxplay.backend import generate_self_play_games
+
+        worker_init_checkpoint = "parallel_worker_init.pth.tar"
+        self.nnet.save_checkpoint(filename=worker_init_checkpoint)
+
+        per_game_examples, per_game_stats = generate_self_play_games(
+            config=self.config,
+            generation=generation,
+            checkpoint_path=worker_init_checkpoint,
+        )
+
+        fresh_games: list[GameExamples] = []
+        for episode_idx, (examples, stats) in enumerate(zip(per_game_examples, per_game_stats, strict=True)):
+            fresh_games.append(examples)
+            self._log_self_play_stats(generation, episode_idx, stats)
         return fresh_games
 
     def _run_self_play_parallel(self, generation: int) -> list[GameExamples]:
@@ -472,21 +503,7 @@ class Coach:
         fresh_games: list[GameExamples] = []
         for episode_idx, (examples, stats) in enumerate(zip(per_ep_examples, per_ep_stats, strict=False)):
             fresh_games.append(examples)
-            self.metrics.log_self_play_profiling(
-                generation=generation,
-                episode=episode_idx,
-                num_moves=stats.num_moves,
-                total_sims=stats.total_sims,
-                total_search_time_s=stats.total_search_time_s,
-                total_inference_time_s=stats.total_inference_time_s,
-                num_leaf_expansions=stats.num_leaf_expansions,
-                tree_size=stats.tree_size,
-                mean_policy_entropy=stats.mean_policy_entropy,
-                total_valid_moves_time_s=stats.total_valid_moves_time_s,
-                total_game_ended_time_s=stats.total_game_ended_time_s,
-                num_valid_moves_calls=stats.num_valid_moves_calls,
-                num_game_ended_calls=stats.num_game_ended_calls,
-            )
+            self._log_self_play_stats(generation, episode_idx, stats)
         return fresh_games
 
     def _run_arena_serial(

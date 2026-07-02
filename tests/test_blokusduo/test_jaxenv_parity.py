@@ -16,16 +16,16 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from tests.test_jax_spike.conftest import DEV_CACHE_PATH
+from tests.test_blokusduo.conftest import DEV_CACHE_PATH
 
 if TYPE_CHECKING:
     from games.blokusduo.game import BlokusDuoGame
 
 jax = pytest.importorskip("jax")
 
-from experiments.jax_spike.bridge import numpy_state_from_board  # noqa: E402
-from experiments.jax_spike.kernels import GameState, make_kernels  # noqa: E402
-from experiments.jax_spike.tables import build_jax_tables  # noqa: E402
+from games.blokusduo.jaxenv.bridge import numpy_state_from_board  # noqa: E402
+from games.blokusduo.jaxenv.kernels import GameState, make_kernels  # noqa: E402
+from games.blokusduo.jaxenv.tables import build_jax_tables  # noqa: E402
 
 # Chunk size for the batched jax mask call — bounds the (chunk, 17837) int32
 # intermediates without changing results.
