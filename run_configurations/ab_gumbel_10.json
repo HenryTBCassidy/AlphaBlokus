@@ -1,6 +1,6 @@
 {
   "game": "blokusduo",
-  "run_name": "ab_jax_10",
+  "run_name": "ab_gumbel_10",
   "seed": 42,
   "num_generations": 10,
   "num_eps": 1000,
@@ -17,11 +17,13 @@
   "symmetry_diagnostic_positions": 100,
   "num_arena_matches": 50,
   "mcts_config": {
-    "num_mcts_sims": 300,
+    "num_mcts_sims": 64,
     "cpuct": 2.5,
     "mcts_batch_size": 16,
     "dirichlet_epsilon": 0.25,
-    "dirichlet_alpha": 0.03
+    "dirichlet_alpha": 0.03,
+    "search_policy": "gumbel",
+    "gumbel_max_considered": 16
   },
   "net_config": {
     "learning_rate": 0.001,
@@ -40,8 +42,9 @@
     "entity": null,
     "tags": [
       "ab-test",
-      "jax-backend",
-      "10gen"
+      "jax-gumbel",
+      "10gen",
+      "n64"
     ],
     "mode": "online"
   },

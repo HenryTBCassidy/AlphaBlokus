@@ -77,7 +77,11 @@ class JaxSelfPlayConfig:
     """
 
     batch_size: int = 256  # parallel game slots searched in lockstep
-    top_k: int = 128  # compact per-node action space (tree memory ∝ top_k)
+    # Compact per-node action space. mctx's per-sim tree traffic scales with
+    # top_k (measured: K=128 is ~5x slower than K=64 at 128f×8b), while search
+    # quality at K=64 still beats the python K=16 virtual-loss yardstick — see
+    # the G4/G7 notes in docs/plans/archive/jax-selfplay-pipeline.md.
+    top_k: int = 64
     dtype: str = "bfloat16"  # net inference dtype: "bfloat16" or "float32"
     wave_plies: int = 32  # scan horizon between host-side harvests
 

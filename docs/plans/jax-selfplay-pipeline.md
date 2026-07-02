@@ -26,7 +26,7 @@ Prerequisites: PR #19 (the spike) merged — this plan builds directly on
 | G1 | Backend seam: `selfplay_backend` config field + Coach dispatch + `PythonSelfPlayBackend` wrapping the existing path (pure refactor, zero behaviour change) | 1 day | High | ✅ |
 | G2 | Promote spike code: `experiments/jax_spike/` → `games/blokusduo/jaxenv/`; tests → `tests/test_blokusduo/`; benchmark → `scripts/benchmark_jax_env.py` | 0.5 day | High | ✅ |
 | G3 | Inference-only JAX net: exact port of `AlphaBlokusDuo` (plain jnp, eval-mode BN), torch→jax weight converter, forward-equivalence test, bf16 option | 2–3 days | High | ✅ |
-| G4 | Search core: mctx `muzero_policy` behind a top-K action-compaction layer; PUCT/noise/temp parameter mapping; validation vs Python MCTS on fixed positions; VRAM/throughput sweep → choose K, B, S defaults | 4–5 days | High | |
+| G4 | Search core: mctx `muzero_policy` behind a top-K action-compaction layer; PUCT/noise/temp parameter mapping; validation vs Python MCTS on fixed positions; VRAM/throughput sweep → choose K, B, S defaults | 4–5 days | High | ✅ |
 | G5 | Batched actor loop (pgx auto-reset pattern): temp schedule per slot, action sampling, game harvesting, value backfill, host-side symmetry augmentation, `ProcessedExample` assembly | 3–4 days | High | ✅ |
 | G6 | `JaxSelfPlayBackend`: Coach integration, per-generation torch→jax weight sync, stats reporting, 1-generation integration test | 2 days | High | ✅ |
 | G7 | Backend-vs-backend throughput benchmark (games/s, sims/s, VRAM) on the box; extend the spike harness | 1 day | High | |
@@ -160,6 +160,17 @@ statistically indistinguishable from Python-vs-Python across seeds (the Python s
 seed-to-seed agreement is the yardstick — batched search can't beat that). Also VRAM + sims/s
 sweep over (B, K, S) on the box → pick defaults. Escape hatch if mctx fights back: `mctx-az`
 fork or a custom fixed-shape tree — flagged for discussion before building either.
+
+> **Result (2026-07-02, box, run3 `accepted_82` net, S=400, 200 positions,
+> `scripts/validate_jax_search.py`, `temp/benchmarks/validate_jax_search.json`):** the
+> acceptance gate passes at every K. Yardstick — production's own python K=16 batching vs
+> the exact K=1 reference: top-1 **0.715**, overlap 0.620. Jax search vs the same reference:
+> K=64 → top-1 **0.735** / overlap 0.771; K=128 → **0.830** / 0.846; K=256 → **0.870** /
+> 0.922. i.e. the jax/mctx/top-K search is a strictly *better* approximation of the exact
+> PUCT search than the production pipeline's own virtual-loss batching, at every tested K.
+> Unit-level (small net, S=60, no batching noise): jax top-1 vs exact = 20/20 with 0.983
+> overlap. **K=128 chosen as default** (0.830 at half the tree memory of K=256). Small-net
+> corollary from the unit tests holds on the trained net; no mctx escape hatch needed.
 
 ## G5. Batched actor loop
 
