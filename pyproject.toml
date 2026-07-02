@@ -22,6 +22,16 @@ dev = [
     "pytest>=8.0.0",
     "ruff>=0.4.0",
 ]
+# JAX spike (docs/plans/jax-spike.md). CPU wheel by default; on the CUDA box
+# install the accelerated variant instead: uv sync --extra jax-cuda
+jax = [
+    "jax>=0.6.0",
+    "matplotlib>=3.8.0",
+]
+jax-cuda = [
+    "jax[cuda12]>=0.6.0",
+    "matplotlib>=3.8.0",
+]
 
 [tool.ruff]
 target-version = "py311"
