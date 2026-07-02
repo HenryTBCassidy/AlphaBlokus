@@ -137,8 +137,12 @@ def main() -> None:
         nnet = NNetWrapper(game, config)
         nnet.load_checkpoint(filename=str(checkpoint))
         nnet.save_checkpoint(filename="bench_init.pth.tar")
-        # Warm-up generation compiles the actor; measure the second.
-        generate_self_play_games(config, generation=1, checkpoint_path="bench_init.pth.tar")
+        # Warm-up generation compiles the actor (artefact cache keys on shapes,
+        # not num_eps, so a small warm-up covers the real run); measure the second.
+        import dataclasses
+
+        warmup = dataclasses.replace(config, num_eps=max(8, batch_size // 8))
+        generate_self_play_games(warmup, generation=1, checkpoint_path="bench_init.pth.tar")
         start = time.perf_counter()
         _examples, stats = generate_self_play_games(
             config, generation=2, checkpoint_path="bench_init.pth.tar",
