@@ -29,8 +29,8 @@ Prerequisites: PR #19 (the spike) merged — this plan builds directly on
 | G4 | Search core: mctx `muzero_policy` behind a top-K action-compaction layer; PUCT/noise/temp parameter mapping; validation vs Python MCTS on fixed positions; VRAM/throughput sweep → choose K, B, S defaults | 4–5 days | High | ✅ |
 | G5 | Batched actor loop (pgx auto-reset pattern): temp schedule per slot, action sampling, game harvesting, value backfill, host-side symmetry augmentation, `ProcessedExample` assembly | 3–4 days | High | ✅ |
 | G6 | `JaxSelfPlayBackend`: Coach integration, per-generation torch→jax weight sync, stats reporting, 1-generation integration test | 2 days | High | ✅ |
-| G7 | Backend-vs-backend throughput benchmark (games/s, sims/s, VRAM) on the box; extend the spike harness | 1 day | High | |
-| G8 | A/B validation: two ~15-gen training runs (python vs jax backend, same config); compare Elo trajectory, final-net head-to-head arena, Pentobi L1; research note | 1 day + box time | High | |
+| G7 | Backend-vs-backend throughput benchmark (games/s, sims/s, VRAM) on the box; extend the spike harness | 1 day | High | ✅ |
+| G8 | A/B validation: ~10-gen training runs (python-PUCT vs jax-PUCT vs jax-Gumbel), same config; compare Elo trajectory, final-net head-to-head arena, Pentobi L1; research note | 1 day + box time | High | |
 | G9 | Flip Blokus default to `selfplay_backend: "jax"`; docs (CLAUDE.md, README, REMOTE-TRAINING, training estimates) | 0.5 day | High | |
 | G10 | Gumbel mode (`search_policy: "gumbel"`, opt-in): mctx `gumbel_muzero_policy`, n≈32–64 sims; validation run — the known ~6× sims lever | 1–2 days | Medium | ✅ |
 
@@ -208,6 +208,29 @@ games/s and sims/s for `python` (16 workers, K=16 — reproduce the N6 10.5k sim
 `jax` (chosen B/K/S) at the run3 config on the box, fp32 and bf16, plus VRAM. Output: HTML +
 JSON per the benchmark conventions. Expected: ~2.5–3× at S=400 PUCT (per the spike ceiling);
 this is the honest number that goes in the findings note.
+
+> **Result (2026-07-02, box, 128f×8b, S=400 flat, `scripts/benchmark_selfplay_backends.py` +
+> component profile + (B,K,S) sweep): the spike's 2× mctx-overhead margin was wrong — it is
+> ~15× at K=128.** Component decomposition at B=128/S=400: 400 net forwards = 1.55s; the
+> entire recurrent body (step + game-end + masks + forward + top-k) = 2.13s; the full mctx
+> search = 32.7s. The overhead lives in mctx's per-sim tree machinery and scales with
+> **top_k** (tree-array traffic), NOT with launches: K=128→64→32 gives 1.57k→8.5k→11.6k
+> sims/s, while batch size barely matters (B=128 vs 1024 vs 2048 within ~15%). Consequences,
+> measured:
+>
+> | Config | sims/s | moves/s | games/s (est ÷28.6 plies) | vs python 11.9k sims/s / 0.91 games/s |
+> |---|---|---|---|---|
+> | jax PUCT S=400 K=128 B=128 | 1.3k | 3.3 | 0.10 | **0.11×** — unusable |
+> | jax PUCT S=400 K=64 B=128 | 8.5k | 21 | 0.75 | 0.8× |
+> | jax PUCT S=400 K=32 B=1024 | 10.8k | 27 | 0.94 | **~1× parity** |
+> | jax **Gumbel-shaped** S=64 K=64 B=1024 | 20.9k | **327** | **~11.4** | **~12.5×** |
+>
+> So on the 3060 Ti: **PUCT-mode jax ≈ parity** with the python pipeline (while freeing all
+> 16 CPU cores), and the speed win comes from **low-sim search** — exactly the plan's G10
+> framing, now with hard numbers. The G8 A/B therefore runs three arms (python-PUCT,
+> jax-PUCT for equivalence, jax-Gumbel n=64 for the lever). Defaults updated: `top_k=64`.
+> Longer-term PUCT-mode fix (custom fixed-shape tree to kill the mctx per-sim traffic) noted
+> as future work, not this plan.
 
 ## G8. A/B validation runs
 

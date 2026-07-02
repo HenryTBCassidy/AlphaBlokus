@@ -17,3 +17,10 @@ Everything here imports jax lazily-by-placement: the modules are only imported
 by ``Coach._run_self_play_jax`` behind the config flag, so python-backend runs
 never require the ``jax`` extra.
 """
+
+import os
+
+# Same guard as games/blokusduo/jaxenv/__init__.py (whichever package loads
+# first wins): stop XLA preallocating 75% of VRAM, which starves the torch
+# training step and CUDA eval workers that share the card in a jax-backend run.
+os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
