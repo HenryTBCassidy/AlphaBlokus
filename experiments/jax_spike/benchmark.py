@@ -319,8 +319,16 @@ def measure_net_rollout(
     results = []
     for batch_size in batch_sizes:
         key = jax.random.PRNGKey(42)
-        final = rollout(key, batch_size)
-        jax.block_until_ready(final)
+        try:
+            final = rollout(key, batch_size)
+            jax.block_until_ready(final)
+        except Exception as error:  # noqa: BLE001 — XlaRuntimeError (OOM) has no stable import path
+            logger.warning(
+                "net-rollout[{}] B={} SKIPPED ({}: {})",
+                dtype_name, batch_size, type(error).__name__, str(error).splitlines()[0][:120],
+            )
+            _measure_forward_only(forward_only, batch_size, dtype_name, results)
+            continue
         completed = float(np.mean(np.asarray(kernels.game_result_batch(final, np.int8(1))) != 0.0))
         seconds = _median_time(lambda k=key, b=batch_size: jax.block_until_ready(rollout(k, b)))
         steps_per_second = batch_size * MAX_PLIES / seconds
@@ -336,17 +344,32 @@ def measure_net_rollout(
             "net-rollout[{}] B={:>5}: {:>12,.0f} steps/s ({:>8,.1f} games/s)",
             dtype_name, batch_size, steps_per_second, batch_size * completed / seconds,
         )
+        _measure_forward_only(forward_only, batch_size, dtype_name, results)
+    return results
+
+
+def _measure_forward_only(forward_only, batch_size: int, dtype_name: str, results: list[Measurement]) -> None:
+    """Time the bare net forward at ``batch_size``, skipping on OOM."""
+    import jax
+
+    key = jax.random.PRNGKey(42)
+    try:
         forward_only(key, batch_size)  # compile
         fwd_seconds = _median_time(lambda k=key, b=batch_size: jax.block_until_ready(forward_only(k, b)))
-        results.append(Measurement(
-            name=f"net_forward_{dtype_name}", batch_size=batch_size, seconds=fwd_seconds,
-            items_per_second=batch_size / fwd_seconds,
-        ))
-        logger.info(
-            "net-forward[{}] B={:>5}: {:>12,.0f} forwards/s",
-            dtype_name, batch_size, batch_size / fwd_seconds,
+    except Exception as error:  # noqa: BLE001
+        logger.warning(
+            "net-forward[{}] B={} SKIPPED ({}: {})",
+            dtype_name, batch_size, type(error).__name__, str(error).splitlines()[0][:120],
         )
-    return results
+        return
+    results.append(Measurement(
+        name=f"net_forward_{dtype_name}", batch_size=batch_size, seconds=fwd_seconds,
+        items_per_second=batch_size / fwd_seconds,
+    ))
+    logger.info(
+        "net-forward[{}] B={:>5}: {:>12,.0f} forwards/s",
+        dtype_name, batch_size, batch_size / fwd_seconds,
+    )
 
 
 # ---------------------------------------------------------------------------
