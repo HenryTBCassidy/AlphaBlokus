@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from alphablokus.core.arena import Arena
+from alphablokus.evaluation.arena import Arena
 from alphablokus.games.tictactoe.game import TicTacToeGame
 from alphablokus.games.tictactoe.minimax import MinimaxTicTacToePlayer
 

@@ -7,7 +7,7 @@ half the games as each colour, and writes a self-contained HTML report:
 - **replays** — a sample of games per level rendered with the *same* board renderer as
   the training arena replays (``reporting.display_blokusduo.build_game_replay_html``).
 
-Runs net-vs-Pentobi through the existing :class:`core.arena.Arena` via the H4
+Runs net-vs-Pentobi through the existing :class:`alphablokus.evaluation.arena.Arena` via the H4
 ``PentobiPlayer``, so the game loop / record capture is all reused.
 
 Usage::
@@ -27,10 +27,10 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from alphablokus.core.arena import Arena
 from alphablokus.core.config import RunConfig, load_args
 from alphablokus.core.game_factory import instantiate_game_and_network
-from alphablokus.core.players import NetworkPlayer
+from alphablokus.evaluation.arena import Arena
+from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.games.blokusduo.pentobi_gtp import find_pentobi_gtp
 from alphablokus.games.blokusduo.pentobi_player import PentobiPlayer
 

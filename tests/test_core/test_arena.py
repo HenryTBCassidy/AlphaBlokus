@@ -1,7 +1,7 @@
 import numpy as np
 
-from alphablokus.core.arena import Arena
 from alphablokus.core.interfaces import IBoard
+from alphablokus.evaluation.arena import Arena
 from alphablokus.games.tictactoe.game import TicTacToeGame
 
 

@@ -1,6 +1,6 @@
 """End-to-end test for the symmetry-diagnostic helpers.
 
-Exercises ``core.symmetry_diagnostic`` against a real (tiny, untrained)
+Exercises ``alphablokus.evaluation.symmetry`` against a real (tiny, untrained)
 TicTacToe network. We don't assert specific KL values — they depend on
 random init — but we do assert that the result has the right shape and
 that an artificially symmetric net produces zero divergence.
@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from alphablokus.core.symmetry_diagnostic import (
+from alphablokus.evaluation.symmetry import (
     build_diagnostic_positions,
     compute_symmetry_diagnostic,
 )

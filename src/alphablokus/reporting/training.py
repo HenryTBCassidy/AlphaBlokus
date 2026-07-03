@@ -89,10 +89,10 @@ def _accepted_mask(arena_data: pd.DataFrame, update_threshold: float) -> pd.Seri
     :meth:`MetricsCollector.log_arena` — that's the ground truth direct
     from the training decision. If the column is missing (older runs
     persisted before the column existed) we fall back to recomputing via
-    :func:`core.acceptance.is_accepted_score_rule`, which is the **same
+    :func:`alphablokus.evaluation.acceptance.is_accepted_score_rule`, which is the **same
     function** the coach uses, so reporting can never diverge.
     """
-    from alphablokus.core.acceptance import is_accepted_score_rule
+    from alphablokus.evaluation.acceptance import is_accepted_score_rule
     if "accepted" in arena_data.columns:
         return arena_data["accepted"].fillna(False).astype(bool)
     return arena_data.apply(
@@ -397,7 +397,7 @@ def _make_arena_plot(arena_data: pd.DataFrame, update_threshold: float) -> go.Fi
     # Acceptance compares this SCORE (draws count as ½) to the threshold, not
     # raw wins. acceptance_score() is the very function the training loop uses,
     # so the chart and the decision cannot diverge.
-    from alphablokus.core.acceptance import acceptance_score
+    from alphablokus.evaluation.acceptance import acceptance_score
     df["pct_score"] = 100 * df.apply(
         lambda r: acceptance_score(int(r["wins"]), int(r["losses"]), int(r["draws"])),
         axis=1,
@@ -637,7 +637,7 @@ def _make_arena_replays_section(
             top_k_actions = [int(a) for a in m["top_k_actions"]]
             top_k_probs = [float(p) for p in m["top_k_probs"]]
             # Defensive: drop any zero-probability entries that older runs
-            # may have persisted (pre-fix in core/arena._extract_top_k).
+            # may have persisted (pre-fix in evaluation/arena._extract_top_k).
             visited = {
                 a: p for a, p in zip(top_k_actions, top_k_probs, strict=False)
                 if p > 0

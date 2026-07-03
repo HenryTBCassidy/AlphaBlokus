@@ -41,9 +41,9 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from alphablokus.core.arena import Arena
 from alphablokus.core.config import RunConfig, load_args
-from alphablokus.core.players import NetworkPlayer, Player, RandomPlayer
+from alphablokus.evaluation.arena import Arena
+from alphablokus.evaluation.players import NetworkPlayer, Player, RandomPlayer
 
 if TYPE_CHECKING:
     from alphablokus.core.interfaces import IGame, INeuralNetWrapper

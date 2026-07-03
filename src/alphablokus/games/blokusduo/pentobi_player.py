@@ -1,7 +1,7 @@
 """Pentobi as an Arena ``Player`` (H4).
 
 Wraps the GTP adapter (H3) + the move translation (H1) so a ``pentobi-gtp`` engine
-plugs into the existing :class:`core.arena.Arena` like any other player. Net-vs-Pentobi
+plugs into the existing :class:`alphablokus.evaluation.arena.Arena` like any other player. Net-vs-Pentobi
 games then run through the *same* machinery as the training arena — including
 ``GameRecord`` capture and the replay rendering — with no new game-loop code.
 

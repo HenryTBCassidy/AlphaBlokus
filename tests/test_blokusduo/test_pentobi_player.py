@@ -12,8 +12,8 @@ from __future__ import annotations
 
 import pytest
 
-from alphablokus.core.arena import Arena
-from alphablokus.core.players import RandomPlayer
+from alphablokus.evaluation.arena import Arena
+from alphablokus.evaluation.players import RandomPlayer
 from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.pentobi_gtp import find_pentobi_gtp
 from alphablokus.games.blokusduo.pentobi_player import PentobiPlayer

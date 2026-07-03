@@ -23,7 +23,7 @@ from numpy.typing import NDArray
 from alphablokus.core.config import RunConfig
 
 if TYPE_CHECKING:
-    from alphablokus.core.arena import GameRecord
+    from alphablokus.evaluation.arena import GameRecord
 
 
 # ---------------------------------------------------------------------------

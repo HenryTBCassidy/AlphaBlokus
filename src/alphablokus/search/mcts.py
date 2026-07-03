@@ -225,7 +225,7 @@ class MCTS:
         ``counts[a]`` is the MCTS visit count of action ``a`` at this root — 0 for
         unvisited or illegal actions and for an unexpanded root. The single source
         of the raw visit distribution, shared by :meth:`get_action_prob` and
-        :class:`core.players.NetworkPlayer`; replaces the old
+        :class:`alphablokus.evaluation.players.NetworkPlayer`; replaces the old
         ``[visit_counts.get((s, a), 0) for a in range(action_size)]`` probe.
         """
         counts = np.zeros(self.game.get_action_size(), dtype=np.int64)

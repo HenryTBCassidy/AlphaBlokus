@@ -7,12 +7,12 @@ from loguru import logger
 from tqdm import tqdm
 
 from alphablokus.core.interfaces import IBoard, IGame
+from alphablokus.evaluation.players import Player
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 # Type aliases for improved readability
-Player: TypeAlias = Callable[[IBoard], int]  # Function that takes a board state and returns an action
 DisplayFn: TypeAlias = Callable[[IBoard], None]  # Function to display the game board
 GameResult: TypeAlias = int | float  # Game outcome (-1, 0, 1, or small float for draws)
 
@@ -115,7 +115,7 @@ class Arena:
         cur_player = 1
         board = self.game.initialise_board()
         move_count = 0
-        recorded_moves: list[MoveRecord] = [] if record else []
+        recorded_moves: list[MoveRecord] = []
 
         # Initialize players if they have a start-game hook
         for player in players.values():

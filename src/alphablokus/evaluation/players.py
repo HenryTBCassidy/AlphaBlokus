@@ -1,7 +1,7 @@
 """Reusable Player implementations.
 
 A ``Player`` is anything callable as ``board → action_index``. The existing
-:class:`core.arena.Arena` already accepts arbitrary callables; this module
+:class:`alphablokus.evaluation.arena.Arena` already accepts arbitrary callables; this module
 gives the common ones names so they're not re-defined ad-hoc in every test
 or script.
 
@@ -10,8 +10,9 @@ Available players:
 - :class:`RandomPlayer` — uniform over legal moves. Cheap baseline.
 - :class:`NetworkPlayer` — neural-network-backed, plays via MCTS using the
   supplied checkpoint. The standard "trained model" player.
-- :class:`MinimaxTicTacToePlayer` — perfect-play opponent for TTT.
-- :class:`HumanPlayer` — reads moves from stdin.
+
+Game-specific players (e.g. the TicTacToe minimax oracle) live with their
+game under :mod:`alphablokus.games`.
 """
 from __future__ import annotations
 
@@ -125,7 +126,7 @@ class NetworkPlayer:
     def reset_search_tree(self) -> None:
         """Discard the MCTS tree between games for a clean evaluation slate.
 
-        Called by :class:`core.arena.Arena` between games when present (via
+        Called by :class:`alphablokus.evaluation.arena.Arena` between games when present (via
         the existing ``startGame`` hook on the player).
         """
         from alphablokus.search.mcts import MCTS

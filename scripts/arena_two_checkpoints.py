@@ -55,9 +55,9 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
-    from alphablokus.core.arena import Arena
     from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
-    from alphablokus.core.players import NetworkPlayer
+    from alphablokus.evaluation.arena import Arena
+    from alphablokus.evaluation.players import NetworkPlayer
     from alphablokus.games.blokusduo.game import BlokusDuoGame
     from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
 

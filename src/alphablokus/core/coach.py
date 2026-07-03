@@ -14,11 +14,11 @@ from loguru import logger
 from numpy.typing import NDArray
 from tqdm import tqdm
 
-from alphablokus.core.arena import Arena
 from alphablokus.core.config import RunConfig
 from alphablokus.core.interfaces import IBoard, IGame, INeuralNetWrapper
-from alphablokus.core.players import NetworkPlayer
 from alphablokus.core.self_play import ProcessedExample
+from alphablokus.evaluation.arena import Arena
+from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.search.mcts import MCTS
 from alphablokus.storage.metrics import (
     CycleStage,
@@ -679,7 +679,7 @@ class Coach:
         return a_wins, b_wins, draws
 
     def _evaluate_minimax_tictactoe(self, generation: int) -> None:
-        from alphablokus.core.players import NetworkPlayer
+        from alphablokus.evaluation.players import NetworkPlayer
         from alphablokus.games.tictactoe.minimax import MinimaxTicTacToePlayer
 
         n = self.config.minimax_games_per_gen
@@ -715,7 +715,7 @@ class Coach:
         reference positions are stable across generations so the per-gen
         metric is directly comparable.
         """
-        from alphablokus.core.symmetry_diagnostic import (
+        from alphablokus.evaluation.symmetry import (
             build_diagnostic_positions,
             compute_symmetry_diagnostic,
         )
@@ -907,12 +907,12 @@ class Coach:
     ) -> bool:
         """Decide whether to accept the newly trained network.
 
-        Thin wrapper around :func:`core.acceptance.is_accepted_score_rule`.
+        Thin wrapper around :func:`alphablokus.evaluation.acceptance.is_accepted_score_rule`.
         Single source of truth lives there so reporting code can never
-        diverge from the training-time decision — see ``core/acceptance.py``
+        diverge from the training-time decision — see ``evaluation/acceptance.py``
         for the full rationale.
         """
-        from alphablokus.core.acceptance import is_accepted_score_rule
+        from alphablokus.evaluation.acceptance import is_accepted_score_rule
         return is_accepted_score_rule(
             new_wins=new_wins, prev_wins=prev_wins, draws=draws,
             threshold=self.config.update_threshold,
