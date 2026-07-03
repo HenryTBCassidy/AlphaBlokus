@@ -40,32 +40,38 @@ class AlphaTicTacToe(nn.Module):
         self.fc4 = nn.Linear(512, 1)
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
-        """
-        This is where the net assembly happens
-        :param x: Inputs:                                              batch_size * board_rows * board_cols
-        :return: Policy vector pi, probability of next move to take:   batch_size * action_size
-        :return: Value vector v of expected result of players:         batch_size * num_players
+        """Forward pass.
+
+        Args:
+            x: Multi-channel board representation, shape
+                ``(batch, channels, board_rows, board_cols)``.
+
+        Returns:
+            Tuple of ``(pi, v)`` — log-softmax policy over all actions,
+            shape ``(batch, action_size)``, and tanh value estimate,
+            shape ``(batch, 1)``.
         """
         x = x.view(-1, self.num_input_channels, self.board_rows, self.board_cols)
-        x = F.relu(self.bn1(self.conv1(x)))  # batch_size * num_filters * board_rows * board_cols
-        x = F.relu(self.bn2(self.conv2(x)))  # batch_size * num_filters * board_rows * board_cols
-        x = F.relu(self.bn3(self.conv3(x)))  # batch_size * num_filters * (board_rows-2) * (board_cols-2)
-        x = F.relu(self.bn4(self.conv4(x)))  # batch_size * num_filters * (board_rows-4) * (board_cols-4)
+        x = F.relu(self.bn1(self.conv1(x)))
+        x = F.relu(self.bn2(self.conv2(x)))
+        # conv3/conv4 are unpadded, so each shaves a border cell per side.
+        x = F.relu(self.bn3(self.conv3(x)))
+        x = F.relu(self.bn4(self.conv4(x)))
 
         x = x.view(-1, self.config.num_filters * (self.board_rows - 4) * (self.board_cols - 4))
 
         x = F.dropout(
             F.relu(self.fc_bn1(self.fc1(x))),
-            p=self.config.dropout,  # batch_size * 1024
+            p=self.config.dropout,
             training=self.training,
         )
         x = F.dropout(
             F.relu(self.fc_bn2(self.fc2(x))),
-            p=self.config.dropout,  # batch_size * 512
+            p=self.config.dropout,
             training=self.training,
         )
 
-        pi = self.fc3(x)  # batch_size * action_size
-        v = self.fc4(x)  # batch_size
+        pi = self.fc3(x)
+        v = self.fc4(x)
 
         return F.log_softmax(pi, dim=1), torch.tanh(v)

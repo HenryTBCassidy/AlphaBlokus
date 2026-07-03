@@ -55,17 +55,13 @@ def read_progress_marker(config: RunConfig) -> dict | None:
 
 
 class Coach:
-    """
-    Main training coordinator for the AlphaZero-style learning process.
+    """The generation loop: self-play → train → arena → strength eval.
 
-    This class orchestrates the entire training loop:
-    1. Self-play: Generate training data using MCTS + current neural network
-    2. Training: Update network weights using generated data
-    3. Evaluation: Compare new network against previous version
-
-    The process is iterative, with each complete cycle called a 'generation'.
-    The neural network improves over time by learning from self-play games,
-    but only if the new version proves stronger than the previous one.
+    Each complete cycle is a *generation*. The freshly trained network only
+    replaces the previous best if it wins the arena at
+    ``config.update_threshold`` or better; either way the carried-forward
+    net is checkpointed so ``--resume`` can continue from any completed
+    generation.
     """
 
     def __init__(
@@ -149,21 +145,12 @@ class Coach:
             self.elo_baseline_net = None
 
     def learn(self, start_generation: int = 1) -> None:
-        """
-        Execute the main training loop for a specified number of generations.
+        """Run the generation loop, finalising metrics/W&B even on crash.
 
-        Each generation consists of:
-        1. Self-play: Generate new games using MCTS + current network
-        2. Training: Update network weights using accumulated game data
-        3. Arena: Evaluate new network against previous version
-
-        The new network is only accepted if it wins >= update_threshold
-        fraction of games against the previous version.
-
-        Notes:
-            - Training data from older generations is gradually discarded
-            - Game data is saved after each generation
-            - Timing information is collected for performance analysis
+        Args:
+            start_generation: 1 for a fresh run; ``last_completed + 1`` when
+                resuming (artifacts are keyed by generation, so a partial run
+                appends rather than overwrites).
         """
         try:
             self._learn_loop(start_generation=start_generation)
@@ -183,7 +170,6 @@ class Coach:
             generation_start = time.perf_counter()
             self.metrics.log_progress(generation, self.config.num_generations)
 
-            # PHASE 1: Generate new training data through self-play
             logger.info(f"Starting Self-Play For Generation #{generation} ...")
             self_play_start = time.perf_counter()
 
@@ -212,7 +198,6 @@ class Coach:
             # Persist this generation's fresh games (file index = generation - 1).
             self.save_self_play_history(generation - 1)
 
-            # PHASE 2: Train neural network
             train_examples = self.replay_buffer.flat_shuffled_examples()
 
             # Build/load the frozen eval set used for per-epoch network
@@ -248,7 +233,7 @@ class Coach:
                 snapshot.gpu_bytes,
             )
 
-            # PHASE 3: Evaluate new network
+            # Arena: accept/reject vs previous best new network
             logger.info(f"Evaluating Against Previous Version For Generation #{generation} ...")
             arena_start = time.perf_counter()
             # ``top_k`` capped at the action-space size (TTT only has 10

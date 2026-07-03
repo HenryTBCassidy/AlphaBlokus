@@ -250,13 +250,11 @@ class AlphaBlokusDuo(nn.Module):
         """
 
         x = x.view(-1, self.num_input_channels, self.board_rows, self.board_cols)
-        conv_block_out = self.conv_block(x)  # batch_size * num_channels * board_rows_conv * board_cols_conv
-        features = self.residual_blocks(conv_block_out)  # batch_size * num_channels * board_rows_conv * board_cols_conv
+        conv_block_out = self.conv_block(x)
+        features = self.residual_blocks(conv_block_out)
 
-        # Predict raw logits distributions wrt policy
-        pi_logits = self.policy_head(features)  # batch_size * 17837 (which is 14 x 14 x 91 + 1)
+        pi_logits = self.policy_head(features)
 
-        # Predict evaluated value from current player's perspective.
-        value = self.value_head(features)  # batch_size
+        value = self.value_head(features)
 
         return F.log_softmax(pi_logits, dim=1), value

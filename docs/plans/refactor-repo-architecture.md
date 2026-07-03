@@ -41,7 +41,7 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R27 | 5 | Typing-gap sweep: missing `from __future__ import annotations` (9 files) + every unannotated signature | MECH | 2 h | High | ✅ |
 | R28 | 5 | Raise mypy to `disallow_untyped_defs` globally; fix fallout | JUDGE | 2.5 h | High | ✅ |
 | R29 | 5 | Adopt `ruff format` in one dedicated commit; enable format check in CI | MECH | 45 min | Medium | ✅ |
-| R30 | 5 | Comment-noise pass: delete restating comments, keep rationale; deduplicate docstrings | JUDGE | 2 h | Medium | |
+| R30 | 5 | Comment-noise pass: delete restating comments, keep rationale; deduplicate docstrings | JUDGE | 2 h | Medium | ✅ |
 | R31 | 5 | Dead-code removals + fix `INeuralNetWrapper.train` protocol drift | MECH | 1 h | Medium | |
 | R32 | 6 | Reorganise `scripts/` into operational / `benchmarks/` / `profiling/`; delete the two superseded baked-data report scripts; drop `PYTHONPATH` incantations | JUDGE | 1.5 h | Medium | |
 | R33 | 6 | Sort `run_configurations/` into current vs `archive/`; sweep references | MECH | 45 min | Low | |
