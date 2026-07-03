@@ -385,7 +385,7 @@ class Coach:
         carry ``outcome`` from prev's perspective (so ``+1`` =
         previous net won) and ``player1_was_white`` tracking whether
         prev was white — which is what
-        :func:`reporting.training._render_arena_replays` expects when
+        the arena-replay viewer (``reporting/arena_replays.py``) expects when
         it labels winners.
 
         Getting this wrong would silently flip the "new net wins" /

@@ -546,7 +546,7 @@ def run_two_player_games_parallel(
       B = new so the resulting records' ``outcome`` and
       ``player1_was_white`` line up with
       ``Coach._run_arena_serial``'s ``Arena(prev, new)`` convention
-      that ``reporting/training._render_arena_replays`` reads.
+      that ``reporting/arena_replays.py`` reads.
     - For **Elo**, ``Coach._run_elo_parallel`` passes A = new,
       B = baseline so ``a_wins`` flows naturally into the ``wins``
       slot of ``_compute_elo``.

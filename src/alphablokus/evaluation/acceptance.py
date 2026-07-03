@@ -1,7 +1,7 @@
 """Single source of truth for the arena-acceptance decision.
 
 The training loop (``Coach._should_accept_new_network``) and the reporting
-layer (``reporting/training._accepted_mask``) historically each computed
+layer (``reporting/charts.accepted_mask``) historically each computed
 acceptance independently, with predictable divergence: a previous bug had
 the report using the old draws-excluded rule while the training code had
 already switched to score-based. The chart then misreported which gens
