@@ -4,7 +4,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from alphablokus.core.interfaces import IBoard
+from alphablokus.interfaces import IBoard
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray

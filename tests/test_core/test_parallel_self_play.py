@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
+from alphablokus.config import MCTSConfig, NetConfig, RunConfig
 from alphablokus.parallel.pool import (
     PHASE_ARENA,
     derive_episode_seed,

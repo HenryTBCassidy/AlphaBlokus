@@ -26,7 +26,7 @@ import threading
 
 import numpy as np
 
-from alphablokus.core.config import load_args
+from alphablokus.config import load_args
 from alphablokus.parallel.inference_channel import ChannelSpec, SharedInferenceChannel, SharedMemoryRequestSource
 from alphablokus.parallel.inference_server import FlushPolicy, InferenceServer
 from alphablokus.parallel.pool import run_self_play_episodes_parallel

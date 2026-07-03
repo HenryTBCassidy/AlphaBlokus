@@ -9,11 +9,11 @@ import torch
 from loguru import logger
 from numpy.typing import NDArray
 
-from alphablokus.core.config import RunConfig
-from alphablokus.core.interfaces import IBoard, IGame, INeuralNetWrapper
+from alphablokus.config import RunConfig
 from alphablokus.evaluation.arena import Arena
 from alphablokus.evaluation.elo import compute_elo
 from alphablokus.evaluation.players import NetworkPlayer
+from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper
 from alphablokus.registry import resolve_oracle
 from alphablokus.search.mcts import MCTS
 from alphablokus.selfplay.episode import ProcessedExample

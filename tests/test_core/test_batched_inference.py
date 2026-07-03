@@ -23,7 +23,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
+from alphablokus.config import MCTSConfig, NetConfig, RunConfig
 from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.pieces import default_pieces_path
 from alphablokus.games.tictactoe.game import TicTacToeGame

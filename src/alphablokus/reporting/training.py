@@ -14,7 +14,7 @@ from alphablokus.games.blokusduo.pieces import default_pieces_path
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from alphablokus.core.config import RunConfig
+    from alphablokus.config import RunConfig
 
 
 def _load_metrics(directory: Path) -> pd.DataFrame:

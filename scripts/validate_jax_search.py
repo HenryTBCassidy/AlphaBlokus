@@ -59,7 +59,7 @@ def main() -> None:
 
     import jax
 
-    from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
+    from alphablokus.config import MCTSConfig, NetConfig, RunConfig
     from alphablokus.games.blokusduo.game import BlokusDuoGame
     from alphablokus.games.blokusduo.jax.bridge import numpy_state_from_board
     from alphablokus.games.blokusduo.jax.checkpoint import convert_torch_checkpoint, params_to_device

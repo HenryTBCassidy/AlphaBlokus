@@ -19,8 +19,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from alphablokus.core.interfaces import IBoard
     from alphablokus.games.tictactoe.game import TicTacToeGame
+    from alphablokus.interfaces import IBoard
 
 
 class MinimaxTicTacToePlayer:

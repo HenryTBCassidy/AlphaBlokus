@@ -6,8 +6,8 @@ import numpy as np
 from loguru import logger
 from tqdm import tqdm
 
-from alphablokus.core.interfaces import IBoard, IGame
 from alphablokus.evaluation.players import Player
+from alphablokus.interfaces import IBoard, IGame
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray

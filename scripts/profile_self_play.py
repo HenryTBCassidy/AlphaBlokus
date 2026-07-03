@@ -30,7 +30,7 @@ import tracemalloc
 
 import numpy as np
 
-from alphablokus.core.config import load_args
+from alphablokus.config import load_args
 from alphablokus.registry import instantiate_game_and_network
 from alphablokus.search.mcts import MCTS
 from alphablokus.selfplay.episode import play_self_play_episode

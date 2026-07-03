@@ -15,8 +15,8 @@ from alphablokus.storage.selfplay_store import SelfPlayStore
 from alphablokus.storage.sparse_policy import as_dense
 
 if TYPE_CHECKING:
-    from alphablokus.core.config import RunConfig
-    from alphablokus.core.interfaces import IGame
+    from alphablokus.config import RunConfig
+    from alphablokus.interfaces import IGame
     from alphablokus.selfplay.episode import GameExamples, ProcessedExample
 
 

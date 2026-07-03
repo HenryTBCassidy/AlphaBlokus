@@ -17,8 +17,8 @@ from alphablokus.games.tictactoe.game import TicTacToeGame
 from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper as TicTacToeNNetWrapper
 
 if TYPE_CHECKING:
-    from alphablokus.core.config import RunConfig
-    from alphablokus.core.interfaces import IGame, INeuralNetWrapper, IOracle
+    from alphablokus.config import RunConfig
+    from alphablokus.interfaces import IGame, INeuralNetWrapper, IOracle
     from alphablokus.selfplay.generate import SelfPlayBackendFn
 
 

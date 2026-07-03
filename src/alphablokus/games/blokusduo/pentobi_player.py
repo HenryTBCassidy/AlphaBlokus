@@ -29,8 +29,8 @@ from alphablokus.games.blokusduo.pentobi_gtp import PentobiGtp
 from alphablokus.games.blokusduo.pentobi_translation import PASS, PentobiMoveTranslator
 
 if TYPE_CHECKING:
-    from alphablokus.core.interfaces import IBoard
     from alphablokus.games.blokusduo.game import BlokusDuoGame
+    from alphablokus.interfaces import IBoard
 
 
 class PentobiPlayer:

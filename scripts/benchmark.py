@@ -34,7 +34,7 @@ from pathlib import Path
 
 import numpy as np
 
-from alphablokus.core.config import RunConfig, load_args
+from alphablokus.config import RunConfig, load_args
 from alphablokus.parallel.pool import run_self_play_episodes_parallel
 from alphablokus.registry import instantiate_game_and_network
 from alphablokus.search.mcts import MCTS

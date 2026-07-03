@@ -87,7 +87,7 @@ def test_gumbel_structural_invariants(setup) -> None:
 def test_gumbel_backend_generates_games(tmp_path) -> None:
     import dataclasses
 
-    from alphablokus.core.config import JaxSelfPlayConfig, MCTSConfig
+    from alphablokus.config import JaxSelfPlayConfig, MCTSConfig
     from alphablokus.games.blokusduo.jax.backend import generate_self_play_games
     from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
     from tests.test_core.test_jaxplay_backend import _config
@@ -115,7 +115,7 @@ def test_gumbel_backend_generates_games(tmp_path) -> None:
 def test_gumbel_python_backend_rejected(tmp_path) -> None:
     import dataclasses
 
-    from alphablokus.core.config import MCTSConfig
+    from alphablokus.config import MCTSConfig
     from alphablokus.games.blokusduo.game import BlokusDuoGame
     from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
     from alphablokus.training.coach import Coach

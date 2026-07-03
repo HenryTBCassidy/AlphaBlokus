@@ -25,7 +25,7 @@ from tqdm import tqdm
 from alphablokus.search.stats import MCTSEpisodeStats
 
 if TYPE_CHECKING:
-    from alphablokus.core.config import RunConfig
+    from alphablokus.config import RunConfig
     from alphablokus.games.blokusduo.jax.harvest import HarvestedGame
     from alphablokus.selfplay.episode import ProcessedExample
 

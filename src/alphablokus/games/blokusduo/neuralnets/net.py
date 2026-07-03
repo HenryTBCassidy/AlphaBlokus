@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from alphablokus.core.config import NetConfig
+from alphablokus.config import NetConfig
 
 
 def calc_conv2d_output(y_x, kernel_size=3, stride=1, pad=1, dilation=1):

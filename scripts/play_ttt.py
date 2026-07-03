@@ -36,7 +36,7 @@ from pathlib import Path
 
 import torch
 
-from alphablokus.core.config import load_args
+from alphablokus.config import load_args
 from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.games.tictactoe.game import TicTacToeGame
 

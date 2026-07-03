@@ -16,7 +16,7 @@ import numpy as np
 from alphablokus.storage.sparse_policy import sparsify
 
 if TYPE_CHECKING:
-    from alphablokus.core.interfaces import IGame
+    from alphablokus.interfaces import IGame
     from alphablokus.search.mcts import MCTS
 
 # (compact_board, sparse_policy, value) — the shape Coach passes to

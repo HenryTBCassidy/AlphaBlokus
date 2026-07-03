@@ -28,7 +28,7 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from alphablokus.core.config import load_args
+from alphablokus.config import load_args
 from alphablokus.registry import instantiate_game_and_network
 from alphablokus.search.mcts import MCTS
 

@@ -2,7 +2,7 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig, load_args
+from alphablokus.config import MCTSConfig, NetConfig, RunConfig, load_args
 
 
 def test_load_args_from_test_run_json():

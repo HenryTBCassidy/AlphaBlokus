@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
-from alphablokus.core.config import RunConfig, load_args
+from alphablokus.config import RunConfig, load_args
 from alphablokus.evaluation.arena import Arena
 from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.registry import instantiate_game_and_network
@@ -41,7 +41,7 @@ from alphablokus.search.mcts import MCTS
 from alphablokus.search.stats import MCTSEpisodeStats
 
 if TYPE_CHECKING:
-    from alphablokus.core.interfaces import IGame, INeuralNetWrapper
+    from alphablokus.interfaces import IGame, INeuralNetWrapper
 
 # Force line-buffered stdout regardless of TTY. Benchmark runs detached
 # under systemd-run/journald and the default block-buffered stdout would

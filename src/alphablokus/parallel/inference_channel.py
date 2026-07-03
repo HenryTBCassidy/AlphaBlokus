@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-    from alphablokus.core.interfaces import IBoard
+    from alphablokus.interfaces import IBoard
 
 _BOARDS = "boards"
 _COUNTS = "counts"

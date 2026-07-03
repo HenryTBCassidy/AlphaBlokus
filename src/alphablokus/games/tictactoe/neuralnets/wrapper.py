@@ -1,9 +1,9 @@
 import torch.nn as nn
 
-from alphablokus.core.config import RunConfig
-from alphablokus.core.interfaces import IGame
+from alphablokus.config import RunConfig
 from alphablokus.games.base_wrapper import BaseNNetWrapper
 from alphablokus.games.tictactoe.neuralnets.net import AlphaTicTacToe
+from alphablokus.interfaces import IGame
 
 
 class NNetWrapper(BaseNNetWrapper):

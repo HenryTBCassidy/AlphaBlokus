@@ -14,8 +14,8 @@ from alphablokus.storage.metrics import EvalSet
 from alphablokus.storage.sparse_policy import as_dense
 
 if TYPE_CHECKING:
-    from alphablokus.core.config import RunConfig
-    from alphablokus.core.interfaces import IGame, IOracle
+    from alphablokus.config import RunConfig
+    from alphablokus.interfaces import IGame, IOracle
     from alphablokus.selfplay.episode import ProcessedExample
 
 

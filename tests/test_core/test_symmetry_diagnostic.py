@@ -18,9 +18,9 @@ from alphablokus.evaluation.symmetry import (
 from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
 
 if TYPE_CHECKING:
-    from alphablokus.core.config import RunConfig
-    from alphablokus.core.interfaces import IBoard
+    from alphablokus.config import RunConfig
     from alphablokus.games.tictactoe.game import TicTacToeGame
+    from alphablokus.interfaces import IBoard
 
 
 def test_build_diagnostic_positions_deterministic_and_sized(ttt_game: TicTacToeGame) -> None:

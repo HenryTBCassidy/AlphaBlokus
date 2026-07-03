@@ -41,12 +41,12 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from alphablokus.core.config import RunConfig, load_args
+from alphablokus.config import RunConfig, load_args
 from alphablokus.evaluation.arena import Arena
 from alphablokus.evaluation.players import NetworkPlayer, Player, RandomPlayer
 
 if TYPE_CHECKING:
-    from alphablokus.core.interfaces import IGame, INeuralNetWrapper
+    from alphablokus.interfaces import IGame, INeuralNetWrapper
 
 
 def _get_game(game_name: str) -> IGame:

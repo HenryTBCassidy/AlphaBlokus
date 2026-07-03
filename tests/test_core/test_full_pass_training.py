@@ -16,7 +16,7 @@ import numpy as np
 from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
 
 if TYPE_CHECKING:
-    from alphablokus.core.config import RunConfig
+    from alphablokus.config import RunConfig
     from alphablokus.games.tictactoe.game import TicTacToeGame
 
 

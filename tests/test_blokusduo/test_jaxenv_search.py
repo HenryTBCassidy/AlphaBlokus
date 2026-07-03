@@ -33,7 +33,7 @@ torch = pytest.importorskip("torch")
 
 import jax.numpy as jnp  # noqa: E402
 
-from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig  # noqa: E402
+from alphablokus.config import MCTSConfig, NetConfig, RunConfig  # noqa: E402
 from alphablokus.games.blokusduo.jax.bridge import numpy_state_from_board  # noqa: E402
 from alphablokus.games.blokusduo.jax.checkpoint import convert_state_dict, params_to_device  # noqa: E402
 from alphablokus.games.blokusduo.jax.kernels import GameState, make_kernels  # noqa: E402

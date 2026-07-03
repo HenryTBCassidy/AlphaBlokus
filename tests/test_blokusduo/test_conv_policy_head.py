@@ -23,7 +23,7 @@ import numpy as np
 import pytest
 import torch
 
-from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
+from alphablokus.config import MCTSConfig, NetConfig, RunConfig
 from alphablokus.games.blokusduo.board import Action, ActionCodec, CoordinateIndexDecoder
 from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.neuralnets.net import ConvPolicyHead, build_action_permutation

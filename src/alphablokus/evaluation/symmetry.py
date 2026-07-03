@@ -28,7 +28,7 @@ import numpy as np
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from alphablokus.core.interfaces import IBoard, IGame, INeuralNetWrapper
+    from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper
 
 
 @dataclass(frozen=True)

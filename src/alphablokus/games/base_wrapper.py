@@ -16,13 +16,13 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from alphablokus.core.interfaces import IBoard, IGame, INeuralNetWrapper
+from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper
 from alphablokus.storage.sparse_policy import as_dense
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from alphablokus.core.config import RunConfig
+    from alphablokus.config import RunConfig
     from alphablokus.storage.metrics import EvalSet, MetricsCollector
 
 

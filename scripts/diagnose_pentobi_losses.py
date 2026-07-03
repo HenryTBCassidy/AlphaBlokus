@@ -13,7 +13,7 @@ os.environ.setdefault("ALPHABLOKUS_MPS", "1")  # eval-only MPS opt-in (see base_
 
 import numpy as np
 
-from alphablokus.core.config import load_args
+from alphablokus.config import load_args
 from alphablokus.evaluation.arena import Arena
 from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.games.blokusduo.pentobi_player import PentobiPlayer

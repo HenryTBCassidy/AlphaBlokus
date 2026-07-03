@@ -4,7 +4,6 @@ from pathlib import Path
 import numpy as np
 from numpy.typing import NDArray
 
-from alphablokus.core.interfaces import IGame
 from alphablokus.games.blokusduo.board import (
     Action,
     ActionCodec,
@@ -16,6 +15,7 @@ from alphablokus.games.blokusduo.board import (
     encode_planes_from_placement,
 )
 from alphablokus.games.blokusduo.pieces import Orientation, PieceManager, pieces_loader
+from alphablokus.interfaces import IGame
 
 
 class BlokusDuoGame(IGame):

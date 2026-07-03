@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
+from alphablokus.config import MCTSConfig, NetConfig, RunConfig
 from alphablokus.games.blokusduo.board import BlokusDuoBoard
 from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.pieces import PieceManager, default_pieces_path, pieces_loader

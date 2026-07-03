@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 import torch
 
-from alphablokus.core.config import NetConfig
+from alphablokus.config import NetConfig
 from alphablokus.games.blokusduo.board import BlokusDuoBoard
 from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.neuralnets.net import AlphaBlokusDuo

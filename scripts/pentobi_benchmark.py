@@ -27,7 +27,7 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from alphablokus.core.config import RunConfig, load_args
+from alphablokus.config import RunConfig, load_args
 from alphablokus.evaluation.arena import Arena
 from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.games.blokusduo.pentobi_gtp import find_pentobi_gtp

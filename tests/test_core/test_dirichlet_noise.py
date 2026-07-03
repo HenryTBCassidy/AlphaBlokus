@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
+from alphablokus.config import MCTSConfig, NetConfig, RunConfig
 from alphablokus.games.tictactoe.game import TicTacToeGame
 from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
 from alphablokus.search.mcts import MCTS

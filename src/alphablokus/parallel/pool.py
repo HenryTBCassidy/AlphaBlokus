@@ -55,8 +55,8 @@ from alphablokus.registry import instantiate_game, instantiate_game_and_network
 from alphablokus.search.mcts import MCTS
 
 if TYPE_CHECKING:
-    from alphablokus.core.config import RunConfig
-    from alphablokus.core.interfaces import IGame, INeuralNetWrapper
+    from alphablokus.config import RunConfig
+    from alphablokus.interfaces import IGame, INeuralNetWrapper
     from alphablokus.search.stats import MCTSEpisodeStats
     from alphablokus.selfplay.episode import ProcessedExample
 

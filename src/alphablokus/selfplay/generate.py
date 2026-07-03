@@ -17,8 +17,8 @@ from alphablokus.search.mcts import MCTS
 from alphablokus.selfplay.episode import GameExamples, play_self_play_episode
 
 if TYPE_CHECKING:
-    from alphablokus.core.config import RunConfig
-    from alphablokus.core.interfaces import IGame, INeuralNetWrapper
+    from alphablokus.config import RunConfig
+    from alphablokus.interfaces import IGame, INeuralNetWrapper
     from alphablokus.search.stats import MCTSEpisodeStats
 
 # Fixed checkpoint filename the pool / jax backends load the current net from.

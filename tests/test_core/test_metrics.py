@@ -2,7 +2,7 @@
 import pandas as pd
 import pytest
 
-from alphablokus.core.config import RunConfig
+from alphablokus.config import RunConfig
 from alphablokus.storage.metrics import CycleStage, MetricsCollector
 
 

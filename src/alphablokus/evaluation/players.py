@@ -21,10 +21,10 @@ from typing import TYPE_CHECKING, TypeAlias
 
 import numpy as np
 
-from alphablokus.core.interfaces import IBoard, IGame, INeuralNetWrapper
+from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper
 
 if TYPE_CHECKING:
-    from alphablokus.core.config import MCTSConfig
+    from alphablokus.config import MCTSConfig
 
 
 Player: TypeAlias = Callable[[IBoard], int]
@@ -81,7 +81,7 @@ class NetworkPlayer:
             opening_moves: Number of the player's own opening plies to which
                 ``opening_temp`` applies before reverting to ``temp``.
         """
-        # Local import to avoid a cycle (mcts imports from core.interfaces).
+        # Local import to avoid a cycle (mcts imports from alphablokus.interfaces).
         from alphablokus.search.mcts import MCTS
 
         self._game = game

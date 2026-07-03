@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, TypeAlias
 import numpy as np
 from numpy.typing import NDArray
 
-from alphablokus.core.interfaces import IBoard
+from alphablokus.interfaces import IBoard
 
 if TYPE_CHECKING:
     from alphablokus.games.blokusduo.pieces import Orientation, PieceManager

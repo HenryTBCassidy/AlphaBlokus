@@ -12,9 +12,9 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from alphablokus.core.interfaces import IOracle
 from alphablokus.games.tictactoe.board import Board
 from alphablokus.games.tictactoe.minimax import MinimaxTicTacToePlayer
+from alphablokus.interfaces import IOracle
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray

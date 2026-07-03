@@ -10,7 +10,7 @@ import numpy as np
 import pyarrow.parquet as pq
 import pytest
 
-from alphablokus.core.config import RunConfig
+from alphablokus.config import RunConfig
 from alphablokus.selfplay.episode import ProcessedExample
 from alphablokus.storage.selfplay_store import SelfPlayStore
 

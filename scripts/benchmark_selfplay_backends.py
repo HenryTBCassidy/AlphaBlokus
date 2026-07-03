@@ -46,7 +46,7 @@ def _gpu_memory_mib() -> int | None:
 
 
 def _base_config(args, *, num_eps: int, workers: int, backend: str, jax_selfplay=None):
-    from alphablokus.core.config import JaxSelfPlayConfig, MCTSConfig, NetConfig, RunConfig
+    from alphablokus.config import JaxSelfPlayConfig, MCTSConfig, NetConfig, RunConfig
 
     return RunConfig(
         game="blokusduo", run_name="bench_backends", num_generations=1, num_eps=num_eps,
@@ -102,7 +102,7 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
-    from alphablokus.core.config import JaxSelfPlayConfig
+    from alphablokus.config import JaxSelfPlayConfig
     from alphablokus.games.blokusduo.game import BlokusDuoGame
     from alphablokus.games.blokusduo.jax.backend import generate_self_play_games
     from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper

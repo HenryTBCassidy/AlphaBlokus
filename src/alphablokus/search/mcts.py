@@ -8,8 +8,8 @@ import numpy as np
 from loguru import logger
 from numpy.typing import NDArray
 
-from alphablokus.core.config import MCTSConfig
-from alphablokus.core.interfaces import IBoard, IGame, INeuralNetWrapper
+from alphablokus.config import MCTSConfig
+from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper
 from alphablokus.search.stats import MCTSEpisodeStats, MCTSMoveStats
 
 # Constants

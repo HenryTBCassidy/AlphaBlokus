@@ -23,7 +23,7 @@ pytest.importorskip("jax")
 pytest.importorskip("mctx")
 pytest.importorskip("torch")
 
-from alphablokus.core.config import JaxSelfPlayConfig, MCTSConfig, NetConfig, RunConfig  # noqa: E402
+from alphablokus.config import JaxSelfPlayConfig, MCTSConfig, NetConfig, RunConfig  # noqa: E402
 from alphablokus.games.blokusduo.game import BlokusDuoGame  # noqa: E402
 from alphablokus.games.blokusduo.jax.backend import generate_self_play_games  # noqa: E402
 from alphablokus.games.blokusduo.pieces import default_pieces_path

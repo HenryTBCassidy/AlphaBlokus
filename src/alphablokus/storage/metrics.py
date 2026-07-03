@@ -20,7 +20,7 @@ import pyarrow.parquet as pq
 from loguru import logger
 from numpy.typing import NDArray
 
-from alphablokus.core.config import RunConfig
+from alphablokus.config import RunConfig
 
 if TYPE_CHECKING:
     from alphablokus.evaluation.arena import GameRecord

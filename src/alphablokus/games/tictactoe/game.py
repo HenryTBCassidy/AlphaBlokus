@@ -1,8 +1,8 @@
 import numpy as np
 from numpy.typing import NDArray
 
-from alphablokus.core.interfaces import IGame
 from alphablokus.games.tictactoe.board import Board
+from alphablokus.interfaces import IGame
 
 
 class TicTacToeGame(IGame):
