@@ -24,12 +24,12 @@ def _action_at_idx(piece_id: int, orientation: Orientation, i: int, j: int) -> A
 
 
 def test_white_first_move_returns_initial_actions(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
-    moves = blokus_game._valid_moves(blokus_board, 1)
+    moves = blokus_game.valid_actions(blokus_board, 1)
     assert set(moves) == set(blokus_game.initial_actions[1])
 
 
 def test_black_first_move_returns_initial_actions(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
-    moves = blokus_game._valid_moves(blokus_board, -1)
+    moves = blokus_game.valid_actions(blokus_board, -1)
     assert set(moves) == set(blokus_game.initial_actions[-1])
 
 
@@ -40,7 +40,7 @@ def test_every_initial_action_covers_start_position(blokus_game: BlokusDuoGame):
 
     for action in blokus_game.initial_actions[1]:
         new_board = board.with_piece(action, player_side=1)
-        assert new_board._piece_placement_board[white_start_idx] != 0, (
+        assert new_board.placement_grid[white_start_idx] != 0, (
             f"Action {action} does not cover white start position")
 
 
@@ -48,7 +48,7 @@ def test_every_remaining_piece_has_initial_action(blokus_game: BlokusDuoGame, bl
     """For each initial move placed, every OTHER remaining piece should have at least one legal move."""
     for first_action in blokus_game.initial_actions[1][:10]:  # Sample first 10 to keep fast
         board = blokus_board.with_piece(first_action, player_side=1)
-        moves = blokus_game._valid_moves(board, 1)
+        moves = blokus_game.valid_actions(board, 1)
         piece_ids_with_moves = {m.piece_id for m in moves}
         remaining = board.remaining_piece_ids(1)
 
@@ -63,14 +63,14 @@ def test_every_remaining_piece_has_initial_action(blokus_game: BlokusDuoGame, bl
 def test_move_count_reasonable_after_first_placement(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
     """After one placement, move count should be in the hundreds, not zero or 17k."""
     board = blokus_board.with_piece(blokus_game.initial_actions[1][0], player_side=1)
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
     assert 50 < len(moves) < 5000
 
 
 def test_every_move_is_playable(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
     """Every returned move should be playable via with_piece without error."""
     board = blokus_board.with_piece(blokus_game.initial_actions[1][0], player_side=1)
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
 
     for move in moves:
         board.with_piece(move, player_side=1)  # Should not raise
@@ -79,18 +79,18 @@ def test_every_move_is_playable(blokus_game: BlokusDuoGame, blokus_board: Blokus
 def test_every_move_places_piece_on_board(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
     """Every returned move, when placed, should result in non-zero cells on the board."""
     board = blokus_board.with_piece(blokus_game.initial_actions[1][0], player_side=1)
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
 
     for move in moves[:20]:  # Sample to keep fast
         new_board = board.with_piece(move, player_side=1)
-        new_cells = np.sum(np.abs(new_board._piece_placement_board)) - np.sum(np.abs(board._piece_placement_board))
+        new_cells = np.sum(np.abs(new_board.placement_grid)) - np.sum(np.abs(board.placement_grid))
         assert new_cells > 0
 
 
 def test_no_duplicate_actions(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
     """The returned list should have no duplicate Actions."""
     board = blokus_board.with_piece(blokus_game.initial_actions[1][0], player_side=1)
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
     assert len(moves) == len(set(moves))
 
 
@@ -102,7 +102,7 @@ def test_no_move_overlaps_existing_piece(blokus_game: BlokusDuoGame, blokus_boar
     board = blokus_board.with_piece(blokus_game.initial_actions[1][0], player_side=1)
     board = board.with_piece(blokus_game.initial_actions[-1][0], player_side=-1)
     board_2d = board.as_2d
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
 
     for move in moves:
         piece_array = blokus_game.piece_manager.get_piece_orientation_array(move.piece_id, move.orientation)
@@ -120,7 +120,7 @@ def test_no_move_has_friendly_side_adjacency(blokus_game: BlokusDuoGame, blokus_
     """No returned move should have any cell side-adjacent to a friendly piece."""
     board = blokus_board.with_piece(blokus_game.initial_actions[1][0], player_side=1)
     board_2d = board.as_2d
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
 
     for move in moves:
         piece_array = blokus_game.piece_manager.get_piece_orientation_array(move.piece_id, move.orientation)
@@ -139,7 +139,7 @@ def test_every_move_has_at_least_one_diagonal(blokus_game: BlokusDuoGame, blokus
     """Every returned move should have at least one cell diagonally adjacent to a friendly piece."""
     board = blokus_board.with_piece(blokus_game.initial_actions[1][0], player_side=1)
     board_2d = board.as_2d
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
 
     for move in moves:
         piece_array = blokus_game.piece_manager.get_piece_orientation_array(move.piece_id, move.orientation)
@@ -163,7 +163,7 @@ def test_every_move_has_at_least_one_diagonal(blokus_game: BlokusDuoGame, blokus
 def test_no_move_has_cells_off_board(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
     """No returned move should have any cell outside the 14x14 board."""
     board = blokus_board.with_piece(blokus_game.initial_actions[1][0], player_side=1)
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
     n = BlokusDuoBoard.N
 
     for move in moves:
@@ -187,7 +187,7 @@ def test_moves_can_be_side_adjacent_to_opponent(blokus_game: BlokusDuoGame, blok
     board = blokus_board.with_piece(_action_at_idx(1, Orientation.Identity, 7, 7), player_side=1)
     board = board.with_piece(_action_at_idx(1, Orientation.Identity, 7, 8), player_side=-1)
 
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
 
     # Some white moves should have cells adjacent to black at (7,8)
     has_opponent_adjacent = False
@@ -217,7 +217,7 @@ def test_opponent_piece_blocks_squares(blokus_game: BlokusDuoGame, blokus_board:
     board = blokus_board.with_piece(_action_at_idx(1, Orientation.Identity, 7, 7), player_side=1)
     board = board.with_piece(_action_at_idx(1, Orientation.Identity, 6, 6), player_side=-1)
 
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
 
     # No white move should have a cell at (6,6) where black's piece is
     for move in moves:
@@ -235,11 +235,11 @@ def test_opponent_piece_blocks_squares(blokus_game: BlokusDuoGame, blokus_board:
 def test_opponent_on_placement_point_reduces_moves(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
     """After opponent occupies a white placement point, white's move count should drop."""
     board = blokus_board.with_piece(_action_at_idx(1, Orientation.Identity, 7, 7), player_side=1)
-    moves_before = blokus_game._valid_moves(board, 1)
+    moves_before = blokus_game.valid_actions(board, 1)
 
     # Black places on (6,6) which is a white placement point
     board_after = board.with_piece(_action_at_idx(1, Orientation.Identity, 6, 6), player_side=-1)
-    moves_after = blokus_game._valid_moves(board_after, 1)
+    moves_after = blokus_game.valid_actions(board_after, 1)
 
     assert len(moves_after) < len(moves_before)
 
@@ -251,7 +251,7 @@ def test_no_move_uses_already_placed_piece(blokus_game: BlokusDuoGame, blokus_bo
     """After placing a piece, no move should use the same piece_id."""
     first_action = blokus_game.initial_actions[1][0]
     board = blokus_board.with_piece(first_action, player_side=1)
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
 
     placed_id = first_action.piece_id
     for move in moves:
@@ -263,7 +263,7 @@ def test_placed_piece_disappears_from_moves(blokus_game: BlokusDuoGame, blokus_b
     """After placing a piece, moves with that piece_id should disappear entirely."""
     first_action = blokus_game.initial_actions[1][0]
     board = blokus_board.with_piece(first_action, player_side=1)
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
 
     placed_id = first_action.piece_id
     piece_ids_in_moves = {m.piece_id for m in moves}
@@ -286,7 +286,7 @@ def test_masking_sets_pass_when_no_moves(blokus_game: BlokusDuoGame, blokus_boar
     board = blokus_board.with_piece(blokus_game.initial_actions[1][0], player_side=1)
     mask = blokus_game.valid_move_masking(board, 1)
 
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
     pass_idx = blokus_game.action_codec.pass_action_index
 
     if len(moves) > 0:
@@ -309,7 +309,7 @@ def test_masking_does_not_set_pass_when_moves_exist(blokus_game: BlokusDuoGame, 
 def test_mask_count_equals_move_count(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
     """Number of 1-bits in the mask should equal len(_valid_moves)."""
     board = blokus_board.with_piece(blokus_game.initial_actions[1][0], player_side=1)
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
     mask = blokus_game.valid_move_masking(board, 1)
     assert int(mask.sum()) == len(moves)
 
@@ -317,7 +317,7 @@ def test_mask_count_equals_move_count(blokus_game: BlokusDuoGame, blokus_board: 
 def test_mask_bits_decode_to_valid_moves(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
     """Every 1-bit in the mask should decode to an Action in _valid_moves."""
     board = blokus_board.with_piece(blokus_game.initial_actions[1][0], player_side=1)
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
     mask = blokus_game.valid_move_masking(board, 1)
     move_set = set(moves)
 
@@ -338,13 +338,13 @@ def test_multi_move_progression(blokus_game: BlokusDuoGame, blokus_board: Blokus
 
     for turn in range(6):
         player = players[turn % 2]
-        moves = blokus_game._valid_moves(board, player)
+        moves = blokus_game.valid_actions(board, player)
         assert len(moves) > 0, f"No moves for player {player} on turn {turn}"
         board = board.with_piece(moves[0], player_side=player)
 
     # After 6 moves (3 per player), both should still have moves
-    assert len(blokus_game._valid_moves(board, 1)) > 0
-    assert len(blokus_game._valid_moves(board, -1)) > 0
+    assert len(blokus_game.valid_actions(board, 1)) > 0
+    assert len(blokus_game.valid_actions(board, -1)) > 0
 
 
 def test_known_legal_placement_is_in_moves(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
@@ -357,7 +357,7 @@ def test_known_legal_placement_is_in_moves(blokus_game: BlokusDuoGame, blokus_bo
     # Domino (piece 2, Identity = [[1],[1]]) at (5,5) — diagonal of (4,4).
     # This places cells at (5,5) and (6,5).
     expected = _action_at_idx(2, Orientation.Identity, 5, 5)
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
     assert expected in moves, f"Expected {expected} to be a valid move"
 
 
@@ -369,7 +369,7 @@ def test_known_illegal_placement_not_in_moves(blokus_game: BlokusDuoGame, blokus
 
     # Domino (piece 2, Identity) at (5,4) — directly below (4,4), side adjacent
     illegal = _action_at_idx(2, Orientation.Identity, 5, 4)
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
     assert illegal not in moves, f"Expected {illegal} to NOT be a valid move (side adjacent)"
 
 
@@ -380,7 +380,7 @@ def test_piece_in_board_corner(blokus_game: BlokusDuoGame, blokus_board: BlokusD
     """Piece placed at board corner should have moves, but only away from the edge."""
     board = blokus_board.with_piece(
         _action_at_idx(1, Orientation.Identity, 0, 0), player_side=1)
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
 
     # All moves should have cells within bounds
     n = BlokusDuoBoard.N
@@ -397,7 +397,7 @@ def test_large_piece_near_edge_excluded(blokus_game: BlokusDuoGame, blokus_board
     # Place monomino at (0, 0) — top-left corner
     board = blokus_board.with_piece(
         _action_at_idx(1, Orientation.Identity, 0, 0), player_side=1)
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
 
     # Filter to I-pentomino moves (piece 11)
     i_pent_moves = [m for m in moves if m.piece_id == 11]
@@ -420,7 +420,7 @@ def test_i_pentomino_along_edge(blokus_game: BlokusDuoGame, blokus_board: Blokus
     board = blokus_board.with_piece(
         _action_at_idx(11, Orientation.Identity, 0, 0), player_side=1)
 
-    moves = blokus_game._valid_moves(board, 1)
+    moves = blokus_game.valid_actions(board, 1)
 
     # No move should have a cell at column < 0 (obviously can't, but verify all are in bounds)
     for move in moves:

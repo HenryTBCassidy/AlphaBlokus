@@ -99,6 +99,14 @@ class BlokusDuoBoard(IBoard):
     # -- IBoard protocol (public) -----------------------------------------------
 
     @property
+    def placement_grid(self) -> BoardArray:
+        """Read-only signed placement board (+piece_id = current player's piece,
+        -piece_id = opponent's, 0 = empty)."""
+        view = self._piece_placement_board.view()
+        view.flags.writeable = False
+        return view
+
+    @property
     def as_2d(self) -> NDArray:
         """Flat H x W game state board (+1/-1/0). Derived from placement board."""
         return np.sign(self._piece_placement_board).astype(np.int8)

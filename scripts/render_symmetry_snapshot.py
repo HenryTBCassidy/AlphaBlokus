@@ -72,7 +72,7 @@ def _build_mid_game_position(game: BlokusDuoGame) -> BlokusDuoBoard:
     black_first = next(a for a in game.initial_actions[-1] if a.piece_id == 1)
     board = board.with_piece(black_first, -1)
     for player in (1, -1, 1, -1):
-        legal = game._valid_moves(board, player)
+        legal = game.valid_actions(board, player)
         choice = next(
             (m for m in legal if m.orientation != Orientation.Identity),
             legal[0],
@@ -91,8 +91,8 @@ def _snapshot_panel(
     """
     body = render_board_html(
         board=board, game=game, current_player=1, turn=-1, action_desc=label,
-        num_moves_white=len(game._valid_moves(board, 1)),
-        num_moves_black=len(game._valid_moves(board, -1)),
+        num_moves_white=len(game.valid_actions(board, 1)),
+        num_moves_black=len(game.valid_actions(board, -1)),
     )
     return f'<div class="snapshot-panel">{body}</div>'
 

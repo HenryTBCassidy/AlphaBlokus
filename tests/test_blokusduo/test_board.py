@@ -121,7 +121,7 @@ def test_as_multi_channel_empty_board(blokus_board: BlokusDuoBoard):
 
 def test_placement_board_dtype(blokus_board: BlokusDuoBoard):
     """Placement board should use int8 dtype."""
-    assert blokus_board._piece_placement_board.dtype == np.int8
+    assert blokus_board.placement_grid.dtype == np.int8
 
 
 def test_placement_board_signed_ids(
@@ -135,7 +135,7 @@ def test_placement_board_signed_ids(
     black_action = blokus_game.initial_actions[-1][0]
     board = board.with_piece(black_action, player_side=-1)
 
-    ppb = board._piece_placement_board
+    ppb = board.placement_grid
     white_mask = ppb > 0
     assert np.any(white_mask)
     assert np.all(ppb[white_mask] == white_action.piece_id)
@@ -153,7 +153,7 @@ def test_as_2d_matches_sign_of_placement(
     white_action = blokus_game.initial_actions[1][0]
     board = blokus_board.with_piece(white_action, player_side=1)
 
-    expected = np.sign(board._piece_placement_board).astype(np.int8)
+    expected = np.sign(board.placement_grid).astype(np.int8)
     np.testing.assert_array_equal(board.as_2d, expected)
 
 
@@ -178,8 +178,8 @@ def test_with_piece_is_independent(
     action = blokus_game.initial_actions[1][0]
     new_board = blokus_board.with_piece(action, player_side=1)
 
-    assert np.all(blokus_board._piece_placement_board == 0)
-    assert np.any(new_board._piece_placement_board != 0)
+    assert np.all(blokus_board.placement_grid == 0)
+    assert np.any(new_board.placement_grid != 0)
 
 
 def test_with_piece_updates_remaining(

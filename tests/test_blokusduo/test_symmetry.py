@@ -111,7 +111,7 @@ def first_move_board(blokus_game: BlokusDuoGame, empty_board: BlokusDuoBoard) ->
     """
     # In board coordinates (x, y), origin bottom-left. We choose y to land
     # the monomino's single cell onto the array-index starting square.
-    decoder = blokus_game._coordinate_index_decoder
+    decoder = blokus_game.coordinate_decoder
     white_x, white_y = decoder.to_coordinate((4, 4))
     black_x, black_y = decoder.to_coordinate((9, 9))
     b = empty_board.with_piece(_action(1, Orientation.Identity, white_x, white_y), 1)
@@ -138,7 +138,7 @@ def mid_game_board(blokus_game: BlokusDuoGame, empty_board: BlokusDuoBoard) -> B
     b = b.with_piece(black_first, -1)
     # A couple of follow-up moves picked to land on different orientations.
     for player in (1, -1, 1, -1):
-        legal = blokus_game._valid_moves(b, player)
+        legal = blokus_game.valid_actions(b, player)
         # Pick a move with a non-Identity orientation when possible so the
         # transpose tests touch the orientation lookup.
         choice = next(
@@ -170,8 +170,8 @@ def test_transposed_placement_grid_equals_numpy_transpose(
     """
     for position in positions:
         assert np.array_equal(
-            position.transposed()._piece_placement_board,
-            np.transpose(position._piece_placement_board),
+            position.transposed().placement_grid,
+            np.transpose(position.placement_grid),
         )
 
 
@@ -184,7 +184,7 @@ def test_transposed_board_caches_match_independent_recompute(
     """
     for position in positions:
         transposed = position.transposed()
-        transposed_grid = np.transpose(position._piece_placement_board)
+        transposed_grid = np.transpose(position.placement_grid)
         transposed_2d = np.sign(transposed_grid).astype(np.int8)
 
         # side_danger — recompute via the canonical static method
@@ -218,8 +218,8 @@ def test_transposed_board_preserves_invariants(
     for position in positions:
         t = position.transposed()
         # Total placed cells identical
-        assert (t._piece_placement_board != 0).sum() == (
-            position._piece_placement_board != 0
+        assert (t.placement_grid != 0).sum() == (
+            position.placement_grid != 0
         ).sum()
         for player in (1, -1):
             assert t.remaining_piece_ids(player) == position.remaining_piece_ids(player)
@@ -234,8 +234,8 @@ def test_transposed_board_is_involution(positions: list[BlokusDuoBoard]) -> None
     """
     for position in positions:
         assert np.array_equal(
-            position.transposed().transposed()._piece_placement_board,
-            position._piece_placement_board,
+            position.transposed().transposed().placement_grid,
+            position.placement_grid,
         )
 
 
@@ -258,8 +258,8 @@ def test_get_symmetries_returns_two_pairs(
     assert symmetries[0][1] is pi
     # Second entry is the transpose
     assert np.array_equal(
-        symmetries[1][0]._piece_placement_board,
-        np.transpose(mid_game_board._piece_placement_board),
+        symmetries[1][0].placement_grid,
+        np.transpose(mid_game_board.placement_grid),
     )
 
 
@@ -309,7 +309,7 @@ def test_transpose_action_geometry(blokus_game: BlokusDuoGame) -> None:
     transpose should be the same monomino at the array-transposed anchor,
     which for the diagonal cell (4, 4) is the same cell.
     """
-    decoder = blokus_game._coordinate_index_decoder
+    decoder = blokus_game.coordinate_decoder
     x, y = decoder.to_coordinate((4, 4))
     action_id = blokus_game.action_codec.encode(
         _action(1, Orientation.Identity, x, y),
@@ -340,7 +340,7 @@ def _placement_equal(a: BlokusDuoBoard, b: BlokusDuoBoard) -> bool:
     geometric equivariance — the higher-level invariants (remaining pieces,
     last played, derived caches) are covered by S2 / T2.c.
     """
-    return np.array_equal(a._piece_placement_board, b._piece_placement_board)
+    return np.array_equal(a.placement_grid, b.placement_grid)
 
 
 def test_get_next_state_equivariant_under_transpose_single_move(
@@ -481,8 +481,8 @@ def test_board_transpose_involution_on_random_rollouts(
             choice = int(rng.choice(legal))
             board, player = blokus_game.get_next_state(board, player, choice)
         assert np.array_equal(
-            board.transposed().transposed()._piece_placement_board,
-            board._piece_placement_board,
+            board.transposed().transposed().placement_grid,
+            board.placement_grid,
         ), f"transpose-twice ≠ identity on random rollout {rollout}"
 
 
@@ -505,15 +505,15 @@ def test_html_snapshot_renders_both_panels(
     original_html = render_board_html(
         board=mid_game_board, game=blokus_game, current_player=1, turn=-1,
         action_desc="original",
-        num_moves_white=len(blokus_game._valid_moves(mid_game_board, 1)),
-        num_moves_black=len(blokus_game._valid_moves(mid_game_board, -1)),
+        num_moves_white=len(blokus_game.valid_actions(mid_game_board, 1)),
+        num_moves_black=len(blokus_game.valid_actions(mid_game_board, -1)),
     )
     transposed_board = mid_game_board.transposed()
     transposed_html = render_board_html(
         board=transposed_board, game=blokus_game, current_player=1, turn=-1,
         action_desc="transposed",
-        num_moves_white=len(blokus_game._valid_moves(transposed_board, 1)),
-        num_moves_black=len(blokus_game._valid_moves(transposed_board, -1)),
+        num_moves_white=len(blokus_game.valid_actions(transposed_board, 1)),
+        num_moves_black=len(blokus_game.valid_actions(transposed_board, -1)),
     )
     assert original_html and transposed_html
     # The two boards differ, so the rendered fragments must differ too.
@@ -529,14 +529,14 @@ def test_diagonal_symmetric_position_is_self_transpose(
     """
     # White monomino at (4, 4) and Black monomino at (9, 9) — both on the
     # diagonal, so the resulting board is its own transpose.
-    decoder = blokus_game._coordinate_index_decoder
+    decoder = blokus_game.coordinate_decoder
     white_x, white_y = decoder.to_coordinate((4, 4))
     black_x, black_y = decoder.to_coordinate((9, 9))
     b = empty_board.with_piece(_action(1, Orientation.Identity, white_x, white_y), 1)
     b = b.with_piece(_action(1, Orientation.Identity, black_x, black_y), -1)
 
     t = b.transposed()
-    assert np.array_equal(t._piece_placement_board, b._piece_placement_board)
+    assert np.array_equal(t.placement_grid, b.placement_grid)
     for player in (1, -1):
         assert np.array_equal(t.side_danger_zone(player), b.side_danger_zone(player))
         assert set(t.placement_points(player).keys()) == set(

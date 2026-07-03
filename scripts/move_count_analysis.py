@@ -46,7 +46,7 @@ def play_random_game(game: BlokusDuoGame) -> tuple[list[dict], list[dict]]:
     while consecutive_passes < 2:
         player = players[turn % 2]
         t0 = time.perf_counter()
-        moves = game._valid_moves(board, player)
+        moves = game.valid_actions(board, player)
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
         records.append({

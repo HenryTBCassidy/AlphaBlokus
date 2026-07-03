@@ -41,8 +41,8 @@ class BlokusDuoRenderer:
         last_action: int | None = None,
         annotation: str = "",
     ) -> str:
-        wm = len(self._game._valid_moves(board, 1))
-        bm = len(self._game._valid_moves(board, -1))
+        wm = len(self._game.valid_actions(board, 1))
+        bm = len(self._game.valid_actions(board, -1))
         return render_board_html(
             board=board,
             game=self._game,
@@ -95,8 +95,8 @@ class BlokusDuoRenderer:
                 board=board, game=self._game, current_player=current_player,
                 turn=-1,
                 action_desc=f"#{rank} — {prob * 100:.1f}%",
-                num_moves_white=len(self._game._valid_moves(board, 1)),
-                num_moves_black=len(self._game._valid_moves(board, -1)),
+                num_moves_white=len(self._game.valid_actions(board, 1)),
+                num_moves_black=len(self._game.valid_actions(board, -1)),
                 candidate_action=action_id,
                 candidate_player=current_player,
             )
@@ -155,7 +155,7 @@ def dump_board(
     print(f"  Placement points: {len(points)}")
 
     if show_moves:
-        moves = game._valid_moves(board, player)
+        moves = game.valid_actions(board, player)
         print(f"  Legal moves: {len(moves)}")
         piece_ids_with_moves = sorted({m.piece_id for m in moves})
         print(f"  Pieces with moves: {piece_ids_with_moves}")
@@ -190,7 +190,7 @@ def dump_board(
     if not show_moves:
         return
 
-    moves = game._valid_moves(board, player)
+    moves = game.valid_actions(board, player)
     if not moves:
         print(f"\n  No legal moves for {player_name}.")
         return
@@ -282,7 +282,7 @@ def render_board_html(
     def cell_text(i: int, j: int) -> str:
         val = board_2d[i, j]
         if val != 0:
-            return f"{abs(int(board._piece_placement_board[i, j]))}"
+            return f"{abs(int(board.placement_grid[i, j]))}"
         return ""
 
     player_name = "White" if current_player == 1 else "Black"
@@ -350,7 +350,7 @@ def _candidate_overlay_cells(
     piece_grid = game.piece_manager.get_piece_orientation_array(
         action.piece_id, action.orientation,
     )
-    anchor_idx = game._coordinate_index_decoder.to_idx(
+    anchor_idx = game.coordinate_decoder.to_idx(
         (action.x_coordinate, action.y_coordinate),
     )
     cells: dict[tuple[int, int], int] = {}
@@ -378,8 +378,8 @@ def build_game_replay_html(game: BlokusDuoGame, actions: list[dict], game_id: in
     board = game.initialise_board()
     boards_html = []
 
-    wm = len(game._valid_moves(board, 1))
-    bm = len(game._valid_moves(board, -1))
+    wm = len(game.valid_actions(board, 1))
+    bm = len(game.valid_actions(board, -1))
     boards_html.append(render_board_html(board, game, 1, -1, "Initial board", wm, bm))
 
     for action_data in actions:
@@ -388,8 +388,8 @@ def build_game_replay_html(game: BlokusDuoGame, actions: list[dict], game_id: in
 
         if action_data["pass"]:
             action_desc = "Pass"
-            wm = len(game._valid_moves(board, 1))
-            bm = len(game._valid_moves(board, -1))
+            wm = len(game.valid_actions(board, 1))
+            bm = len(game.valid_actions(board, -1))
             boards_html.append(render_board_html(board, game, player, turn, action_desc, wm, bm))
             continue
 
@@ -406,8 +406,8 @@ def build_game_replay_html(game: BlokusDuoGame, actions: list[dict], game_id: in
         )
 
         board = board.with_piece(action, player_side=player)
-        wm = len(game._valid_moves(board, 1))
-        bm = len(game._valid_moves(board, -1))
+        wm = len(game.valid_actions(board, 1))
+        bm = len(game.valid_actions(board, -1))
         boards_html.append(render_board_html(board, game, player, turn, action_desc, wm, bm))
 
     return f"""

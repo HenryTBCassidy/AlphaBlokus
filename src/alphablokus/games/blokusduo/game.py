@@ -398,6 +398,20 @@ class BlokusDuoGame(IGame):
             return self._f2_generator.has_any_move(self, board, player)
         return next(self._generate_valid_moves(board, player), None) is not None
 
+    @property
+    def coordinate_decoder(self) -> CoordinateIndexDecoder:
+        """Converter between board coordinates and array indices."""
+        return self._coordinate_index_decoder
+
+    def valid_actions(self, board: BlokusDuoBoard, player: PlayerSide) -> list[Action]:
+        """All legal placements for ``player`` as :class:`Action` objects (excludes pass).
+
+        The object-level companion to ``valid_move_masking`` — used by
+        reporting, replay tooling, and analysis scripts that need concrete
+        piece/orientation/coordinate details rather than a flat mask.
+        """
+        return self._valid_moves(board, player)
+
     def _valid_moves(self, board: BlokusDuoBoard, player: PlayerSide) -> list[Action]:
         """Generate all legal moves for a player (deduplicated)."""
         return list(set(self._generate_valid_moves(board, player)))
