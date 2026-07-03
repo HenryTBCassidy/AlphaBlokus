@@ -1,7 +1,7 @@
 """Free-function self-play episode runner shared by Coach and parallel workers.
 
 Extracted from ``Coach.execute_episode`` so the serial training loop and
-the worker pool in ``core/parallel_self_play.py`` use the **same code
+the worker pool in ``parallel/pool.py`` use the **same code
 path**. That equivalence is the basis of the determinism test in
 ``tests/test_core/test_parallel_self_play.py`` — if both call sites
 invoke this function with the same seed + same MCTS instance, they
@@ -42,7 +42,7 @@ def play_self_play_episode(
 
     - ``Coach.execute_episode`` — when self-play runs sequentially in the
       training process.
-    - ``core.parallel_self_play._worker_play_episode`` — when self-play
+    - ``alphablokus.parallel.pool._worker_play_episode`` — when self-play
       runs in worker processes.
 
     Args:

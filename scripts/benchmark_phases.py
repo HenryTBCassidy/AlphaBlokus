@@ -121,7 +121,7 @@ def _run_self_play_phase(
 
     Serial path (``num_workers == 1``) keeps the existing MCTS-per-episode
     pattern. Parallel path delegates to
-    :func:`core.parallel_self_play.run_self_play_episodes_parallel` —
+    :func:`alphablokus.parallel.pool.run_self_play_episodes_parallel` —
     the same orchestrator ``Coach._run_self_play_parallel`` uses. We
     save ``nnet``'s weights to a checkpoint workers load at pool init.
     """
@@ -157,7 +157,7 @@ def _run_self_play_phase_parallel(
     parallel self-play orchestrator. Saves the current ``nnet`` to a
     fixed-name checkpoint workers load at pool init.
     """
-    from alphablokus.core.parallel_self_play import run_self_play_episodes_parallel
+    from alphablokus.parallel.pool import run_self_play_episodes_parallel
 
     print(f"[Self-Play] {config.num_eps} games across {num_workers} workers — starting",
           flush=True)
@@ -311,7 +311,7 @@ def _run_two_player_phase_parallel(
     *whole game* (both players combined inside the worker), so each
     task contributes one combined ``MCTSEpisodeStats`` to the phase.
     """
-    from alphablokus.core.parallel_self_play import (
+    from alphablokus.parallel.pool import (
         PHASE_ARENA,
         run_two_player_games_parallel,
     )
@@ -511,7 +511,7 @@ def main() -> None:
 
     # Enable the optimised move generator in the main-process game if
     # requested. Workers handle this themselves via
-    # ``core.parallel_self_play._maybe_enable_f2``.
+    # ``alphablokus.parallel.pool._maybe_enable_f2``.
     if getattr(config, "use_optimised_movegen", False) and (
         enable := getattr(game, "enable_optimised_movegen", None)
     ) is not None:

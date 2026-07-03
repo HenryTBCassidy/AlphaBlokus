@@ -42,16 +42,16 @@ from loguru import logger
 from tqdm import tqdm
 
 from alphablokus.core.game_factory import instantiate_game, instantiate_game_and_network
-from alphablokus.core.inference_channel import (
+from alphablokus.evaluation.arena import Arena, GameRecord
+from alphablokus.evaluation.players import NetworkPlayer
+from alphablokus.parallel.inference_channel import (
     ChannelHandles,
     ChannelSpec,
     InferenceClientNet,
     SharedInferenceChannel,
     SharedMemoryRequestSource,
 )
-from alphablokus.core.inference_server import FlushPolicy, InferenceServer
-from alphablokus.evaluation.arena import Arena, GameRecord
-from alphablokus.evaluation.players import NetworkPlayer
+from alphablokus.parallel.inference_server import FlushPolicy, InferenceServer
 from alphablokus.search.mcts import MCTS
 
 if TYPE_CHECKING:
@@ -213,7 +213,7 @@ def _resolve_start_method(config: RunConfig) -> str:
     return method
 
 
-def _make_worker_context(config: RunConfig):
+def _make_worker_context(config: RunConfig) -> mp.context.BaseContext:
     """Build the multiprocessing context for the worker pool.
 
     For ``forkserver``, preload the heavy shared libraries into the fork-server

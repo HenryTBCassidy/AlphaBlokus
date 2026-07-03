@@ -20,7 +20,7 @@ import numpy as np
 
 from alphablokus.core.config import load_args
 from alphablokus.core.game_factory import instantiate_game_and_network
-from alphablokus.core.parallel_self_play import run_self_play_episodes_parallel
+from alphablokus.parallel.pool import run_self_play_episodes_parallel
 
 _CONFIG = "run_configurations/blokus_quicktest.json"
 _NUM_WORKERS = 8

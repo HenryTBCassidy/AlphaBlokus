@@ -36,8 +36,8 @@ import numpy as np
 
 from alphablokus.core.config import RunConfig, load_args
 from alphablokus.core.game_factory import instantiate_game_and_network
-from alphablokus.core.parallel_self_play import run_self_play_episodes_parallel
 from alphablokus.core.self_play import play_self_play_episode
+from alphablokus.parallel.pool import run_self_play_episodes_parallel
 from alphablokus.search.mcts import MCTS
 
 # -- Suite parameters (edit here, not via ad-hoc args) -----------------------------

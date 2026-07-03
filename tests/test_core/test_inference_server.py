@@ -13,7 +13,7 @@ import time
 
 import numpy as np
 
-from alphablokus.core.inference_server import FlushPolicy, InferenceServer
+from alphablokus.parallel.inference_server import FlushPolicy, InferenceServer
 
 # Small fixed board shape for the fakes — (channels, height, width).
 _C, _H, _W = 3, 4, 4

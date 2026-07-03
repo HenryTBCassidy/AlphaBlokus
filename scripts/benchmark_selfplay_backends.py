@@ -111,7 +111,7 @@ def main() -> None:
     results = []
 
     if not args.skip_python:
-        from alphablokus.core.parallel_self_play import run_self_play_episodes_parallel
+        from alphablokus.parallel.pool import run_self_play_episodes_parallel
 
         config = _base_config(args, num_eps=args.python_episodes, workers=args.python_workers,
                               backend="python")

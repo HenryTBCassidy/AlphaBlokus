@@ -23,7 +23,7 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R9 | 2 | `search/`: move `mcts.py`; extract profiling dataclasses to `search/stats.py` | MECH | 1 h | High | ✅ |
 | R10 | 2 | `storage/`: split `storage.py` → `metrics.py` + `selfplay_store.py`; move `sparse_policy.py`; single `ProcessedExample` home | MECH | 1.5 h | High | ✅ |
 | R11 | 2 | `evaluation/`: move `arena.py`, `players.py`, `acceptance.py`, `symmetry_diagnostic.py`→`symmetry.py`; dedupe `Player` alias; fix stale docstring + no-op ternary | MECH | 1 h | High | ✅ |
-| R12 | 2 | `parallel/`: `parallel_self_play.py`→`pool.py`; move `inference_server.py`/`inference_channel.py`; co-locate server lifecycle helpers | MECH | 1.5 h | High | |
+| R12 | 2 | `parallel/`: `parallel_self_play.py`→`pool.py`; move `inference_server.py`/`inference_channel.py`; co-locate server lifecycle helpers | MECH | 1.5 h | High | ✅ |
 | R13 | 2 | `selfplay/`: `self_play.py`→`episode.py`; extract backend dispatch from `Coach` into `selfplay/generate.py` | JUDGE | 1.5 h | High | |
 | R14 | 2 | Consolidate `core/jaxplay/` + `games/blokusduo/jaxenv/` → `games/blokusduo/jax/`; rename colliding `GameRecord` | MECH | 1.5 h | High | |
 | R15 | 2 | `registry.py`: rename `game_factory.py`; concentrate ALL core→games coupling (game, net, jax backend, TTT oracle) | JUDGE | 1.5 h | High | |
@@ -285,7 +285,7 @@ Split `core/storage.py` (1,319 lines, two unrelated subsystems) at the existing 
 
 ## R12. parallel/
 
-`parallel_self_play.py` → `parallel/pool.py`; `inference_server.py` and `inference_channel.py` move alongside. Relocate the inference-server lifecycle block currently embedded in the pool (`_server_enabled`, `_resolve_server_batch`, `_run_inference_server`, `_worker_init_self_play_server`, the spawn/teardown block at old lines 461–517) into `parallel/inference_server.py`, co-locating the server with its lifecycle — the pool keeps only the "if server mode, use these init/task fns" branch. Fix `_make_worker_context`'s missing return annotation (`multiprocessing.context.BaseContext`) while moving it.
+`parallel_self_play.py` → `parallel/pool.py`; `inference_server.py` and `inference_channel.py` move alongside. **Deviation (decided in execution):** the lifecycle helpers stay in `pool.py`. `inference_server.py` is deliberately transport- and CUDA-free (its documented design — CPU-unit-testable batching core), and `_run_inference_server`/`_worker_init_self_play_server` import the game factory and mutate pool worker-globals; moving them would trade the pool's cohesion for polluting the cleanest module in the package. Process lifecycle is pool orchestration and lives with the pool. Fix `_make_worker_context`'s missing return annotation (`multiprocessing.context.BaseContext`) while moving it.
 
 ## R13. selfplay/ + backend dispatch extraction  **(JUDGE)**
 

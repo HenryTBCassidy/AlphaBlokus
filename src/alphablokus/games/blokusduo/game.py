@@ -69,7 +69,7 @@ class BlokusDuoGame(IGame):
         Produces bit-identical training trajectories at the same seed.
 
         Triggered by ``RunConfig.use_optimised_movegen`` in the
-        production codepath (see ``core/parallel_self_play.py``'s
+        production codepath (see ``parallel/pool.py``'s
         worker init and ``scripts/benchmark_phases.py``'s setup).
         """
         from alphablokus.games.blokusduo.movegen_runtime import get_default_generator

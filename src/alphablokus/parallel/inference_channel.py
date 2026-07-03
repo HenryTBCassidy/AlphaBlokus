@@ -219,7 +219,7 @@ class SharedInferenceChannel:
 class _SharedPendingRequest:
     """One leaf evaluation, backed by a worker's shared-memory slot.
 
-    Implements the :class:`~core.inference_server.PendingRequest` protocol.
+    Implements the :class:`~alphablokus.parallel.inference_server.PendingRequest` protocol.
     """
 
     __slots__ = ("_source", "_worker_id", "_leaf_idx")

@@ -207,7 +207,7 @@ class Coach:
         Thin wrapper around :func:`core.self_play.play_self_play_episode`,
         which is the single source of truth for the episode loop. Both
         this serial entry point and the parallel worker module in
-        :mod:`core.parallel_self_play` call into that function — keeping
+        :mod:`alphablokus.parallel.pool` call into that function — keeping
         them bit-for-bit equivalent at the same seed, which is what the
         parallel/serial determinism test relies on.
         """
@@ -493,7 +493,7 @@ class Coach:
         serial codepath's schema — downstream reports don't care which path
         produced the data.
         """
-        from alphablokus.core.parallel_self_play import run_self_play_episodes_parallel
+        from alphablokus.parallel.pool import run_self_play_episodes_parallel
 
         worker_init_checkpoint = "parallel_worker_init.pth.tar"
         self.nnet.save_checkpoint(filename=worker_init_checkpoint)
@@ -555,7 +555,7 @@ class Coach:
         is enforced by a unit test in
         ``tests/test_core/test_parallel_self_play.py``.
         """
-        from alphablokus.core.parallel_self_play import (
+        from alphablokus.parallel.pool import (
             PHASE_ARENA,
             run_two_player_games_parallel,
         )
@@ -656,7 +656,7 @@ class Coach:
         checkpoint so the right network is being evaluated.
         Returns ``(new_wins, baseline_wins, draws)``.
         """
-        from alphablokus.core.parallel_self_play import (
+        from alphablokus.parallel.pool import (
             PHASE_ELO,
             run_two_player_games_parallel,
         )

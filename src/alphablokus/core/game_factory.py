@@ -1,7 +1,7 @@
 """Single source for instantiating ``(game, nnet)`` from a ``RunConfig``.
 
 Previously this dispatch lived in the entry point and was copy-pasted into
-``scripts/benchmark_phases.py``. ``core/parallel_self_play.py`` needs the
+``scripts/benchmark_phases.py``. ``parallel/pool.py`` needs the
 same factory inside each worker process, so the logic moves here and the
 two existing call sites import it.
 
