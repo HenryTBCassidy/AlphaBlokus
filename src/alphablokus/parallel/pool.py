@@ -41,7 +41,6 @@ import torch
 from loguru import logger
 from tqdm import tqdm
 
-from alphablokus.core.game_factory import instantiate_game, instantiate_game_and_network
 from alphablokus.evaluation.arena import Arena, GameRecord
 from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.parallel.inference_channel import (
@@ -52,6 +51,7 @@ from alphablokus.parallel.inference_channel import (
     SharedMemoryRequestSource,
 )
 from alphablokus.parallel.inference_server import FlushPolicy, InferenceServer
+from alphablokus.registry import instantiate_game, instantiate_game_and_network
 from alphablokus.search.mcts import MCTS
 
 if TYPE_CHECKING:

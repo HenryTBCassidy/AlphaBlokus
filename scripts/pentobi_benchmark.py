@@ -28,11 +28,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from alphablokus.core.config import RunConfig, load_args
-from alphablokus.core.game_factory import instantiate_game_and_network
 from alphablokus.evaluation.arena import Arena
 from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.games.blokusduo.pentobi_gtp import find_pentobi_gtp
 from alphablokus.games.blokusduo.pentobi_player import PentobiPlayer
+from alphablokus.registry import instantiate_game_and_network
 
 EVAL_SIMS_DEFAULT = 400
 REPLAYS_PER_LEVEL = 4  # games embedded per level in the report (keeps it readable)

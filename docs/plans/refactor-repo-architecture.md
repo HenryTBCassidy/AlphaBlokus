@@ -26,7 +26,7 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R12 | 2 | `parallel/`: `parallel_self_play.py`→`pool.py`; move `inference_server.py`/`inference_channel.py`; co-locate server lifecycle helpers | MECH | 1.5 h | High | ✅ |
 | R13 | 2 | `selfplay/`: `self_play.py`→`episode.py`; extract backend dispatch from `Coach` into `selfplay/generate.py` | JUDGE | 1.5 h | High | ✅ |
 | R14 | 2 | Consolidate `core/jaxplay/` + `games/blokusduo/jaxenv/` → `games/blokusduo/jax/`; rename colliding `GameRecord` | MECH | 1.5 h | High | ✅ |
-| R15 | 2 | `registry.py`: rename `game_factory.py`; concentrate ALL core→games coupling (game, net, jax backend, TTT oracle) | JUDGE | 1.5 h | High | |
+| R15 | 2 | `registry.py`: rename `game_factory.py`; concentrate ALL core→games coupling (game, net, jax backend, TTT oracle) | JUDGE | 1.5 h | High | ✅ |
 | R16 | 2 | `training/`: move `coach.py`; extract `replay_buffer.py` + `diagnostics.py` (memory snapshots) | JUDGE | 2 h | High | |
 | R17 | 2 | Extract `training/eval_set.py`, `evaluation/elo.py`; TTT-specific eval → `games/tictactoe/oracle.py` | JUDGE | 2 h | High | |
 | R18 | 2 | Delete emptied `core/`; final import sweep; green-suite checkpoint | MECH | 30 min | High | |
@@ -310,7 +310,7 @@ Rename `game_factory.py` → `alphablokus/registry.py` and make it the *only* mo
 
 - Existing `instantiate_game` / `instantiate_game_and_network` (unchanged behaviour; pieces path now via R8's accessor).
 - `resolve_jax_selfplay_backend(config)` — returns `games.blokusduo.jax.backend.generate_self_play_games` for `"blokusduo"`, raises otherwise (moves the guard that lives at `backend.py:45–47` up to the seam); `selfplay/generate.py` calls this instead of importing blokusduo directly.
-- `resolve_oracle(config)` — returns the TicTacToe minimax oracle hooks for `"tictactoe"`, `None` otherwise, replacing Coach's inline `games.tictactoe.*` lazy imports (consumed in R17).
+- `resolve_oracle(config)` — returns the TicTacToe minimax oracle hooks for `"tictactoe"`, `None` otherwise, replacing Coach's inline `games.tictactoe.*` lazy imports. *Execution note: added in R17 together with its consumer so no commit carries a dead function.*
 
 Keep it boring: a `match config.game` per function, no plugin machinery. Document at the top that this is the composition root and the one sanctioned core→games dependency.
 

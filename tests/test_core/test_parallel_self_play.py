@@ -23,13 +23,13 @@ from typing import TYPE_CHECKING
 import pytest
 
 from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
-from alphablokus.core.game_factory import instantiate_game_and_network
 from alphablokus.parallel.pool import (
     PHASE_ARENA,
     derive_episode_seed,
     run_self_play_episodes_parallel,
     run_two_player_games_parallel,
 )
+from alphablokus.registry import instantiate_game_and_network
 
 if TYPE_CHECKING:
     from pathlib import Path

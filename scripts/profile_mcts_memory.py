@@ -29,7 +29,7 @@ import numpy as np
 import torch
 
 from alphablokus.core.config import load_args
-from alphablokus.core.game_factory import instantiate_game_and_network
+from alphablokus.registry import instantiate_game_and_network
 from alphablokus.search.mcts import MCTS
 
 # The seven dicts that make up the MCTS tree (alphablokus/search/mcts.py).

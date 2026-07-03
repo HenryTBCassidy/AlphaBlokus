@@ -27,6 +27,10 @@ WORKER_INIT_CHECKPOINT = "parallel_worker_init.pth.tar"
 # Per-episode profiling sink: (episode_idx, stats) -> None.
 StatsLogger = Callable[[int, "MCTSEpisodeStats"], None]
 
+# The contract a GPU-native backend implements: (config, generation,
+# checkpoint_path) -> (one list of positions per game, per-game stats).
+SelfPlayBackendFn = Callable[..., "tuple[list[GameExamples], list[MCTSEpisodeStats]]"]
+
 
 def generate_games(
     config: RunConfig,
@@ -104,10 +108,11 @@ def _generate_jax(
     generation: int,
     log_stats: StatsLogger,
 ) -> list[GameExamples]:
-    """GPU-native batched backend. The jax import is deferred so
-    python-backend runs never require the ``jax`` extra."""
-    from alphablokus.games.blokusduo.jax.backend import generate_self_play_games
+    """GPU-native batched backend, resolved per-game through the registry
+    (deferred import — python-backend runs never require the ``jax`` extra)."""
+    from alphablokus.registry import resolve_jax_selfplay_backend
 
+    generate_self_play_games = resolve_jax_selfplay_backend(config)
     nnet.save_checkpoint(filename=WORKER_INIT_CHECKPOINT)
     per_game_examples, per_game_stats = generate_self_play_games(
         config=config,

@@ -33,9 +33,9 @@ import numpy as np
 import pandas as pd
 
 from alphablokus.core.config import RunConfig, load_args
-from alphablokus.core.game_factory import instantiate_game_and_network
 from alphablokus.evaluation.arena import Arena
 from alphablokus.evaluation.players import NetworkPlayer
+from alphablokus.registry import instantiate_game_and_network
 from alphablokus.reporting.mcts_profiling import PhaseResult, build_multi_phase_report
 from alphablokus.search.mcts import MCTS
 from alphablokus.search.stats import MCTSEpisodeStats

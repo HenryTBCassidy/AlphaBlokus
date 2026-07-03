@@ -5,7 +5,7 @@ from loguru import logger
 
 from alphablokus.core.coach import Coach, read_progress_marker
 from alphablokus.core.config import load_args
-from alphablokus.core.game_factory import instantiate_game_and_network
+from alphablokus.registry import instantiate_game_and_network
 from alphablokus.reporting import create_html_report
 
 

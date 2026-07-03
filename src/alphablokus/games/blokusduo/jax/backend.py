@@ -35,12 +35,12 @@ _ARTEFACT_CACHE: dict[tuple, dict[str, Any]] = {}
 
 
 def _artefacts(config: RunConfig) -> dict[str, Any]:
-    from alphablokus.core.game_factory import instantiate_game
     from alphablokus.games.blokusduo.jax.actors import make_actor
     from alphablokus.games.blokusduo.jax.harvest import TraceHarvester
     from alphablokus.games.blokusduo.jax.kernels import make_kernels
     from alphablokus.games.blokusduo.jax.search import SearchConfig, make_search
     from alphablokus.games.blokusduo.jax.tables import build_jax_tables
+    from alphablokus.registry import instantiate_game
 
     if config.game != "blokusduo":
         raise ValueError(
