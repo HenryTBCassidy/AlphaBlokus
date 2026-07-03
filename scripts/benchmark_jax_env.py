@@ -17,9 +17,9 @@ timed region:
 
 Usage::
 
-    uv run python -m experiments.jax_spike.benchmark            # CPU dev box
-    uv run python -m experiments.jax_spike.benchmark --net      # + J6 net loop
-    uv run python -m experiments.jax_spike.benchmark --out temp/benchmarks/jax_spike.html
+    uv run python -m scripts.benchmark_jax_env            # CPU dev box
+    uv run python -m scripts.benchmark_jax_env --net      # + J6 net loop
+    uv run python -m scripts.benchmark_jax_env --out temp/benchmarks/jax_env.html
 
 Writes an HTML report (charts inlined base64, ``scripts/benchmark.py``
 conventions) and logs a summary table.
@@ -39,10 +39,10 @@ from pathlib import Path
 import numpy as np
 from loguru import logger
 
-from experiments.jax_spike.bridge import numpy_state_from_board
-from experiments.jax_spike.kernels import GameState, JaxKernels, make_kernels
-from experiments.jax_spike.tables import JaxTables, build_jax_tables
 from games.blokusduo.game import BlokusDuoGame
+from games.blokusduo.jaxenv.bridge import numpy_state_from_board
+from games.blokusduo.jaxenv.kernels import GameState, JaxKernels, make_kernels
+from games.blokusduo.jaxenv.tables import JaxTables, build_jax_tables
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 PIECES_PATH = REPO_ROOT / "games" / "blokusduo" / "pieces.json"
@@ -541,7 +541,7 @@ def main() -> None:
         report.measurements.append(measure_python_mask_baseline(game_f2))
         report.measurements.append(measure_python_rollout_baseline(game_f2))
 
-    out = args.out or REPO_ROOT / "temp" / "benchmarks" / f"jax_spike_{_git_commit()}_{device.platform}.html"
+    out = args.out or REPO_ROOT / "temp" / "benchmarks" / f"jax_env_{_git_commit()}_{device.platform}.html"
     render_html(report, out)
     (out.with_suffix(".json")).write_text(json.dumps(asdict(report), indent=2))
     logger.info("JSON written to {}", out.with_suffix(".json"))

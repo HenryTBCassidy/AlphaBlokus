@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from experiments.jax_spike.tables import NUM_PIECE_IDS
+from games.blokusduo.jaxenv.tables import NUM_PIECE_IDS
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -22,7 +22,7 @@ def numpy_state_from_board(
 ) -> tuple[NDArray, NDArray, NDArray, NDArray]:
     """Extract ``(ppb, remaining, last_piece, current_player)`` numpy arrays.
 
-    Shapes/dtypes match :class:`experiments.jax_spike.kernels.GameState` fields
+    Shapes/dtypes match :class:`games.blokusduo.jaxenv.kernels.GameState` fields
     so rows can be stacked into batches and handed to jax wholesale.
     """
     ppb = board.to_compact().ravel().astype(np.int8)

@@ -28,14 +28,14 @@ Artifacts: `temp/benchmarks/jax_spike_gpu.{html,json}` (box), `temp/benchmarks/j
 
 - **Legal masks**: bit-exact equality with the F2/numba generator on **5,000/5,000**
   dev-cache positions, and with the slow reference generator on a 500-position stratified
-  subsample (three-way oracle). `tests/test_jax_spike/test_parity.py`.
+  subsample (three-way oracle). `tests/test_blokusduo/test_jaxenv_parity.py`.
 - **Step / game-end / scoring**: every cached action sequence replayed ply-by-ply — signed
   board, inventories, last-piece records, player-to-move all bit-identical; `get_game_ended`
   matches at every final position (both perspectives) and per-ply on a 1-in-25 stride.
   Coverage is real: 242 sequences contain passes, 251 end terminal, 16 end drawn.
-  `tests/test_jax_spike/test_step_parity.py`.
+  `tests/test_blokusduo/test_jaxenv_step_parity.py`.
 - The branches random play can't reach (+15 all-placed, +5 monomino-last) are pinned by
-  synthetic-state tests. `tests/test_jax_spike/test_scoring.py`.
+  synthetic-state tests. `tests/test_blokusduo/test_jaxenv_scoring.py`.
 - The full suite passes **on the CUDA backend too** (15/15 on the box) — the kernels do all
   rule arithmetic in int32 matmuls, so there is no float-tolerance parity risk.
 - One real trap found and pinned: the engine's start squares are **array indices**
@@ -138,7 +138,7 @@ inference work on the current pipeline (bf16/torch.compile, larger K) for ≲1.5
 
 ## If go: full-rewrite scope sketch
 
-1. **Env module** — productionise `experiments/jax_spike/{tables,kernels}.py` (they are the
+1. **Env module** — productionise the spike env (now promoted to `games/blokusduo/jaxenv/`) (they are the
    env; the parity suite comes with them).
 2. **mctx integration** — Gumbel AlphaZero policy over batched games; recurrent_fn = step +
    encode + forward; validate policy-improvement on TicTacToe-in-JAX or directly on Duo vs
