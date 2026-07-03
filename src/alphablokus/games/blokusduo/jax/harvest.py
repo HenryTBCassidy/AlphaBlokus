@@ -13,7 +13,7 @@ Consumes :class:`games.blokusduo.jax.actors.WaveTrace` rows (as numpy) and produ
   transpose, 2× examples);
 - value: game outcome from that position's player perspective, with the python
   path's draw-sign convention (+1e-4 to the terminal state's player-to-move,
-  −1e-4 to the opponent — see ``self_play.py:109-116``).
+  −1e-4 to the opponent — see ``selfplay/episode.py::play_self_play_episode``).
 
 Games truncated by the end of the final wave are dropped (and counted) — the
 same trailing-truncation policy as pgx's value mask; nothing is silently lost.

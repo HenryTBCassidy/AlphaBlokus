@@ -58,7 +58,8 @@ class PentobiGtp:
         path = Path(binary).expanduser() if binary else find_pentobi_gtp()
         if path is None or not path.exists():
             raise FileNotFoundError(
-                "pentobi-gtp binary not found. Build it (docs/plans/pentobi-harness.md H2) or set $PENTOBI_GTP_PATH.",
+                "pentobi-gtp binary not found. Build it (docs/plans/archive/pentobi-harness.md H2) "
+                "or set $PENTOBI_GTP_PATH.",
             )
         argv = [str(path), "--game", game, "--level", str(level), "--quiet", "--threads", str(threads)]
         if seed is not None:
