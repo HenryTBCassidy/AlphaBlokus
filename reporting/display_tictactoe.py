@@ -9,7 +9,10 @@ Stylistic convention follows the Blokus Duo renderer:
 """
 from __future__ import annotations
 
-from games.tictactoe.board import Board
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from games.tictactoe.board import Board
 
 # Matched to the Blokus palette so both games look like they belong in the
 # same report. Slight transparency on the "last-move" highlight so the colour
@@ -116,10 +119,7 @@ def _policy_cell_html(prob: float, current_player: int) -> str:
         text = f"{prob * 100:.0f}%"
         intensity = max(0.08, min(0.55, prob))  # 8%-55% bg opacity range
     # rgb of _X_BG = (99,110,250) blue; _O_BG = (239,85,59) red
-    if current_player == -1:
-        bg = f"rgba(239, 85, 59, {intensity:.2f})"
-    else:
-        bg = f"rgba(99, 110, 250, {intensity:.2f})"
+    bg = f"rgba(239, 85, 59, {intensity:.2f})" if current_player == -1 else f"rgba(99, 110, 250, {intensity:.2f})"
     return _cell_html(text, bg=bg, fg="#1f2937", extra="", font_size_px=15)
 
 
@@ -166,10 +166,7 @@ def _wrap_table(cells: list[str], annotation: str) -> str:
         '</table>'
     )
 
-    if annotation:
-        annotation_html = f'<div class="board-annotation">{annotation}</div>'
-    else:
-        annotation_html = ""
+    annotation_html = f'<div class="board-annotation">{annotation}</div>' if annotation else ""
 
     return f'<div class="{_BOARD_CLASS}">{annotation_html}{table_html}</div>'
 

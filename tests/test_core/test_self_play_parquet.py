@@ -54,7 +54,7 @@ def test_save_load_roundtrip_values(store: SelfPlayStore):
     assert loaded is not None
     assert len(loaded) == 3
 
-    for (orig_b, orig_p, orig_v), (load_b, load_p, load_v) in zip(original, loaded):
+    for (orig_b, orig_p, orig_v), (load_b, load_p, load_v) in zip(original, loaded, strict=True):
         np.testing.assert_array_almost_equal(load_b, orig_b)
         np.testing.assert_array_almost_equal(load_p, orig_p)
         assert pytest.approx(load_v) == orig_v
@@ -234,7 +234,7 @@ def test_coach_save_load_roundtrip(ttt_game, test_config: RunConfig):
     loaded = coach.replay_buffer[0]
     assert len(loaded) == 3
 
-    for (orig_b, orig_p, orig_v), (load_b, load_p, load_v) in zip(original, loaded):
+    for (orig_b, orig_p, orig_v), (load_b, load_p, load_v) in zip(original, loaded, strict=True):
         np.testing.assert_array_almost_equal(load_b, orig_b)
         np.testing.assert_array_almost_equal(load_p, orig_p)
         assert pytest.approx(load_v) == orig_v

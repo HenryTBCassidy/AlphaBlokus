@@ -158,7 +158,7 @@ def test_symmetries_count(ttt_game: TicTacToeGame):
     symmetries = ttt_game.get_symmetries(canonical, pi)
     assert len(symmetries) == 8
     # Each symmetry should be a (Board, NDArray) pair
-    for sym_board, sym_pi in symmetries:
+    for sym_board, _sym_pi in symmetries:
         assert isinstance(sym_board, Board)
 
 

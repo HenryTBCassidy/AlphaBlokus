@@ -1,4 +1,4 @@
-from games.blokusduo.pieces import OrientationCodec, PieceManager
+from games.blokusduo.pieces import PieceManager
 
 
 def test_encode_decode_roundtrip(piece_manager: PieceManager):

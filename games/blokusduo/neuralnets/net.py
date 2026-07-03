@@ -157,7 +157,8 @@ class AlphaBlokusDuo(nn.Module):
 
         self.conv_block = nn.Sequential(
             nn.Conv2d(
-                in_channels=self.num_input_channels, out_channels=config.num_filters, kernel_size=3, stride=1, padding=1, bias=False
+                in_channels=self.num_input_channels, out_channels=config.num_filters,
+                kernel_size=3, stride=1, padding=1, bias=False,
             ),
             nn.BatchNorm2d(num_features=config.num_filters),
             nn.ReLU()

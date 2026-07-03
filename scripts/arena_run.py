@@ -37,13 +37,16 @@ from __future__ import annotations
 
 import argparse
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import torch
 
 from core.arena import Arena
 from core.config import RunConfig, load_args
-from core.interfaces import IGame, INeuralNetWrapper
 from core.players import NetworkPlayer, Player, RandomPlayer
+
+if TYPE_CHECKING:
+    from core.interfaces import IGame, INeuralNetWrapper
 
 
 def _get_game(game_name: str) -> IGame:

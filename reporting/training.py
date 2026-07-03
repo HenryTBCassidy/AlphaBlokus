@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime
 import time
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -11,6 +10,8 @@ from plotly import graph_objects as go
 from plotly.subplots import make_subplots
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from core.config import RunConfig
 
 
@@ -1741,7 +1742,6 @@ def create_html_report(config: RunConfig) -> None:
         parts.append('</section>')
         diagnostics_html = "\n".join(parts)
 
-    network_entropy_html = ""  # rolled into diagnostics_html above
 
     with open(filename, "w", encoding="utf-8") as f:
         f.write(f"""<!DOCTYPE html>

@@ -9,12 +9,15 @@ data). These tests lock that batch count and confirm it scales with the buffer
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import TYPE_CHECKING
 
 import numpy as np
 
-from core.config import RunConfig
-from games.tictactoe.game import TicTacToeGame
 from games.tictactoe.neuralnets.wrapper import NNetWrapper
+
+if TYPE_CHECKING:
+    from core.config import RunConfig
+    from games.tictactoe.game import TicTacToeGame
 
 
 class _CountingMetrics:

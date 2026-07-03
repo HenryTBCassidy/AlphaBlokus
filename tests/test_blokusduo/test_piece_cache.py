@@ -35,7 +35,7 @@ def test_cached_arrays_are_immutable(piece_manager: PieceManager):
 
 def test_cached_arrays_are_same_object_on_repeat_access(piece_manager: PieceManager):
     """Repeated calls should return the exact same array object (no allocation)."""
-    piece = piece_manager.pieces[1]
+    piece_manager.pieces[1]
     arr1 = piece_manager.get_piece_orientation_array(1, Orientation.Identity)
     arr2 = piece_manager.get_piece_orientation_array(1, Orientation.Identity)
     assert arr1 is arr2

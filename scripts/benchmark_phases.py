@@ -495,7 +495,10 @@ def main() -> None:
             mcts_config=dc_replace(config.mcts_config, mcts_batch_size=args.mcts_batch_size),
         )
         print(f"[F3] MCTS batch size K={args.mcts_batch_size}", flush=True)
-    output_dir = Path(args.output_dir) if args.output_dir else config.root_directory / "benchmarks" / f"{config.run_name}_benchmark"
+    if args.output_dir:
+        output_dir = Path(args.output_dir)
+    else:
+        output_dir = config.root_directory / "benchmarks" / f"{config.run_name}_benchmark"
     output_dir.mkdir(parents=True, exist_ok=True)
     print(f"Output → {output_dir}")
 

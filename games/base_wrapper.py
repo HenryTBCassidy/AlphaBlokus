@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 import time
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Sequence
 from contextlib import nullcontext
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
@@ -16,10 +16,14 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from core.config import RunConfig
 from core.interfaces import IBoard, IGame, INeuralNetWrapper
 from core.sparse_policy import as_dense
-from core.storage import EvalSet, MetricsCollector
+
+if TYPE_CHECKING:
+    from collections.abc import Callable, Sequence
+
+    from core.config import RunConfig
+    from core.storage import EvalSet, MetricsCollector
 
 
 class AverageMeter:
@@ -185,7 +189,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             logger.warning("No training examples provided, skipping training.")
             return
 
-        boards_np, raw_pis, vs_np = zip(*examples)
+        boards_np, raw_pis, vs_np = zip(*examples, strict=True)
         action_size = self.game.get_action_size()
 
         # Validate training data at the interface boundary. Boards are stored

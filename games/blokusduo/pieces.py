@@ -1,8 +1,8 @@
 import json
+from collections.abc import Generator
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
-from collections.abc import Generator
 
 import numpy as np
 from dataclass_wizard import fromdict

@@ -96,9 +96,7 @@ class TicTacToeGame(IGame):
         for d in range(n):
             if board[d][n - d - 1] == color:
                 count += 1
-        if count == n:
-            return True
-        return False
+        return count == n
 
     def get_canonical_form(self, board: Board, player: int) -> Board:
         return board.canonical(player)

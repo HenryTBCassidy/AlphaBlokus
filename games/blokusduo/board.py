@@ -1,13 +1,15 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
 
 from core.interfaces import IBoard
-from games.blokusduo.pieces import Orientation, PieceManager
+
+if TYPE_CHECKING:
+    from games.blokusduo.pieces import Orientation, PieceManager
 
 # Type aliases for improved readability
 BoardArray: TypeAlias = NDArray[np.int8]  # Game board as numpy array
@@ -281,13 +283,15 @@ class BlokusDuoBoard(IBoard):
                 if piece_orientation[i, j] != 0:
                     ri, ci = length_idx + i, width_idx + j
                     if ri >= self.N or ci >= self.N:
+                        detail = self._piece_insertion_error_message(
+                            piece_orientation, action.x_coordinate, action.y_coordinate)
                         raise IndexError(
-                            f"Piece cannot be inserted at this index, it does not fit on the board! "
-                            f"\n{self._piece_insertion_error_message(piece_orientation, action.x_coordinate, action.y_coordinate)}")
+                            f"Piece cannot be inserted at this index, it does not fit on the board! \n{detail}")
                     if new_ppb[ri, ci] != 0:
+                        detail = self._piece_insertion_error_message(
+                            piece_orientation, action.x_coordinate, action.y_coordinate)
                         raise RuntimeError(
-                            f"Trying to insert piece into board over existing piece! \n"
-                            f"{self._piece_insertion_error_message(piece_orientation, action.x_coordinate, action.y_coordinate)}")
+                            f"Trying to insert piece into board over existing piece! \n{detail}")
                     new_ppb[ri, ci] = np.int8(action.piece_id * player_side)
 
         # Update remaining pieces
@@ -485,9 +489,7 @@ class BlokusDuoBoard(IBoard):
             return False
         if j + 1 < n and board[i, j + 1] == side:
             return False
-        if i + 1 < n and board[i + 1, j] == side:
-            return False
-        return True
+        return not (i + 1 < n and board[i + 1, j] == side)
 
     @classmethod
     def _at_least_one_corner(cls, i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:
@@ -499,9 +501,7 @@ class BlokusDuoBoard(IBoard):
             return True
         if i + 1 < n and j > 0 and board[i + 1, j - 1] == side:
             return True
-        if i + 1 < n and j + 1 < n and board[i + 1, j + 1] == side:
-            return True
-        return False
+        return bool(i + 1 < n and j + 1 < n and board[i + 1, j + 1] == side)
 
     @classmethod
     def _valid_placement(cls, i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:

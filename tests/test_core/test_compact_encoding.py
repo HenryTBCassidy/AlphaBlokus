@@ -9,12 +9,15 @@ lazily is provably lossless.
 
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
-from games.blokusduo.board import BlokusDuoBoard
-from games.blokusduo.game import BlokusDuoGame
-from games.tictactoe.board import Board
-from games.tictactoe.game import TicTacToeGame
+if TYPE_CHECKING:
+    from games.blokusduo.board import BlokusDuoBoard
+    from games.blokusduo.game import BlokusDuoGame
+    from games.tictactoe.board import Board
+    from games.tictactoe.game import TicTacToeGame
 
 
 def _play_sequence(game: TicTacToeGame | BlokusDuoGame, board: Board | BlokusDuoBoard, moves: int) -> list:

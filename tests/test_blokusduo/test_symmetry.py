@@ -7,13 +7,16 @@ invariance / round-trip properties (S5–S7).
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 import pytest
 
 from games.blokusduo.board import Action, BlokusDuoBoard
-from games.blokusduo.game import BlokusDuoGame
 from games.blokusduo.pieces import Orientation, PieceManager
 
+if TYPE_CHECKING:
+    from games.blokusduo.game import BlokusDuoGame
 
 # ── S1: orientation transpose lookup ────────────────────────────────────────
 

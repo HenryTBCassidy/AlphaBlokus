@@ -7,11 +7,9 @@ friendly piece and not side-adjacent to a friendly piece.
 All positions in these tests use array indices (i=row, j=col, top-left origin).
 Board coordinates (x, y, bottom-left origin) are computed via the decoder.
 """
-import numpy as np
 
 from games.blokusduo.board import Action, BlokusDuoBoard, CoordinateIndexDecoder
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.pieces import Orientation, PieceManager
+from games.blokusduo.pieces import Orientation
 
 # Helper: convert array index (i, j) to board coordinates (x, y)
 _decoder = CoordinateIndexDecoder(14)
