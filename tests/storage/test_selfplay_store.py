@@ -152,41 +152,6 @@ def test_compact_board_roundtrip_reencodes(blokus_game, test_config: RunConfig):
     )
 
 
-def test_load_window_missing_directory(tmp_path):
-    """load_window should return [] when the directory doesn't exist."""
-    store = SelfPlayStore(tmp_path / "does_not_exist")
-    result = store.load_window(up_to_generation=5, window_size=5)
-    assert result == []
-
-
-def test_load_window(store: SelfPlayStore):
-    """load_window should load the correct generations."""
-    # Save four generations with different sizes
-    store.save(_make_dummy_examples(2), generation=0)
-    store.save(_make_dummy_examples(3), generation=1)
-    store.save(_make_dummy_examples(4), generation=2)
-    store.save(_make_dummy_examples(5), generation=3)
-
-    # Window of 2 from generation 3 → start_gen = max(0, 3-2) = 1 → loads gens 1, 2, 3
-    history = store.load_window(up_to_generation=3, window_size=2)
-    assert len(history) == 3
-    total_examples = sum(len(e) for e in history)
-    assert total_examples == 12  # 3 from gen 1 + 4 from gen 2 + 5 from gen 3
-
-
-def test_load_window_skips_missing(store: SelfPlayStore):
-    """load_window should skip missing generations gracefully."""
-    # Save gen 0 and gen 2, skip gen 1
-    store.save(_make_dummy_examples(2), generation=0)
-    store.save(_make_dummy_examples(4), generation=2)
-
-    # Window of 5 from generation 2 → should find gens 0 and 2, skip missing 1
-    history = store.load_window(up_to_generation=2, window_size=5)
-    assert len(history) == 2
-    total_examples = sum(len(e) for e in history)
-    assert total_examples == 6  # 2 from gen 0 + 4 from gen 2
-
-
 def test_load_games_splits_by_game_sizes(store: SelfPlayStore):
     """load_games should restore per-game boundaries from game_sizes metadata."""
     # One generation: 3 games of sizes 2, 1, 3 (flat in game order).

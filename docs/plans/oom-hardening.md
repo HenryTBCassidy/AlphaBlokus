@@ -71,7 +71,7 @@ On-disk size drops ~40× (71 KB → ~1–2 KB/position) and the save-time RAM sp
 **Fix.**
 - `load`: read the sparse columns directly off the Arrow table (`table.column(...)`, no `to_pandas`/`iterrows`), rebuild `(board_compact, (indices, values), value)` tuples — the **same sparse form the live buffer holds**. Densification stays where it belongs: per-batch in `_LazyPolicyDataset.__getitem__` via `as_dense`.
 - `load_recent_games`/`load_games`: unchanged logic, now carrying sparse policies → resumed buffer RAM equals live buffer RAM (~6–8 GB at 50k, not 125 GB).
-- Delete the dead `load_window` (`storage/selfplay_store.py::load_window`, not called anywhere) rather than leave the same dense pattern lying around.
+- ~~Delete the dead `load_window`~~ — done by refactor R31.
 
 **Depends on:** O1 (format).
 

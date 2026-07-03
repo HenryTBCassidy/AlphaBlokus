@@ -19,7 +19,7 @@ from __future__ import annotations
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, runtime_checkable
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 from loguru import logger
@@ -77,7 +77,6 @@ class FlushPolicy:
         return n_pending >= self.max_batch or wait_elapsed_s >= self.max_wait_s
 
 
-@runtime_checkable
 class PendingRequest(Protocol):
     """One in-flight evaluation request the server must fulfil.
 
@@ -95,7 +94,6 @@ class PendingRequest(Protocol):
         ...
 
 
-@runtime_checkable
 class RequestSource(Protocol):
     """Where the server pulls pending requests from (transport-agnostic)."""
 

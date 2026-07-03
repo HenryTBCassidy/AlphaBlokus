@@ -154,40 +154,6 @@ class SelfPlayStore:
         logger.info(f"Loaded {len(examples)} examples from {filepath.name}")
         return examples
 
-    def load_window(
-        self,
-        up_to_generation: int,
-        window_size: int,
-    ) -> list[deque[DenseExample]]:
-        """Load self-play examples for a sliding window of generations.
-
-        Loads generations from ``max(0, up_to_generation - window_size)``
-        through ``up_to_generation`` (inclusive), skipping any files that do
-        not exist.
-
-        Args:
-            up_to_generation: The most recent generation to include.
-            window_size: How many past generations to look back.
-
-        Returns:
-            A list of deques, one per loaded generation, in generation order.
-            Empty list if the directory does not exist or no files are found.
-        """
-        if not self._directory.exists():
-            logger.warning(f"Self-play history directory not found: {self._directory}")
-            return []
-
-        start_gen = max(0, up_to_generation - window_size)
-        history: list[deque[DenseExample]] = []
-
-        for gen in range(start_gen, up_to_generation + 1):
-            loaded = self.load(gen)
-            if loaded is not None:
-                history.append(loaded)
-
-        logger.info(f"Loaded {sum(len(e) for e in history)} total examples from {len(history)} generations")
-        return history
-
     def load_games(self, generation: int) -> list[list[DenseExample]] | None:
         """Load a generation's examples split back into per-game lists.
 

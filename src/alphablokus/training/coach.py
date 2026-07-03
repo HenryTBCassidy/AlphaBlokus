@@ -233,7 +233,7 @@ class Coach:
                 snapshot.gpu_bytes,
             )
 
-            # Arena: accept/reject vs previous best new network
+            # Arena: accept or reject the newly trained network.
             logger.info(f"Evaluating Against Previous Version For Generation #{generation} ...")
             arena_start = time.perf_counter()
             # ``top_k`` capped at the action-space size (TTT only has 10
