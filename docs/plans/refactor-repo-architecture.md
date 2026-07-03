@@ -14,7 +14,7 @@ This plan restructures the whole repository into a modern, installable `src/alph
 |---|-------|------|------|--------|----------|------|
 | R1 | 0 | Commit `docs/plans/oom-hardening.md` (currently untracked) with a deferred-execution banner cross-referencing this plan | MECH | 15 min | High | ✅ |
 | R2 | 0 | Repo hygiene: prune stale worktrees, delete merged branches, remove `scripts/.DS_Store`, extend `.gitignore` | MECH | 20 min | Medium | ✅ |
-| R3 | 0 | Delete `notebooks/` (audit confirms no unique content) | MECH | 10 min | Medium | |
+| R3 | 0 | Delete `notebooks/` (audit confirms no unique content) | MECH | 10 min | Medium | ✅ |
 | R4 | 0 | Add GitHub Actions CI (ruff + pytest `-m "not slow"`, base + jax jobs) against the *current* layout | MECH | 1 h | High | |
 | R5 | 0 | Add mypy at a lenient baseline; wire into CI | JUDGE | 1.5 h | High | |
 | R6 | 1 | Move `core/`, `games/`, `reporting/` → `src/alphablokus/`; add `[build-system]`; repo-wide import rewrite (src, tests, scripts) | MECH | 2.5 h | High | |

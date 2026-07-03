@@ -71,9 +71,8 @@ Follow `docs/guides/PLAN-FORMAT.md` when creating implementation plans.
 2. **Action space is huge (17,837).** MCTS iterates only valid moves (`np.where(valids)[0]`).
 3. **Orientation IDs are 0-based (0–90).** `OrientationCodec` in `pieces.py` handles `(piece_id, orientation) ↔ int`. `ActionCodec` in `board.py` handles the full `Action ↔ int` (0–17,836) mapping.
 4. **Coordinate systems:** Board = bottom-left origin (Blokus notation). Arrays = top-left origin (numpy). `CoordinateIndexDecoder` handles conversion.
-5. **`notebooks/eval.ipynb`** has Henry's original design notes on the move generation algorithm — historical reference now that the algorithm is in code.
-6. **Board sizes use class constants.** `BlokusDuoBoard.N = 14`, `Board.N = 3` (TicTacToe). Never hardcode board dimensions as literals.
-7. **Device selection is a simple `cuda: bool` flag** in `RunConfig.net_config` (`core/config.py:35`, used in `games/base_wrapper.py`). No MPS auto-detection. On the Mac always set `cuda: false`; on the home PC set `cuda: true`.
+5. **Board sizes use class constants.** `BlokusDuoBoard.N = 14`, `Board.N = 3` (TicTacToe). Never hardcode board dimensions as literals.
+6. **Device selection is a simple `cuda: bool` flag** in `RunConfig.net_config` (`core/config.py:35`, used in `games/base_wrapper.py`). No MPS auto-detection. On the Mac always set `cuda: false`; on the home PC set `cuda: true`.
 
 ## Documentation
 
