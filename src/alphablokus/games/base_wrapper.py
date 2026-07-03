@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 import time
 from abc import ABC, abstractmethod
-from contextlib import nullcontext
-from typing import TYPE_CHECKING
+from contextlib import AbstractContextManager, nullcontext
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 import torch
@@ -290,7 +290,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                     bucket_counts=diagnostics["calib_counts"],
                 )
 
-    def _compute_eval_set_diagnostics(self, eval_set: EvalSet) -> dict:
+    def _compute_eval_set_diagnostics(self, eval_set: EvalSet) -> dict[str, Any]:
         """Forward-pass the network over the eval set and compute three
         AlphaZero-style diagnostics in one shot:
 
@@ -372,7 +372,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             "calib_counts": bucket_counts,
         }
 
-    def _inference_autocast(self):
+    def _inference_autocast(self) -> AbstractContextManager:
         """fp16 autocast context for the forward pass, or a no-op.
 
         Active only when ``fp16_inference`` is set *and* we're on CUDA — autocast

@@ -36,6 +36,8 @@ import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
+    from multiprocessing.context import BaseContext
+    from multiprocessing.synchronize import Event as EventClass
 
     from numpy.typing import NDArray
 
@@ -69,7 +71,7 @@ class ChannelHandles:
     shm_names: dict[str, str]
     submit_queue: mp.Queue
     result_events: tuple  # tuple[mp.Event, ...], one per worker
-    stop_event: object  # mp.Event
+    stop_event: EventClass
 
 
 def _array_specs(spec: ChannelSpec) -> dict[str, tuple[tuple[int, ...], type]]:
@@ -98,7 +100,7 @@ class SharedInferenceChannel:
         arrays: dict[str, NDArray],
         submit_queue: mp.Queue,
         result_events: tuple,
-        stop_event: object,
+        stop_event: EventClass,
         *,
         owner: bool,
     ) -> None:
@@ -114,7 +116,7 @@ class SharedInferenceChannel:
         self._owner = owner
 
     @classmethod
-    def create(cls, spec: ChannelSpec, ctx: object = None) -> SharedInferenceChannel:
+    def create(cls, spec: ChannelSpec, ctx: BaseContext | None = None) -> SharedInferenceChannel:
         """Allocate a fresh channel in the parent process.
 
         Args:

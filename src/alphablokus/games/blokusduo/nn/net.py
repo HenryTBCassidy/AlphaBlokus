@@ -1,14 +1,24 @@
+from __future__ import annotations
+
 import math
+from typing import TYPE_CHECKING
 
 import numpy as np
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from alphablokus.config import NetConfig
+if TYPE_CHECKING:
+    from alphablokus.config import NetConfig
 
 
-def calc_conv2d_output(y_x, kernel_size=3, stride=1, pad=1, dilation=1):
+def calc_conv2d_output(
+    y_x: tuple[int, int],
+    kernel_size: int | tuple[int, int] = 3,
+    stride: int = 1,
+    pad: int = 1,
+    dilation: int = 1,
+) -> tuple[int, int]:
     """
     Calculate output dimensions after a 2D convolution.
 
@@ -131,7 +141,7 @@ class ConvPolicyHead(nn.Module):
 
 class AlphaBlokusDuo(nn.Module):
     def __init__(self, board_rows: int, board_cols: int, action_size: int,
-                 num_input_channels: int, config: NetConfig):
+                 num_input_channels: int, config: NetConfig) -> None:
         """Initialise the Blokus Duo ResNet.
 
         The neural net receives a multi-channel representation produced by
@@ -218,7 +228,7 @@ class AlphaBlokusDuo(nn.Module):
                 nn.Linear(2 * conv_out, self.action_size),
             )
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass through the network.
 

@@ -5,6 +5,7 @@ hive-partitioned metrics (training loss, arena results, timings, profiling,
 resources, throughput) and writes them to disk on ``flush()``. Self-play
 history persistence lives in :mod:`alphablokus.storage.selfplay_store`.
 """
+from __future__ import annotations
 
 import dataclasses
 import time
@@ -18,11 +19,11 @@ import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from loguru import logger
-from numpy.typing import NDArray
-
-from alphablokus.config import RunConfig
 
 if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
+    from alphablokus.config import RunConfig
     from alphablokus.evaluation.arena import GameRecord
 
 
@@ -640,7 +641,7 @@ class MetricsCollector:
         self,
         generation: int,
         game_idx: int,
-        record: "GameRecord",
+        record: GameRecord,
     ) -> None:
         """Record one arena game's move-by-move history with top-K policies.
 

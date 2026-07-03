@@ -1,22 +1,22 @@
+from __future__ import annotations
+
 import json
 import os
 import time
 from functools import partial
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
 
 import numpy as np
 import torch
 from loguru import logger
 from numpy.typing import NDArray
 
-from alphablokus.config import RunConfig
 from alphablokus.evaluation.arena import Arena
 from alphablokus.evaluation.elo import compute_elo
 from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper
 from alphablokus.registry import resolve_oracle
 from alphablokus.search.mcts import MCTS
-from alphablokus.selfplay.episode import ProcessedExample
 from alphablokus.selfplay.generate import generate_games
 from alphablokus.storage.metrics import (
     CycleStage,
@@ -26,6 +26,11 @@ from alphablokus.storage.metrics import (
 from alphablokus.training.diagnostics import get_memory_snapshot
 from alphablokus.training.eval_set import build_or_load_eval_set
 from alphablokus.training.replay_buffer import ReplayBuffer
+
+if TYPE_CHECKING:
+    from alphablokus.config import RunConfig
+    from alphablokus.search.stats import MCTSEpisodeStats
+    from alphablokus.selfplay.episode import ProcessedExample
 
 # Type aliases for improved readability
 TrainingExample: TypeAlias = tuple[IBoard, int, NDArray, float | None]  # (board, player, policy, value)
@@ -329,7 +334,7 @@ class Coach:
         """Refill the rolling replay buffer to resume training at ``last + 1``."""
         self.replay_buffer.load_for_resume(last_completed_generation)
 
-    def _log_self_play_stats(self, generation: int, episode_idx: int, stats) -> None:
+    def _log_self_play_stats(self, generation: int, episode_idx: int, stats: MCTSEpisodeStats) -> None:
         """One episode's MCTS profiling → metrics, identical schema for every
         self-play backend so downstream reports don't care which path produced
         the data."""

@@ -1,9 +1,15 @@
-import torch.nn as nn
+from __future__ import annotations
 
-from alphablokus.config import RunConfig
+from typing import TYPE_CHECKING
+
 from alphablokus.games.base_wrapper import BaseNNetWrapper
 from alphablokus.games.blokusduo.nn.net import AlphaBlokusDuo
-from alphablokus.interfaces import IGame
+
+if TYPE_CHECKING:
+    import torch.nn as nn
+
+    from alphablokus.config import RunConfig
+    from alphablokus.interfaces import IGame
 
 
 class NNetWrapper(BaseNNetWrapper):

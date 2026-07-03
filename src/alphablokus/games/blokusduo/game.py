@@ -1,8 +1,8 @@
-from collections.abc import Generator
-from pathlib import Path
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import numpy as np
-from numpy.typing import NDArray
 
 from alphablokus.games.blokusduo.board import (
     ActionDict,
@@ -18,6 +18,14 @@ from alphablokus.games.blokusduo.codec import (
 )
 from alphablokus.games.blokusduo.pieces import Orientation, PieceManager, pieces_loader
 from alphablokus.interfaces import IGame
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+    from pathlib import Path
+
+    from numpy.typing import NDArray
+
+    from alphablokus.games.blokusduo.movegen.runtime import F2MoveGenerator
 
 
 class BlokusDuoGame(IGame):
@@ -60,7 +68,7 @@ class BlokusDuoGame(IGame):
         # Optional optimised move generator. ``None`` until
         # ``enable_optimised_movegen()`` is called. When set,
         # ``valid_move_masking`` routes through it.
-        self._f2_generator = None
+        self._f2_generator: F2MoveGenerator | None = None
 
     def enable_optimised_movegen(self) -> None:
         """Enable the precomputed-move-list move generator.

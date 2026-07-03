@@ -1,16 +1,20 @@
+from __future__ import annotations
+
 import math
 import sys
 import time
 from dataclasses import dataclass
-from typing import Final, TypeAlias
+from typing import TYPE_CHECKING, Final, TypeAlias
 
 import numpy as np
 from loguru import logger
 from numpy.typing import NDArray
 
-from alphablokus.config import MCTSConfig
-from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper
 from alphablokus.search.stats import MCTSEpisodeStats, MCTSMoveStats
+
+if TYPE_CHECKING:
+    from alphablokus.config import MCTSConfig
+    from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper
 
 # Constants
 EPS: Final[float] = 1e-8  # Small constant to prevent division by zero

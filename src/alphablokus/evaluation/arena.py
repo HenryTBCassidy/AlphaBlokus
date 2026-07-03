@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeAlias
@@ -6,11 +8,12 @@ import numpy as np
 from loguru import logger
 from tqdm import tqdm
 
-from alphablokus.evaluation.players import Player
 from alphablokus.interfaces import IBoard, IGame
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
+
+    from alphablokus.evaluation.players import Player
 
 # Type aliases for improved readability
 DisplayFn: TypeAlias = Callable[[IBoard], None]  # Function to display the game board

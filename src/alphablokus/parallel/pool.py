@@ -55,6 +55,8 @@ from alphablokus.registry import instantiate_game, instantiate_game_and_network
 from alphablokus.search.mcts import MCTS
 
 if TYPE_CHECKING:
+    from multiprocessing.sharedctypes import Synchronized
+
     from alphablokus.config import RunConfig
     from alphablokus.interfaces import IGame, INeuralNetWrapper
     from alphablokus.search.stats import MCTSEpisodeStats
@@ -250,7 +252,9 @@ def _run_inference_server(
         channel.close()
 
 
-def _worker_init_self_play_server(config: RunConfig, handles: ChannelHandles, counter: object) -> None:
+def _worker_init_self_play_server(
+    config: RunConfig, handles: ChannelHandles, counter: Synchronized,  # mp.Value('i')
+) -> None:
     """Pool initialiser for self-play workers in inference-server mode.
 
     Builds the game only (no per-worker net — the server owns it), claims a
@@ -263,9 +267,9 @@ def _worker_init_self_play_server(config: RunConfig, handles: ChannelHandles, co
     _WORKER_CUDA = False  # server-mode workers hold no net → never touch CUDA
     torch.set_num_threads(1)  # one torch thread/worker — N workers each grabbing all cores oversubscribes
     _WORKER_GAME = instantiate_game(config)
-    with counter.get_lock():  # type: ignore[attr-defined]
-        worker_id = counter.value  # type: ignore[attr-defined]
-        counter.value += 1  # type: ignore[attr-defined]
+    with counter.get_lock():
+        worker_id = counter.value
+        counter.value += 1
     _WORKER_CHANNEL = SharedInferenceChannel.attach(handles)
     _WORKER_NNET_A = InferenceClientNet(_WORKER_CHANNEL, worker_id)
     _maybe_enable_f2(config, _WORKER_GAME)

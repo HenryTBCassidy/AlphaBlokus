@@ -1,8 +1,13 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
-from alphablokus.config import NetConfig
+if TYPE_CHECKING:
+    from alphablokus.config import NetConfig
 
 
 class AlphaTicTacToe(nn.Module):
@@ -35,7 +40,7 @@ class AlphaTicTacToe(nn.Module):
 
         self.fc4 = nn.Linear(512, 1)
 
-    def forward(self, x):
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
         """
         This is where the net assembly happens
         :param x: Inputs:                                              batch_size * board_rows * board_cols

@@ -62,6 +62,10 @@ def _reset_where(terminated: jnp.ndarray, fresh: jnp.ndarray, current: jnp.ndarr
     return jnp.where(flags, fresh, current)
 
 
+# Network weights as a jax pytree (nested dict of arrays from checkpoint.convert_state_dict).
+Params = dict
+
+
 def make_actor(
     kernels: JaxKernels,
     search: Callable[..., SearchResult],
@@ -70,7 +74,7 @@ def make_actor(
     temp_threshold: int,
     wave_plies: int,
     use_search_action: bool = False,
-):
+) -> tuple[Callable[[], ActorCarry], Callable[[Params, jnp.ndarray, ActorCarry], tuple[ActorCarry, WaveTrace]]]:
     """Build ``(initial_carry, run_wave)`` for a fixed batch size.
 
     Returns:
@@ -88,7 +92,7 @@ def make_actor(
 
     batch_index = jnp.arange(batch_size)
 
-    def run_wave(params, rng_key: jnp.ndarray, carry: ActorCarry) -> tuple[ActorCarry, WaveTrace]:
+    def run_wave(params: Params, rng_key: jnp.ndarray, carry: ActorCarry) -> tuple[ActorCarry, WaveTrace]:
         fresh = _fresh_games()
 
         def step_fn(carry: ActorCarry, key: jnp.ndarray) -> tuple[ActorCarry, WaveTrace]:
