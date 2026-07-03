@@ -1,6 +1,6 @@
 # AlphaBlokus — AI Assistant Context
 
-> Context for Claude and other AI assistants working on this project. Read this alongside the README before starting any task.
+> Extended context for Claude and other AI assistants working on this project. Read this alongside the README and `AGENTS.md` before starting any task. AGENTS.md carries the operational rules (commands, gotchas, doc map); this file carries the *why* — architecture rationale and background that doesn't fit a rule list.
 
 ---
 
@@ -19,66 +19,75 @@
 
 ### Why ResNet over plain CNN?
 
-Residual connections prevent gradient degradation in deeper networks. Blokus needs more capacity than Tic-Tac-Toe's 4-layer CNN. The AlphaZero paper uses ResNet — we follow the proven recipe. Configurable depth (1-8 blocks) lets us experiment without code changes.
+Residual connections prevent gradient degradation in deeper networks. Blokus needs more capacity than Tic-Tac-Toe's 4-layer CNN. The AlphaZero paper uses ResNet — we follow the proven recipe. Configurable depth and width (`num_residual_blocks`, `num_filters`) let us experiment without code changes. The policy head is fully convolutional by default (F4): the action space is `(cell, orientation)` pairs, so a 1×1 conv emitting one logit plane per orientation costs ~47K params where the legacy FC head cost ~7M.
 
 ### Why 44x14x14 board encoding?
 
-The network needs both spatial state (where pieces are) and piece inventory (which pieces remain). The 44-channel encoding follows the AlphaZero convention of one binary plane per piece type per player: 21 planes per player showing exactly where each piece sits on the board, plus 2 aggregate planes (union of all current/opponent pieces). Piece inventory is implicit -- an all-zero plane means that piece hasn't been played. Conv filters see which specific piece occupies each position, enabling piece-shape-aware spatial reasoning. See `../plans/archive/board-encoding-options.md` for the full design rationale and alternatives considered.
+The network needs both spatial state (where pieces are) and piece inventory (which pieces remain). The 44-channel encoding follows the AlphaZero convention of one binary plane per piece type per player: 21 planes per player showing exactly where each piece sits on the board, plus 2 aggregate planes (union of all current/opponent pieces). Piece inventory is implicit — an all-zero plane means that piece hasn't been played. Conv filters see which specific piece occupies each position, enabling piece-shape-aware spatial reasoning. See `../plans/archive/board-encoding-options.md` for the full design rationale and alternatives considered.
 
 ### Why 91 piece-orientations (not 168)?
 
-Each piece has up to 8 orientations (4 rotations x 2 flips), but many are duplicates due to symmetry. The 1-square piece has only 1 unique orientation. A symmetric 2x2 square has only 1. Asymmetric pentominoes have all 8. After symmetry reduction: 91 unique orientations. This keeps the action space as small as possible while being complete.
+Each piece has up to 8 orientations (4 rotations x 2 flips), but many are duplicates due to symmetry. The 1-square piece has only 1 unique orientation. A symmetric 2x2 square has only 1. Asymmetric pentominoes have all 8. After symmetry reduction: 91 unique orientations. This keeps the action space as small as possible while being complete. `OrientationCodec` maps `(piece_id, orientation)` to **contiguous** integer IDs 0–90 — no gaps.
 
 ### Why game-agnostic framework?
 
-The `IGame` and `INeuralNetWrapper` protocols let us add new games without touching MCTS, Coach, or Arena. Tic-Tac-Toe validated the framework before we invested time in Blokus game logic. Could extend to Connect 4, Othello, or other games later.
+The `IBoard` / `IGame[TBoard]` / `INeuralNetWrapper` protocols let us add new games without touching MCTS, Coach, or Arena. Tic-Tac-Toe validated the framework before we invested time in Blokus game logic, and it remains the fast regression game. The coupling to concrete games is concentrated in exactly one module — `alphablokus/registry.py`, the composition root — so "game-agnostic" is enforced, not aspirational.
 
-### Why no parallel MCTS yet?
+### Why two self-play backends (python and jax), and why both are first-class
 
-Premature optimisation. Get the pipeline working correctly first, then optimise. The current bottleneck is implementing move generation, not MCTS speed. Parallelism is documented in `../02-ALGORITHMS.md` for when we're ready.
+Self-play generation dominates wall-clock. The **python engine** (`search/mcts.py` + `selfplay/episode.py` + `parallel/pool.py`) is the framework itself: it drives arena, Elo, and Pentobi evaluation on every run, it is the only engine for TicTacToe, and it is the correctness oracle. The **jax backend** (`games/blokusduo/jax/`) reimplements Blokus self-play GPU-natively — rules as int8 matmuls, mctx search over a top-K compact action space, an inference-only jnp net bridged from the torch checkpoint each generation — and at production net size generates games ~12× faster (`docs/research/jax-pipeline-ab.md`). Production Blokus configs use jax + Gumbel search; everything else stays python. Neither is legacy; don't quarantine either.
+
+**The python↔jax parity contract** (what keeps the fast path honest):
+
+- The jax **rules kernels** are bit-identical to the python rules engine — parity tests sweep thousands of stratified positions comparing legal-move masks, terminal detection, and encodings.
+- The jax **PUCT search** is tuned to match the python search's arithmetic (raw-Q transform, cpuct mapping — see `games/blokusduo/jax/search.py`'s module docstring), and its move agreement is measured against the exact search; at K=64 it tracks it *better* than the python engine's own K=16 virtual-loss batching.
+- The **harvester** (`jax/harvest.py`) emits training examples in the *exact* representation `selfplay/episode.py` produces (compact canonical boards, sparse policies, same draw-sign convention), so storage, resume, and training are backend-agnostic.
+- **Gumbel mode is a deliberate behavioural change** (different policy target: completed-Q improved policy, no Dirichlet/temperature), opt-in via `search_policy: "gumbel"` and validated by its own A/B training run, not by parity.
 
 ### Why canonical form = channel reordering?
 
 The canonical form is handled by `board.as_multi_channel(current_player)`, which places the current player's 21 piece planes in channels 0-20 and the opponent's in channels 21-41. The network always sees "my pieces" in the first channel group and "opponent's pieces" in the second, regardless of which colour it's playing. This replaces the old approach of multiplying a single-channel board by the player value (+/-1).
 
+### Why a rolling game-sized replay buffer?
+
+Training uses a `deque` of the last `replay_buffer_games` games (compact boards + sparse policies), trained with full epoch passes — no sampling knob. Staleness and reuse fall out of `B`, `F` (`num_eps`) and `E` (`epochs`): see `docs/02-ALGORITHMS.md`. This replaced a generation-window design whose window could never shrink below 5 generations, and it is what lifted the training-step RAM ceiling (compact boards are ~175× smaller than dense planes).
+
 ---
 
-## Gotchas
+## Gotchas (context-level; the operational list lives in AGENTS.md)
 
-1. **Move generation is the hard part.** The board, pieces, placement validation, and neural network are all done. The blocker is efficiently generating legal moves from the placement point cache. This was the predicted bottleneck in the project plan and it proved correct.
+1. **`state_key` uses `_piece_placement_board.tobytes()`.** MCTS hashes board states using the `state_key` property on `IBoard`. For BlokusDuo this uses the piece placement board's raw numpy byte representation (196 bytes, int8). Anything that changes the placement board's dtype/layout silently invalidates the tree keys.
 
-2. **The action space is huge.** 17,837 actions means the policy head's final FC layer alone is ~9M parameters. MCTS iterating over all actions (even illegal ones) is O(17,837) per simulation. Must optimise to only iterate valid moves.
+2. **Draws are `1e-4`, not `0`.** `get_game_ended` returns `0` for "game still running", so the draw sentinel is `1e-4`; value targets for drawn games are `±1e-4 ≈ 0`. The jax kernels reproduce the same convention (`DRAW_VALUE`).
 
-3. **`state_key` uses `_piece_placement_board.tobytes()`.** MCTS hashes board states using the `state_key` property on `IBoard`. For BlokusDuo this uses the piece placement board's raw numpy byte representation (196 bytes, int8).
+3. **Coordinate systems are confusing.** Board coordinates use bottom-left origin (matching standard Blokus notation). Array indices use top-left origin (matching numpy). `CoordinateIndexDecoder` (in `games/blokusduo/codec.py`) handles conversion. Always be explicit about which system you're in.
 
-4. **Piece-orientation IDs have gaps.** The `BidirectionalDict` assigns IDs sequentially but skips IDs when moving to the next piece (the populate_lookup loop increments `i` one extra time between pieces). Be careful when mapping between action indices and piece-orientation IDs.
+4. **Internal Elo curves are not cross-comparable.** Each run's Elo is anchored to its own random gen-0 net. A run can trail another on internal Elo and still beat it head-to-head (observed in the jax A/B). Head-to-head arenas are the arbiter between runs.
 
-5. **No optimizer state in checkpoints.** The wrapper saves only `state_dict`, not the Adam optimizer's momentum buffers. This means training "restarts" each generation. Acceptable for now, but saving optimizer state would give smoother training.
+5. **Checkpoints carry optimizer + scheduler state.** `save_checkpoint` stores `state_dict` *and* `optimizer_state_dict` (+ scheduler when configured), so Adam momentum survives resume. Only `state_dict` keys are bridged to the jax net.
 
-6. **`calc_conv2d_output` exists but is only used once.** The Blokus ResNet uses it to compute the flattened size for the FC layers. The Tic-Tac-Toe net hardcodes the computation. If you change kernel sizes or padding, use this helper.
-
-7. **Coordinate systems are confusing.** Board coordinates use bottom-left origin (matching standard Blokus notation). Array indices use top-left origin (matching numpy). `CoordinateIndexDecoder` handles conversion. Always be explicit about which system you're in.
-
-8. **`eval.ipynb` has move generation design notes.** Check the notebook for Henry's thinking about the move generation algorithm before implementing.
+6. **Performance claims go stale fast here.** Any "X dominates the profile" claim is only true at a specific net size and backend — the move-gen/inference split flipped once already (see `docs/08-TRAINING-ESTIMATES.md`'s banner), and the jax backend changed the workload shape again. Cite `docs/research/` measurements, not folklore.
 
 ---
 
 ## Things NOT to Do
 
-- **Don't rewrite the framework.** MCTS, Coach, Arena work correctly — they're validated on Tic-Tac-Toe. Focus on completing the Blokus game logic
-- **Don't over-engineer move generation.** Get it working correctly first, optimise second. A correct but slow `valid_moves()` is infinitely better than a fast but buggy one
-- **Don't add 4-player Blokus support until Duo beats Pentobi level 9.** It's a stretch goal, not a current priority. 4-player would require fundamental changes (coalition dynamics, non-zero-sum) — see `docs/01-BACKGROUND.md` for details
+- **Don't rewrite the framework.** MCTS, Coach, Arena, move generation, and the game rules are validated — relocate or extend, never re-derive
+- **Don't add 4-player Blokus support until Duo beats Pentobi level 9.** It's a stretch goal, not a current priority. 4-player would require fundamental changes (coalition dynamics, non-zero-sum) — see `../01-BACKGROUND.md` for details
 - **Don't switch to Transformer/Mamba/ViT.** ResNet is proven for AlphaZero. Novel architectures are research risk we don't need
-- **Don't implement learning rate scheduling before the first successful training run.** Get the basics working, then refine
 - **Don't build a web UI.** The HTML reporting that already exists is sufficient for analysis
 - **Don't pad options for educational value.** If one approach clearly works, recommend it. Henry will push back on unnecessary alternatives
-- **Read the README first** — it has the current project status
+- **Don't trust stale docs over code.** When a doc and the source disagree, the source wins — and fix the doc
 
 ---
 
-## Where to Start
+## Where to Start Reading
 
-- **`README.md`** — Project overview and current status
-- **This file** (`docs/guides/AI-CONTEXT.md`) — AI context, architecture decisions, and gotchas
-- **The relevant `docs/` file** for whatever work is being done (e.g., `docs/02-ALGORITHMS.md` for MCTS work, `docs/03-NEURAL-NETWORKS.md` for net work)
-- **`docs/plans/bug-fixes.md`** — The active bug list
+Follow the pipeline top-down; each hop is one seam:
+
+1. **`src/alphablokus/cli.py`** — entry point: config load, resume/report-only dispatch, Coach construction via `registry.instantiate_game_and_network`.
+2. **`src/alphablokus/training/coach.py`** — one generation end-to-end: self-play → train → arena → strength eval → flush metrics.
+3. **`src/alphablokus/selfplay/generate.py`** — the backend dispatch (serial / worker pool / jax) that Coach's phase 1 collapses into.
+4. From there, follow your task: `search/mcts.py` (the search), `games/blokusduo/game.py` + `movegen/` (rules + move generation), `games/blokusduo/jax/` (the GPU backend), `evaluation/` (arena/Elo/acceptance), `storage/` + `reporting/` (parquet + report).
+
+Supporting reading: `README.md` (status), the relevant `docs/` reference file for the domain you're touching, and `docs/plans/` for what's in flight.
