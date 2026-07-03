@@ -24,11 +24,12 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from core.config import MCTSConfig, NetConfig, RunConfig
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.neuralnets.wrapper import NNetWrapper
+from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
+from alphablokus.games.blokusduo.pieces import default_pieces_path
 
-_PIECES = Path(__file__).resolve().parent.parent / "games" / "blokusduo" / "pieces.json"
+_PIECES = default_pieces_path()
 
 
 def _make_boards(game: BlokusDuoGame, n: int, seed: int) -> list:

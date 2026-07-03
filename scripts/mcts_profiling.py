@@ -17,16 +17,17 @@ from pathlib import Path
 
 import numpy as np
 
-from core.config import MCTSConfig, NetConfig, RunConfig
-from core.mcts import MCTS, MCTSEpisodeStats
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.neuralnets.wrapper import NNetWrapper as BlokusDuoNNetWrapper
-from games.tictactoe.game import TicTacToeGame
-from games.tictactoe.neuralnets.wrapper import NNetWrapper as TicTacToeNNetWrapper
-from reporting.mcts_profiling import build_single_phase_report
+from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
+from alphablokus.core.mcts import MCTS, MCTSEpisodeStats
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper as BlokusDuoNNetWrapper
+from alphablokus.games.blokusduo.pieces import default_pieces_path
+from alphablokus.games.tictactoe.game import TicTacToeGame
+from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper as TicTacToeNNetWrapper
+from alphablokus.reporting.mcts_profiling import build_single_phase_report
 
 OUTPUT_DIR = Path("temp/analysis/mcts_profiling")
-PIECES_PATH = Path("games/blokusduo/pieces.json")
+PIECES_PATH = default_pieces_path()
 
 
 def _create_game_and_net(

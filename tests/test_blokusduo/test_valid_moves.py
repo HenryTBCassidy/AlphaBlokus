@@ -6,9 +6,9 @@ progression, and edge cases.
 """
 import numpy as np
 
-from games.blokusduo.board import Action, BlokusDuoBoard, CoordinateIndexDecoder
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.pieces import Orientation
+from alphablokus.games.blokusduo.board import Action, BlokusDuoBoard, CoordinateIndexDecoder
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.pieces import Orientation
 
 _decoder = CoordinateIndexDecoder(14)
 

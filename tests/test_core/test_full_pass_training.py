@@ -13,11 +13,11 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from games.tictactoe.neuralnets.wrapper import NNetWrapper
+from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
 
 if TYPE_CHECKING:
-    from core.config import RunConfig
-    from games.tictactoe.game import TicTacToeGame
+    from alphablokus.core.config import RunConfig
+    from alphablokus.games.tictactoe.game import TicTacToeGame
 
 
 class _CountingMetrics:

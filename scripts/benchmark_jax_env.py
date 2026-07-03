@@ -39,13 +39,14 @@ from pathlib import Path
 import numpy as np
 from loguru import logger
 
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.jaxenv.bridge import numpy_state_from_board
-from games.blokusduo.jaxenv.kernels import GameState, JaxKernels, make_kernels
-from games.blokusduo.jaxenv.tables import JaxTables, build_jax_tables
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.jaxenv.bridge import numpy_state_from_board
+from alphablokus.games.blokusduo.jaxenv.kernels import GameState, JaxKernels, make_kernels
+from alphablokus.games.blokusduo.jaxenv.tables import JaxTables, build_jax_tables
+from alphablokus.games.blokusduo.pieces import default_pieces_path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-PIECES_PATH = REPO_ROOT / "games" / "blokusduo" / "pieces.json"
+PIECES_PATH = default_pieces_path()
 DEV_CACHE_PATH = REPO_ROOT / "tests" / "fixtures" / "blokus_duo_positions" / "dev_5000.npz"
 
 #: Fixed rollout horizon. Random Duo games average ~32 plies; terminal states
@@ -378,7 +379,7 @@ def _measure_forward_only(forward_only, batch_size: int, dtype_name: str, result
 
 def measure_python_mask_baseline(game: BlokusDuoGame, sample: int = 500) -> Measurement:
     """Per-call latency of the production F2/numba mask over dev positions."""
-    from games.blokusduo.movegen_runtime import get_default_generator
+    from alphablokus.games.blokusduo.movegen_runtime import get_default_generator
     from tests.fixtures.blokus_positions import iter_cached_positions
 
     generator = get_default_generator()

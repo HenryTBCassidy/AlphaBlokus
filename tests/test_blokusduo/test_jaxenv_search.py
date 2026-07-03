@@ -25,7 +25,7 @@ import pytest
 from tests.test_blokusduo.conftest import DEV_CACHE_PATH
 
 if TYPE_CHECKING:
-    from games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
 
 jax = pytest.importorskip("jax")
 pytest.importorskip("mctx")
@@ -33,13 +33,13 @@ torch = pytest.importorskip("torch")
 
 import jax.numpy as jnp  # noqa: E402
 
-from core.config import MCTSConfig, NetConfig, RunConfig  # noqa: E402
-from core.mcts import MCTS  # noqa: E402
-from games.blokusduo.jaxenv.bridge import numpy_state_from_board  # noqa: E402
-from games.blokusduo.jaxenv.checkpoint import convert_state_dict, params_to_device  # noqa: E402
-from games.blokusduo.jaxenv.kernels import GameState, make_kernels  # noqa: E402
-from games.blokusduo.jaxenv.search import SearchConfig, dense_policy, make_search  # noqa: E402
-from games.blokusduo.jaxenv.tables import build_jax_tables  # noqa: E402
+from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig  # noqa: E402
+from alphablokus.core.mcts import MCTS  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.bridge import numpy_state_from_board  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.checkpoint import convert_state_dict, params_to_device  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.kernels import GameState, make_kernels  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.search import SearchConfig, dense_policy, make_search  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.tables import build_jax_tables  # noqa: E402
 
 N_POSITIONS = 20
 SIMS = 60
@@ -66,7 +66,7 @@ def setup(tmp_path_factory, blokus_game_module: BlokusDuoGame):
     torch.manual_seed(3)
     game = blokus_game_module
     game.enable_optimised_movegen()
-    from games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
 
     nnet = NNetWrapper(game, _run_config(tmp_path_factory.mktemp("jax_search")))
     params = params_to_device(convert_state_dict(nnet.nnet.state_dict(), num_residual_blocks=1))

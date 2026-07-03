@@ -10,16 +10,15 @@ coordinate or a wrong shape-match silently corrupts every benchmark game. Two gu
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
-from games.blokusduo.board import Action, CoordinateIndexDecoder
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.pentobi_translation import PASS, PentobiMoveTranslator
+from alphablokus.games.blokusduo.board import Action, CoordinateIndexDecoder
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.pentobi_translation import PASS, PentobiMoveTranslator
+from alphablokus.games.blokusduo.pieces import default_pieces_path
 
-_PIECES = Path(__file__).resolve().parent.parent.parent / "games" / "blokusduo" / "pieces.json"
+_PIECES = default_pieces_path()
 
 
 @pytest.fixture(scope="module")

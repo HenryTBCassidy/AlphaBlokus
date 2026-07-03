@@ -29,8 +29,10 @@ from pathlib import Path
 import numpy as np
 from loguru import logger
 
+from alphablokus.games.blokusduo.pieces import default_pieces_path
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PIECES_PATH = REPO_ROOT / "games" / "blokusduo" / "pieces.json"
+PIECES_PATH = default_pieces_path()
 DEV_CACHE_PATH = REPO_ROOT / "tests" / "fixtures" / "blokus_duo_positions" / "dev_5000.npz"
 
 
@@ -57,15 +59,15 @@ def main() -> None:
 
     import jax
 
-    from core.config import MCTSConfig, NetConfig, RunConfig
-    from core.mcts import MCTS
-    from games.blokusduo.game import BlokusDuoGame
-    from games.blokusduo.jaxenv.bridge import numpy_state_from_board
-    from games.blokusduo.jaxenv.checkpoint import convert_torch_checkpoint, params_to_device
-    from games.blokusduo.jaxenv.kernels import GameState, make_kernels
-    from games.blokusduo.jaxenv.search import SearchConfig, dense_policy, make_search
-    from games.blokusduo.jaxenv.tables import build_jax_tables
-    from games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
+    from alphablokus.core.mcts import MCTS
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.jaxenv.bridge import numpy_state_from_board
+    from alphablokus.games.blokusduo.jaxenv.checkpoint import convert_torch_checkpoint, params_to_device
+    from alphablokus.games.blokusduo.jaxenv.kernels import GameState, make_kernels
+    from alphablokus.games.blokusduo.jaxenv.search import SearchConfig, dense_policy, make_search
+    from alphablokus.games.blokusduo.jaxenv.tables import build_jax_tables
+    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
     from tests.fixtures.blokus_positions import iter_cached_positions
 
     game = BlokusDuoGame(pieces_config_path=PIECES_PATH)

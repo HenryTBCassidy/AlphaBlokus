@@ -36,9 +36,9 @@ from pathlib import Path
 
 import torch
 
-from core.config import load_args
-from core.players import NetworkPlayer
-from games.tictactoe.game import TicTacToeGame
+from alphablokus.core.config import load_args
+from alphablokus.core.players import NetworkPlayer
+from alphablokus.games.tictactoe.game import TicTacToeGame
 
 
 def _render_board(board, current_player: int) -> str:
@@ -101,7 +101,7 @@ def main() -> None:
         raise SystemExit(f"play_ttt only supports tictactoe; config is {config.game!r}")
 
     game = TicTacToeGame()
-    from games.tictactoe.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
     wrapper = NNetWrapper(game, config)
 
     ckpt_path = Path(args.checkpoint)

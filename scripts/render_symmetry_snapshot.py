@@ -25,10 +25,10 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from games.blokusduo.board import BlokusDuoBoard
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.pieces import Orientation
-from reporting.display_blokusduo import BOARD_CSS, render_board_html
+from alphablokus.games.blokusduo.board import BlokusDuoBoard
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.pieces import Orientation, default_pieces_path
+from alphablokus.reporting.display_blokusduo import BOARD_CSS, render_board_html
 
 # Pentobi-aligned starting squares (array indices). Kept here as a local
 # constant so the snapshot doesn't have to import them from game.py — keeps
@@ -40,7 +40,7 @@ BLACK_START = (9, 9)
 def main() -> None:
     project_root = Path(__file__).resolve().parent.parent
     game = BlokusDuoGame(
-        pieces_config_path=project_root / "games" / "blokusduo" / "pieces.json",
+        pieces_config_path=default_pieces_path(),
     )
 
     board = _build_mid_game_position(game)

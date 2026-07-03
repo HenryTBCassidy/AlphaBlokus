@@ -9,12 +9,10 @@ Tests run in ~100ms (table build is fast).
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import numpy as np
 import pytest
 
-from games.blokusduo.movegen_tables import (
+from alphablokus.games.blokusduo.movegen_tables import (
     ADJ_STATUS_BITS,
     ADJ_STATUS_COUNT,
     ADJ_STATUS_OFFSETS,
@@ -27,9 +25,9 @@ from games.blokusduo.movegen_tables import (
     build_lookup_table,
     build_move_tables,
 )
-from games.blokusduo.pieces import pieces_loader
+from alphablokus.games.blokusduo.pieces import default_pieces_path, pieces_loader
 
-PIECES_PATH = Path(__file__).resolve().parent.parent.parent / "games" / "blokusduo" / "pieces.json"
+PIECES_PATH = default_pieces_path()
 PENTOBI_DUO_MOVE_COUNT = 13_729
 
 

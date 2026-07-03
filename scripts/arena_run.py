@@ -41,30 +41,30 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from core.arena import Arena
-from core.config import RunConfig, load_args
-from core.players import NetworkPlayer, Player, RandomPlayer
+from alphablokus.core.arena import Arena
+from alphablokus.core.config import RunConfig, load_args
+from alphablokus.core.players import NetworkPlayer, Player, RandomPlayer
 
 if TYPE_CHECKING:
-    from core.interfaces import IGame, INeuralNetWrapper
+    from alphablokus.core.interfaces import IGame, INeuralNetWrapper
 
 
 def _get_game(game_name: str) -> IGame:
     if game_name == "tictactoe":
-        from games.tictactoe.game import TicTacToeGame
+        from alphablokus.games.tictactoe.game import TicTacToeGame
         return TicTacToeGame()
     if game_name == "blokusduo":
-        from games.blokusduo.game import BlokusDuoGame
+        from alphablokus.games.blokusduo.game import BlokusDuoGame
         return BlokusDuoGame()
     raise ValueError(f"Unknown game: {game_name!r}")
 
 
 def _get_nnet_class(game_name: str) -> type[INeuralNetWrapper]:
     if game_name == "tictactoe":
-        from games.tictactoe.neuralnets.wrapper import NNetWrapper
+        from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
         return NNetWrapper
     if game_name == "blokusduo":
-        from games.blokusduo.neuralnets.wrapper import NNetWrapper
+        from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
         return NNetWrapper
     raise ValueError(f"Unknown game: {game_name!r}")
 
@@ -102,7 +102,7 @@ def build_player(spec: str, game: IGame, config: RunConfig) -> Player:
                 "Minimax player is only available for TicTacToe; "
                 f"current config game is {config.game!r}"
             )
-        from games.tictactoe.minimax import MinimaxTicTacToePlayer
+        from alphablokus.games.tictactoe.minimax import MinimaxTicTacToePlayer
         return MinimaxTicTacToePlayer(game)
 
     path = Path(spec)

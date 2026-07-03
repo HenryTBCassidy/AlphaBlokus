@@ -30,10 +30,10 @@ import tracemalloc
 
 import numpy as np
 
-from core.config import load_args
-from core.game_factory import instantiate_game_and_network
-from core.mcts import MCTS
-from core.self_play import play_self_play_episode
+from alphablokus.core.config import load_args
+from alphablokus.core.game_factory import instantiate_game_and_network
+from alphablokus.core.mcts import MCTS
+from alphablokus.core.self_play import play_self_play_episode
 
 
 def _play_one(game, nnet, config, seed: int):

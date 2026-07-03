@@ -1,3 +1,7 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
 [project]
 name = "alphablokus"
 version = "0.1.0"
@@ -36,6 +40,9 @@ jax-cuda = [
     "matplotlib>=3.8.0",
 ]
 
+[tool.hatch.build.targets.wheel]
+packages = ["src/alphablokus"]
+
 [tool.ruff]
 target-version = "py311"
 line-length = 120
@@ -55,7 +62,7 @@ select = [
 # Lenient baseline (refactor plan R5). Strictness ratchets to
 # disallow_untyped_defs in R28 once the typing sweep (R27) lands.
 python_version = "3.11"
-files = ["core", "games", "reporting", "main.py"]
+files = ["src/alphablokus", "main.py"]
 no_implicit_optional = true
 warn_redundant_casts = true
 check_untyped_defs = false
@@ -81,25 +88,25 @@ ignore_missing_imports = true
 # listed here are fully checked — do not add to this list.
 [[tool.mypy.overrides]]
 module = [
-    "core.coach",
-    "core.inference_channel",
-    "core.jaxplay.backend",
-    "core.mcts",
-    "core.parallel_self_play",
-    "core.self_play",
-    "core.storage",
-    "games.base_wrapper",
-    "games.blokusduo.board",
-    "games.blokusduo.game",
-    "games.blokusduo.jaxenv.bridge",
-    "games.blokusduo.movegen_runtime",
-    "games.blokusduo.movegen_tables",
-    "games.blokusduo.neuralnets.net",
-    "games.blokusduo.pentobi_player",
-    "games.blokusduo.pentobi_translation",
-    "games.tictactoe.game",
-    "games.tictactoe.minimax",
-    "reporting.display",
+    "alphablokus.core.coach",
+    "alphablokus.core.inference_channel",
+    "alphablokus.core.jaxplay.backend",
+    "alphablokus.core.mcts",
+    "alphablokus.core.parallel_self_play",
+    "alphablokus.core.self_play",
+    "alphablokus.core.storage",
+    "alphablokus.games.base_wrapper",
+    "alphablokus.games.blokusduo.board",
+    "alphablokus.games.blokusduo.game",
+    "alphablokus.games.blokusduo.jaxenv.bridge",
+    "alphablokus.games.blokusduo.movegen_runtime",
+    "alphablokus.games.blokusduo.movegen_tables",
+    "alphablokus.games.blokusduo.neuralnets.net",
+    "alphablokus.games.blokusduo.pentobi_player",
+    "alphablokus.games.blokusduo.pentobi_translation",
+    "alphablokus.games.tictactoe.game",
+    "alphablokus.games.tictactoe.minimax",
+    "alphablokus.reporting.display",
 ]
 ignore_errors = true
 

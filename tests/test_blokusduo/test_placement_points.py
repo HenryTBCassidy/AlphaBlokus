@@ -8,8 +8,8 @@ All positions in these tests use array indices (i=row, j=col, top-left origin).
 Board coordinates (x, y, bottom-left origin) are computed via the decoder.
 """
 
-from games.blokusduo.board import Action, BlokusDuoBoard, CoordinateIndexDecoder
-from games.blokusduo.pieces import Orientation
+from alphablokus.games.blokusduo.board import Action, BlokusDuoBoard, CoordinateIndexDecoder
+from alphablokus.games.blokusduo.pieces import Orientation
 
 # Helper: convert array index (i, j) to board coordinates (x, y)
 _decoder = CoordinateIndexDecoder(14)

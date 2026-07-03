@@ -17,17 +17,18 @@ import pytest
 from tests.test_blokusduo.conftest import DEV_CACHE_PATH
 
 if TYPE_CHECKING:
-    from games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
 
 jax = pytest.importorskip("jax")
 pytest.importorskip("mctx")
 torch = pytest.importorskip("torch")
 
-from games.blokusduo.jaxenv.bridge import numpy_state_from_board  # noqa: E402
-from games.blokusduo.jaxenv.checkpoint import convert_state_dict, params_to_device  # noqa: E402
-from games.blokusduo.jaxenv.kernels import GameState, make_kernels  # noqa: E402
-from games.blokusduo.jaxenv.search import SearchConfig, dense_policy, make_search  # noqa: E402
-from games.blokusduo.jaxenv.tables import build_jax_tables  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.bridge import numpy_state_from_board  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.checkpoint import convert_state_dict, params_to_device  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.kernels import GameState, make_kernels  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.search import SearchConfig, dense_policy, make_search  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.tables import build_jax_tables  # noqa: E402
+from alphablokus.games.blokusduo.pieces import default_pieces_path  # noqa: E402
 from tests.test_blokusduo.test_jaxenv_search import _run_config  # noqa: E402
 
 N_POSITIONS = 12
@@ -40,7 +41,7 @@ def setup(tmp_path_factory, blokus_game_module: BlokusDuoGame):
 
     torch.manual_seed(5)
     game = blokus_game_module
-    from games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
 
     nnet = NNetWrapper(game, _run_config(tmp_path_factory.mktemp("gumbel")))
     params = params_to_device(convert_state_dict(nnet.nnet.state_dict(), num_residual_blocks=1))
@@ -86,9 +87,9 @@ def test_gumbel_structural_invariants(setup) -> None:
 def test_gumbel_backend_generates_games(tmp_path) -> None:
     import dataclasses
 
-    from core.config import JaxSelfPlayConfig, MCTSConfig
-    from core.jaxplay.backend import generate_self_play_games
-    from games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.core.config import JaxSelfPlayConfig, MCTSConfig
+    from alphablokus.core.jaxplay.backend import generate_self_play_games
+    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
     from tests.test_core.test_jaxplay_backend import _config
 
     torch.manual_seed(6)
@@ -101,11 +102,10 @@ def test_gumbel_backend_generates_games(tmp_path) -> None:
         jax_selfplay=JaxSelfPlayConfig(batch_size=2, top_k=32, dtype="float32", wave_plies=16),
         num_eps=2,
     )
-    from pathlib import Path
 
-    from games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
 
-    game = BlokusDuoGame(pieces_config_path=Path("games/blokusduo/pieces.json"))
+    game = BlokusDuoGame(pieces_config_path=default_pieces_path())
     NNetWrapper(game, config).save_checkpoint(filename="init.pth.tar")
     games, stats = generate_self_play_games(config, generation=1, checkpoint_path="init.pth.tar")
     assert len(games) == 2
@@ -114,12 +114,11 @@ def test_gumbel_backend_generates_games(tmp_path) -> None:
 
 def test_gumbel_python_backend_rejected(tmp_path) -> None:
     import dataclasses
-    from pathlib import Path
 
-    from core.coach import Coach
-    from core.config import MCTSConfig
-    from games.blokusduo.game import BlokusDuoGame
-    from games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.core.coach import Coach
+    from alphablokus.core.config import MCTSConfig
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
     from tests.test_core.test_jaxplay_backend import _config
 
     config = dataclasses.replace(
@@ -127,6 +126,6 @@ def test_gumbel_python_backend_rejected(tmp_path) -> None:
         selfplay_backend="python",
         mcts_config=MCTSConfig(num_mcts_sims=8, cpuct=2.5, search_policy="gumbel"),
     )
-    game = BlokusDuoGame(pieces_config_path=Path("games/blokusduo/pieces.json"))
+    game = BlokusDuoGame(pieces_config_path=default_pieces_path())
     with pytest.raises(ValueError, match="gumbel"):
         Coach(game, NNetWrapper(game, config), config)

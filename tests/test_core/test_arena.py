@@ -1,8 +1,8 @@
 import numpy as np
 
-from core.arena import Arena
-from core.interfaces import IBoard
-from games.tictactoe.game import TicTacToeGame
+from alphablokus.core.arena import Arena
+from alphablokus.core.interfaces import IBoard
+from alphablokus.games.tictactoe.game import TicTacToeGame
 
 
 def _random_player(board: IBoard) -> int:

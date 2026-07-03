@@ -14,10 +14,10 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 if TYPE_CHECKING:
-    from games.blokusduo.board import BlokusDuoBoard
-    from games.blokusduo.game import BlokusDuoGame
-    from games.tictactoe.board import Board
-    from games.tictactoe.game import TicTacToeGame
+    from alphablokus.games.blokusduo.board import BlokusDuoBoard
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.tictactoe.board import Board
+    from alphablokus.games.tictactoe.game import TicTacToeGame
 
 
 def _play_sequence(game: TicTacToeGame | BlokusDuoGame, board: Board | BlokusDuoBoard, moves: int) -> list:

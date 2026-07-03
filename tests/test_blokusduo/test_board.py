@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from games.blokusduo.board import BlokusDuoBoard, CoordinateIndexDecoder
-from games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.board import BlokusDuoBoard, CoordinateIndexDecoder
+from alphablokus.games.blokusduo.game import BlokusDuoGame
 
 
 @pytest.fixture

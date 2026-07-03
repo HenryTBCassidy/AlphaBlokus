@@ -2,8 +2,8 @@
 import pandas as pd
 import pytest
 
-from core.config import RunConfig
-from core.storage import CycleStage, MetricsCollector
+from alphablokus.core.config import RunConfig
+from alphablokus.core.storage import CycleStage, MetricsCollector
 
 
 @pytest.fixture

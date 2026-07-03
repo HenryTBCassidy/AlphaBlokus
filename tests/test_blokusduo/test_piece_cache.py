@@ -1,7 +1,7 @@
 """Tests for PieceManager cached orientation arrays and filled cell indices."""
 import numpy as np
 
-from games.blokusduo.pieces import Orientation, PieceManager
+from alphablokus.games.blokusduo.pieces import Orientation, PieceManager
 
 
 def test_cached_arrays_match_piece_properties(piece_manager: PieceManager):

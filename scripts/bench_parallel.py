@@ -16,9 +16,9 @@ from dataclasses import replace
 
 import torch
 
-from core.config import load_args
-from core.game_factory import instantiate_game_and_network
-from core.parallel_self_play import run_self_play_episodes_parallel
+from alphablokus.core.config import load_args
+from alphablokus.core.game_factory import instantiate_game_and_network
+from alphablokus.core.parallel_self_play import run_self_play_episodes_parallel
 
 
 def main() -> None:

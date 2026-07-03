@@ -32,15 +32,15 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pandas as pd
 
-from core.arena import Arena
-from core.config import RunConfig, load_args
-from core.game_factory import instantiate_game_and_network
-from core.mcts import MCTS, MCTSEpisodeStats
-from core.players import NetworkPlayer
-from reporting.mcts_profiling import PhaseResult, build_multi_phase_report
+from alphablokus.core.arena import Arena
+from alphablokus.core.config import RunConfig, load_args
+from alphablokus.core.game_factory import instantiate_game_and_network
+from alphablokus.core.mcts import MCTS, MCTSEpisodeStats
+from alphablokus.core.players import NetworkPlayer
+from alphablokus.reporting.mcts_profiling import PhaseResult, build_multi_phase_report
 
 if TYPE_CHECKING:
-    from core.interfaces import IGame, INeuralNetWrapper
+    from alphablokus.core.interfaces import IGame, INeuralNetWrapper
 
 # Force line-buffered stdout regardless of TTY. Benchmark runs detached
 # under systemd-run/journald and the default block-buffered stdout would
@@ -156,7 +156,7 @@ def _run_self_play_phase_parallel(
     parallel self-play orchestrator. Saves the current ``nnet`` to a
     fixed-name checkpoint workers load at pool init.
     """
-    from core.parallel_self_play import run_self_play_episodes_parallel
+    from alphablokus.core.parallel_self_play import run_self_play_episodes_parallel
 
     print(f"[Self-Play] {config.num_eps} games across {num_workers} workers — starting",
           flush=True)
@@ -310,7 +310,7 @@ def _run_two_player_phase_parallel(
     *whole game* (both players combined inside the worker), so each
     task contributes one combined ``MCTSEpisodeStats`` to the phase.
     """
-    from core.parallel_self_play import (
+    from alphablokus.core.parallel_self_play import (
         PHASE_ARENA,
         run_two_player_games_parallel,
     )

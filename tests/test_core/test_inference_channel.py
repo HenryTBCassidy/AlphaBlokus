@@ -13,14 +13,14 @@ import threading
 import numpy as np
 import pytest
 
-from core.inference_channel import (
+from alphablokus.core.inference_channel import (
     ChannelHandles,
     ChannelSpec,
     InferenceClientNet,
     SharedInferenceChannel,
     SharedMemoryRequestSource,
 )
-from core.inference_server import FlushPolicy, InferenceServer
+from alphablokus.core.inference_server import FlushPolicy, InferenceServer
 
 _C, _H, _W = 3, 4, 4
 _A = 7

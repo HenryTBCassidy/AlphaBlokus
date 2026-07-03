@@ -1,6 +1,6 @@
 import numpy as np
 
-from games.blokusduo.pieces import PieceManager, pieces_loader
+from alphablokus.games.blokusduo.pieces import PieceManager, pieces_loader
 
 
 def test_pieces_loader_count(pieces_path):

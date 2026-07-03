@@ -20,16 +20,16 @@ invariant is independent of sim count.
 """
 from __future__ import annotations
 
-from pathlib import Path
 from unittest.mock import patch
 
 import numpy as np
 import pytest
 
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.movegen_runtime import get_default_generator
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.movegen_runtime import get_default_generator
+from alphablokus.games.blokusduo.pieces import default_pieces_path
 
-PIECES_PATH = Path(__file__).resolve().parent.parent.parent / "games" / "blokusduo" / "pieces.json"
+PIECES_PATH = default_pieces_path()
 
 
 def _run_episode_with_movegen(seed: int, use_f2: bool, num_moves: int) -> list:

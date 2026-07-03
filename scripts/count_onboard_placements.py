@@ -32,15 +32,14 @@ from __future__ import annotations
 
 import sys
 from collections import defaultdict
-from pathlib import Path
 
-from games.blokusduo.board import ActionCodec, CoordinateIndexDecoder
-from games.blokusduo.pieces import pieces_loader
+from alphablokus.games.blokusduo.board import ActionCodec, CoordinateIndexDecoder
+from alphablokus.games.blokusduo.pieces import default_pieces_path, pieces_loader
 
 # Pentobi's hard-coded Duo move count, from libpentobi_base/Move.h:32.
 PENTOBI_DUO_MOVE_COUNT = 13_729
 
-PIECES_PATH = Path(__file__).resolve().parent.parent / "games" / "blokusduo" / "pieces.json"
+PIECES_PATH = default_pieces_path()
 BOARD_SIZE = 14
 
 

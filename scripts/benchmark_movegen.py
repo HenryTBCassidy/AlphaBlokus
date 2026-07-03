@@ -23,14 +23,15 @@ from pathlib import Path
 
 import numpy as np
 
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.movegen_runtime import get_default_generator
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.movegen_runtime import get_default_generator
+from alphablokus.games.blokusduo.pieces import default_pieces_path
 from tests.fixtures.blokus_positions import (
     load_cache,
     replay_to_board_and_player,
 )
 
-PIECES_PATH = Path(__file__).resolve().parent.parent / "games" / "blokusduo" / "pieces.json"
+PIECES_PATH = default_pieces_path()
 DEV_CACHE = Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "blokus_duo_positions" / "dev_5000.npz"
 
 

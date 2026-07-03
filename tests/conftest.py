@@ -2,11 +2,11 @@ from pathlib import Path
 
 import pytest
 
-from core.config import MCTSConfig, NetConfig, RunConfig
-from games.blokusduo.board import BlokusDuoBoard
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.pieces import PieceManager, pieces_loader
-from games.tictactoe.game import TicTacToeGame
+from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
+from alphablokus.games.blokusduo.board import BlokusDuoBoard
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.pieces import PieceManager, default_pieces_path, pieces_loader
+from alphablokus.games.tictactoe.game import TicTacToeGame
 
 
 @pytest.fixture(scope="session")
@@ -60,7 +60,7 @@ def test_config(tmp_path: Path, mcts_config: MCTSConfig, net_config: NetConfig) 
 @pytest.fixture(scope="session")
 def pieces_path() -> Path:
     """Path to the BlokusDuo pieces.json config file."""
-    return Path(__file__).resolve().parent.parent / "games" / "blokusduo" / "pieces.json"
+    return default_pieces_path()
 
 
 @pytest.fixture(scope="session")

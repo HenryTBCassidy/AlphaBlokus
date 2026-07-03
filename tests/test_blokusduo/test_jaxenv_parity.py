@@ -19,13 +19,13 @@ import pytest
 from tests.test_blokusduo.conftest import DEV_CACHE_PATH
 
 if TYPE_CHECKING:
-    from games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
 
 jax = pytest.importorskip("jax")
 
-from games.blokusduo.jaxenv.bridge import numpy_state_from_board  # noqa: E402
-from games.blokusduo.jaxenv.kernels import GameState, make_kernels  # noqa: E402
-from games.blokusduo.jaxenv.tables import build_jax_tables  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.bridge import numpy_state_from_board  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.kernels import GameState, make_kernels  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.tables import build_jax_tables  # noqa: E402
 
 # Chunk size for the batched jax mask call — bounds the (chunk, 17837) int32
 # intermediates without changing results.
@@ -37,7 +37,7 @@ REFERENCE_SUBSAMPLE_STRIDE = 10
 
 @pytest.mark.skipif(not DEV_CACHE_PATH.exists(), reason="dev_5000 cache not built")
 def test_legal_mask_parity_dev_cache(blokus_game_module: BlokusDuoGame) -> None:
-    from games.blokusduo.movegen_runtime import get_default_generator
+    from alphablokus.games.blokusduo.movegen_runtime import get_default_generator
     from tests.fixtures.blokus_positions import iter_cached_positions
 
     game = blokus_game_module

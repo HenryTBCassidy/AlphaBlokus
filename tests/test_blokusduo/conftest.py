@@ -6,7 +6,8 @@ from pathlib import Path
 
 import pytest
 
-from games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.pieces import default_pieces_path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
 
@@ -17,4 +18,4 @@ DEV_CACHE_PATH = REPO_ROOT / "tests" / "fixtures" / "blokus_duo_positions" / "de
 @pytest.fixture(scope="module")
 def blokus_game_module() -> BlokusDuoGame:
     """Module-scoped game instance — pieces.json parsing isn't free."""
-    return BlokusDuoGame(pieces_config_path=REPO_ROOT / "games" / "blokusduo" / "pieces.json")
+    return BlokusDuoGame(pieces_config_path=default_pieces_path())

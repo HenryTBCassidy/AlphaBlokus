@@ -17,9 +17,9 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R3 | 0 | Delete `notebooks/` (audit confirms no unique content) | MECH | 10 min | Medium | ✅ |
 | R4 | 0 | Add GitHub Actions CI (ruff + pytest `-m "not slow"`, base + jax jobs) against the *current* layout | MECH | 1 h | High | ✅ |
 | R5 | 0 | Add mypy at a lenient baseline; wire into CI | JUDGE | 1.5 h | High | ✅ |
-| R6 | 1 | Move `core/`, `games/`, `reporting/` → `src/alphablokus/`; add `[build-system]`; repo-wide import rewrite (src, tests, scripts) | MECH | 2.5 h | High | |
+| R6 | 1 | Move `core/`, `games/`, `reporting/` → `src/alphablokus/`; add `[build-system]`; repo-wide import rewrite (src, tests, scripts) | MECH | 2.5 h | High | ✅ |
 | R7 | 1 | `main.py` → `alphablokus/cli.py` + `[project.scripts]` console entry; delete root `main.py`; update every documented command | MECH | 45 min | High | |
-| R8 | 1 | Single `pieces.json` accessor via `importlib.resources`; kill the four divergent load paths | MECH | 1 h | High | |
+| R8 | 1 | Single `pieces.json` accessor via `importlib.resources`; kill the four divergent load paths | MECH | 1 h | High | ✅ |
 | R9 | 2 | `search/`: move `mcts.py`; extract profiling dataclasses to `search/stats.py` | MECH | 1 h | High | |
 | R10 | 2 | `storage/`: split `storage.py` → `metrics.py` + `selfplay_store.py`; move `sparse_policy.py`; single `ProcessedExample` home | MECH | 1.5 h | High | |
 | R11 | 2 | `evaluation/`: move `arena.py`, `players.py`, `acceptance.py`, `symmetry_diagnostic.py`→`symmetry.py`; dedupe `Player` alias; fix stale docstring + no-op ternary | MECH | 1 h | High | |
@@ -54,6 +54,8 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R40 | 8 | Full verification: complete suite incl. `slow` + jax extra; end-to-end `test_run.json` and a jax CPU config; render both reports; load a pre-refactor checkpoint | MECH | 1 h | High | |
 | R41 | 8 | Box validation: quick GPU run (python + jax gumbel), `pentobi_benchmark` sanity, `fetch_run_reports.sh` | MECH | 1 h | High | |
 | R42 | 8 | Archive this plan | MECH | 10 min | High | |
+
+> **Execution note (R6/R8):** R8 landed inside the R6 commit rather than separately — the move itself broke ~25 divergent `pieces.json` path resolutions (repo-root- and CWD-relative), so committing the move without the accessor would have produced a red commit. The accessor is `alphablokus.games.blokusduo.pieces.default_pieces_path()`.
 
 **Phase boundaries (suite green, PR merged):** Phase 0 = safety net on the old layout · 1 = the package exists · 2 = `core/` fully dissolved · 3 = games/reporting internal shape · 4 = tests mirror source · 5 = typing/style complete · 6 = scripts/configs · 7 = docs · 8 = verification + close.
 

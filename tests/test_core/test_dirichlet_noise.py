@@ -9,10 +9,10 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from core.config import MCTSConfig, NetConfig, RunConfig
-from core.mcts import MCTS
-from games.tictactoe.game import TicTacToeGame
-from games.tictactoe.neuralnets.wrapper import NNetWrapper
+from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
+from alphablokus.core.mcts import MCTS
+from alphablokus.games.tictactoe.game import TicTacToeGame
+from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
 
 if TYPE_CHECKING:
     from pathlib import Path

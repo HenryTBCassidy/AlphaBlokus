@@ -1,10 +1,10 @@
 import numpy as np
 import pytest
 
-from core.config import MCTSConfig, RunConfig
-from core.mcts import MCTS
-from games.tictactoe.game import TicTacToeGame
-from games.tictactoe.neuralnets.wrapper import NNetWrapper
+from alphablokus.core.config import MCTSConfig, RunConfig
+from alphablokus.core.mcts import MCTS
+from alphablokus.games.tictactoe.game import TicTacToeGame
+from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
 
 
 @pytest.fixture
