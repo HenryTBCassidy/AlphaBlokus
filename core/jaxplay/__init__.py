@@ -1,6 +1,6 @@
 """GPU-native batched self-play (``selfplay_backend: "jax"``).
 
-Structure (plan: ``docs/plans/jax-selfplay-pipeline.md``):
+Structure (plan: ``docs/plans/archive/jax-selfplay-pipeline.md``):
 
 - :mod:`core.jaxplay.actors` — the jitted device loop: B games stepped in
   lockstep, each move searched by mctx (``games/blokusduo/jaxenv/search``),

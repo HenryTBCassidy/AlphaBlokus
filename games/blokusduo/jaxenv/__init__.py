@@ -2,7 +2,7 @@
 
 Born as the de-risk spike (``docs/plans/archive/jax-spike.md``, findings in
 ``docs/research/jax-spike-findings.md``), promoted here by the self-play
-pipeline plan (``docs/plans/jax-selfplay-pipeline.md``). Everything is
+pipeline plan (``docs/plans/archive/jax-selfplay-pipeline.md``). Everything is
 ``jit``/``vmap``-clean and parity-tested against the Python engine
 (``tests/test_blokusduo/test_jaxenv_*.py``).
 

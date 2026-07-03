@@ -1,6 +1,6 @@
 # JAX Self-Play Pipeline — Throughput and A/B Validation
 
-Results for plan steps G7/G8 of `docs/plans/jax-selfplay-pipeline.md` (executed 2026-07-02 on
+Results for plan steps G7/G8 of `docs/plans/archive/jax-selfplay-pipeline.md` (executed 2026-07-02 on
 the box: RTX 3060 Ti 8GB, i5-13600KF, jax 0.10.2 + CUDA 12, mctx 0.0.71). Companion to the
 search-agreement validation recorded in the plan's G4 note
 (`temp/benchmarks/validate_jax_search.json`).
@@ -59,35 +59,61 @@ frozen gen-0. Arms differ ONLY in generation backend/search: python-PUCT S=300 (
 K=16) vs jax-PUCT S=300 (B=256, K=64, bf16) vs jax-Gumbel n=64 (max_considered 16). Evaluation
 (arena/Elo/Pentobi) runs the identical python machinery in all arms.
 
-<!-- RESULTS FILLED AFTER THE CHAIN COMPLETES -->
+One operational failure worth recording: the first chain attempt crashed both jax arms with
+CUDA OOM — XLA preallocates 75% of VRAM by default, starving the torch training step and the
+CUDA eval workers that share the card. Fixed at the jax import gateways
+(`XLA_PYTHON_CLIENT_PREALLOCATE=false`, `core/jaxplay/__init__.py` +
+`games/blokusduo/jaxenv/__init__.py`); the rerun held at 1.2–1.7 GB VRAM throughout.
 
-### 3.1 Wall-clock
+### 3.1 Wall-clock (10 generations × 1000 games)
 
-| Arm | total | per-gen self-play | notes |
+| Arm | self-play total | self-play games/s | whole run |
 |---|---|---|---|
-| python-PUCT | TBD | TBD | |
-| jax-PUCT | TBD | TBD | |
-| jax-Gumbel n=64 | TBD | TBD | |
+| python-PUCT S=300 (16 workers, K=16) | 3,476 s | 2.88 | 1h 11m |
+| jax-PUCT S=300 (B=256, K=64, bf16) | 25,197 s | 0.40 | 7h 13m |
+| jax-Gumbel n=64 (B=256, K=64, bf16) | **740 s** | **13.5** | **20 min** |
+
+At this deliberately small net (64f×4b) the python pipeline is at its best (CPU search is
+cheap relative to the tiny net) and mctx's per-sim overhead is at its relatively worst — so
+jax-PUCT is 7× *slower* here, worse than the 128f×8b parity of §2. The asymmetry flips with
+net size: at 128f×8b python drops to 0.91 games/s while jax-Gumbel holds ~11 (§2), i.e.
+**~12× at production scale, 4.7× (self-play) / 3.5× (end-to-end) even at this
+python-friendly config.**
 
 ### 3.2 Strength
 
 | Comparison | Result |
 |---|---|
-| Internal Elo trajectory (vs frozen gen-0) | TBD |
-| Head-to-head: jax-PUCT final vs python final (100 games, S=400, noise-free) | TBD |
-| Head-to-head: jax-Gumbel final vs python final (100 games) | TBD |
-| Pentobi L1 (20 games, 800 sims) per final net | TBD |
+| Head-to-head: **jax-PUCT** final vs python final (100 games, S=400, noise-free, alternating colours, randomised openings) | **58–37–5 → 60.5%** for jax (95% CI 50.7–69.5%) |
+| Head-to-head: **jax-Gumbel** final vs python final (100 games) | **50–43–7 → 53.5%** for gumbel (95% CI 43.8–63.0%) |
+| Pentobi L1 (20 games, 800 sims): python / jax-PUCT / jax-Gumbel finals | 0/20 · **1/20** · 0/20 — near-uninformative at this run size (run3 needed 30+ gens at 2× net to reach 25%); the only game won by any arm went to jax-PUCT, consistent with its head-to-head edge |
+| Internal Elo trajectories | python 492→802, jax-PUCT 470→630, gumbel 470→591 — **not cross-comparable** (each run's Elo is anchored to its own random gen-0 net; the jax arm *trails* python on internal Elo yet *beats* it head-to-head). Method note: never compare Elo curves across runs; head-to-head is the arbiter. |
+
+The jax-PUCT net being significantly *stronger* (CI excludes parity) is plausibly real signal,
+not just luck: the G4 agreement data showed the top-K search tracks the exact PUCT search more
+faithfully than python's K=16 virtual-loss batching — better search → better targets. Gumbel
+at 16× fewer sims trains a net statistically indistinguishable from the python baseline.
 
 ### 3.3 Verdict vs the G8 acceptance gate
 
-TBD — gate: jax-trained net not weaker beyond noise AND ≥2× wall-clock. Expected shape from
-§2: the equivalence claim rests on the jax-PUCT arm; the wall-clock claim rests on the Gumbel
-arm.
+Gate: *jax-trained net not weaker beyond noise AND ≥2× wall-clock win.*
+
+- **Strength: PASS, both arms** (jax-PUCT 60.5% — stronger; gumbel 53.5% — parity).
+- **Wall-clock: PASS via the Gumbel arm** (3.5× end-to-end at the python-friendliest config;
+  ~12× at production net size), **FAIL for PUCT mode** (parity at 128f×8b, 7× slower at
+  64f×4b — mctx per-sim tree traffic, see §1).
+
+**Decision: flip Blokus production configs to `selfplay_backend: "jax"` +
+`search_policy: "gumbel"`.** PUCT mode stays fully supported as the fidelity/cross-check mode
+(and trains slightly stronger nets if wall-clock is no object); the python backend stays the
+default for the `RunConfig` dataclass, TicTacToe, and all evaluation.
 
 ## 4. Recommendations
 
 - Production jax runs: `selfplay_backend: "jax"`, `search_policy: "gumbel"` with n≈64 sims,
-  `top_k: 64`, `batch_size: 256+`, bf16. (TBD pending §3.)
+  `top_k: 64`, `batch_size: 256+`, bf16 — see `run_configurations/blokus_jax_gumbel_30.json`.
+- Revisit `gumbel_max_considered` (16) and n once a longer run exists; the Gumbel paper's
+  n=16–32 settings would roughly double throughput again if strength holds.
 - PUCT-mode wall-clock on GPU is bounded by mctx's per-sim tree traffic; if a
   no-behaviour-change speedup is ever needed, the fix is a custom fixed-shape tree (out of
   scope here — logged as future work in the plan).

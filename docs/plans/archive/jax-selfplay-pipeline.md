@@ -14,6 +14,14 @@ enforced by the validation steps (G4, G8). Known, accepted semantic deltas are l
 "Behavioural fidelity contract" below — anything not on that list appearing in A/B results is a
 bug.
 
+> **Completed 2026-07-03.** All rows ✅. Results: search-agreement in the G4 note,
+> throughput in the G7 note, the three-arm A/B + flip decision in
+> [`docs/research/jax-pipeline-ab.md`](../../research/jax-pipeline-ab.md). Headline: exact
+> example-format compatibility; jax-PUCT trains a net that beats the python baseline
+> head-to-head (60.5%); Gumbel n=64 trains at parity strength in 20 min vs python's 71 min
+> (3.5×; ~12× at production net size). Production Blokus = jax + Gumbel
+> (`blokus_jax_gumbel_30.json`).
+
 Prerequisites: PR #19 (the spike) merged — this plan builds directly on
 `experiments/jax_spike/` and the `jax`/`jax-cuda` extras.
 
@@ -30,8 +38,8 @@ Prerequisites: PR #19 (the spike) merged — this plan builds directly on
 | G5 | Batched actor loop (pgx auto-reset pattern): temp schedule per slot, action sampling, game harvesting, value backfill, host-side symmetry augmentation, `ProcessedExample` assembly | 3–4 days | High | ✅ |
 | G6 | `JaxSelfPlayBackend`: Coach integration, per-generation torch→jax weight sync, stats reporting, 1-generation integration test | 2 days | High | ✅ |
 | G7 | Backend-vs-backend throughput benchmark (games/s, sims/s, VRAM) on the box; extend the spike harness | 1 day | High | ✅ |
-| G8 | A/B validation: ~10-gen training runs (python-PUCT vs jax-PUCT vs jax-Gumbel), same config; compare Elo trajectory, final-net head-to-head arena, Pentobi L1; research note | 1 day + box time | High | |
-| G9 | Flip Blokus default to `selfplay_backend: "jax"`; docs (CLAUDE.md, README, REMOTE-TRAINING, training estimates) | 0.5 day | High | |
+| G8 | A/B validation: ~10-gen training runs (python-PUCT vs jax-PUCT vs jax-Gumbel), same config; compare Elo trajectory, final-net head-to-head arena, Pentobi L1; research note | 1 day + box time | High | ✅ |
+| G9 | Flip Blokus default to `selfplay_backend: "jax"`; docs (CLAUDE.md, README, REMOTE-TRAINING, training estimates) | 0.5 day | High | ✅ |
 | G10 | Gumbel mode (`search_policy: "gumbel"`, opt-in): mctx `gumbel_muzero_policy`, n≈32–64 sims; validation run — the known ~6× sims lever | 1–2 days | Medium | ✅ |
 
 Total: ~3–4 working weeks solo. G1→G6 are sequential; G7 depends on G6; G8 on G7; G10 is
@@ -248,6 +256,13 @@ Set `selfplay_backend: "jax"` in the Blokus run configs (the dataclass default s
 `"python"` so TTT and old configs are untouched); update CLAUDE.md current-state, README
 status, `docs/guides/REMOTE-TRAINING.md` (jax-cuda extra in the box setup), and
 `docs/08-TRAINING-ESTIMATES.md` with the measured G7/G8 numbers.
+
+> **As applied (per the G8 verdict):** the flip is jax **+ Gumbel** — the new production
+> config is `run_configurations/blokus_jax_gumbel_30.json` (128f×8b, 2000 games/gen, n=64,
+> K=64, B=512, bf16); historical run configs are untouched. Docs updated: CLAUDE.md
+> (current-state block, commands, gotcha #7), REMOTE-TRAINING (jax-cuda sync). README has no
+> "Current Status" section to update (pre-existing stale pointer in CLAUDE.md);
+> 08-TRAINING-ESTIMATES deferred to when a full gumbel production run exists to measure.
 
 ## G10. Gumbel mode (opt-in, the ~6× lever)
 

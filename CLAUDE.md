@@ -6,12 +6,15 @@ AlphaZero implementation for Blokus Duo. Self-play reinforcement learning on a 1
 
 **Current state:** Core framework complete and validated on Tic-Tac-Toe. Blokus Duo game logic is complete — board, pieces, placement validation, move generation, masking, game-end detection, `get_symmetries` (order-2: identity + main-diagonal transpose), and neural net all work. Blokus training runs have been executed on the PC (see `docs/plans/archive/full-cycle-optimisation.md`), and the full-cycle performance optimisations (F1–F4) have landed. See README.md "Current Status" for details.
 
+**JAX self-play backend (2026-07):** Blokus self-play generation can run GPU-native — rules as int8 matmuls, mctx search over a top-K compact action space, inference-only jnp net bridged from the torch checkpoint each generation (`games/blokusduo/jaxenv/` + `core/jaxplay/`). Selected per run via `RunConfig.selfplay_backend: "python" | "jax"`; production Blokus configs use jax + Gumbel search (`search_policy: "gumbel"`, n=64 — validated at strength parity and ~3.5–12× wall-clock in `docs/research/jax-pipeline-ab.md`). The python path is unchanged, remains the dataclass default, and always drives arena/Elo/Pentobi evaluation. Requires `uv sync --extra jax` (Mac CPU) or `--extra jax-cuda` (box).
+
 > ⚠️ The "Critical path" section below is **stale** — it predates the Blokus training runs and the F1–F3 optimisation work. Treat it as historical until refreshed.
 
 ## Commands
 
 ```bash
 uv sync                                          # Install dependencies
+uv sync --extra jax                              # + JAX self-play backend (CPU; use --extra jax-cuda on the box)
 uv run pytest                                    # Run tests
 uv run pytest -m "not slow"                      # Skip integration tests
 uv run pytest tests/test_blokusduo/              # Blokus tests only
@@ -73,7 +76,8 @@ Follow `docs/guides/PLAN-FORMAT.md` when creating implementation plans.
 4. **Coordinate systems:** Board = bottom-left origin (Blokus notation). Arrays = top-left origin (numpy). `CoordinateIndexDecoder` handles conversion.
 5. **`notebooks/eval.ipynb`** has Henry's original design notes on the move generation algorithm — historical reference now that the algorithm is in code.
 6. **Board sizes use class constants.** `BlokusDuoBoard.N = 14`, `Board.N = 3` (TicTacToe). Never hardcode board dimensions as literals.
-7. **Device selection is a simple `cuda: bool` flag** in `RunConfig.net_config` (`core/config.py:35`, used in `games/base_wrapper.py`). No MPS auto-detection. On the Mac always set `cuda: false`; on the home PC set `cuda: true`.
+7. **The jax backend is Blokus-only and inference-only.** `selfplay_backend: "jax"` raises for TicTacToe; training stays in torch (weights bridged per generation). Don't compare internal Elo curves across runs — each is anchored to its own gen-0 net (see `docs/research/jax-pipeline-ab.md` §3.2).
+8. **Device selection is a simple `cuda: bool` flag** in `RunConfig.net_config` (`core/config.py:35`, used in `games/base_wrapper.py`). No MPS auto-detection. On the Mac always set `cuda: false`; on the home PC set `cuda: true`.
 
 ## Documentation
 

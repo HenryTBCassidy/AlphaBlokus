@@ -9,7 +9,7 @@ visit distributions from:
 
 Reports top-1 agreement and visit-distribution overlap (Σ min(p,q)) of
 everything against the K=1 reference, plus timing. The acceptance gate from
-``docs/plans/jax-selfplay-pipeline.md`` G4: some K must reach the K=16
+``docs/plans/archive/jax-selfplay-pipeline.md`` G4: some K must reach the K=16
 yardstick's agreement with the reference.
 
 Usage (box)::

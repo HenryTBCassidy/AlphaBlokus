@@ -73,7 +73,7 @@ class JaxSelfPlayConfig:
     Search hyperparameters (sims, cpuct, Dirichlet noise) come from
     ``MCTSConfig`` — same source of truth as the python backend; these are the
     jax-only execution knobs. Defaults chosen from the G4/G7 box sweeps
-    (docs/plans/jax-selfplay-pipeline.md).
+    (docs/plans/archive/jax-selfplay-pipeline.md).
     """
 
     batch_size: int = 256  # parallel game slots searched in lockstep
@@ -189,7 +189,7 @@ class RunConfig:
     # ``"jax"`` is the GPU-native batched pipeline (games/blokusduo/jaxenv +
     # core/jaxplay — Blokus only, requires the ``jax``/``jax-cuda`` extra).
     # Arena/Elo/Pentobi evaluation always uses the python path regardless.
-    # Plan: docs/plans/jax-selfplay-pipeline.md.
+    # Plan: docs/plans/archive/jax-selfplay-pipeline.md.
     selfplay_backend: Literal["python", "jax"] = "python"
 
     # Execution knobs for the jax backend; ignored by the python backend.

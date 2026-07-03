@@ -111,6 +111,7 @@ git clone https://github.com/<your-fork>/AlphaBlokus.git
 cd AlphaBlokus
 source /home/<wsl-user>/.local/bin/env   # NOT $HOME/.local/bin/env — see "PowerShell mangling" below
 uv sync --extra dev                       # --extra dev is required for pytest
+uv sync --extra jax-cuda --extra dev      # + CUDA jax for the jax self-play backend (production Blokus configs)
 uv run pytest -q                          # confirm tests pass
 ```
 
