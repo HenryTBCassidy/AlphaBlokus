@@ -7,6 +7,7 @@ invoke this function with the same seed + same MCTS instance, they
 produce identical training examples regardless of which process runs
 the work.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -36,7 +37,9 @@ GameExamples = list[ProcessedExample]
 
 
 def play_self_play_episode(
-    game: IGame, mcts: MCTS, temp_threshold: int,
+    game: IGame,
+    mcts: MCTS,
+    temp_threshold: int,
 ) -> list[ProcessedExample]:
     """Play one self-play game and return training examples for it.
 

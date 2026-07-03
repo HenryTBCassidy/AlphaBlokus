@@ -16,6 +16,7 @@ Modes:
   --sims overrides num_mcts_sims (the per-sim function split is sim-count
   independent, so a smaller value profiles faster).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -60,8 +61,9 @@ def _rss_mb() -> float:
 
 def run_timing(game, nnet, config, games: int, seed: int) -> None:
     _play_one(game, nnet, config, seed)  # warm up (CUDA ctx, first-call JIT)
-    agg = dict(moves=0, sims=0, search=0.0, infer=0.0, movegen=0.0,
-               gameended=0.0, wall=0.0, leaves=0, tree=0, examples=0)
+    agg = dict(
+        moves=0, sims=0, search=0.0, infer=0.0, movegen=0.0, gameended=0.0, wall=0.0, leaves=0, tree=0, examples=0
+    )
     per_game = []
     for i in range(games):
         s, nex, wall = _play_one(game, nnet, config, seed + 1 + i)
@@ -83,17 +85,21 @@ def run_timing(game, nnet, config, games: int, seed: int) -> None:
     print("\n================ TIMING (single-process self-play, no tracemalloc) ================")
     print(f"games={games}  moves={agg['moves']}  sims={agg['sims']}  leaves={agg['leaves']}")
     print(f"avg wall/game = {wall / games:.2f}s  (per-game: {', '.join(f'{w:.1f}' for w in per_game)})")
-    print(f"avg tree states/game = {agg['tree'] / games:.0f}  examples/game = {agg['examples'] / games:.0f}"
-          f"  RSS={_rss_mb():.0f} MB")
+    print(
+        f"avg tree states/game = {agg['tree'] / games:.0f}  examples/game = {agg['examples'] / games:.0f}"
+        f"  RSS={_rss_mb():.0f} MB"
+    )
     print("\n  NOTE: move-gen/game-ended timers are not wired into the batched search path,")
     print("        so they read ~0 here — cProfile gives the honest attribution.")
     print("\n  slice                          time(s)    %game    Amdahl ceiling")
     print("  " + "-" * 62)
-    for name, t in [("NN inference", agg["infer"]),
-                    ("Move generation (timer gap → see cProfile)", agg["movegen"]),
-                    ("Game-ended (timer gap → see cProfile)", agg["gameended"]),
-                    ("Other search (select/UCB/expand/backprop/key)", other),
-                    ("Episode overhead", overhead)]:
+    for name, t in [
+        ("NN inference", agg["infer"]),
+        ("Move generation (timer gap → see cProfile)", agg["movegen"]),
+        ("Game-ended (timer gap → see cProfile)", agg["gameended"]),
+        ("Other search (select/UCB/expand/backprop/key)", other),
+        ("Episode overhead", overhead),
+    ]:
         print(f"  {name:<46}{t:7.2f}  {_pct(t, wall):5.1f}%   {_amdahl(t / wall):5.2f}x")
     print("  " + "-" * 62)
     print(f"  {'TOTAL wall':<46}{wall:7.2f}  100.0%")
@@ -108,8 +114,10 @@ def run_cprofile(game, nnet, config, seed: int) -> None:
     pr.enable()
     play_self_play_episode(game, mcts, config.temp_threshold)
     pr.disable()
-    for key, label in [("tottime", "own time, excl. callees — the optimisation targets"),
-                       ("cumulative", "incl. callees")]:
+    for key, label in [
+        ("tottime", "own time, excl. callees — the optimisation targets"),
+        ("cumulative", "incl. callees"),
+    ]:
         s = io.StringIO()
         pstats.Stats(pr, stream=s).strip_dirs().sort_stats(key).print_stats(22)
         print(f"\n================ cProfile top 22 by {key} ({label}) ================")
@@ -164,18 +172,21 @@ def main() -> None:
     config = load_args(args.config)
     if args.sims:
         config = dataclasses.replace(
-            config, mcts_config=dataclasses.replace(config.mcts_config, num_mcts_sims=args.sims))
+            config, mcts_config=dataclasses.replace(config.mcts_config, num_mcts_sims=args.sims)
+        )
     game, nnet = instantiate_game_and_network(config)
     # Match production: the Coach/workers call _maybe_enable_f2 to route move-gen
     # through the precomputed-table generator. instantiate_game does NOT, so do it here.
     f2_on = getattr(config, "use_optimised_movegen", False)
     if f2_on and hasattr(game, "enable_optimised_movegen"):
         game.enable_optimised_movegen()
-    print(f"game={config.game} sims={config.mcts_config.num_mcts_sims} "
-          f"K={config.mcts_config.mcts_batch_size} cuda={config.net_config.cuda} "
-          f"f2_movegen={f2_on} "
-          f"net={config.net_config.num_filters}f×{config.net_config.num_residual_blocks}b "
-          f"{config.net_config.policy_head}")
+    print(
+        f"game={config.game} sims={config.mcts_config.num_mcts_sims} "
+        f"K={config.mcts_config.mcts_batch_size} cuda={config.net_config.cuda} "
+        f"f2_movegen={f2_on} "
+        f"net={config.net_config.num_filters}f×{config.net_config.num_residual_blocks}b "
+        f"{config.net_config.policy_head}"
+    )
 
     if args.mode == "timing":
         run_timing(game, nnet, config, args.games, args.seed)

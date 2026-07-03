@@ -1,5 +1,6 @@
 """The interactive arena-replay viewer: embedded HTML/CSS/JS template and
 its per-generation section builder."""
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -14,7 +15,6 @@ if TYPE_CHECKING:
 
     from alphablokus.config import RunConfig
     from alphablokus.interfaces import IGame
-
 
 
 _REPLAY_MAX_GENERATIONS = 16
@@ -67,15 +67,13 @@ def build_arena_replays_section(
     # don't OOM report generation. Sample generations evenly, cap games/gen.
     all_gens = sorted(df["generation"].unique())
     sampled_gens = _evenly_sample(all_gens, _REPLAY_MAX_GENERATIONS)
-    df = df[
-        df["generation"].isin(sampled_gens)
-        & (df["game_idx"] < _REPLAY_MAX_GAMES_PER_GEN)
-    ]
+    df = df[df["generation"].isin(sampled_gens) & (df["game_idx"] < _REPLAY_MAX_GAMES_PER_GEN)]
     if len(sampled_gens) < len(all_gens) or _REPLAY_MAX_GAMES_PER_GEN < 50:
         logger.info(
-            "Arena replays: rendering {} of {} generations (evenly sampled) "
-            "× up to {} games/gen to bound report size",
-            len(sampled_gens), len(all_gens), _REPLAY_MAX_GAMES_PER_GEN,
+            "Arena replays: rendering {} of {} generations (evenly sampled) × up to {} games/gen to bound report size",
+            len(sampled_gens),
+            len(all_gens),
+            _REPLAY_MAX_GAMES_PER_GEN,
         )
 
     df = df.sort_values(["generation", "game_idx", "move_idx"])
@@ -116,10 +114,7 @@ def build_arena_replays_section(
             top_k_probs = [float(p) for p in m["top_k_probs"]]
             # Defensive: drop any zero-probability entries that older runs
             # may have persisted (pre-fix in evaluation/arena._extract_top_k).
-            visited = {
-                a: p for a, p in zip(top_k_actions, top_k_probs, strict=False)
-                if p > 0
-            }
+            visited = {a: p for a, p in zip(top_k_actions, top_k_probs, strict=False) if p > 0}
             # Played-action probability: prefer the explicitly-persisted
             # column added in MoveRecord.played_prob; fall back to looking
             # the played action up in the top-K for older parquets.
@@ -136,17 +131,23 @@ def build_arena_replays_section(
             alternatives = {a: p for a, p in visited.items() if a != action}
 
             played_caption = _format_played_action_caption(
-                game, action, played_prob, colour_name,
+                game,
+                action,
+                played_prob,
+                colour_name,
             )
             policy_html = renderer.render_policy_html(
-                board, alternatives,
+                board,
+                alternatives,
                 annotation=f"{colour_name}'s top alternatives",
                 current_player=player,
             )
             # Apply move and render the resulting state.
             board, _ = game.get_next_state(board, player, action)
             after_html = renderer.render_board_html(
-                board, last_action=action, annotation=played_caption,
+                board,
+                last_action=action,
+                annotation=played_caption,
             )
 
             turn_card = (
@@ -154,10 +155,10 @@ def build_arena_replays_section(
                 f'<button class="replay-turn-toggle" type="button" '
                 f'onclick="alphaBlokus_toggleTurn(this)">'
                 f'<span class="replay-turn-label">'
-                f'Turn {turn_idx} — {player_label}'
-                f'</span>'
+                f"Turn {turn_idx} — {player_label}"
+                f"</span>"
                 f'<span class="replay-turn-hint">↓ click to show top candidates</span>'
-                f'</button>'
+                f"</button>"
                 f'<div class="replay-turn-actual">{after_html}</div>'
                 f'<div class="replay-turn-candidates" hidden>{policy_html}</div>'
                 "</div>"
@@ -179,24 +180,21 @@ def build_arena_replays_section(
             outcome_class = "result-draw"
 
         # Final result banner at the bottom of the replay.
-        turns_html.append(
-            f'<div class="replay-result">{outcome_label}</div>'
+        turns_html.append(f'<div class="replay-result">{outcome_label}</div>')
+
+        games_by_gen.setdefault(int(gen), []).append(
+            {
+                "game_idx": int(game_idx),
+                "outcome": outcome,
+                "outcome_label": outcome_label,
+                "outcome_class": outcome_class,
+                "player1_was_white": player1_was_white,
+                "turns_html": turns_html,
+            }
         )
 
-        games_by_gen.setdefault(int(gen), []).append({
-            "game_idx": int(game_idx),
-            "outcome": outcome,
-            "outcome_label": outcome_label,
-            "outcome_class": outcome_class,
-            "player1_was_white": player1_was_white,
-            "turns_html": turns_html,
-        })
-
     payload = json.dumps(games_by_gen)
-    gen_options = "\n".join(
-        f'<option value="{g}">Generation {g}</option>'
-        for g in sorted(games_by_gen)
-    )
+    gen_options = "\n".join(f'<option value="{g}">Generation {g}</option>' for g in sorted(games_by_gen))
     first_gen = min(games_by_gen)
     initial_game_options = _render_game_options(games_by_gen[first_gen])
 
@@ -219,7 +217,10 @@ def build_arena_replays_section(
 
 
 def _format_played_action_caption(
-    game: IGame, action_id: int, played_prob: float, colour_name: str,  # noqa: ARG001
+    game: IGame,
+    action_id: int,
+    played_prob: float,
+    colour_name: str,  # noqa: ARG001
 ) -> str:
     """Build the annotation for the actual-board panel — describes the move
     in human-readable terms and surfaces its raw MCTS visit probability.
@@ -234,10 +235,7 @@ def _format_played_action_caption(
     ``MoveRecord.played_prob`` field landed, where the played action may
     have fallen outside the captured top-K.
     """
-    prob_suffix = (
-        f" — {played_prob * 100:.1f}% of visits"
-        if played_prob > 0 else " — visit % not recorded"
-    )
+    prob_suffix = f" — {played_prob * 100:.1f}% of visits" if played_prob > 0 else " — visit % not recorded"
     if isinstance(game, BlokusDuoGame):
         if game.action_codec.is_pass(action_id):
             return f"Played: PASS{prob_suffix}"
@@ -255,6 +253,7 @@ def _blokus_board_css(config: RunConfig) -> str:
     """Inline the right per-game board CSS into the standalone page."""
     if config.game == "blokusduo":
         from alphablokus.reporting.display_blokusduo import BOARD_CSS
+
         return BOARD_CSS
     # TTT renders board styles inline via :func:`display_tictactoe`, so the
     # standalone page only needs the shared replay layout CSS.
@@ -272,11 +271,10 @@ def _render_game_options(games: list[dict]) -> str:
     """
     return "\n".join(
         f'<option class="{g["outcome_class"]}" value="{g["game_idx"]}">'
-        f'G{g["game_idx"] + 1} — {g["outcome_label"]}'
+        f"G{g['game_idx'] + 1} — {g['outcome_label']}"
         f"</option>"
         for g in games
     )
-
 
 
 _ARENA_REPLAYS_LINK_CARD = """\
@@ -497,5 +495,3 @@ h1 {{ border-bottom: 2px solid #636efa; padding-bottom: 8px; margin-bottom: 4px;
 </body>
 </html>
 """
-
-

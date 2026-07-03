@@ -229,7 +229,9 @@ class IOracle(Protocol):
         ...
 
     def eval_targets(
-        self, compact_boards: list[NDArray], action_size: int,
+        self,
+        compact_boards: list[NDArray],
+        action_size: int,
     ) -> tuple[NDArray, NDArray]:
         """Ground-truth ``(policies, values)`` eval-set targets for the positions."""
         ...

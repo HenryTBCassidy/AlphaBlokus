@@ -15,6 +15,7 @@ behaviour:
    refactor must preserve at ``K=1`` (the batched path with batch size 1 has
    to stay bit-identical to today's recursive search).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -42,6 +43,7 @@ _DEV_CACHE = Path(__file__).resolve().parent.parent / "fixtures" / "blokus_duo_p
 # only test that batched == serial, not that the net is any good).
 # ---------------------------------------------------------------------------
 
+
 def _ttt_wrapper(tmp_path: Path) -> tuple[TicTacToeGame, BaseNNetWrapper]:
     from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
 
@@ -60,14 +62,25 @@ def _blokus_wrapper(tmp_path: Path) -> tuple[BlokusDuoGame, BaseNNetWrapper]:
 
 def _run_config(tmp_path: Path, *, game: str, num_filters: int, blocks: int) -> RunConfig:
     net_config = NetConfig(
-        learning_rate=1e-3, dropout=0.3, epochs=1, batch_size=4, cuda=False,
-        num_filters=num_filters, num_residual_blocks=blocks,
+        learning_rate=1e-3,
+        dropout=0.3,
+        epochs=1,
+        batch_size=4,
+        cuda=False,
+        num_filters=num_filters,
+        num_residual_blocks=blocks,
     )
     return RunConfig(
-        game=game, run_name="test_batched", num_generations=1, num_eps=2,
-        temp_threshold=5, update_threshold=0.55,
-        num_arena_matches=2, root_directory=tmp_path,
-        load_model=False, mcts_config=MCTSConfig(num_mcts_sims=8, cpuct=1.0),
+        game=game,
+        run_name="test_batched",
+        num_generations=1,
+        num_eps=2,
+        temp_threshold=5,
+        update_threshold=0.55,
+        num_arena_matches=2,
+        root_directory=tmp_path,
+        load_model=False,
+        mcts_config=MCTSConfig(num_mcts_sims=8, cpuct=1.0),
         net_config=net_config,
     )
 
@@ -91,6 +104,7 @@ def _assert_batch_matches_serial(nnet, boards) -> None:
 # ---------------------------------------------------------------------------
 # predict_batch equivalence — TicTacToe
 # ---------------------------------------------------------------------------
+
 
 def test_predict_batch_matches_serial_ttt(tmp_path: Path) -> None:
     game, nnet = _ttt_wrapper(tmp_path)
@@ -132,6 +146,7 @@ def test_predict_batch_order_independence_ttt(tmp_path: Path) -> None:
 # predict_batch equivalence — Blokus (real positions from the dev fixture)
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.skipif(not _DEV_CACHE.exists(), reason="dev_5000 fixture not present")
 def test_predict_batch_matches_serial_blokus(tmp_path: Path) -> None:
     game, nnet = _blokus_wrapper(tmp_path)
@@ -155,6 +170,7 @@ def test_predict_batch_matches_serial_blokus(tmp_path: Path) -> None:
 # (white-box), replacing the old read-only ``visit_counts``/``virtual_visits``
 # compat views once production stopped depending on them (N4.2).
 # ---------------------------------------------------------------------------
+
 
 def _tree_snapshot(mcts: MCTS) -> dict:
     """Per-node visit-count snapshot for determinism comparison.
@@ -185,21 +201,50 @@ _GOLDEN_TTT = {
     "empty": {
         "openings": [],
         "visit_counts": [6, 5, 6, 5, 6, 5, 5, 5, 6, 0],
-        "probs": [0.1224489796, 0.1020408163, 0.1224489796, 0.1020408163,
-                  0.1224489796, 0.1020408163, 0.1020408163, 0.1020408163,
-                  0.1224489796, 0.0],
+        "probs": [
+            0.1224489796,
+            0.1020408163,
+            0.1224489796,
+            0.1020408163,
+            0.1224489796,
+            0.1020408163,
+            0.1020408163,
+            0.1020408163,
+            0.1224489796,
+            0.0,
+        ],
     },
     "after_0": {
         "openings": [0],
         "visit_counts": [0, 6, 6, 6, 6, 6, 6, 6, 7, 0],
-        "probs": [0.0, 0.1224489796, 0.1224489796, 0.1224489796, 0.1224489796,
-                  0.1224489796, 0.1224489796, 0.1224489796, 0.1428571429, 0.0],
+        "probs": [
+            0.0,
+            0.1224489796,
+            0.1224489796,
+            0.1224489796,
+            0.1224489796,
+            0.1224489796,
+            0.1224489796,
+            0.1224489796,
+            0.1428571429,
+            0.0,
+        ],
     },
     "after_0_4": {
         "openings": [0, 4],
         "visit_counts": [0, 7, 7, 7, 0, 7, 7, 7, 7, 0],
-        "probs": [0.0, 0.1428571429, 0.1428571429, 0.1428571429, 0.0,
-                  0.1428571429, 0.1428571429, 0.1428571429, 0.1428571429, 0.0],
+        "probs": [
+            0.0,
+            0.1428571429,
+            0.1428571429,
+            0.1428571429,
+            0.0,
+            0.1428571429,
+            0.1428571429,
+            0.1428571429,
+            0.1428571429,
+            0.0,
+        ],
     },
 }
 
@@ -265,6 +310,7 @@ def test_mcts_visit_counts_deterministic_ttt(tmp_path: Path) -> None:
 # _select_action vectorisation — bit-identical to the original scalar loop
 # ---------------------------------------------------------------------------
 
+
 def _scalar_select_action(node: _Node, cpuct: float) -> int:
     """Reference copy of the pre-vectorisation scalar UCB loop (P2/B1).
 
@@ -321,9 +367,7 @@ def test_select_action_matches_scalar_loop(tmp_path: Path, with_virtual_loss: bo
         mcts = MCTS(game, nnet, MCTSConfig(num_mcts_sims=1, cpuct=cpuct))
 
         num_legal = int(rng.integers(1, 40))
-        acts = np.sort(
-            rng.choice(np.arange(200), size=num_legal, replace=False)
-        ).astype(np.int32)
+        acts = np.sort(rng.choice(np.arange(200), size=num_legal, replace=False)).astype(np.int32)
         priors = rng.random(num_legal).astype(np.float32)
         priors /= priors.sum()
 
@@ -349,6 +393,7 @@ def test_select_action_matches_scalar_loop(tmp_path: Path, with_virtual_loss: bo
 # ---------------------------------------------------------------------------
 # Batched (K>1) search — determinism and self-consistency
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.parametrize("batch_size", [4, 8, 16])
 def test_batched_search_deterministic_ttt(tmp_path: Path, batch_size: int) -> None:
@@ -411,14 +456,13 @@ def test_batched_search_self_consistent_blokus(tmp_path: Path, batch_size: int) 
     # min(K, num_sims) whose descents all land on the still-unexpanded root.
     root_visits = int(mcts.root_visit_counts(canonical).sum())
     expected = num_sims - min(batch_size, num_sims)
-    assert root_visits == expected, (
-        f"K={batch_size}: root visits {root_visits}, expected {expected}"
-    )
+    assert root_visits == expected, f"K={batch_size}: root visits {root_visits}, expected {expected}"
 
 
 # ---------------------------------------------------------------------------
 # fp16 inference flag — must be a clean no-op on CPU
 # ---------------------------------------------------------------------------
+
 
 def test_fp16_inference_flag_noop_on_cpu(tmp_path: Path) -> None:
     """fp16 autocast only engages on CUDA; on CPU the flag must be a no-op so
@@ -431,16 +475,30 @@ def test_fp16_inference_flag_noop_on_cpu(tmp_path: Path) -> None:
     def predict_with(fp16: bool):
         torch.manual_seed(0)
         net_config = NetConfig(
-            learning_rate=1e-3, dropout=0.3, epochs=1, batch_size=4, cuda=False,
-            num_filters=32, num_residual_blocks=1, fp16_inference=fp16,
+            learning_rate=1e-3,
+            dropout=0.3,
+            epochs=1,
+            batch_size=4,
+            cuda=False,
+            num_filters=32,
+            num_residual_blocks=1,
+            fp16_inference=fp16,
         )
         run_config = RunConfig(
-            game="tictactoe", run_name="t", num_generations=1, num_eps=2, temp_threshold=5,
-            update_threshold=0.55, num_arena_matches=2,
-            root_directory=tmp_path, load_model=False,
-            mcts_config=MCTSConfig(num_mcts_sims=2, cpuct=1.0), net_config=net_config,
+            game="tictactoe",
+            run_name="t",
+            num_generations=1,
+            num_eps=2,
+            temp_threshold=5,
+            update_threshold=0.55,
+            num_arena_matches=2,
+            root_directory=tmp_path,
+            load_model=False,
+            mcts_config=MCTSConfig(num_mcts_sims=2, cpuct=1.0),
+            net_config=net_config,
         )
         from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
+
         return NNetWrapper(game, run_config).predict(board)
 
     pol_off, val_off = predict_with(False)
@@ -452,6 +510,7 @@ def test_fp16_inference_flag_noop_on_cpu(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # Adaptive simulation budget (IDEAS.md I1)
 # ---------------------------------------------------------------------------
+
 
 def test_move_sim_budget_schedules(tmp_path: Path) -> None:
     """``flat`` spends num_mcts_sims; ``branching`` clamps to [sims_min, cap]."""
@@ -465,18 +524,17 @@ def test_move_sim_budget_schedules(tmp_path: Path) -> None:
     assert flat._move_sim_budget(board) == 50
 
     # branching, scale 1: budget == legal-move count when inside [min, cap].
-    branch = MCTS(game, nnet, MCTSConfig(
-        num_mcts_sims=50, cpuct=1.0, sim_schedule="branching", sims_min=1))
+    branch = MCTS(game, nnet, MCTSConfig(num_mcts_sims=50, cpuct=1.0, sim_schedule="branching", sims_min=1))
     assert branch._move_sim_budget(board) == min(50, max(1, legal))
 
     # floor dominates when the branching factor is below sims_min.
-    floored = MCTS(game, nnet, MCTSConfig(
-        num_mcts_sims=50, cpuct=1.0, sim_schedule="branching", sims_min=legal + 5))
+    floored = MCTS(game, nnet, MCTSConfig(num_mcts_sims=50, cpuct=1.0, sim_schedule="branching", sims_min=legal + 5))
     assert floored._move_sim_budget(board) == legal + 5
 
     # cap (num_mcts_sims) dominates when scaled branching exceeds it.
-    capped = MCTS(game, nnet, MCTSConfig(
-        num_mcts_sims=7, cpuct=1.0, sim_schedule="branching", sim_branching_scale=100.0))
+    capped = MCTS(
+        game, nnet, MCTSConfig(num_mcts_sims=7, cpuct=1.0, sim_schedule="branching", sim_branching_scale=100.0)
+    )
     assert capped._move_sim_budget(board) == 7
 
     # The schedule still yields a well-formed policy end-to-end.

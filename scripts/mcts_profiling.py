@@ -9,6 +9,7 @@ Usage:
     uv run python -m scripts.mcts_profiling --checkpoint temp/some_run/Nets/best.pth.tar
     uv run python -m scripts.mcts_profiling --game tictactoe --num-sims 25
 """
+
 from __future__ import annotations
 
 import argparse
@@ -118,9 +119,11 @@ def run_profiling(game_name: str, num_games: int, num_sims: int, checkpoint: str
         stats = play_mcts_game(game, nnet, mcts_config)
         elapsed = time.perf_counter() - t0
         all_stats.append(stats)
-        print(f"  Game {i + 1}/{num_games}: {stats.num_moves} moves, "
-              f"{stats.total_search_time_s:.1f}s search, "
-              f"{elapsed:.1f}s total")
+        print(
+            f"  Game {i + 1}/{num_games}: {stats.num_moves} moves, "
+            f"{stats.total_search_time_s:.1f}s search, "
+            f"{elapsed:.1f}s total"
+        )
 
     return all_stats
 

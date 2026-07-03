@@ -47,12 +47,12 @@ class _Node:
     ``virtual`` are mutated in place during backprop and ``n_total`` is bumped.
     """
 
-    acts: NDArray[np.int32]      # ascending legal action ids
-    priors: PolicyVector         # priors aligned to acts (float32; float64 after Dirichlet)
-    n: NDArray[np.int32]         # visit counts per edge (0 == unvisited)
-    q: NDArray[np.float64]       # running-mean Q per edge
-    virtual: NDArray[np.int32]   # in-flight virtual loss per edge (0 between batches)
-    n_total: int = 0             # total visits through this node (old state_visits[s])
+    acts: NDArray[np.int32]  # ascending legal action ids
+    priors: PolicyVector  # priors aligned to acts (float32; float64 after Dirichlet)
+    n: NDArray[np.int32]  # visit counts per edge (0 == unvisited)
+    q: NDArray[np.float64]  # running-mean Q per edge
+    virtual: NDArray[np.int32]  # in-flight virtual loss per edge (0 between batches)
+    n_total: int = 0  # total visits through this node (old state_visits[s])
 
 
 @dataclass(frozen=True)
@@ -132,7 +132,10 @@ class MCTS:
     # -- Public methods --------------------------------------------------------
 
     def get_action_prob(
-        self, canonical_board: IBoard, temp: float = 1, add_root_noise: bool = False,
+        self,
+        canonical_board: IBoard,
+        temp: float = 1,
+        add_root_noise: bool = False,
     ) -> list[float]:
         """Get action probabilities for the current board state.
 
@@ -183,16 +186,18 @@ class MCTS:
         if self._detailed:
             s = self.game.state_key(canonical_board)
             num_valid = len(self.nodes[s].acts) if s in self.nodes else 0
-            self._move_stats.append(MCTSMoveStats(
-                move_number=self._num_moves,
-                num_sims=self._total_sims - pre_sims,
-                search_time_s=(time.perf_counter() - sim_start) if self._profiling else 0.0,
-                inference_time_s=self._total_inference_time_s - pre_inference,
-                valid_moves_time_s=self._total_valid_moves_time_s - pre_valid_moves,
-                game_ended_time_s=self._total_game_ended_time_s - pre_game_ended,
-                num_leaf_expansions=self._num_leaf_expansions - pre_leaf,
-                num_valid_moves=num_valid,
-            ))
+            self._move_stats.append(
+                MCTSMoveStats(
+                    move_number=self._num_moves,
+                    num_sims=self._total_sims - pre_sims,
+                    search_time_s=(time.perf_counter() - sim_start) if self._profiling else 0.0,
+                    inference_time_s=self._total_inference_time_s - pre_inference,
+                    valid_moves_time_s=self._total_valid_moves_time_s - pre_valid_moves,
+                    game_ended_time_s=self._total_game_ended_time_s - pre_game_ended,
+                    num_leaf_expansions=self._num_leaf_expansions - pre_leaf,
+                    num_valid_moves=num_valid,
+                )
+            )
 
         # Extract visit counts for all actions — the dense root distribution.
         # Same integer values as the old ``visit_counts.get((s, a), 0)`` probe
@@ -219,7 +224,7 @@ class MCTS:
             return probs
 
         # Apply temperature and normalise to get probabilities
-        counts = [x ** (1. / temp) for x in counts]
+        counts = [x ** (1.0 / temp) for x in counts]
         counts_sum = float(sum(counts))
         return [x / counts_sum for x in counts]
 
@@ -318,7 +323,11 @@ class MCTS:
             if self._profiling:
                 self._total_inference_time_s += time.perf_counter() - infer_start
             for key, board, priors, value in zip(
-                eval_keys, eval_boards, priors_list, values_list, strict=True,
+                eval_keys,
+                eval_boards,
+                priors_list,
+                values_list,
+                strict=True,
             ):
                 values_by_key[key] = value
                 if key not in self.nodes:
@@ -362,14 +371,12 @@ class MCTS:
                     self._num_game_ended_calls += 1
             if self.game_ended_cache[s] != 0:
                 # Terminal leaf — value is known, no network evaluation needed.
-                return _Descent(key=s, board=None, path=path,
-                                value=self.game_ended_cache[s], needs_eval=False)
+                return _Descent(key=s, board=None, path=path, value=self.game_ended_cache[s], needs_eval=False)
 
             # Unexpanded leaf — defer evaluation to the batched NN call.
             node = self.nodes.get(s)
             if node is None:
-                return _Descent(key=s, board=board, path=path,
-                                value=None, needs_eval=True)
+                return _Descent(key=s, board=board, path=path, value=None, needs_eval=True)
 
             # Internal node — pick a child and descend, depositing virtual loss.
             idx = self._select_action(node)
@@ -485,10 +492,7 @@ class MCTS:
         value = -leaf_value
         for node, idx in reversed(path):
             if node.n[idx] != 0:
-                node.q[idx] = (
-                    (node.n[idx] * node.q[idx] + value)
-                    / (node.n[idx] + 1)
-                )
+                node.q[idx] = (node.n[idx] * node.q[idx] + value) / (node.n[idx] + 1)
                 node.n[idx] += 1
             else:
                 node.q[idx] = value
@@ -552,8 +556,7 @@ class MCTS:
         """
         total = sys.getsizeof(self.nodes) + sys.getsizeof(self.game_ended_cache)
         for node in self.nodes.values():
-            total += (node.acts.nbytes + node.priors.nbytes + node.n.nbytes
-                      + node.q.nbytes + node.virtual.nbytes)
+            total += node.acts.nbytes + node.priors.nbytes + node.n.nbytes + node.q.nbytes + node.virtual.nbytes
         return total
 
     def get_episode_stats(self) -> MCTSEpisodeStats:

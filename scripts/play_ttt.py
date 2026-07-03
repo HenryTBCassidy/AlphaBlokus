@@ -28,6 +28,7 @@ column ``a // 3``, row ``a % 3``::
     ---+---+---
      2 | 5 | 8
 """
+
 from __future__ import annotations
 
 import argparse
@@ -87,11 +88,13 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Play TicTacToe against a trained model.")
     parser.add_argument("--checkpoint", required=True, help="Path to a .pth.tar checkpoint")
     parser.add_argument(
-        "--config", default="run_configurations/smoke_test.json",
+        "--config",
+        default="run_configurations/smoke_test.json",
         help="RunConfig JSON whose net architecture matches the checkpoint.",
     )
     parser.add_argument(
-        "--model-first", action="store_true",
+        "--model-first",
+        action="store_true",
         help="Model plays X (first). Default: human plays X.",
     )
     args = parser.parse_args()
@@ -102,6 +105,7 @@ def main() -> None:
 
     game = TicTacToeGame()
     from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
+
     wrapper = NNetWrapper(game, config)
 
     ckpt_path = Path(args.checkpoint)
@@ -110,7 +114,10 @@ def main() -> None:
     wrapper.nnet.load_state_dict(ckpt["state_dict"])
 
     model_player = NetworkPlayer(
-        game=game, nnet=wrapper, mcts_config=config.mcts_config, temp=0.0,
+        game=game,
+        nnet=wrapper,
+        mcts_config=config.mcts_config,
+        temp=0.0,
     )
 
     human_plays_x = not args.model_first

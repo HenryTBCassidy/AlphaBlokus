@@ -3,6 +3,7 @@
 Built once from generation 1's self-play and persisted, so every epoch and
 every resumed run measures the network against the same positions.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -60,16 +61,18 @@ def build_or_load_eval_set(
     marker_path = eval_dir / "targets_kind.txt"
     expected_kind = "minimax_v1" if oracle is not None else "selfplay_v1"
     if (
-        boards_path.exists() and policies_path.exists() and values_path.exists()
-        and marker_path.exists() and marker_path.read_text().strip() == expected_kind
+        boards_path.exists()
+        and policies_path.exists()
+        and values_path.exists()
+        and marker_path.exists()
+        and marker_path.read_text().strip() == expected_kind
     ):
         eval_set = EvalSet(
             boards=np.load(boards_path),
             target_policies=np.load(policies_path),
             target_values=np.load(values_path),
         )
-        logger.info("Loaded eval set ({} positions, kind={}) from {}",
-                    len(eval_set), expected_kind, eval_dir)
+        logger.info("Loaded eval set ({} positions, kind={}) from {}", len(eval_set), expected_kind, eval_dir)
         return eval_set
 
     if not train_examples:
@@ -92,7 +95,8 @@ def build_or_load_eval_set(
 
     if oracle is not None:
         target_policies, target_values = oracle.eval_targets(
-            sampled_compact, action_size=action_size,
+            sampled_compact,
+            action_size=action_size,
         )
 
     eval_set = EvalSet(
@@ -106,6 +110,5 @@ def build_or_load_eval_set(
     np.save(policies_path, eval_set.target_policies)
     np.save(values_path, eval_set.target_values)
     marker_path.write_text(expected_kind)
-    logger.info("Built eval set ({} positions, kind={}) → {}",
-                n, expected_kind, eval_dir)
+    logger.info("Built eval set ({} positions, kind={}) → {}", n, expected_kind, eval_dir)
     return eval_set

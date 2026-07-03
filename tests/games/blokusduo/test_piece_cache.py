@@ -1,4 +1,5 @@
 """Tests for PieceManager cached orientation arrays and filled cell indices."""
+
 import numpy as np
 
 from alphablokus.games.blokusduo.pieces import Orientation, PieceManager
@@ -20,8 +21,9 @@ def test_cached_arrays_match_piece_properties(piece_manager: PieceManager):
         }
         for orientation in piece.basis_orientations:
             cached = piece_manager.get_piece_orientation_array(piece.id, orientation)
-            np.testing.assert_array_equal(cached, expected[orientation],
-                err_msg=f"Piece {piece.id} {orientation} cache mismatch")
+            np.testing.assert_array_equal(
+                cached, expected[orientation], err_msg=f"Piece {piece.id} {orientation} cache mismatch"
+            )
 
 
 def test_cached_arrays_are_immutable(piece_manager: PieceManager):
@@ -29,8 +31,7 @@ def test_cached_arrays_are_immutable(piece_manager: PieceManager):
     for piece in piece_manager.pieces.values():
         for orientation in piece.basis_orientations:
             arr = piece_manager.get_piece_orientation_array(piece.id, orientation)
-            assert not arr.flags.writeable, (
-                f"Piece {piece.id} {orientation} array should be immutable")
+            assert not arr.flags.writeable, f"Piece {piece.id} {orientation} array should be immutable"
 
 
 def test_cached_arrays_are_same_object_on_repeat_access(piece_manager: PieceManager):
@@ -48,8 +49,9 @@ def test_filled_cells_match_array(piece_manager: PieceManager):
             arr = piece_manager.get_piece_orientation_array(piece.id, orientation)
             filled = piece_manager.get_filled_cells(piece.id, orientation)
             expected = np.argwhere(arr != 0)
-            np.testing.assert_array_equal(filled, expected,
-                err_msg=f"Piece {piece.id} {orientation} filled cells mismatch")
+            np.testing.assert_array_equal(
+                filled, expected, err_msg=f"Piece {piece.id} {orientation} filled cells mismatch"
+            )
 
 
 def test_filled_cells_count_matches_piece_size(piece_manager: PieceManager):
@@ -59,7 +61,8 @@ def test_filled_cells_count_matches_piece_size(piece_manager: PieceManager):
         for orientation in piece.basis_orientations:
             filled = piece_manager.get_filled_cells(piece.id, orientation)
             assert len(filled) == expected_count, (
-                f"Piece {piece.id} {orientation}: expected {expected_count} filled cells, got {len(filled)}")
+                f"Piece {piece.id} {orientation}: expected {expected_count} filled cells, got {len(filled)}"
+            )
 
 
 def test_all_91_orientations_cached(piece_manager: PieceManager):

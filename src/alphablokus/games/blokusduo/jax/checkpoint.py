@@ -52,15 +52,18 @@ def convert_state_dict(state: dict, num_residual_blocks: int) -> dict[str, Any]:
     """Torch ``AlphaBlokusDuo`` state dict → numpy params pytree (fp32)."""
     if "policy_head.move_conv.weight" not in state:
         raise ValueError(
-            "Only the conv policy head is supported by the jax net "
-            "(this checkpoint looks like the legacy 'fc' head)."
+            "Only the conv policy head is supported by the jax net (this checkpoint looks like the legacy 'fc' head)."
         )
     params: dict[str, Any] = {
         "trunk": _fold_conv_bn(state, "conv_block.0", "conv_block.1"),
         "blocks": [
             {
-                "conv1": _fold_conv_bn(state, f"residual_blocks.{i}.conv_block1.0", f"residual_blocks.{i}.conv_block1.1"),  # noqa: E501
-                "conv2": _fold_conv_bn(state, f"residual_blocks.{i}.conv_block2.0", f"residual_blocks.{i}.conv_block2.1"),  # noqa: E501
+                "conv1": _fold_conv_bn(
+                    state, f"residual_blocks.{i}.conv_block1.0", f"residual_blocks.{i}.conv_block1.1"
+                ),  # noqa: E501
+                "conv2": _fold_conv_bn(
+                    state, f"residual_blocks.{i}.conv_block2.0", f"residual_blocks.{i}.conv_block2.1"
+                ),  # noqa: E501
             }
             for i in range(num_residual_blocks)
         ],

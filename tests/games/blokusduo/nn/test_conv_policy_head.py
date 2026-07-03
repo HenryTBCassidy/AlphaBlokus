@@ -14,6 +14,7 @@ wrong move. These tests prove the read-out against the **real** ``ActionCodec``
 Levels 1-2 are what catch an axis-order or coordinate-flip bug; level 3 is the
 integration sanity (shapes, masking alignment, no crash).
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -40,18 +41,35 @@ _N = 14  # Blokus Duo board size
 
 
 def _wrapper(
-    tmp_path: Path, policy_head: str, *, filters: int = 16, epochs: int = 1,
+    tmp_path: Path,
+    policy_head: str,
+    *,
+    filters: int = 16,
+    epochs: int = 1,
 ) -> tuple[BlokusDuoGame, NNetWrapper]:
     game = BlokusDuoGame(pieces_config_path=_PIECES)
     net_cfg = NetConfig(
-        learning_rate=1e-3, dropout=0.3, epochs=epochs, batch_size=4, cuda=False,
-        num_filters=filters, num_residual_blocks=1, policy_head=policy_head,
+        learning_rate=1e-3,
+        dropout=0.3,
+        epochs=epochs,
+        batch_size=4,
+        cuda=False,
+        num_filters=filters,
+        num_residual_blocks=1,
+        policy_head=policy_head,
     )
     run_cfg = RunConfig(
-        game="blokusduo", run_name="test_conv", num_generations=1, num_eps=2,
-        temp_threshold=5, update_threshold=0.55, num_arena_matches=2,
-        root_directory=tmp_path, load_model=False,
-        mcts_config=MCTSConfig(num_mcts_sims=2, cpuct=1.0), net_config=net_cfg,
+        game="blokusduo",
+        run_name="test_conv",
+        num_generations=1,
+        num_eps=2,
+        temp_threshold=5,
+        update_threshold=0.55,
+        num_arena_matches=2,
+        root_directory=tmp_path,
+        load_model=False,
+        mcts_config=MCTSConfig(num_mcts_sims=2, cpuct=1.0),
+        net_config=net_cfg,
     )
     return game, NNetWrapper(game, run_cfg)
 
@@ -59,6 +77,7 @@ def _wrapper(
 # ---------------------------------------------------------------------------
 # Level 1 — the permutation
 # ---------------------------------------------------------------------------
+
 
 def test_permutation_is_bijection(piece_manager: PieceManager) -> None:
     """perm must be a permutation of [0, num_moves) — no slot dropped or doubled."""
@@ -88,12 +107,14 @@ def test_permutation_matches_action_codec(piece_manager: PieceManager) -> None:
         assert o == expected_o, f"orientation mismatch at action {action_index}"
         assert (x, y) == (action.x_coordinate, action.y_coordinate), (
             f"coordinate mismatch at action {action_index}: perm says ({x},{y}), "
-            f"ActionCodec says ({action.x_coordinate},{action.y_coordinate})")
+            f"ActionCodec says ({action.x_coordinate},{action.y_coordinate})"
+        )
 
 
 # ---------------------------------------------------------------------------
 # Level 2 — the head places every output at the right ActionCodec index
 # ---------------------------------------------------------------------------
+
 
 def test_conv_head_places_every_logit_at_action_codec_index(piece_manager: PieceManager) -> None:
     """The decisive read-out test: build a ConvPolicyHead, and assert its
@@ -102,17 +123,16 @@ def test_conv_head_places_every_logit_at_action_codec_index(piece_manager: Piece
     the pass logit at the pass index. Pure reordering => exact equality."""
     torch.manual_seed(0)
     num_orientations = piece_manager.num_entries
-    head = ConvPolicyHead(num_filters=8, num_orientations=num_orientations,
-                          board_rows=_N, board_cols=_N)
+    head = ConvPolicyHead(num_filters=8, num_orientations=num_orientations, board_rows=_N, board_cols=_N)
     head.eval()
     codec = ActionCodec(_N, piece_manager)
     decoder = CoordinateIndexDecoder(_N)
 
     features = torch.randn(1, 8, _N, _N)
     with torch.no_grad():
-        moves = head.move_conv(features)[0].numpy()        # (O, rows, cols)
+        moves = head.move_conv(features)[0].numpy()  # (O, rows, cols)
         pass_logit = float(head.pass_head(features)[0, 0])
-        out = head(features)[0].numpy()                     # (action_size,)
+        out = head(features)[0].numpy()  # (action_size,)
 
     expected = np.empty(codec.action_size, dtype=out.dtype)
     for o in range(num_orientations):
@@ -131,6 +151,7 @@ def test_conv_head_places_every_logit_at_action_codec_index(piece_manager: Piece
 # Net-level: shape, normalisation, param count
 # ---------------------------------------------------------------------------
 
+
 def test_conv_net_policy_shape_and_normalises(tmp_path: Path) -> None:
     game, nnet = _wrapper(tmp_path, "conv")
     board = game.get_canonical_form(game.initialise_board(), 1)
@@ -146,17 +167,18 @@ def test_conv_head_slashes_param_count(tmp_path: Path) -> None:
     _, conv = _wrapper(tmp_path, "conv", filters=64)
     fc_params = sum(p.numel() for p in fc.nnet.parameters())
     conv_params = sum(p.numel() for p in conv.nnet.parameters())
-    assert conv_params < fc_params / 10, (
-        f"expected conv net far smaller; got conv={conv_params:,} fc={fc_params:,}")
+    assert conv_params < fc_params / 10, f"expected conv net far smaller; got conv={conv_params:,} fc={fc_params:,}"
 
 
 # ---------------------------------------------------------------------------
 # Level 3 — end-to-end on real boards
 # ---------------------------------------------------------------------------
 
+
 @pytest.mark.skipif(not _DEV_CACHE.exists(), reason="dev_5000 fixture not present")
 def test_conv_net_masked_policy_decodes_to_legal_moves(
-    tmp_path: Path, piece_manager: PieceManager,
+    tmp_path: Path,
+    piece_manager: PieceManager,
 ) -> None:
     """On real positions: the conv-head policy, masked to legal moves, keeps mass
     only on legal actions, and legal actions decode to placements the game
@@ -191,6 +213,7 @@ def test_conv_net_masked_policy_decodes_to_legal_moves(
 # checkpoint compatibility must fail loudly across head types
 # ---------------------------------------------------------------------------
 
+
 def test_loading_fc_checkpoint_into_conv_net_raises(tmp_path: Path) -> None:
     """The two heads have incompatible state_dicts. Loading an FC checkpoint
     into a conv net (or vice-versa) must raise, never load partially — strict
@@ -206,6 +229,7 @@ def test_loading_fc_checkpoint_into_conv_net_raises(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 # the conv head actually trains (gradients flow, loss drops, no NaN)
 # ---------------------------------------------------------------------------
+
 
 def test_conv_net_trains_and_loss_drops(tmp_path: Path) -> None:
     """Train the conv-head net on a small batch of real positions with
@@ -233,7 +257,8 @@ def test_conv_net_trains_and_loss_drops(tmp_path: Path) -> None:
         board, player = game.get_next_state(board, player, action)
 
     boards_t = torch.tensor(
-        np.array([game.encode_compact(e[0]) for e in examples]), dtype=torch.float32,
+        np.array([game.encode_compact(e[0]) for e in examples]),
+        dtype=torch.float32,
     )
     targets_pi = torch.tensor(np.array([e[1] for e in examples]), dtype=torch.float32)
 

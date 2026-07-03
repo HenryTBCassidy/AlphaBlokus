@@ -5,6 +5,7 @@ hive-partitioned metrics (training loss, arena results, timings, profiling,
 resources, throughput) and writes them to disk on ``flush()``. Self-play
 history persistence lives in :mod:`alphablokus.storage.selfplay_store`.
 """
+
 from __future__ import annotations
 
 import dataclasses
@@ -30,6 +31,7 @@ if TYPE_CHECKING:
 # ---------------------------------------------------------------------------
 # Public enum
 # ---------------------------------------------------------------------------
+
 
 class CycleStage(StrEnum):
     """Stages of the training cycle, used for timing records."""
@@ -67,6 +69,7 @@ class EvalSet:
 # Internal helpers
 # ---------------------------------------------------------------------------
 
+
 def _dataclass_to_jsonable(obj: Any) -> Any:
     """Recursively convert a dataclass tree into JSON-serialisable primitives.
 
@@ -89,6 +92,7 @@ def _dataclass_to_jsonable(obj: Any) -> Any:
 # ---------------------------------------------------------------------------
 # MetricsCollector (stateful buffer → hive-partitioned parquet)
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class MetricsCollector:
@@ -185,8 +189,7 @@ class MetricsCollector:
         # On resume, re-attach to the original run id so the dashboard shows one
         # continuous run; resume="allow" creates it if the id isn't found.
         resume_kwargs: dict[str, Any] = (
-            {"id": self.resume_wandb_run_id, "resume": "allow"}
-            if self.resume_wandb_run_id else {}
+            {"id": self.resume_wandb_run_id, "resume": "allow"} if self.resume_wandb_run_id else {}
         )
         self._wandb_run = wandb.init(
             project=wandb_config.project,
@@ -305,11 +308,13 @@ class MetricsCollector:
             eta_s = per_gen_s * (total_generations - completed)
         else:
             eta_s = float("nan")  # unknown until gen 1 completes
-        self._publish({
-            "progress/generation_fraction": completed / max(total_generations, 1),
-            "progress/eta_seconds": eta_s,
-            "generation": generation,
-        })
+        self._publish(
+            {
+                "progress/generation_fraction": completed / max(total_generations, 1),
+                "progress/eta_seconds": eta_s,
+                "generation": generation,
+            }
+        )
 
     def log_training(
         self,
@@ -328,24 +333,28 @@ class MetricsCollector:
         that misled the eye. The reporting layer now smooths the raw per-batch
         losses visually instead (EWM in HTML, native in W&B).
         """
-        self._training_records.append({
-            "generation": generation,
-            "epoch": epoch,
-            "batch_number": batch_number,
-            "pi_loss": pi_loss,
-            "v_loss": v_loss,
-            "total_loss": total_loss,
-        })
+        self._training_records.append(
+            {
+                "generation": generation,
+                "epoch": epoch,
+                "batch_number": batch_number,
+                "pi_loss": pi_loss,
+                "v_loss": v_loss,
+                "total_loss": total_loss,
+            }
+        )
         self._global_batch += 1
-        self._publish({
-            "training/pi_loss": pi_loss,
-            "training/v_loss": v_loss,
-            "training/total_loss": total_loss,
-            "global_batch": self._global_batch,
-            "generation": generation,
-            "epoch": epoch,
-            "batch": batch_number,
-        })
+        self._publish(
+            {
+                "training/pi_loss": pi_loss,
+                "training/v_loss": v_loss,
+                "training/total_loss": total_loss,
+                "global_batch": self._global_batch,
+                "generation": generation,
+                "epoch": epoch,
+                "batch": batch_number,
+            }
+        )
 
     def log_arena(
         self,
@@ -362,13 +371,15 @@ class MetricsCollector:
         running ``arena/acceptance_rate`` over the run — the most useful
         "is training producing improvements?" headline.
         """
-        self._arena_records.append({
-            "generation": generation,
-            "wins": wins,
-            "losses": losses,
-            "draws": draws,
-            "accepted": accepted,
-        })
+        self._arena_records.append(
+            {
+                "generation": generation,
+                "wins": wins,
+                "losses": losses,
+                "draws": draws,
+                "accepted": accepted,
+            }
+        )
         total = wins + losses + draws
         win_rate = wins / total if total > 0 else 0.0
         payload = {
@@ -383,9 +394,7 @@ class MetricsCollector:
             if accepted:
                 self._arena_accepts += 1
             payload["arena/accepted"] = int(accepted)
-            payload["arena/acceptance_rate"] = (
-                self._arena_accepts / self._arena_attempts
-            )
+            payload["arena/acceptance_rate"] = self._arena_accepts / self._arena_attempts
         self._publish(payload)
 
     def log_timing(
@@ -395,15 +404,19 @@ class MetricsCollector:
         time_elapsed: float,
     ) -> None:
         """Record execution time of a training stage."""
-        self._timing_records.append({
-            "generation": generation,
-            "cycle_stage": cycle_stage,
-            "time_elapsed": time_elapsed,
-        })
-        self._publish({
-            f"timing/{cycle_stage.value}_s": time_elapsed,
-            "generation": generation,
-        })
+        self._timing_records.append(
+            {
+                "generation": generation,
+                "cycle_stage": cycle_stage,
+                "time_elapsed": time_elapsed,
+            }
+        )
+        self._publish(
+            {
+                f"timing/{cycle_stage.value}_s": time_elapsed,
+                "generation": generation,
+            }
+        )
 
     def log_self_play_profiling(
         self,
@@ -429,9 +442,7 @@ class MetricsCollector:
         confident in its move choice.
         """
         sims_per_second = total_sims / total_search_time_s if total_search_time_s > 0 else 0.0
-        inference_fraction = (
-            total_inference_time_s / total_search_time_s if total_search_time_s > 0 else 0.0
-        )
+        inference_fraction = total_inference_time_s / total_search_time_s if total_search_time_s > 0 else 0.0
         record = {
             "generation": generation,
             "episode": episode,
@@ -446,32 +457,34 @@ class MetricsCollector:
             "mean_policy_entropy": mean_policy_entropy,
         }
         if total_valid_moves_time_s > 0 or total_game_ended_time_s > 0:
-            valid_moves_fraction = (
-                total_valid_moves_time_s / total_search_time_s if total_search_time_s > 0 else 0.0
+            valid_moves_fraction = total_valid_moves_time_s / total_search_time_s if total_search_time_s > 0 else 0.0
+            record.update(
+                {
+                    "total_valid_moves_time_s": total_valid_moves_time_s,
+                    "total_game_ended_time_s": total_game_ended_time_s,
+                    "num_valid_moves_calls": num_valid_moves_calls,
+                    "num_game_ended_calls": num_game_ended_calls,
+                    "valid_moves_fraction": valid_moves_fraction,
+                }
             )
-            record.update({
-                "total_valid_moves_time_s": total_valid_moves_time_s,
-                "total_game_ended_time_s": total_game_ended_time_s,
-                "num_valid_moves_calls": num_valid_moves_calls,
-                "num_game_ended_calls": num_game_ended_calls,
-                "valid_moves_fraction": valid_moves_fraction,
-            })
         self._self_play_profiling_records.append(record)
         self._global_episode += 1
-        self._publish({
-            "self_play/num_moves": num_moves,
-            "self_play/total_sims": total_sims,
-            "self_play/search_time_s": total_search_time_s,
-            "self_play/inference_time_s": total_inference_time_s,
-            "self_play/sims_per_second": sims_per_second,
-            "self_play/inference_fraction": inference_fraction,
-            "self_play/leaf_expansions": num_leaf_expansions,
-            "self_play/tree_size": tree_size,
-            "self_play/policy_entropy": mean_policy_entropy,
-            "global_episode": self._global_episode,
-            "generation": generation,
-            "episode": episode,
-        })
+        self._publish(
+            {
+                "self_play/num_moves": num_moves,
+                "self_play/total_sims": total_sims,
+                "self_play/search_time_s": total_search_time_s,
+                "self_play/inference_time_s": total_inference_time_s,
+                "self_play/sims_per_second": sims_per_second,
+                "self_play/inference_fraction": inference_fraction,
+                "self_play/leaf_expansions": num_leaf_expansions,
+                "self_play/tree_size": tree_size,
+                "self_play/policy_entropy": mean_policy_entropy,
+                "global_episode": self._global_episode,
+                "generation": generation,
+                "episode": episode,
+            }
+        )
 
     def log_resource_usage(
         self,
@@ -481,18 +494,20 @@ class MetricsCollector:
         gpu_memory_bytes: float | None = None,
     ) -> None:
         """Record a memory usage snapshot at a point in the training cycle."""
-        self._resource_usage_records.append({
-            "generation": generation,
-            "cycle_stage": cycle_stage,
-            "process_rss_bytes": process_rss_bytes,
-            "gpu_memory_bytes": gpu_memory_bytes,
-        })
+        self._resource_usage_records.append(
+            {
+                "generation": generation,
+                "cycle_stage": cycle_stage,
+                "process_rss_bytes": process_rss_bytes,
+                "gpu_memory_bytes": gpu_memory_bytes,
+            }
+        )
         payload: dict[str, Any] = {
-            f"resources/{cycle_stage.value}_rss_mb": process_rss_bytes / (1024 ** 2),
+            f"resources/{cycle_stage.value}_rss_mb": process_rss_bytes / (1024**2),
             "generation": generation,
         }
         if gpu_memory_bytes is not None:
-            payload[f"resources/{cycle_stage.value}_gpu_mb"] = gpu_memory_bytes / (1024 ** 2)
+            payload[f"resources/{cycle_stage.value}_gpu_mb"] = gpu_memory_bytes / (1024**2)
         self._publish(payload)
 
     def log_training_entropy(
@@ -510,19 +525,23 @@ class MetricsCollector:
         network internalises stronger move selection. The papers' headline
         "is the network learning?" curve.
         """
-        self._training_entropy_records.append({
-            "generation": generation,
-            "epoch": epoch,
-            "mean_entropy": mean_entropy,
-            "std_entropy": std_entropy,
-            "eval_set_size": eval_set_size,
-        })
-        self._publish({
-            "training/network_policy_entropy": mean_entropy,
-            "training/network_policy_entropy_std": std_entropy,
-            "generation": generation,
-            "epoch": epoch,
-        })
+        self._training_entropy_records.append(
+            {
+                "generation": generation,
+                "epoch": epoch,
+                "mean_entropy": mean_entropy,
+                "std_entropy": std_entropy,
+                "eval_set_size": eval_set_size,
+            }
+        )
+        self._publish(
+            {
+                "training/network_policy_entropy": mean_entropy,
+                "training/network_policy_entropy_std": std_entropy,
+                "generation": generation,
+                "epoch": epoch,
+            }
+        )
 
     def log_policy_accuracy(
         self,
@@ -538,19 +557,23 @@ class MetricsCollector:
         is the fraction where the MCTS argmax is in the network's top-5.
         Should rise toward 1.0 as the network internalises MCTS preferences.
         """
-        self._policy_accuracy_records.append({
-            "generation": generation,
-            "epoch": epoch,
-            "top1_accuracy": top1_accuracy,
-            "top5_accuracy": top5_accuracy,
-            "eval_set_size": eval_set_size,
-        })
-        self._publish({
-            "training/network_top1_accuracy": top1_accuracy,
-            "training/network_top5_accuracy": top5_accuracy,
-            "generation": generation,
-            "epoch": epoch,
-        })
+        self._policy_accuracy_records.append(
+            {
+                "generation": generation,
+                "epoch": epoch,
+                "top1_accuracy": top1_accuracy,
+                "top5_accuracy": top5_accuracy,
+                "eval_set_size": eval_set_size,
+            }
+        )
+        self._publish(
+            {
+                "training/network_top1_accuracy": top1_accuracy,
+                "training/network_top5_accuracy": top5_accuracy,
+                "generation": generation,
+                "epoch": epoch,
+            }
+        )
 
     def log_value_calibration(
         self,
@@ -571,25 +594,29 @@ class MetricsCollector:
         for i, (centre, mean_v, count) in enumerate(
             zip(bucket_centers, bucket_means, bucket_counts, strict=True),
         ):
-            self._value_calibration_records.append({
-                "generation": generation,
-                "epoch": epoch,
-                "bucket_idx": i,
-                "bucket_center": float(centre),
-                "bucket_mean_actual": float(mean_v) if not np.isnan(mean_v) else None,
-                "bucket_count": int(count),
-            })
+            self._value_calibration_records.append(
+                {
+                    "generation": generation,
+                    "epoch": epoch,
+                    "bucket_idx": i,
+                    "bucket_center": float(centre),
+                    "bucket_mean_actual": float(mean_v) if not np.isnan(mean_v) else None,
+                    "bucket_count": int(count),
+                }
+            )
 
         # W&B summary: log the mean absolute calibration error across populated
         # buckets — a single scalar that tracks "how off is the value head?"
         populated = bucket_counts > 0
         if populated.any():
             errs = np.abs(bucket_means[populated] - bucket_centers[populated])
-            self._publish({
-                "training/value_calibration_error": float(errs.mean()),
-                "generation": generation,
-                "epoch": epoch,
-            })
+            self._publish(
+                {
+                    "training/value_calibration_error": float(errs.mean()),
+                    "generation": generation,
+                    "epoch": epoch,
+                }
+            )
 
     def log_elo(
         self,
@@ -615,27 +642,31 @@ class MetricsCollector:
         the new network was rejected in arena.
         """
         elo_absolute = baseline_rating + elo_diff
-        self._elo_records.append({
-            "generation": generation,
-            "elo_rating": elo_absolute,
-            "elo_diff": elo_diff,
-            "baseline_rating": baseline_rating,
-            "score_rate": score_rate,
-            "wins": wins,
-            "losses": losses,
-            "draws": draws,
-            "games": games,
-        })
-        self._publish({
-            "elo/rating": elo_absolute,
-            "elo/diff_vs_baseline": elo_diff,
-            "elo/baseline_rating": baseline_rating,
-            "elo/score_rate": score_rate,
-            "elo/wins": wins,
-            "elo/losses": losses,
-            "elo/draws": draws,
-            "generation": generation,
-        })
+        self._elo_records.append(
+            {
+                "generation": generation,
+                "elo_rating": elo_absolute,
+                "elo_diff": elo_diff,
+                "baseline_rating": baseline_rating,
+                "score_rate": score_rate,
+                "wins": wins,
+                "losses": losses,
+                "draws": draws,
+                "games": games,
+            }
+        )
+        self._publish(
+            {
+                "elo/rating": elo_absolute,
+                "elo/diff_vs_baseline": elo_diff,
+                "elo/baseline_rating": baseline_rating,
+                "elo/score_rate": score_rate,
+                "elo/wins": wins,
+                "elo/losses": losses,
+                "elo/draws": draws,
+                "generation": generation,
+            }
+        )
 
     def log_arena_game(
         self,
@@ -655,18 +686,20 @@ class MetricsCollector:
         outcome = float(record.outcome)
         p1_white = bool(record.player1_was_white)
         for move_idx, move in enumerate(record.moves):
-            self._arena_replay_records.append({
-                "generation": generation,
-                "game_idx": game_idx,
-                "move_idx": move_idx,
-                "player": move.player,
-                "action": move.action,
-                "top_k_actions": list(move.top_k_actions),
-                "top_k_probs": list(move.top_k_probs),
-                "played_prob": float(move.played_prob),
-                "outcome": outcome,
-                "player1_was_white": p1_white,
-            })
+            self._arena_replay_records.append(
+                {
+                    "generation": generation,
+                    "game_idx": game_idx,
+                    "move_idx": move_idx,
+                    "player": move.player,
+                    "action": move.action,
+                    "top_k_actions": list(move.top_k_actions),
+                    "top_k_probs": list(move.top_k_probs),
+                    "played_prob": float(move.played_prob),
+                    "outcome": outcome,
+                    "player1_was_white": p1_white,
+                }
+            )
 
     def log_minimax(
         self,
@@ -686,25 +719,29 @@ class MetricsCollector:
         draw_rate = draws / games if games > 0 else 0.0
         loss_rate = losses / games if games > 0 else 0.0
         win_rate = wins / games if games > 0 else 0.0
-        self._minimax_records.append({
-            "generation": generation,
-            "wins": wins,
-            "losses": losses,
-            "draws": draws,
-            "games": games,
-            "win_rate": win_rate,
-            "draw_rate": draw_rate,
-            "loss_rate": loss_rate,
-        })
-        self._publish({
-            "minimax/win_rate": win_rate,
-            "minimax/draw_rate": draw_rate,
-            "minimax/loss_rate": loss_rate,
-            "minimax/wins": wins,
-            "minimax/losses": losses,
-            "minimax/draws": draws,
-            "generation": generation,
-        })
+        self._minimax_records.append(
+            {
+                "generation": generation,
+                "wins": wins,
+                "losses": losses,
+                "draws": draws,
+                "games": games,
+                "win_rate": win_rate,
+                "draw_rate": draw_rate,
+                "loss_rate": loss_rate,
+            }
+        )
+        self._publish(
+            {
+                "minimax/win_rate": win_rate,
+                "minimax/draw_rate": draw_rate,
+                "minimax/loss_rate": loss_rate,
+                "minimax/wins": wins,
+                "minimax/losses": losses,
+                "minimax/draws": draws,
+                "generation": generation,
+            }
+        )
 
     def log_symmetry_diagnostic(
         self,
@@ -731,21 +768,25 @@ class MetricsCollector:
             overall_kls.append(mean_kl)
             overall_matches.extend(matches)
             for sym_idx, kl in enumerate(kls):
-                self._symmetry_diagnostic_records.append({
-                    "generation": generation,
-                    "position_idx": pos_idx,
-                    "symmetry_idx": sym_idx,
-                    "kl_divergence": float(kl),
-                    "top1_match": bool(matches[sym_idx]) if sym_idx < len(matches) else False,
-                })
-        self._publish({
-            "learning_quality/symmetry_kl_mean": float(np.mean(overall_kls)),
-            "learning_quality/symmetry_kl_max": float(np.max(overall_kls)),
-            "learning_quality/symmetry_top1_match_rate": (
-                float(np.mean(overall_matches)) if overall_matches else 0.0
-            ),
-            "generation": generation,
-        })
+                self._symmetry_diagnostic_records.append(
+                    {
+                        "generation": generation,
+                        "position_idx": pos_idx,
+                        "symmetry_idx": sym_idx,
+                        "kl_divergence": float(kl),
+                        "top1_match": bool(matches[sym_idx]) if sym_idx < len(matches) else False,
+                    }
+                )
+        self._publish(
+            {
+                "learning_quality/symmetry_kl_mean": float(np.mean(overall_kls)),
+                "learning_quality/symmetry_kl_max": float(np.max(overall_kls)),
+                "learning_quality/symmetry_top1_match_rate": (
+                    float(np.mean(overall_matches)) if overall_matches else 0.0
+                ),
+                "generation": generation,
+            }
+        )
 
     def log_training_throughput(
         self,
@@ -756,20 +797,24 @@ class MetricsCollector:
     ) -> None:
         """Record training throughput for a single epoch."""
         samples_per_second = num_examples / epoch_time_s if epoch_time_s > 0 else 0.0
-        self._training_throughput_records.append({
-            "generation": generation,
-            "epoch": epoch,
-            "num_examples": num_examples,
-            "epoch_time_s": epoch_time_s,
-            "samples_per_second": samples_per_second,
-        })
-        self._publish({
-            "throughput/num_examples": num_examples,
-            "throughput/epoch_time_s": epoch_time_s,
-            "throughput/samples_per_second": samples_per_second,
-            "generation": generation,
-            "epoch": epoch,
-        })
+        self._training_throughput_records.append(
+            {
+                "generation": generation,
+                "epoch": epoch,
+                "num_examples": num_examples,
+                "epoch_time_s": epoch_time_s,
+                "samples_per_second": samples_per_second,
+            }
+        )
+        self._publish(
+            {
+                "throughput/num_examples": num_examples,
+                "throughput/epoch_time_s": epoch_time_s,
+                "throughput/samples_per_second": samples_per_second,
+                "generation": generation,
+                "epoch": epoch,
+            }
+        )
 
     def log_training_dynamics(
         self,
@@ -790,17 +835,19 @@ class MetricsCollector:
         pass training over a games-sized buffer. W&B-only; the HTML report shows
         the governing knobs in its config summary instead.
         """
-        self._publish({
-            "training_per_gen/epochs": epochs,
-            "training_per_gen/emergent_reuse": emergent_reuse,
-            "training_per_gen/staleness_gens": staleness_gens,
-            "training_per_gen/buffer_games": buffer_games,
-            "training_per_gen/buffer_positions": buffer_positions,
-            "training_per_gen/buffer_fill_fraction": (
-                buffer_games / buffer_capacity_games if buffer_capacity_games > 0 else 0.0
-            ),
-            "generation": generation,
-        })
+        self._publish(
+            {
+                "training_per_gen/epochs": epochs,
+                "training_per_gen/emergent_reuse": emergent_reuse,
+                "training_per_gen/staleness_gens": staleness_gens,
+                "training_per_gen/buffer_games": buffer_games,
+                "training_per_gen/buffer_positions": buffer_positions,
+                "training_per_gen/buffer_fill_fraction": (
+                    buffer_games / buffer_capacity_games if buffer_capacity_games > 0 else 0.0
+                ),
+                "generation": generation,
+            }
+        )
 
     def flush(self, config: RunConfig, generation: int) -> None:
         """Write buffered metrics for the current generation and clear buffers.
@@ -994,28 +1041,34 @@ class MetricsCollector:
             for gen, group in df.groupby("generation"):
                 last_epoch = group["epoch"].max()
                 last = group[group["epoch"] == last_epoch]
-                per_gen_payload.setdefault(int(gen), {}).update({
-                    "training_per_gen/pi_loss": float(last["pi_loss"].mean()),
-                    "training_per_gen/v_loss": float(last["v_loss"].mean()),
-                    "training_per_gen/total_loss": float(last["total_loss"].mean()),
-                })
+                per_gen_payload.setdefault(int(gen), {}).update(
+                    {
+                        "training_per_gen/pi_loss": float(last["pi_loss"].mean()),
+                        "training_per_gen/v_loss": float(last["v_loss"].mean()),
+                        "training_per_gen/total_loss": float(last["total_loss"].mean()),
+                    }
+                )
 
         if self._training_entropy_records:
             ent = pd.DataFrame(self._training_entropy_records)
             for gen, group in ent.groupby("generation"):
                 last = group[group["epoch"] == group["epoch"].max()]
-                per_gen_payload.setdefault(int(gen), {}).update({
-                    "training_per_gen/network_policy_entropy": float(last["mean_entropy"].iloc[0]),
-                })
+                per_gen_payload.setdefault(int(gen), {}).update(
+                    {
+                        "training_per_gen/network_policy_entropy": float(last["mean_entropy"].iloc[0]),
+                    }
+                )
 
         if self._policy_accuracy_records:
             acc = pd.DataFrame(self._policy_accuracy_records)
             for gen, group in acc.groupby("generation"):
                 last = group[group["epoch"] == group["epoch"].max()]
-                per_gen_payload.setdefault(int(gen), {}).update({
-                    "training_per_gen/network_top1_accuracy": float(last["top1_accuracy"].iloc[0]),
-                    "training_per_gen/network_top5_accuracy": float(last["top5_accuracy"].iloc[0]),
-                })
+                per_gen_payload.setdefault(int(gen), {}).update(
+                    {
+                        "training_per_gen/network_top1_accuracy": float(last["top1_accuracy"].iloc[0]),
+                        "training_per_gen/network_top5_accuracy": float(last["top5_accuracy"].iloc[0]),
+                    }
+                )
 
         if self._value_calibration_records:
             calib = pd.DataFrame(self._value_calibration_records)
@@ -1024,9 +1077,11 @@ class MetricsCollector:
                 if last.empty:
                     continue
                 errs = (last["bucket_mean_actual"] - last["bucket_center"]).abs()
-                per_gen_payload.setdefault(int(gen), {}).update({
-                    "training_per_gen/value_calibration_error": float(errs.mean()),
-                })
+                per_gen_payload.setdefault(int(gen), {}).update(
+                    {
+                        "training_per_gen/value_calibration_error": float(errs.mean()),
+                    }
+                )
 
         # Publish one combined payload per generation, keyed by generation
         # via the define_metric step_metric wiring set up in _init_wandb.

@@ -88,7 +88,10 @@ def _git_commit() -> str:
     try:
         return subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            cwd=REPO_ROOT, capture_output=True, text=True, check=True,
+            cwd=REPO_ROOT,
+            capture_output=True,
+            text=True,
+            check=True,
         ).stdout.strip()
     except (subprocess.CalledProcessError, FileNotFoundError):
         return "unknown"
@@ -127,8 +130,11 @@ def _tile_states(states: GameState, batch_size: int) -> GameState:
 # JAX measurements
 # ---------------------------------------------------------------------------
 
+
 def measure_mask_throughput(
-    kernels: JaxKernels, cache_states: GameState, batch_sizes: tuple[int, ...],
+    kernels: JaxKernels,
+    cache_states: GameState,
+    batch_sizes: tuple[int, ...],
 ) -> list[Measurement]:
     import jax
 
@@ -138,10 +144,14 @@ def measure_mask_throughput(
         out = kernels.legal_mask_batch(batch)  # warm-up / compile
         out.block_until_ready()
         seconds = _median_time(lambda b=batch: kernels.legal_mask_batch(b).block_until_ready())
-        results.append(Measurement(
-            name="legal_mask", batch_size=batch_size, seconds=seconds,
-            items_per_second=batch_size / seconds,
-        ))
+        results.append(
+            Measurement(
+                name="legal_mask",
+                batch_size=batch_size,
+                seconds=seconds,
+                items_per_second=batch_size / seconds,
+            )
+        )
         logger.info("legal_mask  B={:>5}: {:>12,.0f} masks/s", batch_size, batch_size / seconds)
     return results
 
@@ -176,7 +186,8 @@ def make_random_rollout(kernels: JaxKernels, max_plies: int = MAX_PLIES):
 
 
 def measure_random_rollout(
-    kernels: JaxKernels, batch_sizes: tuple[int, ...],
+    kernels: JaxKernels,
+    batch_sizes: tuple[int, ...],
 ) -> list[Measurement]:
     import jax
 
@@ -190,14 +201,21 @@ def measure_random_rollout(
         seconds = _median_time(lambda k=key, b=batch_size: jax.block_until_ready(rollout(k, b)))
         steps_per_second = batch_size * MAX_PLIES / seconds
         games_per_second = batch_size * completed / seconds
-        results.append(Measurement(
-            name="random_rollout", batch_size=batch_size, seconds=seconds,
-            items_per_second=steps_per_second,
-            detail={"games_per_second": games_per_second, "completed_fraction": completed},
-        ))
+        results.append(
+            Measurement(
+                name="random_rollout",
+                batch_size=batch_size,
+                seconds=seconds,
+                items_per_second=steps_per_second,
+                detail={"games_per_second": games_per_second, "completed_fraction": completed},
+            )
+        )
         logger.info(
             "rollout     B={:>5}: {:>12,.0f} steps/s, {:>9,.1f} games/s (completed {:.1%})",
-            batch_size, steps_per_second, games_per_second, completed,
+            batch_size,
+            steps_per_second,
+            games_per_second,
+            completed,
         )
     return results
 
@@ -205,6 +223,7 @@ def measure_random_rollout(
 # ---------------------------------------------------------------------------
 # J6: dummy net loop
 # ---------------------------------------------------------------------------
+
 
 def _init_dummy_net_params(key, filters: int, blocks: int, action_size: int, dtype):
     """Random weights for a run3-shaped ResNet in plain jnp arrays."""
@@ -214,13 +233,12 @@ def _init_dummy_net_params(key, filters: int, blocks: int, action_size: int, dty
     scale = 0.05
 
     def conv(k, cin, cout, ksize):
-        return (jax.random.normal(k, (cout, cin, ksize, ksize), dtype) * scale)
+        return jax.random.normal(k, (cout, cin, ksize, ksize), dtype) * scale
 
     params = {
         "trunk": conv(next(keys), 44, filters, 3),
         "blocks": [
-            (conv(next(keys), filters, filters, 3), conv(next(keys), filters, filters, 3))
-            for _ in range(blocks)
+            (conv(next(keys), filters, filters, 3), conv(next(keys), filters, filters, 3)) for _ in range(blocks)
         ],
         # Conv policy head: 1x1 conv to 91 orientation planes + pass logit.
         "policy": conv(next(keys), filters, 91, 1),
@@ -232,7 +250,10 @@ def _init_dummy_net_params(key, filters: int, blocks: int, action_size: int, dty
 
 
 def make_net_rollout(
-    kernels: JaxKernels, tables: JaxTables, dtype_name: str, max_plies: int = MAX_PLIES,
+    kernels: JaxKernels,
+    tables: JaxTables,
+    dtype_name: str,
+    max_plies: int = MAX_PLIES,
 ):
     """Batched pseudo-self-play: mask -> net forward -> masked sample -> step.
 
@@ -255,8 +276,8 @@ def make_net_rollout(
     def encode(ppb: jnp.ndarray, player: jnp.ndarray) -> jnp.ndarray:
         """44-channel encoding straight from the signed board (canonical)."""
         signed = (ppb * player).reshape(n, n)  # current player's pieces positive
-        own = (signed[None, :, :] == piece_planes[:, None, None])
-        opp = (signed[None, :, :] == -piece_planes[:, None, None])
+        own = signed[None, :, :] == piece_planes[:, None, None]
+        opp = signed[None, :, :] == -piece_planes[:, None, None]
         aggregates = jnp.stack([signed > 0, signed < 0])
         return jnp.concatenate([own, opp, aggregates]).astype(dtype)
 
@@ -312,7 +333,10 @@ def make_net_rollout(
 
 
 def measure_net_rollout(
-    kernels: JaxKernels, tables: JaxTables, batch_sizes: tuple[int, ...], dtype_name: str,
+    kernels: JaxKernels,
+    tables: JaxTables,
+    batch_sizes: tuple[int, ...],
+    dtype_name: str,
 ) -> list[Measurement]:
     import jax
 
@@ -326,24 +350,34 @@ def measure_net_rollout(
         except Exception as error:  # noqa: BLE001 — XlaRuntimeError (OOM) has no stable import path
             logger.warning(
                 "net-rollout[{}] B={} SKIPPED ({}: {})",
-                dtype_name, batch_size, type(error).__name__, str(error).splitlines()[0][:120],
+                dtype_name,
+                batch_size,
+                type(error).__name__,
+                str(error).splitlines()[0][:120],
             )
             _measure_forward_only(forward_only, batch_size, dtype_name, results)
             continue
         completed = float(np.mean(np.asarray(kernels.game_result_batch(final, np.int8(1))) != 0.0))
         seconds = _median_time(lambda k=key, b=batch_size: jax.block_until_ready(rollout(k, b)))
         steps_per_second = batch_size * MAX_PLIES / seconds
-        results.append(Measurement(
-            name=f"net_rollout_{dtype_name}", batch_size=batch_size, seconds=seconds,
-            items_per_second=steps_per_second,
-            detail={
-                "games_per_second": batch_size * completed / seconds,
-                "completed_fraction": completed,
-            },
-        ))
+        results.append(
+            Measurement(
+                name=f"net_rollout_{dtype_name}",
+                batch_size=batch_size,
+                seconds=seconds,
+                items_per_second=steps_per_second,
+                detail={
+                    "games_per_second": batch_size * completed / seconds,
+                    "completed_fraction": completed,
+                },
+            )
+        )
         logger.info(
             "net-rollout[{}] B={:>5}: {:>12,.0f} steps/s ({:>8,.1f} games/s)",
-            dtype_name, batch_size, steps_per_second, batch_size * completed / seconds,
+            dtype_name,
+            batch_size,
+            steps_per_second,
+            batch_size * completed / seconds,
         )
         _measure_forward_only(forward_only, batch_size, dtype_name, results)
     return results
@@ -360,22 +394,32 @@ def _measure_forward_only(forward_only, batch_size: int, dtype_name: str, result
     except Exception as error:  # noqa: BLE001
         logger.warning(
             "net-forward[{}] B={} SKIPPED ({}: {})",
-            dtype_name, batch_size, type(error).__name__, str(error).splitlines()[0][:120],
+            dtype_name,
+            batch_size,
+            type(error).__name__,
+            str(error).splitlines()[0][:120],
         )
         return
-    results.append(Measurement(
-        name=f"net_forward_{dtype_name}", batch_size=batch_size, seconds=fwd_seconds,
-        items_per_second=batch_size / fwd_seconds,
-    ))
+    results.append(
+        Measurement(
+            name=f"net_forward_{dtype_name}",
+            batch_size=batch_size,
+            seconds=fwd_seconds,
+            items_per_second=batch_size / fwd_seconds,
+        )
+    )
     logger.info(
         "net-forward[{}] B={:>5}: {:>12,.0f} forwards/s",
-        dtype_name, batch_size, batch_size / fwd_seconds,
+        dtype_name,
+        batch_size,
+        batch_size / fwd_seconds,
     )
 
 
 # ---------------------------------------------------------------------------
 # Python baselines
 # ---------------------------------------------------------------------------
+
 
 def measure_python_mask_baseline(game: BlokusDuoGame, sample: int = 500) -> Measurement:
     """Per-call latency of the production F2/numba mask over dev positions."""
@@ -414,10 +458,13 @@ def measure_python_rollout_baseline(game: BlokusDuoGame, games: int = 20) -> Mea
     seconds = time.perf_counter() - t0
     logger.info(
         "python rollout: {:.2f} games/s, {:,.0f} steps/s (single process)",
-        games / seconds, total_plies / seconds,
+        games / seconds,
+        total_plies / seconds,
     )
     return Measurement(
-        name="python_rollout", batch_size=1, seconds=seconds,
+        name="python_rollout",
+        batch_size=1,
+        seconds=seconds,
         items_per_second=total_plies / seconds,
         detail={"games_per_second": games / seconds, "games": games},
     )
@@ -426,6 +473,7 @@ def measure_python_rollout_baseline(game: BlokusDuoGame, games: int = 20) -> Mea
 # ---------------------------------------------------------------------------
 # Report
 # ---------------------------------------------------------------------------
+
 
 def _fig_b64(fig) -> str:
     buffer = io.BytesIO()

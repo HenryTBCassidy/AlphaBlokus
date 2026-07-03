@@ -3,6 +3,7 @@
 Pins the exploration-noise contract: off by default (bit-identical search),
 on => valid perturbation of the root priors only, and reproducible under a seed.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -24,14 +25,26 @@ def _nnet(tmp_path: Path) -> tuple[TicTacToeGame, NNetWrapper]:
     torch.manual_seed(0)
     game = TicTacToeGame()
     net_cfg = NetConfig(
-        learning_rate=1e-3, dropout=0.3, epochs=1, batch_size=4, cuda=False,
-        num_filters=32, num_residual_blocks=1,
+        learning_rate=1e-3,
+        dropout=0.3,
+        epochs=1,
+        batch_size=4,
+        cuda=False,
+        num_filters=32,
+        num_residual_blocks=1,
     )
     run_cfg = RunConfig(
-        game="tictactoe", run_name="t", num_generations=1, num_eps=2, temp_threshold=5,
-        update_threshold=0.55, num_arena_matches=2,
-        root_directory=tmp_path, load_model=False,
-        mcts_config=MCTSConfig(num_mcts_sims=2, cpuct=1.0), net_config=net_cfg,
+        game="tictactoe",
+        run_name="t",
+        num_generations=1,
+        num_eps=2,
+        temp_threshold=5,
+        update_threshold=0.55,
+        num_arena_matches=2,
+        root_directory=tmp_path,
+        load_model=False,
+        mcts_config=MCTSConfig(num_mcts_sims=2, cpuct=1.0),
+        net_config=net_cfg,
     )
     return game, NNetWrapper(game, run_cfg)
 
@@ -75,8 +88,7 @@ def test_noise_perturbs_only_root_legal_priors(tmp_path: Path) -> None:
 
     # Noised priors.
     np.random.seed(1)
-    noised = MCTS(game, nnet, MCTSConfig(num_mcts_sims=4, cpuct=1.0,
-                                         dirichlet_epsilon=0.25, dirichlet_alpha=0.3))
+    noised = MCTS(game, nnet, MCTSConfig(num_mcts_sims=4, cpuct=1.0, dirichlet_epsilon=0.25, dirichlet_alpha=0.3))
     noised.get_action_prob(canonical, temp=1, add_root_noise=True)
     noisy_priors = noised.nodes[s].priors
 

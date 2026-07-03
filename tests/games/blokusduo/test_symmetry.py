@@ -5,6 +5,7 @@ Covers the layered correctness checks described in
 transpose (S2), action transpose (S3), and the higher-level equivariance /
 invariance / round-trip properties (S5–S7).
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -26,9 +27,12 @@ def test_orientation_transpose_id_is_involution(piece_manager: PieceManager) -> 
     """T1.a — applying the transpose lookup twice returns the original ID."""
     n = piece_manager.num_entries
     for o_id in range(n):
-        assert piece_manager.orientation_transpose_id(
-            piece_manager.orientation_transpose_id(o_id),
-        ) == o_id
+        assert (
+            piece_manager.orientation_transpose_id(
+                piece_manager.orientation_transpose_id(o_id),
+            )
+            == o_id
+        )
 
 
 def test_orientation_transpose_id_is_bijection(piece_manager: PieceManager) -> None:
@@ -52,12 +56,12 @@ def test_orientation_transpose_id_matches_grid_transpose(
             new_piece_id, new_orientation = piece_manager.get_piece_orientation(new_o_id)
 
             assert new_piece_id == piece_id, (
-                f"piece {piece_id} ({piece.name}) {orientation.value} transposed "
-                f"to a different piece {new_piece_id}"
+                f"piece {piece_id} ({piece.name}) {orientation.value} transposed to a different piece {new_piece_id}"
             )
             original = piece_manager.get_piece_orientation_array(piece_id, orientation)
             transposed_grid = piece_manager.get_piece_orientation_array(
-                new_piece_id, new_orientation,
+                new_piece_id,
+                new_orientation,
             )
             assert np.array_equal(np.transpose(original), transposed_grid), (
                 f"piece {piece_id} ({piece.name}) orientation {orientation.value}: "
@@ -71,10 +75,7 @@ def test_monomino_orientation_transpose_is_identity(
     """Sanity check: the monomino has only one orientation (Identity), and
     its transpose must map back to itself.
     """
-    monomino_id = next(
-        pid for pid, p in piece_manager.pieces.items()
-        if p.identity.shape == (1, 1)
-    )
+    monomino_id = next(pid for pid, p in piece_manager.pieces.items() if p.identity.shape == (1, 1))
     o_id = piece_manager.get_piece_orientation_id((monomino_id, Orientation.Identity))
     assert piece_manager.orientation_transpose_id(o_id) == o_id
 
@@ -85,10 +86,7 @@ def transposed_orientation_table(piece_manager: PieceManager) -> dict[int, int]:
 
     Lets follow-up symmetry tests reuse the table without rebuilding it.
     """
-    return {
-        o_id: piece_manager.orientation_transpose_id(o_id)
-        for o_id in range(piece_manager.num_entries)
-    }
+    return {o_id: piece_manager.orientation_transpose_id(o_id) for o_id in range(piece_manager.num_entries)}
 
 
 # ── Position fixtures shared by S2+ tests ───────────────────────────────────
@@ -128,13 +126,9 @@ def mid_game_board(blokus_game: BlokusDuoGame, empty_board: BlokusDuoBoard) -> B
     each player's first move and then valid-moves-aware follow-ups.
     """
     # First move: white monomino on its start square.
-    white_first = next(
-        a for a in blokus_game.initial_actions[1] if a.piece_id == 1
-    )
+    white_first = next(a for a in blokus_game.initial_actions[1] if a.piece_id == 1)
     b = empty_board.with_piece(white_first, 1)
-    black_first = next(
-        a for a in blokus_game.initial_actions[-1] if a.piece_id == 1
-    )
+    black_first = next(a for a in blokus_game.initial_actions[-1] if a.piece_id == 1)
     b = b.with_piece(black_first, -1)
     # A couple of follow-up moves picked to land on different orientations.
     for player in (1, -1, 1, -1):
@@ -204,9 +198,7 @@ def test_transposed_board_caches_match_independent_recompute(
                     if BlokusDuoBoard._valid_placement(i, j, player, transposed_2d):
                         expected_keys.add((i, j))
             actual_keys = set(transposed.placement_points(player).keys())
-            assert actual_keys == expected_keys, (
-                f"placement_points key set mismatch for player {player}"
-            )
+            assert actual_keys == expected_keys, f"placement_points key set mismatch for player {player}"
 
 
 def test_transposed_board_preserves_invariants(
@@ -218,9 +210,7 @@ def test_transposed_board_preserves_invariants(
     for position in positions:
         t = position.transposed()
         # Total placed cells identical
-        assert (t.placement_grid != 0).sum() == (
-            position.placement_grid != 0
-        ).sum()
+        assert (t.placement_grid != 0).sum() == (position.placement_grid != 0).sum()
         for player in (1, -1):
             assert t.remaining_piece_ids(player) == position.remaining_piece_ids(player)
             assert t.last_piece_played(player) == position.last_piece_played(player)
@@ -243,7 +233,8 @@ def test_transposed_board_is_involution(positions: list[BlokusDuoBoard]) -> None
 
 
 def test_get_symmetries_returns_two_pairs(
-    blokus_game: BlokusDuoGame, mid_game_board: BlokusDuoBoard,
+    blokus_game: BlokusDuoGame,
+    mid_game_board: BlokusDuoBoard,
 ) -> None:
     """Blokus Duo's symmetry group has order 2 — identity plus the main-
     diagonal reflection. ``get_symmetries`` must always return exactly two
@@ -264,7 +255,8 @@ def test_get_symmetries_returns_two_pairs(
 
 
 def test_get_symmetries_policy_pairs_with_board(
-    blokus_game: BlokusDuoGame, mid_game_board: BlokusDuoBoard,
+    blokus_game: BlokusDuoGame,
+    mid_game_board: BlokusDuoBoard,
 ) -> None:
     """The policy entry of the second tuple must be the action-permutation
     of the original — i.e. the policy correctly transposed.
@@ -344,7 +336,8 @@ def _placement_equal(a: BlokusDuoBoard, b: BlokusDuoBoard) -> bool:
 
 
 def test_get_next_state_equivariant_under_transpose_single_move(
-    blokus_game: BlokusDuoGame, mid_game_board: BlokusDuoBoard,
+    blokus_game: BlokusDuoGame,
+    mid_game_board: BlokusDuoBoard,
 ) -> None:
     """T5.a — for every legal action from a hand-built mid-game position
     and for both players, applying-then-transposing equals transposing-
@@ -361,7 +354,9 @@ def test_get_next_state_equivariant_under_transpose_single_move(
             action = int(action)
             # Path A: apply then transpose
             post_move_a, next_player_a = blokus_game.get_next_state(
-                mid_game_board, player, action,
+                mid_game_board,
+                player,
+                action,
             )
             path_a = post_move_a.transposed()
             # Path B: transpose then apply transposed action
@@ -371,8 +366,7 @@ def test_get_next_state_equivariant_under_transpose_single_move(
 
             assert next_player_a == next_player_b
             assert _placement_equal(path_a, path_b), (
-                f"equivariance failed for player {player}, action {action} "
-                f"(transposed: {t_action})"
+                f"equivariance failed for player {player}, action {action} (transposed: {t_action})"
             )
 
 
@@ -414,8 +408,7 @@ def test_transpose_commutes_with_game_replay(blokus_game: BlokusDuoGame) -> None
             path_b, _ = blokus_game.get_next_state(path_b, p, t_action)
 
         assert _placement_equal(final_a, path_b), (
-            f"replay equivariance failed on rollout {rollout} "
-            f"({len(actions)} moves)"
+            f"replay equivariance failed on rollout {rollout} ({len(actions)} moves)"
         )
 
 
@@ -423,7 +416,8 @@ def test_transpose_commutes_with_game_replay(blokus_game: BlokusDuoGame) -> None
 
 
 def test_valid_move_count_invariant_under_transpose(
-    blokus_game: BlokusDuoGame, positions: list[BlokusDuoBoard],
+    blokus_game: BlokusDuoGame,
+    positions: list[BlokusDuoBoard],
 ) -> None:
     """Legal-move count is preserved under transposition for every fixture
     and both players.
@@ -432,13 +426,12 @@ def test_valid_move_count_invariant_under_transpose(
         for player in (1, -1):
             mask_orig = blokus_game.valid_move_masking(position, player)
             mask_t = blokus_game.valid_move_masking(position.transposed(), player)
-            assert mask_orig.sum() == mask_t.sum(), (
-                f"legal-move count drift under transpose for player {player}"
-            )
+            assert mask_orig.sum() == mask_t.sum(), f"legal-move count drift under transpose for player {player}"
 
 
 def test_legal_action_set_transposes_correctly(
-    blokus_game: BlokusDuoGame, mid_game_board: BlokusDuoBoard,
+    blokus_game: BlokusDuoGame,
+    mid_game_board: BlokusDuoBoard,
 ) -> None:
     """The action-by-action set of legal moves on the transposed board is
     exactly the transpose-image of the legal set on the original.
@@ -450,8 +443,7 @@ def test_legal_action_set_transposes_correctly(
         legal_t = set(np.flatnonzero(mask_t).tolist())
         expected_t = {blokus_game.transpose_action(a) for a in legal_orig}
         assert legal_t == expected_t, (
-            f"legal action set image mismatch for player {player}: "
-            f"diff = {legal_t.symmetric_difference(expected_t)}"
+            f"legal action set image mismatch for player {player}: diff = {legal_t.symmetric_difference(expected_t)}"
         )
 
 
@@ -490,7 +482,8 @@ def test_board_transpose_involution_on_random_rollouts(
 
 
 def test_html_snapshot_renders_both_panels(
-    blokus_game: BlokusDuoGame, mid_game_board: BlokusDuoBoard,
+    blokus_game: BlokusDuoGame,
+    mid_game_board: BlokusDuoBoard,
 ) -> None:
     """The visual-snapshot path: ``reporting.display_blokusduo.render_board_html``
     successfully renders both the original and transposed board. Catches
@@ -503,14 +496,20 @@ def test_html_snapshot_renders_both_panels(
     from alphablokus.reporting.display_blokusduo import render_board_html
 
     original_html = render_board_html(
-        board=mid_game_board, game=blokus_game, current_player=1, turn=-1,
+        board=mid_game_board,
+        game=blokus_game,
+        current_player=1,
+        turn=-1,
         action_desc="original",
         num_moves_white=len(blokus_game.valid_actions(mid_game_board, 1)),
         num_moves_black=len(blokus_game.valid_actions(mid_game_board, -1)),
     )
     transposed_board = mid_game_board.transposed()
     transposed_html = render_board_html(
-        board=transposed_board, game=blokus_game, current_player=1, turn=-1,
+        board=transposed_board,
+        game=blokus_game,
+        current_player=1,
+        turn=-1,
         action_desc="transposed",
         num_moves_white=len(blokus_game.valid_actions(transposed_board, 1)),
         num_moves_black=len(blokus_game.valid_actions(transposed_board, -1)),
@@ -539,6 +538,4 @@ def test_diagonal_symmetric_position_is_self_transpose(
     assert np.array_equal(t.placement_grid, b.placement_grid)
     for player in (1, -1):
         assert np.array_equal(t.side_danger_zone(player), b.side_danger_zone(player))
-        assert set(t.placement_points(player).keys()) == set(
-            b.placement_points(player).keys()
-        )
+        assert set(t.placement_points(player).keys()) == set(b.placement_points(player).keys())

@@ -15,6 +15,7 @@ The headline invariants this file enforces:
 Tests use TicTacToe + a small MCTS sim count so the whole file runs in
 a few seconds even with multiple pool spawns.
 """
+
 from __future__ import annotations
 
 from dataclasses import replace
@@ -225,15 +226,11 @@ def test_two_player_one_worker_matches_four_workers(
     assert len(r1) == len(r4) == 4
     # Move sequences should match game-for-game when seeds match.
     for game_idx, (rec1, rec4) in enumerate(zip(r1, r4, strict=False)):
-        assert rec1.outcome == rec4.outcome, (
-            f"Game {game_idx} outcome differs: {rec1.outcome} vs {rec4.outcome}"
-        )
+        assert rec1.outcome == rec4.outcome, f"Game {game_idx} outcome differs: {rec1.outcome} vs {rec4.outcome}"
         assert rec1.player1_was_white == rec4.player1_was_white
         actions_1 = tuple(m.action for m in rec1.moves)
         actions_4 = tuple(m.action for m in rec4.moves)
-        assert actions_1 == actions_4, (
-            f"Game {game_idx} move sequence differs between worker counts"
-        )
+        assert actions_1 == actions_4, f"Game {game_idx} move sequence differs between worker counts"
 
 
 @pytest.mark.slow
@@ -281,7 +278,9 @@ def test_two_player_records_use_a_perspective(
     b_wins_from_records = sum(1 for r in records if r.outcome < -0.5)
     draws_from_records = sum(1 for r in records if abs(r.outcome) < 0.5)
     assert (a_wins_from_records, b_wins_from_records, draws_from_records) == (
-        a_wins, b_wins, draws,
+        a_wins,
+        b_wins,
+        draws,
     ), (
         f"Per-record outcomes don't match aggregate counts. "
         f"From records: A={a_wins_from_records} B={b_wins_from_records} D={draws_from_records}; "
@@ -306,8 +305,7 @@ def test_two_player_records_use_a_perspective(
         if not rec.moves:
             continue
         assert rec.moves[0].player == 1, (
-            f"Game {i}: first move's player should be +1 (arena player1), "
-            f"got {rec.moves[0].player}"
+            f"Game {i}: first move's player should be +1 (arena player1), got {rec.moves[0].player}"
         )
 
 

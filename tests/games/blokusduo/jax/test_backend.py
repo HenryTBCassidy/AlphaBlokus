@@ -154,9 +154,7 @@ def test_deterministic_at_fixed_seed(generated, tmp_path) -> None:
     assert len(games_again) == len(games)
     for game_a, game_b in zip(games, games_again, strict=True):
         assert len(game_a) == len(game_b)
-        for (board_a, (idx_a, val_a), value_a), (board_b, (idx_b, val_b), value_b) in zip(
-            game_a, game_b, strict=True
-        ):
+        for (board_a, (idx_a, val_a), value_a), (board_b, (idx_b, val_b), value_b) in zip(game_a, game_b, strict=True):
             np.testing.assert_array_equal(board_a, board_b)
             np.testing.assert_array_equal(idx_a, idx_b)
             np.testing.assert_array_equal(val_a, val_b)

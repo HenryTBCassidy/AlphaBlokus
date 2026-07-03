@@ -114,10 +114,14 @@ def test_load_refuses_legacy_dense_file(store: SelfPlayStore, test_config: RunCo
 
     store._directory.mkdir(parents=True, exist_ok=True)
     df = pd.DataFrame({"board": [b""], "policy": [b""], "value": [0.0]})
-    table = pa.Table.from_pandas(df).replace_schema_metadata({
-        b"board_shape": b"44,14,14", b"board_dtype": b"float32",
-        b"policy_size": b"10", b"policy_dtype": b"float64",
-    })
+    table = pa.Table.from_pandas(df).replace_schema_metadata(
+        {
+            b"board_shape": b"44,14,14",
+            b"board_dtype": b"float32",
+            b"policy_size": b"10",
+            b"policy_dtype": b"float64",
+        }
+    )
     pq.write_table(table, store._directory / "self_play_0.parquet")
 
     with pytest.raises(ValueError, match="board_kind"):
@@ -129,7 +133,9 @@ def test_compact_board_roundtrip_reencodes(blokus_game, test_config: RunConfig):
     store = SelfPlayStore(test_config.self_play_history_directory)
     board = blokus_game.initialise_board()
     board, _ = blokus_game.get_next_state(
-        board, 1, int(np.where(blokus_game.valid_move_masking(board, 1))[0][0]),
+        board,
+        1,
+        int(np.where(blokus_game.valid_move_masking(board, 1))[0][0]),
     )
     compact = board.to_compact()
     policy = np.zeros(blokus_game.get_action_size(), dtype=np.float64)
@@ -141,7 +147,8 @@ def test_compact_board_roundtrip_reencodes(blokus_game, test_config: RunConfig):
     loaded_compact = loaded[0][0]
     assert np.array_equal(loaded_compact, compact)
     assert np.array_equal(
-        blokus_game.encode_compact(loaded_compact), board.as_multi_channel(1),
+        blokus_game.encode_compact(loaded_compact),
+        board.as_multi_channel(1),
     )
 
 

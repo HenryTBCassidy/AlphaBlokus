@@ -53,7 +53,8 @@ def _expected_batches(buffer_size: int, batch_size: int, epochs: int) -> int:
 def test_full_pass_batch_count(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
     """Batch count equals epochs × ceil(buffer_positions / batch_size)."""
     config = replace(  # batch_size 4 from the fixture; 3 full passes
-        test_config, net_config=replace(test_config.net_config, epochs=3),
+        test_config,
+        net_config=replace(test_config.net_config, epochs=3),
     )
     nnet = NNetWrapper(ttt_game, config)
     action_size = ttt_game.get_action_size()

@@ -23,6 +23,7 @@ class Board(IBoard):
          pieces[2][0] is the bottom left square,
     Squares are stored and manipulated as (x,y) tuples.
     """
+
     N: int = 3  # Board size
 
     # list of all 8 directions on the board, as (x,y) offsets
@@ -53,8 +54,8 @@ class Board(IBoard):
         """
         board = self.as_2d
         rep = np.zeros((2, self.N, self.N), dtype=np.float32)
-        rep[0] = (board == current_player)
-        rep[1] = (board == -current_player)
+        rep[0] = board == current_player
+        rep[1] = board == -current_player
         return rep
 
     @property

@@ -1,4 +1,5 @@
 """Chess-style Elo arithmetic for the frozen-baseline strength curve."""
+
 from __future__ import annotations
 
 import math

@@ -3,6 +3,7 @@
 Not a permanent tool — probes *how* the net loses (score margin, board coverage,
 pieces placed, when it gets walled off, opening move) rather than just win/loss.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -35,12 +36,14 @@ def main() -> None:
 
     cfg = load_args(args.config)
     import torch
+
     if cfg.net_config.cuda and not torch.cuda.is_available():
         cfg = replace(cfg, net_config=replace(cfg.net_config, cuda=False))
     game, nnet = instantiate_game_and_network(cfg)
     nnet.load_checkpoint(filename=args.net)
-    net_player = NetworkPlayer(game, nnet, eval_cfg(cfg.mcts_config, args.sims), temp=0.0,
-                               opening_temp=1.0, opening_moves=4)
+    net_player = NetworkPlayer(
+        game, nnet, eval_cfg(cfg.mcts_config, args.sims), temp=0.0, opening_temp=1.0, opening_moves=4
+    )
 
     pentobi = PentobiPlayer(game, args.level, seed=1)
     try:
@@ -49,8 +52,7 @@ def main() -> None:
         pentobi.close()
 
     codec = game.action_codec
-    piece_sq = {pid: int(game.piece_manager.pieces[pid].identity.sum())
-                for pid in game.piece_manager.pieces}
+    piece_sq = {pid: int(game.piece_manager.pieces[pid].identity.sum()) for pid in game.piece_manager.pieces}
     total_sq = sum(piece_sq.values())
 
     print(f"\n=== net {nw}-{pw}-{d} at L{args.level}, {args.sims} sims, {args.games} games ===")
@@ -64,7 +66,7 @@ def main() -> None:
         net_first_pass = pen_first_pass = None
         net_open = None
         for m in rec.moves:
-            is_net = (m.player == net_side)
+            is_net = m.player == net_side
             is_pass = codec.is_pass(m.action)
             if is_net:
                 net_moves += 1
@@ -89,18 +91,18 @@ def main() -> None:
         won = margin > 0
         rows.append((net_placed_sq, pen_placed_sq, 21 - len(net_rem), 21 - len(pen_rem), margin))
         print(
-            f"g{gi:2d} {'W' if net_side==1 else 'B'} | "
+            f"g{gi:2d} {'W' if net_side == 1 else 'B'} | "
             f"{'WIN ' if won else 'loss'} margin {margin:+3d} | "
             f"squares net {net_placed_sq:2d} vs pen {pen_placed_sq:2d} | "
-            f"pieces net {21-len(net_rem):2d} vs pen {21-len(pen_rem):2d} | "
+            f"pieces net {21 - len(net_rem):2d} vs pen {21 - len(pen_rem):2d} | "
             f"net 1st pass @ move {net_first_pass} (of {net_moves}) | open {net_open}"
         )
 
     arr = np.array([r for r in rows], dtype=float)
     print("\n--- averages ---")
-    print(f"squares placed:  net {arr[:,0].mean():.1f}  vs  pentobi {arr[:,1].mean():.1f}")
-    print(f"pieces placed:   net {arr[:,2].mean():.1f}  vs  pentobi {arr[:,3].mean():.1f}")
-    print(f"score margin:    {arr[:,4].mean():+.1f}  (min {arr[:,4].min():+.0f}, max {arr[:,4].max():+.0f})")
+    print(f"squares placed:  net {arr[:, 0].mean():.1f}  vs  pentobi {arr[:, 1].mean():.1f}")
+    print(f"pieces placed:   net {arr[:, 2].mean():.1f}  vs  pentobi {arr[:, 3].mean():.1f}")
+    print(f"score margin:    {arr[:, 4].mean():+.1f}  (min {arr[:, 4].min():+.0f}, max {arr[:, 4].max():+.0f})")
 
 
 if __name__ == "__main__":

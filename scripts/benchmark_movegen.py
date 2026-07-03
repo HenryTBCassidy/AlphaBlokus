@@ -14,6 +14,7 @@ the speedup factor. Validates that both implementations agree on every
 position before reporting timings (skipping a position if they disagree
 would be silent corruption).
 """
+
 from __future__ import annotations
 
 import sys
@@ -133,8 +134,10 @@ def main() -> int:
     print(f"{'Implementation':<30s} {'total':>10s} {'mean':>10s} {'p50':>10s} {'p95':>10s}")
     for name, calls in [("current", per_call_current), ("F2", per_call_f2)]:
         arr = np.array(calls)
-        print(f"{name:<30s} {arr.sum():>9.2f}s {arr.mean()*1000:>9.2f}ms "
-              f"{np.median(arr)*1000:>9.2f}ms {np.percentile(arr,95)*1000:>9.2f}ms")
+        print(
+            f"{name:<30s} {arr.sum():>9.2f}s {arr.mean() * 1000:>9.2f}ms "
+            f"{np.median(arr) * 1000:>9.2f}ms {np.percentile(arr, 95) * 1000:>9.2f}ms"
+        )
     print()
 
     # ----- Per-phase breakdown -----

@@ -8,7 +8,9 @@ from alphablokus.search.mcts import MCTS
 
 @pytest.fixture
 def mcts_instance(
-    ttt_game: TicTacToeGame, test_config: RunConfig, mcts_config: MCTSConfig,
+    ttt_game: TicTacToeGame,
+    test_config: RunConfig,
+    mcts_config: MCTSConfig,
 ) -> MCTS:
     """MCTS with a real (tiny, untrained) TicTacToe neural network."""
     nnet = NNetWrapper(ttt_game, test_config)
@@ -16,7 +18,8 @@ def mcts_instance(
 
 
 def test_mcts_episode_stats_populated(
-    ttt_game: TicTacToeGame, mcts_instance: MCTS,
+    ttt_game: TicTacToeGame,
+    mcts_instance: MCTS,
 ):
     """After get_action_prob(), all profiling stats should be non-zero."""
     board = ttt_game.initialise_board()
@@ -33,7 +36,8 @@ def test_mcts_episode_stats_populated(
 
 
 def test_mcts_episode_stats_accumulates(
-    ttt_game: TicTacToeGame, mcts_instance: MCTS,
+    ttt_game: TicTacToeGame,
+    mcts_instance: MCTS,
 ):
     """Two get_action_prob() calls should produce num_moves == 2."""
     board = ttt_game.initialise_board()
@@ -51,7 +55,8 @@ def test_mcts_episode_stats_accumulates(
 
 
 def test_mcts_episode_stats_frozen(
-    ttt_game: TicTacToeGame, mcts_instance: MCTS,
+    ttt_game: TicTacToeGame,
+    mcts_instance: MCTS,
 ):
     """MCTSEpisodeStats should be immutable (frozen dataclass)."""
     board = ttt_game.initialise_board()
@@ -64,7 +69,8 @@ def test_mcts_episode_stats_frozen(
 
 
 def test_mcts_inference_time_less_than_search(
-    ttt_game: TicTacToeGame, mcts_instance: MCTS,
+    ttt_game: TicTacToeGame,
+    mcts_instance: MCTS,
 ):
     """Inference time should be a fraction of total search time."""
     board = ttt_game.initialise_board()
@@ -76,7 +82,8 @@ def test_mcts_inference_time_less_than_search(
 
 
 def test_mcts_tree_size_matches_state_visits(
-    ttt_game: TicTacToeGame, mcts_instance: MCTS,
+    ttt_game: TicTacToeGame,
+    mcts_instance: MCTS,
 ):
     """tree_size should equal the number of expanded states in the search tree."""
     board = ttt_game.initialise_board()

@@ -47,7 +47,10 @@ class _GpuSampler:
             try:
                 out = subprocess.run(
                     ["nvidia-smi", "--query-gpu=utilization.gpu", "--format=csv,noheader,nounits"],
-                    capture_output=True, text=True, timeout=5, check=False,
+                    capture_output=True,
+                    text=True,
+                    timeout=5,
+                    check=False,
                 )
                 self.samples.append(int(out.stdout.strip().split("\n")[0]))
             except (ValueError, subprocess.SubprocessError):
@@ -78,8 +81,10 @@ def _time_run(cfg: object, checkpoint: str, label: str) -> float:
         elapsed = time.perf_counter() - start
     per_game = elapsed / cfg.num_eps  # type: ignore[attr-defined]
     n_ex = sum(len(e) for e in examples)
-    print(f"[{label}] {cfg.num_eps} games in {elapsed:.1f}s = {per_game:.2f}s/game "  # type: ignore[attr-defined]
-          f"| {n_ex} examples | GPU {gpu.summary()}")
+    print(
+        f"[{label}] {cfg.num_eps} games in {elapsed:.1f}s = {per_game:.2f}s/game "  # type: ignore[attr-defined]
+        f"| {n_ex} examples | GPU {gpu.summary()}"
+    )
     return per_game
 
 
@@ -98,8 +103,10 @@ def main(mode: str) -> None:
         _game, nnet = instantiate_game_and_network(cfg)
         nnet.save_checkpoint(filename=checkpoint)
 
-    print(f"=== F5 benchmark [{mode}]: {_NUM_WORKERS} workers, {cfg.mcts_config.num_mcts_sims} sims, "
-          f"K={cfg.mcts_config.mcts_batch_size}, {_NUM_EPS} games ===")
+    print(
+        f"=== F5 benchmark [{mode}]: {_NUM_WORKERS} workers, {cfg.mcts_config.num_mcts_sims} sims, "
+        f"K={cfg.mcts_config.mcts_batch_size}, {_NUM_EPS} games ==="
+    )
     cfg = dc.replace(cfg, inference_server=(mode == "on"), server_max_wait_ms=1.0)
     per_game = _time_run(cfg, checkpoint, f"server-{mode.upper()}")
     Path("temp/benchmarks").mkdir(parents=True, exist_ok=True)

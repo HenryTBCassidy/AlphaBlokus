@@ -9,7 +9,9 @@ from alphablokus.search.mcts import MCTS
 
 @pytest.fixture
 def mcts_instance(
-    ttt_game: TicTacToeGame, test_config: RunConfig, mcts_config: MCTSConfig,
+    ttt_game: TicTacToeGame,
+    test_config: RunConfig,
+    mcts_config: MCTSConfig,
 ) -> MCTS:
     """MCTS with a real (tiny, untrained) TicTacToe neural network."""
     nnet = NNetWrapper(ttt_game, test_config)
@@ -17,7 +19,8 @@ def mcts_instance(
 
 
 def test_action_probs_valid_moves_only(
-    ttt_game: TicTacToeGame, mcts_instance: MCTS,
+    ttt_game: TicTacToeGame,
+    mcts_instance: MCTS,
 ):
     """Non-zero probabilities should only appear on legal moves."""
     board = ttt_game.initialise_board()
@@ -38,7 +41,8 @@ def test_action_probs_valid_moves_only(
 
 
 def test_action_probs_sum_to_one(
-    ttt_game: TicTacToeGame, mcts_instance: MCTS,
+    ttt_game: TicTacToeGame,
+    mcts_instance: MCTS,
 ):
     """Probability vector from get_action_prob should sum to ~1.0."""
     board = ttt_game.initialise_board()
@@ -48,7 +52,8 @@ def test_action_probs_sum_to_one(
 
 
 def test_action_probs_deterministic_temp0(
-    ttt_game: TicTacToeGame, mcts_instance: MCTS,
+    ttt_game: TicTacToeGame,
+    mcts_instance: MCTS,
 ):
     """temp=0 should return a one-hot vector (exactly one action selected)."""
     board = ttt_game.initialise_board()
@@ -59,7 +64,8 @@ def test_action_probs_deterministic_temp0(
 
 
 def test_search_returns_value(
-    ttt_game: TicTacToeGame, mcts_instance: MCTS,
+    ttt_game: TicTacToeGame,
+    mcts_instance: MCTS,
 ):
     """search() should return a numeric value in [-1, 1]."""
     board = ttt_game.initialise_board()
@@ -71,7 +77,8 @@ def test_search_returns_value(
 
 
 def test_mcts_tree_grows(
-    ttt_game: TicTacToeGame, mcts_instance: MCTS,
+    ttt_game: TicTacToeGame,
+    mcts_instance: MCTS,
 ):
     """After simulations, the search tree (nodes) should be non-empty and every
     node should carry its priors."""

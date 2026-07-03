@@ -33,19 +33,26 @@ PER_PLY_GAME_ENDED_STRIDE = 25
 
 
 def _assert_states_match(
-    state: GameState, board, player: int, sequence_index: int, ply: int,
+    state: GameState,
+    board,
+    player: int,
+    sequence_index: int,
+    ply: int,
 ) -> None:
     ppb, remaining, last_piece, current_player = numpy_state_from_board(board, player)
     np.testing.assert_array_equal(
-        np.asarray(state.ppb), ppb,
+        np.asarray(state.ppb),
+        ppb,
         err_msg=f"ppb mismatch at sequence {sequence_index} ply {ply}",
     )
     np.testing.assert_array_equal(
-        np.asarray(state.remaining), remaining,
+        np.asarray(state.remaining),
+        remaining,
         err_msg=f"inventory mismatch at sequence {sequence_index} ply {ply}",
     )
     np.testing.assert_array_equal(
-        np.asarray(state.last_piece), last_piece,
+        np.asarray(state.last_piece),
+        last_piece,
         err_msg=f"last-piece mismatch at sequence {sequence_index} ply {ply}",
     )
     assert int(state.current_player) == player, f"player mismatch at sequence {sequence_index} ply {ply}"

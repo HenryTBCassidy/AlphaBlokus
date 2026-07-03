@@ -36,8 +36,8 @@ class ResNetBlock(nn.Module):
     """Basic residual block."""
 
     def __init__(
-            self,
-            num_filters: int,
+        self,
+        num_filters: int,
     ) -> None:
         super().__init__()
 
@@ -100,7 +100,7 @@ def build_action_permutation(board_rows: int, board_cols: int, num_orientations:
         x = remaining % board_size
         y = remaining // board_size
         row = board_rows - 1 - y  # CoordinateIndexDecoder.to_idx: length_idx
-        col = x                   # width_idx
+        col = x  # width_idx
         perm[action_index] = o * cells + row * board_cols + col
     return perm
 
@@ -115,12 +115,14 @@ class ConvPolicyHead(nn.Module):
     head's interface so the surrounding net/forward is unchanged.
     """
 
-    def __init__(self, num_filters: int, num_orientations: int,
-                 board_rows: int, board_cols: int) -> None:
+    def __init__(self, num_filters: int, num_orientations: int, board_rows: int, board_cols: int) -> None:
         super().__init__()
         self.move_conv = nn.Conv2d(
-            in_channels=num_filters, out_channels=num_orientations,
-            kernel_size=1, stride=1, bias=True,
+            in_channels=num_filters,
+            out_channels=num_orientations,
+            kernel_size=1,
+            stride=1,
+            bias=True,
         )
         # Pass action: one scalar logit from globally-pooled features.
         self.pass_head = nn.Sequential(
@@ -132,16 +134,17 @@ class ConvPolicyHead(nn.Module):
         self.register_buffer("perm", torch.as_tensor(perm, dtype=torch.long))
 
     def forward(self, features: torch.Tensor) -> torch.Tensor:
-        moves = self.move_conv(features)               # (B, O, rows, cols)
-        moves = moves.reshape(moves.size(0), -1)        # (B, O·rows·cols), channel-major
-        moves = moves[:, self.perm]                     # -> ActionCodec order
-        pass_logit = self.pass_head(features)           # (B, 1)
-        return torch.cat([moves, pass_logit], dim=1)    # (B, action_size)
+        moves = self.move_conv(features)  # (B, O, rows, cols)
+        moves = moves.reshape(moves.size(0), -1)  # (B, O·rows·cols), channel-major
+        moves = moves[:, self.perm]  # -> ActionCodec order
+        pass_logit = self.pass_head(features)  # (B, 1)
+        return torch.cat([moves, pass_logit], dim=1)  # (B, action_size)
 
 
 class AlphaBlokusDuo(nn.Module):
-    def __init__(self, board_rows: int, board_cols: int, action_size: int,
-                 num_input_channels: int, config: NetConfig) -> None:
+    def __init__(
+        self, board_rows: int, board_cols: int, action_size: int, num_input_channels: int, config: NetConfig
+    ) -> None:
         """Initialise the Blokus Duo ResNet.
 
         The neural net receives a multi-channel representation produced by
@@ -167,11 +170,15 @@ class AlphaBlokusDuo(nn.Module):
 
         self.conv_block = nn.Sequential(
             nn.Conv2d(
-                in_channels=self.num_input_channels, out_channels=config.num_filters,
-                kernel_size=3, stride=1, padding=1, bias=False,
+                in_channels=self.num_input_channels,
+                out_channels=config.num_filters,
+                kernel_size=3,
+                stride=1,
+                padding=1,
+                bias=False,
             ),
             nn.BatchNorm2d(num_features=config.num_filters),
-            nn.ReLU()
+            nn.ReLU(),
         )
 
         # Residual blocks
@@ -206,7 +213,8 @@ class AlphaBlokusDuo(nn.Module):
                 raise ValueError(
                     f"action_size {self.action_size} is not cells·O+1 for a "
                     f"{self.board_rows}×{self.board_cols} board; conv head needs "
-                    "an (orientation, cell) action space.")
+                    "an (orientation, cell) action space."
+                )
             self.policy_head: nn.Module = ConvPolicyHead(
                 num_filters=config.num_filters,
                 num_orientations=num_orientations,

@@ -48,9 +48,11 @@ def _load_metrics(directory: Path) -> pd.DataFrame:
         df["generation"] = df["generation"].astype(int)
     return df
 
+
 # ---------------------------------------------------------------------------
 # Consistent color palette and chart defaults
 # ---------------------------------------------------------------------------
+
 
 def _format_duration(seconds: float) -> str:
     """Format seconds as a human-readable duration string."""
@@ -76,9 +78,11 @@ def _make_kpi_cards(
     # single trailing batch and the artefact of running-mean resets.
     sorted_loss = loss_data.sort_values(["generation", "epoch", "batch_number"])
     last_epoch_per_gen = sorted_loss.groupby("generation")["epoch"].max()
-    by_gen = sorted_loss[
-        sorted_loss["epoch"] == sorted_loss["generation"].map(last_epoch_per_gen)
-    ].groupby("generation")["total_loss"].mean()
+    by_gen = (
+        sorted_loss[sorted_loss["epoch"] == sorted_loss["generation"].map(last_epoch_per_gen)]
+        .groupby("generation")["total_loss"]
+        .mean()
+    )
     final_loss = by_gen.iloc[-1]
     first_loss = by_gen.iloc[0]
     loss_delta_pct = ((final_loss - first_loss) / first_loss) * 100
@@ -100,10 +104,13 @@ def _make_kpi_cards(
     train_speed = throughput_data["samples_per_second"].mean()
 
     cards = [
-        ("Final Loss", f"{final_loss:.3f}", f"{loss_delta_pct:+.0f}% vs gen 1",
-         "positive" if loss_delta_pct < 0 else "negative"),
-        ("Accept Rate", f"{accept_count}/{total_gens}",
-         f"{100 * accept_count / total_gens:.0f}% of generations", ""),
+        (
+            "Final Loss",
+            f"{final_loss:.3f}",
+            f"{loss_delta_pct:+.0f}% vs gen 1",
+            "positive" if loss_delta_pct < 0 else "negative",
+        ),
+        ("Accept Rate", f"{accept_count}/{total_gens}", f"{100 * accept_count / total_gens:.0f}% of generations", ""),
         ("Total Time", _format_duration(total_time), f"{total_gens} generations", ""),
         ("Self-Play", f"{sp_speed:,.0f}", "sims/s (median)", ""),
         ("Training", f"{train_speed:,.0f}", "samples/s (mean)", ""),
@@ -116,7 +123,7 @@ def _make_kpi_cards(
             f'<div class="kpi-card">'
             f'<div class="kpi-value">{value}</div>'
             f'<div class="kpi-label">{label}</div>'
-            f'<div{delta_class}>{context}</div>'
+            f"<div{delta_class}>{context}</div>"
             f"</div>"
         )
     return f'<div class="kpi-grid">{"".join(html_parts)}</div>'
@@ -125,6 +132,7 @@ def _make_kpi_cards(
 # ---------------------------------------------------------------------------
 # Loss per generation
 # ---------------------------------------------------------------------------
+
 
 def _make_config_table(config: RunConfig) -> str:
     """Build an HTML table summarising the run configuration."""
@@ -138,8 +146,10 @@ def _make_config_table(config: RunConfig) -> str:
         ("Update threshold", config.update_threshold),
         ("Replay buffer (games)", config.replay_buffer_games),
         ("Buffer staleness (gens)", round(config.replay_buffer_games / max(config.num_eps, 1), 1)),
-        ("Emergent reuse (E×B/F)", round(
-            config.net_config.epochs * config.replay_buffer_games / max(config.num_eps, 1), 1)),
+        (
+            "Emergent reuse (E×B/F)",
+            round(config.net_config.epochs * config.replay_buffer_games / max(config.num_eps, 1), 1),
+        ),
         ("Learning rate", config.net_config.learning_rate),
         ("Batch size", config.net_config.batch_size),
         ("Epochs", config.net_config.epochs),
@@ -227,32 +237,23 @@ def create_html_report(config: RunConfig) -> None:
     throughput_data = _load_metrics(config.training_throughput_directory)
     # Optional — only populated when an eval set was built (i.e. recent runs).
     network_entropy_data = (
-        _load_metrics(config.training_entropy_directory)
-        if config.training_entropy_directory.exists() else None
+        _load_metrics(config.training_entropy_directory) if config.training_entropy_directory.exists() else None
     )
     arena_replays_data = (
-        _load_metrics(config.arena_replays_directory)
-        if config.arena_replays_directory.exists() else None
+        _load_metrics(config.arena_replays_directory) if config.arena_replays_directory.exists() else None
     )
     policy_accuracy_data = (
-        _load_metrics(config.policy_accuracy_directory)
-        if config.policy_accuracy_directory.exists() else None
+        _load_metrics(config.policy_accuracy_directory) if config.policy_accuracy_directory.exists() else None
     )
     value_calibration_data = (
-        _load_metrics(config.value_calibration_directory)
-        if config.value_calibration_directory.exists() else None
+        _load_metrics(config.value_calibration_directory) if config.value_calibration_directory.exists() else None
     )
-    elo_data = (
-        _load_metrics(config.elo_ratings_directory)
-        if config.elo_ratings_directory.exists() else None
-    )
+    elo_data = _load_metrics(config.elo_ratings_directory) if config.elo_ratings_directory.exists() else None
     minimax_data = (
-        _load_metrics(config.minimax_results_directory)
-        if config.minimax_results_directory.exists() else None
+        _load_metrics(config.minimax_results_directory) if config.minimax_results_directory.exists() else None
     )
     symmetry_data = (
-        _load_metrics(config.symmetry_diagnostic_directory)
-        if config.symmetry_diagnostic_directory.exists() else None
+        _load_metrics(config.symmetry_diagnostic_directory) if config.symmetry_diagnostic_directory.exists() else None
     )
 
     # Build figures
@@ -279,24 +280,15 @@ def create_html_report(config: RunConfig) -> None:
         if value_calibration_data is not None and not value_calibration_data.empty
         else None
     )
-    fig_elo = (
-        make_elo_plot(elo_data, arena_data)
-        if elo_data is not None and not elo_data.empty
-        else None
-    )
-    fig_minimax = (
-        make_minimax_plot(minimax_data)
-        if minimax_data is not None and not minimax_data.empty
-        else None
-    )
+    fig_elo = make_elo_plot(elo_data, arena_data) if elo_data is not None and not elo_data.empty else None
+    fig_minimax = make_minimax_plot(minimax_data) if minimax_data is not None and not minimax_data.empty else None
     fig_symmetry = (
-        make_symmetry_diagnostic_plot(symmetry_data)
-        if symmetry_data is not None and not symmetry_data.empty
-        else None
+        make_symmetry_diagnostic_plot(symmetry_data) if symmetry_data is not None and not symmetry_data.empty else None
     )
     if arena_replays_data is not None and not arena_replays_data.empty:
         arena_replays_html, arena_replays_standalone = build_arena_replays_section(
-            arena_replays_data, config,
+            arena_replays_data,
+            config,
         )
     else:
         arena_replays_html, arena_replays_standalone = "", ""
@@ -317,7 +309,11 @@ def create_html_report(config: RunConfig) -> None:
 
     today = datetime.datetime.now(tz=datetime.UTC).strftime("%Y-%m-%d")
     kpi_html = _make_kpi_cards(
-        loss_data, arena_data, timings_data, profiling_data, throughput_data,
+        loss_data,
+        arena_data,
+        timings_data,
+        profiling_data,
+        throughput_data,
         update_threshold=config.update_threshold,
     )
     config_html = _make_config_table(config)
@@ -325,30 +321,30 @@ def create_html_report(config: RunConfig) -> None:
     strength_html = ""
     if fig_elo is not None or fig_minimax is not None:
         parts = [
-            '<section>',
-            '<h2>Strength vs Fixed Baselines</h2>',
+            "<section>",
+            "<h2>Strength vs Fixed Baselines</h2>",
             '<p class="section-desc">'
-            'External strength measurements: the active network (after the '
-            'accept/reject decision) plays a fixed gen-0 opponent. Filled '
-            'markers = accepted gen (rating is for the just-trained net); '
-            'open markers = rejected gen (rating is for the reverted '
-            'previous-best net — so two adjacent open markers measure the '
-            '<em>same</em> network and differ only by 20-game sampling '
-            'noise). Minimax (TTT only) is the absolute '
+            "External strength measurements: the active network (after the "
+            "accept/reject decision) plays a fixed gen-0 opponent. Filled "
+            "markers = accepted gen (rating is for the just-trained net); "
+            "open markers = rejected gen (rating is for the reverted "
+            "previous-best net — so two adjacent open markers measure the "
+            "<em>same</em> network and differ only by 20-game sampling "
+            "noise). Minimax (TTT only) is the absolute "
             '"is this optimal?" signal.<br>'
-            '<strong>Caveat:</strong> at high MCTS sim counts the search '
-            'dominates the network signal, so the trained-net-vs-random '
-            'gap is squeezed and per-gen swings are dominated by the '
-            'small (20-game) sample. Treat the absolute level as noisy; '
-            'trust the trend over many gens. The reliable training-progress '
-            'signals are <em>policy agreement</em> and <em>value loss</em>.'
-            '</p>',
+            "<strong>Caveat:</strong> at high MCTS sim counts the search "
+            "dominates the network signal, so the trained-net-vs-random "
+            "gap is squeezed and per-gen swings are dominated by the "
+            "small (20-game) sample. Treat the absolute level as noisy; "
+            "trust the trend over many gens. The reliable training-progress "
+            "signals are <em>policy agreement</em> and <em>value loss</em>."
+            "</p>",
         ]
         if fig_elo is not None:
             parts.append(_chart(fig_elo))
         if fig_minimax is not None:
             parts.append(_chart(fig_minimax))
-        parts.append('</section>')
+        parts.append("</section>")
         strength_html = "\n".join(parts)
 
     diagnostics_html = ""
@@ -359,14 +355,14 @@ def create_html_report(config: RunConfig) -> None:
         or fig_symmetry is not None
     ):
         parts = [
-            '<section>',
-            '<h2>Network Diagnostics</h2>',
+            "<section>",
+            "<h2>Network Diagnostics</h2>",
             '<p class="section-desc">'
-            'Per-epoch evaluation of the network alone (no MCTS) on a frozen '
-            'held-out set of positions sampled from generation 1\'s self-play. '
-            'These are the AlphaZero-style training health curves — they '
-            'isolate the network\'s learning from MCTS noise.'
-            '</p>',
+            "Per-epoch evaluation of the network alone (no MCTS) on a frozen "
+            "held-out set of positions sampled from generation 1's self-play. "
+            "These are the AlphaZero-style training health curves — they "
+            "isolate the network's learning from MCTS noise."
+            "</p>",
         ]
         if fig_network_entropy is not None:
             parts.append(_chart(fig_network_entropy))
@@ -376,9 +372,8 @@ def create_html_report(config: RunConfig) -> None:
             parts.append(_chart(fig_value_calibration))
         if fig_symmetry is not None:
             parts.append(_chart(fig_symmetry))
-        parts.append('</section>')
+        parts.append("</section>")
         diagnostics_html = "\n".join(parts)
-
 
     with open(filename, "w", encoding="utf-8") as f:
         f.write(f"""<!DOCTYPE html>

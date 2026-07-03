@@ -28,6 +28,7 @@ Exits with status 0 if the count matches 13,729, status 1 with a diff
 report otherwise. The diff report classifies mismatches per (piece, x-row,
 y-row) so the cause is easy to localise.
 """
+
 from __future__ import annotations
 
 import sys
@@ -63,7 +64,8 @@ def count_onboard_placements() -> tuple[int, list[dict]]:
     for action_id in range(codec.pass_action_index):
         action = codec.decode(action_id)
         piece_orientation = piece_manager.get_piece_orientation_array(
-            action.piece_id, action.orientation,
+            action.piece_id,
+            action.orientation,
         )
         length_idx, width_idx = decoder.to_idx(
             coordinate=(action.x_coordinate, action.y_coordinate),
@@ -90,33 +92,36 @@ def count_onboard_placements() -> tuple[int, list[dict]]:
         else:
             offboard_by_piece[action.piece_id] += 1
             if len(offboard_samples) < 5:
-                offboard_samples.append({
-                    "action_id": action_id,
-                    "piece_id": action.piece_id,
-                    "orientation": str(action.orientation),
-                    "anchor": (action.x_coordinate, action.y_coordinate),
-                    "piece_shape": piece_orientation.tolist(),
-                })
+                offboard_samples.append(
+                    {
+                        "action_id": action_id,
+                        "piece_id": action.piece_id,
+                        "orientation": str(action.orientation),
+                        "anchor": (action.x_coordinate, action.y_coordinate),
+                        "piece_shape": piece_orientation.tolist(),
+                    }
+                )
 
     return onboard, offboard_samples
 
 
 def main() -> int:
-    print(f"Enumerating the {ActionCodec(BOARD_SIZE, pieces_loader(PIECES_PATH)).pass_action_index} "
-          f"placement actions (skipping pass)...")
+    print(
+        f"Enumerating the {ActionCodec(BOARD_SIZE, pieces_loader(PIECES_PATH)).pass_action_index} "
+        f"placement actions (skipping pass)..."
+    )
     print()
 
     onboard, offboard_samples = count_onboard_placements()
-    pass_action_index = (
-        BOARD_SIZE * BOARD_SIZE
-        * pieces_loader(PIECES_PATH).num_entries
-    )
+    pass_action_index = BOARD_SIZE * BOARD_SIZE * pieces_loader(PIECES_PATH).num_entries
     offboard = pass_action_index - onboard
 
     print(f"  On-board placements:   {onboard:>6,}")
     print(f"  Off-board placements:  {offboard:>6,}")
-    print(f"  Total placement slots: {pass_action_index:>6,}  "
-          f"(= {BOARD_SIZE}^2 × {pieces_loader(PIECES_PATH).num_entries} orientations)")
+    print(
+        f"  Total placement slots: {pass_action_index:>6,}  "
+        f"(= {BOARD_SIZE}^2 × {pieces_loader(PIECES_PATH).num_entries} orientations)"
+    )
     print()
     print(f"  Pentobi (Move.h:32):   {PENTOBI_DUO_MOVE_COUNT:>6,}")
     print(f"  Difference:            {onboard - PENTOBI_DUO_MOVE_COUNT:>+6,}")
@@ -126,21 +131,21 @@ def main() -> int:
         print("MATCH. F2 can safely size its precomputed tables to 13,729 entries.")
         return 0
 
-    print(f"MISMATCH. Our on-board count ({onboard:,}) disagrees with "
-          f"Pentobi's ({PENTOBI_DUO_MOVE_COUNT:,}).")
+    print(f"MISMATCH. Our on-board count ({onboard:,}) disagrees with Pentobi's ({PENTOBI_DUO_MOVE_COUNT:,}).")
     print()
     print("First few off-board samples (for diff investigation):")
     for sample in offboard_samples:
-        print(f"  action_id={sample['action_id']:5d}  "
-              f"piece={sample['piece_id']:2d}  "
-              f"orient={sample['orientation']:8s}  "
-              f"anchor=({sample['anchor'][0]:2d},{sample['anchor'][1]:2d})  "
-              f"shape={sample['piece_shape']}")
+        print(
+            f"  action_id={sample['action_id']:5d}  "
+            f"piece={sample['piece_id']:2d}  "
+            f"orient={sample['orientation']:8s}  "
+            f"anchor=({sample['anchor'][0]:2d},{sample['anchor'][1]:2d})  "
+            f"shape={sample['piece_shape']}"
+        )
     print()
     print("Investigate before proceeding with F2:")
     print(" - Compare pieces.json shapes against Pentobi's piece definitions.")
-    print(" - Check our anchor-cell convention vs Pentobi's "
-          "(libpentobi_base/PieceTransformsClassic.cpp).")
+    print(" - Check our anchor-cell convention vs Pentobi's (libpentobi_base/PieceTransformsClassic.cpp).")
     print(" - Confirm Pentobi's 13,729 is the Duo count and not another variant.")
     return 1
 

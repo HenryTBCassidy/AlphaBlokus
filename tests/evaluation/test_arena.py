@@ -10,7 +10,7 @@ def _random_player(board: IBoard) -> int:
     # For TicTacToe: 9 cells + 1 pass action = 10
     flat = board.as_2d
     valid = np.zeros(10, dtype=int)
-    empty = (flat == 0)
+    empty = flat == 0
     for i in range(3):
         for j in range(3):
             if empty[i][j]:

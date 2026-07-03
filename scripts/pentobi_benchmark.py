@@ -19,6 +19,7 @@ Usage::
 ``--config`` supplies the net architecture + game + checkpoint directory; ``--net`` is the
 checkpoint filename within that run's ``net_directory`` (omit to benchmark a fresh net).
 """
+
 from __future__ import annotations
 
 import argparse
@@ -47,8 +48,11 @@ def _eval_mcts_config(base, sims: int, batch: int = 1):
     a GPU/MPS backend (see the CPU-vs-MPS gap) at the cost of the same virtual-loss
     approximation the net trained under."""
     return replace(
-        base, num_mcts_sims=sims, mcts_batch_size=batch,
-        dirichlet_epsilon=0.0, sim_schedule="flat",
+        base,
+        num_mcts_sims=sims,
+        mcts_batch_size=batch,
+        dirichlet_epsilon=0.0,
+        sim_schedule="flat",
     )
 
 
@@ -72,11 +76,17 @@ def _record_to_actions(game, record) -> list[dict]:
             actions.append({"turn": i + 1, "player": move.player, "pass": True})
             continue
         a = codec.decode(move.action)
-        actions.append({
-            "turn": i + 1, "player": move.player, "pass": False,
-            "piece_id": a.piece_id, "orientation": a.orientation.value,
-            "x": a.x_coordinate, "y": a.y_coordinate,
-        })
+        actions.append(
+            {
+                "turn": i + 1,
+                "player": move.player,
+                "pass": False,
+                "piece_id": a.piece_id,
+                "orientation": a.orientation.value,
+                "x": a.x_coordinate,
+                "y": a.y_coordinate,
+            }
+        )
     return actions
 
 
@@ -86,16 +96,22 @@ def benchmark_level(game, net_player, level: int, games: int, seed: int | None) 
     try:
         # net is player1; play_games splits half/half by colour and swaps internally.
         net_wins, pentobi_wins, draws, records = Arena(
-            net_player, pentobi, game,
+            net_player,
+            pentobi,
+            game,
         ).play_games(games, record=True)
     finally:
         pentobi.close()
     played = net_wins + pentobi_wins + draws
     win_rate = net_wins / played if played else 0.0
     return {
-        "level": level, "games": played, "net_wins": net_wins,
-        "pentobi_wins": pentobi_wins, "draws": draws,
-        "win_rate": win_rate, "ci": _wilson_ci(net_wins, played),
+        "level": level,
+        "games": played,
+        "net_wins": net_wins,
+        "pentobi_wins": pentobi_wins,
+        "draws": draws,
+        "win_rate": win_rate,
+        "ci": _wilson_ci(net_wins, played),
         "records": records,
     }
 
@@ -146,10 +162,10 @@ def build_report(game, per_level: list[dict], metrics: dict, header: dict, out_p
     html = f"""<!doctype html><html><head><meta charset=utf-8><title>Pentobi Benchmark</title>
 <style>{style}</style></head><body>
 <h1>Pentobi Benchmark</h1>
-<p class=meta>net: {header['net']} &middot; config: {header['config']} &middot;
-eval sims: {header['sims']} &middot; {header['games']} games/level &middot; {header['timestamp']}</p>
-<p class=kpi>Pentobi Level: {metrics['pentobi_level']} &nbsp;|&nbsp;
-Score: {metrics['score']:.3f} &nbsp;|&nbsp; Weighted: {metrics['weighted_score']:.3f}</p>
+<p class=meta>net: {header["net"]} &middot; config: {header["config"]} &middot;
+eval sims: {header["sims"]} &middot; {header["games"]} games/level &middot; {header["timestamp"]}</p>
+<p class=kpi>Pentobi Level: {metrics["pentobi_level"]} &nbsp;|&nbsp;
+Score: {metrics["score"]:.3f} &nbsp;|&nbsp; Weighted: {metrics["weighted_score"]:.3f}</p>
 <p class=meta>Pentobi Level = highest level the net beats at &gt;50% win rate.</p>
 <h2>Results by level</h2>
 <table><tr><th>level</th><th>games</th><th>net W</th><th>Pentobi W</th><th>draws</th>
@@ -171,30 +187,48 @@ def main() -> None:
     ap.add_argument("--games", type=int, default=20, help="Games per level (split half/half by colour)")
     ap.add_argument("--sims", type=int, default=EVAL_SIMS_DEFAULT, help="Eval MCTS simulations")
     ap.add_argument("--seed", type=int, default=1, help="Pentobi engine base seed (per-game reseed)")
-    ap.add_argument("--opening-temp", type=float, default=1.0,
-                    help="Temperature for the net's opening plies (diversifies games; 0 = deterministic)")
-    ap.add_argument("--opening-moves", type=int, default=4,
-                    help="Number of the net's opening plies sampled at --opening-temp before temp=0")
-    ap.add_argument("--batch", type=int, default=16,
-                    help="MCTS leaf batch size K (1 = exact; >1 batches leaf evals, far faster on GPU/MPS)")
+    ap.add_argument(
+        "--opening-temp",
+        type=float,
+        default=1.0,
+        help="Temperature for the net's opening plies (diversifies games; 0 = deterministic)",
+    )
+    ap.add_argument(
+        "--opening-moves",
+        type=int,
+        default=4,
+        help="Number of the net's opening plies sampled at --opening-temp before temp=0",
+    )
+    ap.add_argument(
+        "--batch",
+        type=int,
+        default=16,
+        help="MCTS leaf batch size K (1 = exact; >1 batches leaf evals, far faster on GPU/MPS)",
+    )
     ap.add_argument("--out", default=None, help="Report path (default temp/benchmarks/pentobi_<net>.html)")
-    ap.add_argument("--mps", dest="mps", action="store_true", default=True,
-                    help="Use Apple MPS (Metal) for inference when available (default on)")
+    ap.add_argument(
+        "--mps",
+        dest="mps",
+        action="store_true",
+        default=True,
+        help="Use Apple MPS (Metal) for inference when available (default on)",
+    )
     ap.add_argument("--no-mps", dest="mps", action="store_false", help="Force CPU instead of MPS")
     args = ap.parse_args()
 
     if find_pentobi_gtp() is None:
         raise SystemExit(
-            "pentobi-gtp not found — build it (docs/plans/pentobi-harness.md H2) "
-            "or set $PENTOBI_GTP_PATH.",
+            "pentobi-gtp not found — build it (docs/plans/pentobi-harness.md H2) or set $PENTOBI_GTP_PATH.",
         )
 
     if args.mps:
         import os
+
         os.environ["ALPHABLOKUS_MPS"] = "1"  # opt into MPS in the wrapper (eval-only)
 
     config: RunConfig = load_args(args.config)
     import torch
+
     if config.net_config.cuda and not torch.cuda.is_available():
         config = replace(config, net_config=replace(config.net_config, cuda=False))
         print("[benchmark] CUDA unavailable — using MPS/CPU for the net.", flush=True)
@@ -207,8 +241,12 @@ def main() -> None:
         print("[benchmark] no --net given: benchmarking a fresh random-init net.", flush=True)
 
     net_player = NetworkPlayer(
-        game, nnet, _eval_mcts_config(config.mcts_config, args.sims, args.batch), temp=0.0,
-        opening_temp=args.opening_temp, opening_moves=args.opening_moves,
+        game,
+        nnet,
+        _eval_mcts_config(config.mcts_config, args.sims, args.batch),
+        temp=0.0,
+        opening_temp=args.opening_temp,
+        opening_moves=args.opening_moves,
     )
     levels = list(range(1, 10)) if args.sweep else [args.level if args.level else 1]
 
@@ -216,21 +254,34 @@ def main() -> None:
     for level in levels:
         print(f"[benchmark] level {level}: {args.games} games...", flush=True)
         r = benchmark_level(game, net_player, level, args.games, args.seed)
-        print(f"  net {r['net_wins']}-{r['pentobi_wins']}-{r['draws']} "
-              f"(win rate {r['win_rate']:.0%}, 95% CI [{r['ci'][0]:.0%}, {r['ci'][1]:.0%}])", flush=True)
+        print(
+            f"  net {r['net_wins']}-{r['pentobi_wins']}-{r['draws']} "
+            f"(win rate {r['win_rate']:.0%}, 95% CI [{r['ci'][0]:.0%}, {r['ci'][1]:.0%}])",
+            flush=True,
+        )
         per_level.append(r)
 
     metrics = compute_headline_metrics(per_level)
-    print(f"[benchmark] Pentobi Level={metrics['pentobi_level']} "
-          f"Score={metrics['score']:.3f} Weighted={metrics['weighted_score']:.3f}", flush=True)
+    print(
+        f"[benchmark] Pentobi Level={metrics['pentobi_level']} "
+        f"Score={metrics['score']:.3f} Weighted={metrics['weighted_score']:.3f}",
+        flush=True,
+    )
 
     out = Path(args.out or f"temp/benchmarks/pentobi_{args.net or 'freshnet'}.html")
-    build_report(game, per_level, metrics, {
-        "net": args.net or "fresh random-init",
-        "config": args.config,
-        "sims": args.sims, "games": args.games,
-        "timestamp": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
-    }, out)
+    build_report(
+        game,
+        per_level,
+        metrics,
+        {
+            "net": args.net or "fresh random-init",
+            "config": args.config,
+            "sims": args.sims,
+            "games": args.games,
+            "timestamp": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
+        },
+        out,
+    )
     print(f"[benchmark] report → {out}", flush=True)
 
 

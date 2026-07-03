@@ -14,6 +14,7 @@ Available players:
 Game-specific players (e.g. the TicTacToe minimax oracle) live with their
 game under :mod:`alphablokus.games`.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

@@ -22,6 +22,7 @@ The 50,000-position gauntlet (``gauntlet_50000.npz``) is a separate,
 slow test marked with ``pytest.mark.slow`` that runs once before
 switch-over rather than on every pytest invocation.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -57,6 +58,7 @@ GAUNTLET_CACHE = _FIXTURE_DIR / "gauntlet_50000.npz"
 # The current and "new" move-gen implementations
 # ---------------------------------------------------------------------------
 
+
 def current_valid_moves(game: BlokusDuoGame, board: BlokusDuoBoard, player: int) -> NDArray:
     """The current array-based move-gen — the reference we're checking against."""
     return game.valid_move_masking(board, player)
@@ -71,6 +73,7 @@ def new_valid_moves(game: BlokusDuoGame, board: BlokusDuoBoard, player: int) -> 
     :func:`_describe_mismatch` formats the discrepancy.
     """
     from alphablokus.games.blokusduo.movegen.runtime import get_default_generator
+
     mask_bool = get_default_generator().valid_move_mask(game, board, player)
     # Coerce to numerical mask matching the current impl's output dtype
     # (game.valid_move_masking returns float for historical reasons).
@@ -80,6 +83,7 @@ def new_valid_moves(game: BlokusDuoGame, board: BlokusDuoBoard, player: int) -> 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _valid_action_set(mask: NDArray) -> frozenset[int]:
     """Convert a binary action mask to a hashable set of action IDs."""
@@ -112,6 +116,7 @@ def _describe_mismatch(
 # Tests
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture(scope="module")
 def blokus_game_module() -> BlokusDuoGame:
     """Module-scoped game instance — pieces.json parsing isn't free."""
@@ -129,9 +134,7 @@ def test_dev_cache_exists() -> None:
                         cache_dir=Path('tests/fixtures/blokus_duo_positions'), \\
                         n=5_000, seed=42, label='dev_5000')"
     """
-    assert DEV_CACHE.exists(), (
-        f"Dev cache missing at {DEV_CACHE}. Regenerate per the docstring."
-    )
+    assert DEV_CACHE.exists(), f"Dev cache missing at {DEV_CACHE}. Regenerate per the docstring."
 
 
 def test_dev_cache_shape(blokus_game_module: BlokusDuoGame) -> None:
@@ -173,20 +176,24 @@ def test_movegen_equivalence_dev_cache(blokus_game_module: BlokusDuoGame) -> Non
         # mutating the board (it shouldn't, but the equivalence test
         # is the place to be paranoid).
         board_current, player_current = replay_to_board_and_player(
-            blokus_game_module, sequence,
+            blokus_game_module,
+            sequence,
         )
         board_new, player_new = replay_to_board_and_player(
-            blokus_game_module, sequence,
+            blokus_game_module,
+            sequence,
         )
-        assert player_current == player_new, (
-            f"Player-to-move drift at position {i}: {player_current} vs {player_new}"
-        )
+        assert player_current == player_new, f"Player-to-move drift at position {i}: {player_current} vs {player_new}"
 
         current_mask = current_valid_moves(
-            blokus_game_module, board_current, player_current,
+            blokus_game_module,
+            board_current,
+            player_current,
         )
         new_mask = new_valid_moves(
-            blokus_game_module, board_new, player_new,
+            blokus_game_module,
+            board_new,
+            player_new,
         )
 
         current_set = _valid_action_set(current_mask)
@@ -225,9 +232,13 @@ def test_has_any_move_equivalence_dev_cache(blokus_game_module: BlokusDuoGame) -
         sequence = actions_array[i, :n_moves]
         board, _player = replay_to_board_and_player(blokus_game_module, sequence)
         for p in (1, -1):
-            reference = next(
-                blokus_game_module._generate_valid_moves(board, p), None,  # noqa: SLF001
-            ) is not None
+            reference = (
+                next(
+                    blokus_game_module._generate_valid_moves(board, p),
+                    None,  # noqa: SLF001
+                )
+                is not None
+            )
             f2_exists = f2.has_any_move(blokus_game_module, board, p)
             if reference != f2_exists:
                 mismatches.append(
@@ -239,8 +250,7 @@ def test_has_any_move_equivalence_dev_cache(blokus_game_module: BlokusDuoGame) -
 
     if mismatches:
         pytest.fail(
-            "has_any_move disagreed with the reference existence check:\n"
-            + "\n".join(mismatches),
+            "has_any_move disagreed with the reference existence check:\n" + "\n".join(mismatches),
         )
 
 
@@ -273,10 +283,12 @@ def test_movegen_equivalence_gauntlet(blokus_game_module: BlokusDuoGame) -> None
         n_moves = int(n_moves_array[i])
         sequence = actions_array[i, :n_moves]
         board_current, player_current = replay_to_board_and_player(
-            blokus_game_module, sequence,
+            blokus_game_module,
+            sequence,
         )
         board_new, player_new = replay_to_board_and_player(
-            blokus_game_module, sequence,
+            blokus_game_module,
+            sequence,
         )
         current_mask = current_valid_moves(blokus_game_module, board_current, player_current)
         new_mask = new_valid_moves(blokus_game_module, board_new, player_new)

@@ -1,4 +1,5 @@
 """Worker-pool infrastructure shared by self-play generation and arena/Elo evaluation."""
+
 from alphablokus.parallel.pool import (
     PHASE_ARENA,
     PHASE_ELO,

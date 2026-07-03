@@ -40,12 +40,21 @@ N_POSITIONS = 200
 def _random_torch_net(game: BlokusDuoGame, seed: int = 0) -> AlphaBlokusDuo:
     torch.manual_seed(seed)
     config = NetConfig(
-        learning_rate=1e-3, dropout=0.0, epochs=1, batch_size=8, cuda=False,
-        num_filters=32, num_residual_blocks=2, policy_head="conv",
+        learning_rate=1e-3,
+        dropout=0.0,
+        epochs=1,
+        batch_size=8,
+        cuda=False,
+        num_filters=32,
+        num_residual_blocks=2,
+        policy_head="conv",
     )
     net = AlphaBlokusDuo(
-        board_rows=game.board_size, board_cols=game.board_size,
-        action_size=game.get_action_size(), num_input_channels=44, config=config,
+        board_rows=game.board_size,
+        board_cols=game.board_size,
+        action_size=game.get_action_size(),
+        num_input_channels=44,
+        config=config,
     )
     # Randomise BN running stats so eval-mode BN is a non-trivial affine map —
     # fresh nets have mean=0/var=1, which would let a broken fold pass unnoticed.
@@ -81,9 +90,9 @@ def test_fp32_forward_equivalence(blokus_game_module: BlokusDuoGame, encoded_pos
 
     np.testing.assert_allclose(np.asarray(jax_log_pi), torch_log_pi.numpy(), atol=2e-4, rtol=0)
     np.testing.assert_allclose(np.asarray(jax_value), torch_value.numpy().reshape(-1), atol=1e-5, rtol=0)
-    assert np.array_equal(
-        np.asarray(jax_log_pi).argmax(axis=1), torch_log_pi.numpy().argmax(axis=1)
-    ), "fp32 policy argmax must agree on every position"
+    assert np.array_equal(np.asarray(jax_log_pi).argmax(axis=1), torch_log_pi.numpy().argmax(axis=1)), (
+        "fp32 policy argmax must agree on every position"
+    )
 
 
 @pytest.mark.skipif(not DEV_CACHE_PATH.exists(), reason="dev_5000 cache not built")

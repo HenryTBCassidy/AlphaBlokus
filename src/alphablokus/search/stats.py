@@ -4,6 +4,7 @@ Separate from the search algorithm so consumers that only need the
 stats shape (the jax backend, reporting) do not import the search
 machinery itself.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass

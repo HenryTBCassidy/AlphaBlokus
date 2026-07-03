@@ -5,6 +5,7 @@ in the parquet schema. Boards are stored compact (``IBoard.to_compact``);
 policies are currently stored dense on disk — the sparse-on-disk format is
 tracked by ``docs/plans/oom-hardening.md`` (O1/O2).
 """
+
 from __future__ import annotations
 
 from collections import deque
@@ -24,7 +25,6 @@ if TYPE_CHECKING:
 # store densifies on save and rehydrates dense on load. Unifying the two on a
 # sparse on-disk format is ``docs/plans/oom-hardening.md`` O1/O2.
 DenseExample = tuple[np.ndarray, np.ndarray, float]
-
 
 
 class SelfPlayStore:
@@ -77,11 +77,13 @@ class SelfPlayStore:
 
         boards, policies, values = zip(*examples, strict=False)
 
-        df = pd.DataFrame({
-            "board": [b.tobytes() for b in boards],
-            "policy": [p.tobytes() for p in policies],
-            "value": list(values),
-        })
+        df = pd.DataFrame(
+            {
+                "board": [b.tobytes() for b in boards],
+                "policy": [p.tobytes() for p in policies],
+                "value": list(values),
+            }
+        )
 
         sample_board = boards[0]
         sample_policy = policies[0]
@@ -183,10 +185,7 @@ class SelfPlayStore:
             if loaded is not None:
                 history.append(loaded)
 
-        logger.info(
-            f"Loaded {sum(len(e) for e in history)} total examples "
-            f"from {len(history)} generations"
-        )
+        logger.info(f"Loaded {sum(len(e) for e in history)} total examples from {len(history)} generations")
         return history
 
     def load_games(self, generation: int) -> list[list[DenseExample]] | None:
@@ -205,8 +204,9 @@ class SelfPlayStore:
         game_sizes = self._read_game_sizes(generation)
         if game_sizes is None:
             logger.warning(
-                "No game_sizes metadata in self-play file {} — treating its "
-                "{} positions as one game.", generation, len(flat),
+                "No game_sizes metadata in self-play file {} — treating its {} positions as one game.",
+                generation,
+                len(flat),
             )
             return [list(flat)]
 
@@ -217,7 +217,9 @@ class SelfPlayStore:
         return games
 
     def load_recent_games(
-        self, last_file_index: int, num_games: int,
+        self,
+        last_file_index: int,
+        num_games: int,
     ) -> deque[list[DenseExample]]:
         """Reconstruct the rolling replay buffer from recent generation files.
 
@@ -253,7 +255,9 @@ class SelfPlayStore:
 
         logger.info(
             "Reconstructed replay buffer: {} games ({} positions) from files ≤ {}",
-            len(buffer), sum(len(g) for g in buffer), last_file_index,
+            len(buffer),
+            sum(len(g) for g in buffer),
+            last_file_index,
         )
         return buffer
 

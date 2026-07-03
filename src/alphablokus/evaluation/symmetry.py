@@ -18,6 +18,7 @@ the mean across them. A perfectly equivariant network scores 0. Larger
 values indicate the network has internalised arbitrary biases that the
 augmented training signal isn't fully averaging out.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -48,7 +49,10 @@ class SymmetryDiagnosticResult:
 
 
 def build_diagnostic_positions(
-    game: IGame, *, n: int = 100, seed: int = 2026,
+    game: IGame,
+    *,
+    n: int = 100,
+    seed: int = 2026,
 ) -> list[IBoard]:
     """Generate ``n`` reproducible reference board positions for the
     symmetry diagnostic.
@@ -121,7 +125,10 @@ def build_diagnostic_positions(
 
 
 def compute_symmetry_diagnostic(
-    nnet: INeuralNetWrapper, game: IGame, board: IBoard, position_index: int = 0,
+    nnet: INeuralNetWrapper,
+    game: IGame,
+    board: IBoard,
+    position_index: int = 0,
 ) -> SymmetryDiagnosticResult:
     """Measure how equivariant ``nnet`` is on ``board``.
 

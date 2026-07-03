@@ -4,6 +4,7 @@ Implements :class:`~reporting.display.IBoardRenderer` for Blokus Duo via the
 :class:`BlokusDuoRenderer` class, plus exposes the older free-function API
 kept around for the ``scripts/move_count_analysis.py`` script.
 """
+
 from __future__ import annotations
 
 from collections import defaultdict
@@ -75,25 +76,25 @@ class BlokusDuoRenderer(IBoardRenderer[BlokusDuoBoard]):
         emit a "no alternatives considered" notice so the panel doesn't
         look broken.
         """
-        annotation_html = (
-            f'<div class="board-annotation">{annotation}</div>' if annotation else ""
-        )
+        annotation_html = f'<div class="board-annotation">{annotation}</div>' if annotation else ""
         if not action_probs:
             return (
                 '<div class="candidate-policy">'
-                f'{annotation_html}'
+                f"{annotation_html}"
                 '<div class="candidate-empty">'
-                'No alternative moves considered — MCTS only visited the'
-                ' action that was played.'
-                '</div>'
-                '</div>'
+                "No alternative moves considered — MCTS only visited the"
+                " action that was played."
+                "</div>"
+                "</div>"
             )
         top = sorted(action_probs.items(), key=lambda kv: -kv[1])[:top_k]
 
         cards = []
         for rank, (action_id, prob) in enumerate(top, start=1):
             board_html = render_board_html(
-                board=board, game=self._game, current_player=current_player,
+                board=board,
+                game=self._game,
+                current_player=current_player,
                 turn=-1,
                 action_desc=f"#{rank} — {prob * 100:.1f}%",
                 num_moves_white=len(self._game.valid_actions(board, 1)),
@@ -104,10 +105,7 @@ class BlokusDuoRenderer(IBoardRenderer[BlokusDuoBoard]):
             cards.append(f'<div class="candidate-card">{board_html}</div>')
 
         return (
-            f'<div class="candidate-policy">'
-            f'{annotation_html}'
-            f'<div class="candidate-cards">{"".join(cards)}</div>'
-            f'</div>'
+            f'<div class="candidate-policy">{annotation_html}<div class="candidate-cards">{"".join(cards)}</div></div>'
         )
 
 
@@ -203,7 +201,7 @@ def dump_board(
             break
 
     print("\n  Moves by placement point:")
-    for (pi, pj) in sorted(moves_by_point.keys()):
+    for pi, pj in sorted(moves_by_point.keys()):
         point_moves = moves_by_point[(pi, pj)]
         print(f"\n  ({pi:2d}, {pj:2d}) — {len(point_moves)} moves:")
         display_moves = point_moves[:max_moves_per_point] if max_moves_per_point else point_moves
@@ -250,7 +248,9 @@ def render_board_html(
     candidate_caption: str | None = None
     if candidate_action is not None:
         ghost_cells, candidate_caption = _candidate_overlay_cells(
-            game, board, candidate_action,
+            game,
+            board,
+            candidate_action,
             player=candidate_player if candidate_player is not None else current_player,
         )
 
@@ -263,10 +263,7 @@ def render_board_html(
         if (i, j) in ghost_cells:
             side = ghost_cells[(i, j)]
             base = "#636efa" if side == 1 else "#ef553b"
-            return (
-                f"background:repeating-linear-gradient(135deg,"
-                f"{base}80 0 4px,{base}30 4px 8px);"
-            )
+            return f"background:repeating-linear-gradient(135deg,{base}80 0 4px,{base}30 4px 8px);"
         return ""
 
     def cell_text(i: int, j: int) -> str:
@@ -300,22 +297,18 @@ def render_board_html(
     if turn == -1:
         header = action_desc if action_desc else f"<strong>{player_name}</strong>"
     else:
-        header = (
-            f"<strong>Turn {turn}</strong> — {player_name}'s move — {action_desc}"
-        )
+        header = f"<strong>Turn {turn}</strong> — {player_name}'s move — {action_desc}"
 
     # Move counts only appear on the snapshot views where they're genuinely
     # informative (the actual played board, post-move). Candidates show the
     # same pre-move state across all 3 cards so the counts would just clutter.
     move_counts_html = (
         f'<span class="move-counts">W:{num_moves_white} moves | B:{num_moves_black} moves</span>'
-        if candidate_action is None else ""
+        if candidate_action is None
+        else ""
     )
 
-    caption_html = (
-        f'<div class="candidate-caption">{candidate_caption}</div>'
-        if candidate_caption else ""
-    )
+    caption_html = f'<div class="candidate-caption">{candidate_caption}</div>' if candidate_caption else ""
 
     return f"""
     <div class="board-turn">
@@ -329,7 +322,10 @@ def render_board_html(
 
 
 def _candidate_overlay_cells(
-    game: BlokusDuoGame, board: BlokusDuoBoard, action_id: int, player: int,
+    game: BlokusDuoGame,
+    board: BlokusDuoBoard,
+    action_id: int,
+    player: int,
 ) -> tuple[dict[tuple[int, int], int], str]:
     """Return cells the candidate piece would occupy + a human-readable
     caption. Pass actions yield an empty overlay and a "PASS" caption.
@@ -338,7 +334,8 @@ def _candidate_overlay_cells(
         return {}, "PASS"
     action = game.action_codec.decode(action_id)
     piece_grid = game.piece_manager.get_piece_orientation_array(
-        action.piece_id, action.orientation,
+        action.piece_id,
+        action.orientation,
     )
     anchor_idx = game.coordinate_decoder.to_idx(
         (action.x_coordinate, action.y_coordinate),

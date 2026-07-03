@@ -21,6 +21,7 @@ the engine raises ``GtpError`` if we ``play`` a move it considers illegal, and t
 asserts every move we return is legal in our own game. A mismatch surfaces immediately
 rather than silently corrupting the result.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

@@ -83,6 +83,7 @@ class BlokusDuoGame(IGame[BlokusDuoBoard]):
         worker init and ``scripts/benchmark_phases.py``'s setup).
         """
         from alphablokus.games.blokusduo.movegen.runtime import get_default_generator
+
         self._f2_generator = get_default_generator()
 
     # -- Public methods (IGame protocol, in call order) -------------------------
@@ -101,13 +102,10 @@ class BlokusDuoGame(IGame[BlokusDuoBoard]):
         This includes all possible piece placements (board_size² × num_orientations)
         plus one pass action.
         """
-        return (self.board_size ** 2) * self.num_orientations + 1
+        return (self.board_size**2) * self.num_orientations + 1
 
     def get_next_state(
-        self,
-        board: BlokusDuoBoard,
-        player: PlayerSide,
-        action: int
+        self, board: BlokusDuoBoard, player: PlayerSide, action: int
     ) -> tuple[BlokusDuoBoard, PlayerSide]:
         """Apply an action to the current board state.
 
@@ -190,7 +188,9 @@ class BlokusDuoGame(IGame[BlokusDuoBoard]):
         return encode_planes_from_placement(compact)
 
     def get_symmetries(
-        self, board: BlokusDuoBoard, pi: NDArray,
+        self,
+        board: BlokusDuoBoard,
+        pi: NDArray,
     ) -> list[tuple[BlokusDuoBoard, NDArray]]:
         """Return all geometric symmetries of ``(board, pi)`` as (board, pi)
         pairs.
@@ -283,7 +283,8 @@ class BlokusDuoGame(IGame[BlokusDuoBoard]):
                 continue
 
             if (
-                board_2d is not None and side_danger is not None
+                board_2d is not None
+                and side_danger is not None
                 and not self._all_cells_valid(filled_cells, ins_i, ins_j, board_2d, side_danger)
             ):
                 continue
@@ -309,7 +310,8 @@ class BlokusDuoGame(IGame[BlokusDuoBoard]):
                 if self._all_cells_valid(
                     self.piece_manager.get_filled_cells(a.piece_id, a.orientation),
                     *self._coordinate_index_decoder.to_idx((a.x_coordinate, a.y_coordinate)),
-                    board_2d, side_danger,
+                    board_2d,
+                    side_danger,
                 ):
                     yield a
             return
@@ -319,13 +321,17 @@ class BlokusDuoGame(IGame[BlokusDuoBoard]):
         points = board.placement_points(player)
         remaining = board.remaining_piece_ids(player)
 
-        for (pi, pj) in points:
+        for pi, pj in points:
             for piece_id in remaining:
                 piece = self.piece_manager.pieces[piece_id]
                 for orientation in piece.basis_orientations:
                     yield from self._placements_at_point(
-                        piece_id, orientation, pi, pj,
-                        board_2d=board_2d, side_danger=side_danger,
+                        piece_id,
+                        orientation,
+                        pi,
+                        pj,
+                        board_2d=board_2d,
+                        side_danger=side_danger,
                     )
 
     # -- Symmetry helpers (public) ----------------------------------------------
@@ -428,10 +434,8 @@ class BlokusDuoGame(IGame[BlokusDuoBoard]):
         """Calculate and cache all possible initial moves for both players."""
         start_moves: ActionDict = {1: [], -1: []}
         for piece_id, orientation in self.piece_manager.all_piece_id_basis_orientations():
-            start_moves[1].extend(
-                self._placements_at_point(piece_id, orientation, *self.white_start))
-            start_moves[-1].extend(
-                self._placements_at_point(piece_id, orientation, *self.black_start))
+            start_moves[1].extend(self._placements_at_point(piece_id, orientation, *self.white_start))
+            start_moves[-1].extend(self._placements_at_point(piece_id, orientation, *self.black_start))
         return start_moves
 
     def _calculate_score(self, board: BlokusDuoBoard, player: PlayerSide) -> int:
@@ -450,7 +454,5 @@ class BlokusDuoGame(IGame[BlokusDuoBoard]):
             if last_played == 1:  # Monomino
                 score += 5
         else:
-            score = -int(np.sum([
-                self.piece_manager.pieces[pid].identity.sum() for pid in remaining
-            ]))
+            score = -int(np.sum([self.piece_manager.pieces[pid].identity.sum() for pid in remaining]))
         return score

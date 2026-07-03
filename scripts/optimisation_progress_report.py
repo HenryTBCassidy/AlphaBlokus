@@ -14,6 +14,7 @@ Usage:
     uv run python -m scripts.optimisation_progress_report
     # writes temp/optimisation_progress/report.html
 """
+
 from __future__ import annotations
 
 import sys
@@ -55,7 +56,7 @@ class Milestone:
 
     label: str
     date: str
-    total_min: float          # whole-benchmark wall-clock (16 self-play + 10 arena + 10 elo)
+    total_min: float  # whole-benchmark wall-clock (16 self-play + 10 arena + 10 elo)
     cumulative_speedup: float  # vs the serial benchmark baseline
     self_play_s_per_game: float
     colour: str
@@ -88,15 +89,26 @@ F3_K_SWEEP: list[tuple[str, float]] = [("K=1", 257.6), ("K=8", 217.5), ("K=16", 
 # predict() on the idle 3060 Ti (production net). Shows the pure batching gain,
 # uncontaminated by MCTS / 8-worker contention.
 F3_MICROBENCH: list[tuple[int, float]] = [
-    (1, 0.73), (2, 1.69), (4, 4.60), (8, 9.23), (16, 11.53), (32, 19.75), (64, 20.57),
+    (1, 0.73),
+    (2, 1.69),
+    (4, 4.60),
+    (8, 9.23),
+    (16, 11.53),
+    (32, 19.75),
+    (64, 20.57),
 ]
 
 
 def _bar(x, y, *, colours, title, ytitle, texttemplate, height=420) -> go.Figure:
-    fig = go.Figure(go.Bar(x=x, y=y, marker_color=colours, text=y,
-                           texttemplate=texttemplate, textposition="outside"))
-    fig.update_layout(title=title, yaxis_title=ytitle, template="plotly_white",
-                      height=height, margin=dict(t=56, b=120), xaxis_tickangle=-20)
+    fig = go.Figure(go.Bar(x=x, y=y, marker_color=colours, text=y, texttemplate=texttemplate, textposition="outside"))
+    fig.update_layout(
+        title=title,
+        yaxis_title=ytitle,
+        template="plotly_white",
+        height=height,
+        margin=dict(t=56, b=120),
+        xaxis_tickangle=-20,
+    )
     fig.update_yaxes(rangemode="tozero")
     return fig
 
@@ -105,50 +117,93 @@ def _build_figures() -> dict[str, go.Figure]:
     labels = [m.label for m in MILESTONES]
     colours = [m.colour for m in MILESTONES]
 
-    total = _bar(labels, [m.total_min for m in MILESTONES], colours=colours,
-                 title="Total benchmark wall-clock (16 self-play + 10 arena + 10 Elo games)",
-                 ytitle="minutes", texttemplate="%{y:.1f} min")
+    total = _bar(
+        labels,
+        [m.total_min for m in MILESTONES],
+        colours=colours,
+        title="Total benchmark wall-clock (16 self-play + 10 arena + 10 Elo games)",
+        ytitle="minutes",
+        texttemplate="%{y:.1f} min",
+    )
 
-    speedup = _bar(labels, [m.cumulative_speedup for m in MILESTONES], colours=colours,
-                   title="Cumulative speedup vs serial baseline",
-                   ytitle="× faster", texttemplate="%{y:.2f}×")
+    speedup = _bar(
+        labels,
+        [m.cumulative_speedup for m in MILESTONES],
+        colours=colours,
+        title="Cumulative speedup vs serial baseline",
+        ytitle="× faster",
+        texttemplate="%{y:.2f}×",
+    )
 
-    sp = _bar(labels, [m.self_play_s_per_game for m in MILESTONES], colours=colours,
-              title="Self-play cost per game", ytitle="seconds / game",
-              texttemplate="%{y:.2f}s")
+    sp = _bar(
+        labels,
+        [m.self_play_s_per_game for m in MILESTONES],
+        colours=colours,
+        title="Self-play cost per game",
+        ytitle="seconds / game",
+        texttemplate="%{y:.2f}s",
+    )
 
     # Component-split evolution (stacked).
     comp_labels = [c[0] for c in COMPONENT_SPLIT]
     split = go.Figure()
-    for name, idx, colour in [("NN inference", 1, _C_F3), ("Move generation", 2, _C_F1),
-                              ("Other (UCB / bookkeeping)", 3, _C_SERIAL)]:
-        split.add_bar(name=name, x=comp_labels, y=[c[idx] for c in COMPONENT_SPLIT],
-                      marker_color=colour, text=[f"{c[idx]:.0f}%" for c in COMPONENT_SPLIT],
-                      textposition="inside")
-    split.update_layout(barmode="stack", title="Where the time goes — component split per step",
-                        yaxis_title="% of MCTS search time", template="plotly_white",
-                        height=420, margin=dict(t=56, b=80), legend=dict(orientation="h", y=-0.18))
+    for name, idx, colour in [
+        ("NN inference", 1, _C_F3),
+        ("Move generation", 2, _C_F1),
+        ("Other (UCB / bookkeeping)", 3, _C_SERIAL),
+    ]:
+        split.add_bar(
+            name=name,
+            x=comp_labels,
+            y=[c[idx] for c in COMPONENT_SPLIT],
+            marker_color=colour,
+            text=[f"{c[idx]:.0f}%" for c in COMPONENT_SPLIT],
+            textposition="inside",
+        )
+    split.update_layout(
+        barmode="stack",
+        title="Where the time goes — component split per step",
+        yaxis_title="% of MCTS search time",
+        template="plotly_white",
+        height=420,
+        margin=dict(t=56, b=80),
+        legend=dict(orientation="h", y=-0.18),
+    )
 
-    ksweep = _bar([k for k, _ in F3_K_SWEEP], [v for _, v in F3_K_SWEEP],
-                  colours=[_C_F2, "#ab63fa", _C_F3],
-                  title="F3 batch-size sweep — total wall-clock (8 workers, end-to-end)",
-                  ytitle="seconds", texttemplate="%{y:.0f}s")
+    ksweep = _bar(
+        [k for k, _ in F3_K_SWEEP],
+        [v for _, v in F3_K_SWEEP],
+        colours=[_C_F2, "#ab63fa", _C_F3],
+        title="F3 batch-size sweep — total wall-clock (8 workers, end-to-end)",
+        ytitle="seconds",
+        texttemplate="%{y:.0f}s",
+    )
 
-    micro = go.Figure(go.Scatter(
-        x=[k for k, _ in F3_MICROBENCH], y=[s for _, s in F3_MICROBENCH],
-        mode="lines+markers+text", text=[f"{s:.1f}×" for _, s in F3_MICROBENCH],
-        textposition="top center", line=dict(color=_C_F3, width=3), marker=dict(size=8)))
+    micro = go.Figure(
+        go.Scatter(
+            x=[k for k, _ in F3_MICROBENCH],
+            y=[s for _, s in F3_MICROBENCH],
+            mode="lines+markers+text",
+            text=[f"{s:.1f}×" for _, s in F3_MICROBENCH],
+            textposition="top center",
+            line=dict(color=_C_F3, width=3),
+            marker=dict(size=8),
+        )
+    )
     micro.update_layout(
         title="F3 isolated GPU-side batching speedup (idle GPU: predict_batch(K) vs K× predict)",
-        xaxis_title="batch size K", yaxis_title="× faster", template="plotly_white",
-        height=420, margin=dict(t=56, b=60))
-    micro.update_xaxes(type="log", tickvals=[k for k, _ in F3_MICROBENCH],
-                       ticktext=[str(k) for k, _ in F3_MICROBENCH])
-    micro.add_hline(y=1.0, line_dash="dot", line_color="#9aa0b5",
-                    annotation_text="break-even", annotation_position="bottom right")
+        xaxis_title="batch size K",
+        yaxis_title="× faster",
+        template="plotly_white",
+        height=420,
+        margin=dict(t=56, b=60),
+    )
+    micro.update_xaxes(type="log", tickvals=[k for k, _ in F3_MICROBENCH], ticktext=[str(k) for k, _ in F3_MICROBENCH])
+    micro.add_hline(
+        y=1.0, line_dash="dot", line_color="#9aa0b5", annotation_text="break-even", annotation_position="bottom right"
+    )
 
-    return {"total": total, "speedup": speedup, "self_play": sp, "split": split,
-            "ksweep": ksweep, "micro": micro}
+    return {"total": total, "speedup": speedup, "self_play": sp, "split": split, "ksweep": ksweep, "micro": micro}
 
 
 def _kpi_cards() -> str:
@@ -160,8 +215,7 @@ def _kpi_cards() -> str:
         ("3.58× lighter", "GPU inference per game (F3 K=16)"),
     ]
     inner = "".join(
-        f'<div class="kpi-card"><div class="kpi-value">{v}</div>'
-        f'<div class="kpi-label">{lbl}</div></div>'
+        f'<div class="kpi-card"><div class="kpi-value">{v}</div><div class="kpi-label">{lbl}</div></div>'
         for v, lbl in cards
     )
     return f'<div class="kpi-grid">{inner}</div>'

@@ -1,5 +1,6 @@
 """Shipped testing utilities (the ``numpy.testing`` idiom): position-cache
 generation and replay helpers shared by the test suite and benchmark scripts."""
+
 from alphablokus.testing.positions import (
     PAD_ACTION,
     build_cache,

@@ -28,13 +28,14 @@ def default_pieces_path() -> Path:
 class Orientation(StrEnum):
     """
     Possible orientations for a Blokus piece.
-    
+
     Each orientation represents a unique transformation that can be applied to a piece:
     - Identity: No transformation
     - Rot90/180/270: Rotations by 90, 180, or 270 degrees
     - Flip: Mirror reflection
     - Flip90/180/270: Mirror reflection followed by rotation
     """
+
     Identity = "Identity"
     Rot90 = "Rot90"
     Rot180 = "Rot180"
@@ -58,6 +59,7 @@ class Piece:
                           transformations would produce equivalent shapes
         fill_values: 2D grid of 1s and 0s representing the piece's shape
     """
+
     name: str
     id: int
     basis_orientations: list[Orientation]
@@ -331,6 +333,7 @@ def pieces_loader(filename: Path) -> PieceManager:
     if piece_manager.num_entries != 91:
         raise ValueError(
             f"Expected 91 entries in PieceManager, got {piece_manager.num_entries}. "
-            f"Error constructing Piece-Orientation <-> id lookup!")
+            f"Error constructing Piece-Orientation <-> id lookup!"
+        )
 
     return piece_manager

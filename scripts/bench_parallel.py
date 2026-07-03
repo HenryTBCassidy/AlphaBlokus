@@ -8,6 +8,7 @@ games — the games/s ratio is pure code speed, not net-init noise.
 Usage:
     PYTHONPATH=. python scripts/bench_parallel.py --config <cfg> --workers 16 --eps 80
 """
+
 from __future__ import annotations
 
 import argparse
@@ -39,7 +40,10 @@ def main() -> None:
 
     t0 = time.perf_counter()
     examples, stats = run_self_play_episodes_parallel(
-        config, generation=0, checkpoint_path=ckpt, num_workers=args.workers,
+        config,
+        generation=0,
+        checkpoint_path=ckpt,
+        num_workers=args.workers,
     )
     wall = time.perf_counter() - t0
 
@@ -47,8 +51,7 @@ def main() -> None:
     total_sims = sum(s.total_sims for s in stats)
     total_moves = sum(s.num_moves for s in stats)
     print("================ PARALLEL SELF-PLAY THROUGHPUT ================")
-    print(f"workers={args.workers}  eps={n_games}  wall={wall:.1f}s  "
-          f"(pool/spawn overhead included)")
+    print(f"workers={args.workers}  eps={n_games}  wall={wall:.1f}s  (pool/spawn overhead included)")
     print(f"games/s        = {n_games / wall:.3f}")
     print(f"total moves    = {total_moves}   total sims = {total_sims}")
     print(f"sims/s         = {total_sims / wall:.0f}")

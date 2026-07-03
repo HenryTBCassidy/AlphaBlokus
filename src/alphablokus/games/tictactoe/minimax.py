@@ -11,6 +11,7 @@ upper / lower), which adds complexity for no real gain at TTT's ~5,400-state
 size. The unpruned implementation handles the full game tree in <1s and the
 memoisation makes repeated calls essentially free.
 """
+
 from __future__ import annotations
 
 import math

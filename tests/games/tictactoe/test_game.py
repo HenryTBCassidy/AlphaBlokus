@@ -62,7 +62,7 @@ def test_canonical_form_player1(ttt_game: TicTacToeGame):
     # Net representation should have correct channels
     net_rep = canonical.as_multi_channel(1)
     assert net_rep.shape == (2, 3, 3)
-    assert net_rep[0][1][1] == 1   # Channel 0: my stone at centre
+    assert net_rep[0][1][1] == 1  # Channel 0: my stone at centre
     assert np.sum(net_rep[1]) == 0  # Channel 1: no opponent stones
 
 
@@ -76,8 +76,8 @@ def test_canonical_form_player_neg1(ttt_game: TicTacToeGame):
     # Net representation from player 1's perspective (MCTS convention)
     net_rep = canonical.as_multi_channel(1)
     assert net_rep.shape == (2, 3, 3)
-    assert net_rep[0][1][1] == 0   # Channel 0: player 1 has no +1 stones (they were flipped to -1)
-    assert net_rep[1][1][1] == 1   # Channel 1: the -1 at centre is "opponent"
+    assert net_rep[0][1][1] == 0  # Channel 0: player 1 has no +1 stones (they were flipped to -1)
+    assert net_rep[1][1][1] == 1  # Channel 1: the -1 at centre is "opponent"
 
 
 def test_game_not_ended_initially(ttt_game: TicTacToeGame):
@@ -89,11 +89,11 @@ def test_game_ended_win_row(ttt_game: TicTacToeGame):
     """Player 1 wins with top row."""
     board = ttt_game.initialise_board()
     # Fill top row with player 1
-    board, _ = ttt_game.get_next_state(board, 1, 0)   # (0,0)
-    board, _ = ttt_game.get_next_state(board, -1, 3)   # opponent at (1,0)
-    board, _ = ttt_game.get_next_state(board, 1, 1)    # (0,1)
-    board, _ = ttt_game.get_next_state(board, -1, 4)   # opponent at (1,1)
-    board, _ = ttt_game.get_next_state(board, 1, 2)    # (0,2)
+    board, _ = ttt_game.get_next_state(board, 1, 0)  # (0,0)
+    board, _ = ttt_game.get_next_state(board, -1, 3)  # opponent at (1,0)
+    board, _ = ttt_game.get_next_state(board, 1, 1)  # (0,1)
+    board, _ = ttt_game.get_next_state(board, -1, 4)  # opponent at (1,1)
+    board, _ = ttt_game.get_next_state(board, 1, 2)  # (0,2)
     # Player 1 should have won
     assert ttt_game.get_game_ended(board, 1) == 1
 
@@ -101,22 +101,22 @@ def test_game_ended_win_row(ttt_game: TicTacToeGame):
 def test_game_ended_win_col(ttt_game: TicTacToeGame):
     """Player 1 wins with left column."""
     board = ttt_game.initialise_board()
-    board, _ = ttt_game.get_next_state(board, 1, 0)    # (0,0)
-    board, _ = ttt_game.get_next_state(board, -1, 1)    # opponent at (0,1)
-    board, _ = ttt_game.get_next_state(board, 1, 3)    # (1,0)
-    board, _ = ttt_game.get_next_state(board, -1, 4)    # opponent at (1,1)
-    board, _ = ttt_game.get_next_state(board, 1, 6)    # (2,0)
+    board, _ = ttt_game.get_next_state(board, 1, 0)  # (0,0)
+    board, _ = ttt_game.get_next_state(board, -1, 1)  # opponent at (0,1)
+    board, _ = ttt_game.get_next_state(board, 1, 3)  # (1,0)
+    board, _ = ttt_game.get_next_state(board, -1, 4)  # opponent at (1,1)
+    board, _ = ttt_game.get_next_state(board, 1, 6)  # (2,0)
     assert ttt_game.get_game_ended(board, 1) == 1
 
 
 def test_game_ended_win_diag(ttt_game: TicTacToeGame):
     """Player 1 wins with main diagonal."""
     board = ttt_game.initialise_board()
-    board, _ = ttt_game.get_next_state(board, 1, 0)    # (0,0)
-    board, _ = ttt_game.get_next_state(board, -1, 1)    # opponent at (0,1)
-    board, _ = ttt_game.get_next_state(board, 1, 4)    # (1,1)
-    board, _ = ttt_game.get_next_state(board, -1, 2)    # opponent at (0,2)
-    board, _ = ttt_game.get_next_state(board, 1, 8)    # (2,2)
+    board, _ = ttt_game.get_next_state(board, 1, 0)  # (0,0)
+    board, _ = ttt_game.get_next_state(board, -1, 1)  # opponent at (0,1)
+    board, _ = ttt_game.get_next_state(board, 1, 4)  # (1,1)
+    board, _ = ttt_game.get_next_state(board, -1, 2)  # opponent at (0,2)
+    board, _ = ttt_game.get_next_state(board, 1, 8)  # (2,2)
     assert ttt_game.get_game_ended(board, 1) == 1
 
 
@@ -130,15 +130,15 @@ def test_game_ended_draw(ttt_game: TicTacToeGame):
     # But we need to use canonical form: player 1 = 1
     # Let's build manually: actions in order for a draw
     moves = [
-        (1, 0),    # P1 at (0,0)
-        (-1, 1),   # P2 at (0,1)
-        (1, 2),    # P1 at (0,2)
-        (-1, 4),   # P2 at (1,1)
-        (1, 3),    # P1 at (1,0)
-        (-1, 6),   # P2 at (2,0)
-        (1, 7),    # P1 at (2,1)
-        (-1, 8),   # P2 at (2,2)
-        (1, 5),    # P1 at (1,2)
+        (1, 0),  # P1 at (0,0)
+        (-1, 1),  # P2 at (0,1)
+        (1, 2),  # P1 at (0,2)
+        (-1, 4),  # P2 at (1,1)
+        (1, 3),  # P1 at (1,0)
+        (-1, 6),  # P2 at (2,0)
+        (1, 7),  # P1 at (2,1)
+        (-1, 8),  # P2 at (2,2)
+        (1, 5),  # P1 at (1,2)
     ]
     for player, action in moves:
         board, _ = ttt_game.get_next_state(board, player, action)
@@ -218,19 +218,19 @@ def test_as_multi_channel_empty_board(ttt_game: TicTacToeGame):
 def test_as_multi_channel_player_perspective(ttt_game: TicTacToeGame):
     """Calling as_multi_channel with different players should swap channels."""
     board = ttt_game.initialise_board()
-    board, _ = ttt_game.get_next_state(board, 1, 4)   # Player 1 at centre
+    board, _ = ttt_game.get_next_state(board, 1, 4)  # Player 1 at centre
     board, _ = ttt_game.get_next_state(board, -1, 0)  # Player -1 at (0,0)
 
     rep_p1 = board.as_multi_channel(1)
     rep_pn1 = board.as_multi_channel(-1)
 
     # Player 1's perspective: channel 0 has player 1's stones, channel 1 has -1's stones
-    assert rep_p1[0][1][1] == 1   # Player 1 at centre
-    assert rep_p1[1][0][0] == 1   # Player -1 at (0,0)
+    assert rep_p1[0][1][1] == 1  # Player 1 at centre
+    assert rep_p1[1][0][0] == 1  # Player -1 at (0,0)
 
     # Player -1's perspective: channels are swapped
-    assert rep_pn1[0][0][0] == 1   # Player -1's stone is now "mine" (channel 0)
-    assert rep_pn1[1][1][1] == 1   # Player 1's stone is now "opponent" (channel 1)
+    assert rep_pn1[0][0][0] == 1  # Player -1's stone is now "mine" (channel 0)
+    assert rep_pn1[1][1][1] == 1  # Player 1's stone is now "opponent" (channel 1)
 
     # Channels should be swapped
     np.testing.assert_array_equal(rep_p1[0], rep_pn1[1])

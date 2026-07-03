@@ -11,8 +11,7 @@ if TYPE_CHECKING:
 
 
 class AlphaTicTacToe(nn.Module):
-    def __init__(self, board_rows: int, board_cols: int, action_size: int,
-                 num_input_channels: int, config: NetConfig):
+    def __init__(self, board_rows: int, board_cols: int, action_size: int, num_input_channels: int, config: NetConfig):
         super().__init__()
         self.board_rows = board_rows
         self.board_cols = board_cols
@@ -55,10 +54,16 @@ class AlphaTicTacToe(nn.Module):
 
         x = x.view(-1, self.config.num_filters * (self.board_rows - 4) * (self.board_cols - 4))
 
-        x = F.dropout(F.relu(self.fc_bn1(self.fc1(x))), p=self.config.dropout,  # batch_size * 1024
-                      training=self.training)
-        x = F.dropout(F.relu(self.fc_bn2(self.fc2(x))), p=self.config.dropout,  # batch_size * 512
-                      training=self.training)
+        x = F.dropout(
+            F.relu(self.fc_bn1(self.fc1(x))),
+            p=self.config.dropout,  # batch_size * 1024
+            training=self.training,
+        )
+        x = F.dropout(
+            F.relu(self.fc_bn2(self.fc2(x))),
+            p=self.config.dropout,  # batch_size * 512
+            training=self.training,
+        )
 
         pi = self.fc3(x)  # batch_size * action_size
         v = self.fc4(x)  # batch_size

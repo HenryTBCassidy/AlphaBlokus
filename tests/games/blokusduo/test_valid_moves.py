@@ -4,6 +4,7 @@ Tests cover: initial moves, constraint checking (overlap, sides, corners, bounds
 opponent interactions, piece usage, pass action, masking consistency, multi-move
 progression, and edge cases.
 """
+
 import numpy as np
 
 from alphablokus.games.blokusduo.board import BlokusDuoBoard
@@ -40,8 +41,7 @@ def test_every_initial_action_covers_start_position(blokus_game: BlokusDuoGame):
 
     for action in blokus_game.initial_actions[1]:
         new_board = board.with_piece(action, player_side=1)
-        assert new_board.placement_grid[white_start_idx] != 0, (
-            f"Action {action} does not cover white start position")
+        assert new_board.placement_grid[white_start_idx] != 0, f"Action {action} does not cover white start position"
 
 
 def test_every_remaining_piece_has_initial_action(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
@@ -53,8 +53,7 @@ def test_every_remaining_piece_has_initial_action(blokus_game: BlokusDuoGame, bl
         remaining = board.remaining_piece_ids(1)
 
         for pid in remaining:
-            assert pid in piece_ids_with_moves, (
-                f"Piece {pid} has no moves after placing {first_action}")
+            assert pid in piece_ids_with_moves, f"Piece {pid} has no moves after placing {first_action}"
 
 
 # -- Basic move generation after first placement --------------------------------
@@ -113,7 +112,8 @@ def test_no_move_overlaps_existing_piece(blokus_game: BlokusDuoGame, blokus_boar
             for dj in range(p_wid):
                 if piece_array[di, dj] == 1:
                     assert board_2d[ins_i + di, ins_j + dj] == 0, (
-                        f"Move {move} overlaps existing piece at ({ins_i + di}, {ins_j + dj})")
+                        f"Move {move} overlaps existing piece at ({ins_i + di}, {ins_j + dj})"
+                    )
 
 
 def test_no_move_has_friendly_side_adjacency(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
@@ -132,7 +132,8 @@ def test_no_move_has_friendly_side_adjacency(blokus_game: BlokusDuoGame, blokus_
                 if piece_array[di, dj] == 1:
                     ri, rj = ins_i + di, ins_j + dj
                     assert BlokusDuoBoard._no_sides(ri, rj, 1, board_2d), (
-                        f"Move {move} has friendly side at ({ri}, {rj})")
+                        f"Move {move} has friendly side at ({ri}, {rj})"
+                    )
 
 
 def test_every_move_has_at_least_one_diagonal(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
@@ -172,8 +173,7 @@ def test_no_move_has_cells_off_board(blokus_game: BlokusDuoGame, blokus_board: B
         p_len, p_wid = piece_array.shape
 
         assert ins_i >= 0 and ins_j >= 0, f"Move {move} has negative insertion index"
-        assert ins_i + p_len <= n and ins_j + p_wid <= n, (
-            f"Move {move} extends beyond board edge")
+        assert ins_i + p_len <= n and ins_j + p_wid <= n, f"Move {move} extends beyond board edge"
 
 
 # -- Opponent interactions -----------------------------------------------------
@@ -228,8 +228,7 @@ def test_opponent_piece_blocks_squares(blokus_game: BlokusDuoGame, blokus_board:
         for di in range(p_len):
             for dj in range(p_wid):
                 if piece_array[di, dj] == 1:
-                    assert (ins_i + di, ins_j + dj) != (6, 6), (
-                        f"Move {move} places a cell on opponent's piece at (6,6)")
+                    assert (ins_i + di, ins_j + dj) != (6, 6), f"Move {move} places a cell on opponent's piece at (6,6)"
 
 
 def test_opponent_on_placement_point_reduces_moves(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
@@ -255,8 +254,7 @@ def test_no_move_uses_already_placed_piece(blokus_game: BlokusDuoGame, blokus_bo
 
     placed_id = first_action.piece_id
     for move in moves:
-        assert move.piece_id != placed_id, (
-            f"Move {move} uses already-placed piece {placed_id}")
+        assert move.piece_id != placed_id, f"Move {move} uses already-placed piece {placed_id}"
 
 
 def test_placed_piece_disappears_from_moves(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
@@ -351,8 +349,7 @@ def test_known_legal_placement_is_in_moves(blokus_game: BlokusDuoGame, blokus_bo
     """After placing monomino at white start, placing piece 2 (domino) at a known
     diagonal should be in the valid moves list."""
     # White monomino at start (4,4) in array coords (Pentobi convention)
-    board = blokus_board.with_piece(
-        _action_at_idx(1, Orientation.Identity, 4, 4), player_side=1)
+    board = blokus_board.with_piece(_action_at_idx(1, Orientation.Identity, 4, 4), player_side=1)
 
     # Domino (piece 2, Identity = [[1],[1]]) at (5,5) — diagonal of (4,4).
     # This places cells at (5,5) and (6,5).
@@ -364,8 +361,7 @@ def test_known_legal_placement_is_in_moves(blokus_game: BlokusDuoGame, blokus_bo
 def test_known_illegal_placement_not_in_moves(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
     """A piece placed side-adjacent to a friendly piece should NOT be in valid moves."""
     # White monomino at start (4,4)
-    board = blokus_board.with_piece(
-        _action_at_idx(1, Orientation.Identity, 4, 4), player_side=1)
+    board = blokus_board.with_piece(_action_at_idx(1, Orientation.Identity, 4, 4), player_side=1)
 
     # Domino (piece 2, Identity) at (5,4) — directly below (4,4), side adjacent
     illegal = _action_at_idx(2, Orientation.Identity, 5, 4)
@@ -378,8 +374,7 @@ def test_known_illegal_placement_not_in_moves(blokus_game: BlokusDuoGame, blokus
 
 def test_piece_in_board_corner(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
     """Piece placed at board corner should have moves, but only away from the edge."""
-    board = blokus_board.with_piece(
-        _action_at_idx(1, Orientation.Identity, 0, 0), player_side=1)
+    board = blokus_board.with_piece(_action_at_idx(1, Orientation.Identity, 0, 0), player_side=1)
     moves = blokus_game.valid_actions(board, 1)
 
     # All moves should have cells within bounds
@@ -395,8 +390,7 @@ def test_piece_in_board_corner(blokus_game: BlokusDuoGame, blokus_board: BlokusD
 def test_large_piece_near_edge_excluded(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
     """I-pentomino (5x1, piece 11) placements that would hang off the board should be excluded."""
     # Place monomino at (0, 0) — top-left corner
-    board = blokus_board.with_piece(
-        _action_at_idx(1, Orientation.Identity, 0, 0), player_side=1)
+    board = blokus_board.with_piece(_action_at_idx(1, Orientation.Identity, 0, 0), player_side=1)
     moves = blokus_game.valid_actions(board, 1)
 
     # Filter to I-pentomino moves (piece 11)
@@ -410,15 +404,15 @@ def test_large_piece_near_edge_excluded(blokus_game: BlokusDuoGame, blokus_board
         p_len, p_wid = piece_array.shape
         assert ins_i >= 0 and ins_j >= 0
         assert ins_i + p_len <= n and ins_j + p_wid <= n, (
-            f"I-pentomino move {move} hangs off the board: ins=({ins_i},{ins_j}) shape=({p_len},{p_wid})")
+            f"I-pentomino move {move} hangs off the board: ins=({ins_i},{ins_j}) shape=({p_len},{p_wid})"
+        )
 
 
 def test_i_pentomino_along_edge(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard):
     """I-pentomino (piece 11) placed along column 0 should only generate diagonal
     points on one side (column 1), not column -1."""
     # Place I-pentomino vertically along column 0, rows 0-4
-    board = blokus_board.with_piece(
-        _action_at_idx(11, Orientation.Identity, 0, 0), player_side=1)
+    board = blokus_board.with_piece(_action_at_idx(11, Orientation.Identity, 0, 0), player_side=1)
 
     moves = blokus_game.valid_actions(board, 1)
 
@@ -430,5 +424,5 @@ def test_i_pentomino_along_edge(blokus_game: BlokusDuoGame, blokus_board: Blokus
 
     # Placement points should only be on column 1 side
     points = board.placement_points(1)
-    for (pi, pj) in points:
+    for pi, pj in points:
         assert pj == 1, f"Placement point ({pi},{pj}) should only be at column 1 for edge piece"

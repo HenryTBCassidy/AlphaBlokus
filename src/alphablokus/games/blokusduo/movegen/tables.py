@@ -68,6 +68,7 @@ For the runtime check ``forbidden[cell]`` to be safe when ``cell ==
 NULL_CELL``, the ``forbidden`` array must be allocated with shape
 ``(num_cells + 1,)`` and the ``NULL_CELL`` slot must always be 0.
 """
+
 from __future__ import annotations
 
 import time
@@ -121,18 +122,19 @@ ADJ_STATUS_COUNT: int = 1 << ADJ_STATUS_BITS  # 64
 #: (N, W, E, S) in ``get_adj_coord`` order, then 2 of the 4 diagonals
 #: (NW, SE) in ``get_diag_coord`` order.
 ADJ_STATUS_OFFSETS: tuple[tuple[int, int], ...] = (
-    (-1, 0),   # bit 0: N
-    (0, -1),   # bit 1: W
-    (0, 1),    # bit 2: E
-    (1, 0),    # bit 3: S
+    (-1, 0),  # bit 0: N
+    (0, -1),  # bit 1: W
+    (0, 1),  # bit 2: E
+    (1, 0),  # bit 3: S
     (-1, -1),  # bit 4: NW
-    (1, 1),    # bit 5: SE
+    (1, 1),  # bit 5: SE
 )
 
 
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class MoveTables:
@@ -184,6 +186,7 @@ class MoveTables:
 # ---------------------------------------------------------------------------
 # Build
 # ---------------------------------------------------------------------------
+
 
 def build_move_tables(
     piece_manager: PieceManager,
@@ -239,17 +242,20 @@ def build_move_tables(
                     y=y,
                 )
                 adj_set, attach_set = _adj_and_attach(
-                    placement_cells, board_size,
+                    placement_cells,
+                    board_size,
                 )
-                records.append({
-                    "piece_id": piece_id,
-                    "orientation_id": orientation_id,
-                    "anchor": anchor_cell_idx,
-                    "action_id": action_id,
-                    "cells": placement_cells,
-                    "adj": adj_set,
-                    "attach": attach_set,
-                })
+                records.append(
+                    {
+                        "piece_id": piece_id,
+                        "orientation_id": orientation_id,
+                        "anchor": anchor_cell_idx,
+                        "action_id": action_id,
+                        "cells": placement_cells,
+                        "adj": adj_set,
+                        "attach": attach_set,
+                    }
+                )
 
     num_moves = len(records)
 
@@ -275,8 +281,7 @@ def build_move_tables(
         cells = rec["cells"]
         if len(cells) > MAX_CELLS_PER_PIECE:
             raise AssertionError(
-                f"Piece {rec['piece_id']} has {len(cells)} cells, exceeds "
-                f"MAX_CELLS_PER_PIECE={MAX_CELLS_PER_PIECE}.",
+                f"Piece {rec['piece_id']} has {len(cells)} cells, exceeds MAX_CELLS_PER_PIECE={MAX_CELLS_PER_PIECE}.",
             )
         n_cells_arr[move_id] = len(cells)
         cells_arr[move_id, : len(cells)] = cells
@@ -326,6 +331,7 @@ def build_move_tables(
 # ---------------------------------------------------------------------------
 # P5: the (anchor, adj_status, piece) → candidate move IDs lookup table
 # ---------------------------------------------------------------------------
+
 
 @dataclass(frozen=True)
 class LookupTable:
@@ -384,7 +390,10 @@ class LookupTable:
 
 
 def build_lookup_table(
-    tables: MoveTables, board_size: int = BOARD_SIZE, *, verbose: bool = False,
+    tables: MoveTables,
+    board_size: int = BOARD_SIZE,
+    *,
+    verbose: bool = False,
 ) -> LookupTable:
     """Build the (anchor, adj_status, piece) lookup table from the
     geometry tables.
@@ -451,7 +460,7 @@ def build_lookup_table(
         for bit in range(ADJ_STATUS_BITS):
             asc = int(adj_status_cells[anchor, bit])
             if asc != NULL_CELL and asc in footprint:
-                mask |= (1 << bit)
+                mask |= 1 << bit
         return mask
 
     # Step 3: group move IDs by (footprint_cell, piece) for fast adj_status filtering.
@@ -464,9 +473,7 @@ def build_lookup_table(
     # point." A single move whose 5-cell footprint includes 2 attach
     # points appears in 2 different (anchor, piece) lists — runtime
     # dedup via a "seen" set keeps it from being counted twice.
-    moves_by_anchor_piece: list[list[list[int]]] = [
-        [[] for _ in range(n_pieces)] for _ in range(n_anchors)
-    ]
+    moves_by_anchor_piece: list[list[list[int]]] = [[[] for _ in range(n_pieces)] for _ in range(n_anchors)]
     for move_id in range(tables.num_moves):
         p = int(tables.piece[move_id]) - 1  # piece IDs are 1..21
         n = int(tables.n_cells[move_id])
@@ -495,10 +502,7 @@ def build_lookup_table(
             # Precompute the incompat_mask of each base move vs this anchor.
             base_masks = [incompat_mask_for_anchor(m, anchor) for m in base]
             for status in range(ADJ_STATUS_COUNT):
-                candidates = [
-                    base[i] for i, mask in enumerate(base_masks)
-                    if (mask & status) == 0
-                ]
+                candidates = [base[i] for i, mask in enumerate(base_masks) if (mask & status) == 0]
                 begin[anchor, status, piece_idx] = cursor
                 size[anchor, status, piece_idx] = len(candidates)
                 if len(candidates) > 0xFFFF:
@@ -523,7 +527,7 @@ def build_lookup_table(
         print(f"  total:            {mb:.2f} MB")
         nonempty = int((size > 0).sum())
         total_slots = n_anchors * ADJ_STATUS_COUNT * n_pieces
-        print(f"  non-empty slots:  {nonempty:,} / {total_slots:,} ({100*nonempty/total_slots:.1f}%)")
+        print(f"  non-empty slots:  {nonempty:,} / {total_slots:,} ({100 * nonempty / total_slots:.1f}%)")
 
     return LookupTable(
         total_entries=total_entries,
@@ -538,8 +542,12 @@ def build_lookup_table(
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _piece_footprint(
-    piece_grid: NDArray, anchor_row: int, anchor_col: int, board_size: int,
+    piece_grid: NDArray,
+    anchor_row: int,
+    anchor_col: int,
+    board_size: int,
 ) -> list[int] | None:
     """Return the cell indices the piece occupies when anchored at
     ``(anchor_row, anchor_col)``, or ``None`` if any cell is off-board.
@@ -561,7 +569,8 @@ def _piece_footprint(
 
 
 def _adj_and_attach(
-    footprint: list[int], board_size: int,
+    footprint: list[int],
+    board_size: int,
 ) -> tuple[set[int], set[int]]:
     """Compute the edge-adjacent and diagonally-adjacent cell sets.
 
@@ -631,6 +640,7 @@ def _print_per_piece_counts(tables: MoveTables) -> None:
 # CLI entry point for inspection / one-off building
 # ---------------------------------------------------------------------------
 
+
 def main() -> int:
     """Build the tables and print summary stats. Useful for sanity-checking."""
     pieces_path = default_pieces_path()
@@ -644,17 +654,28 @@ def main() -> int:
     print(f"Total build time: {elapsed:.2f}s")
     print(f"num_moves: {tables.num_moves:,}")
     print("Memory (rough):")
-    print(f"  cells:        {tables.cells.nbytes / 1024:.1f} KB "
-          f"({tables.cells.shape} {tables.cells.dtype})")
+    print(f"  cells:        {tables.cells.nbytes / 1024:.1f} KB ({tables.cells.shape} {tables.cells.dtype})")
     print(f"  adj_cells:    {tables.adj_cells.nbytes / 1024:.1f} KB")
     print(f"  attach_cells: {tables.attach_cells.nbytes / 1024:.1f} KB")
     print(f"  action_to_move_id: {tables.action_to_move_id.nbytes / 1024:.1f} KB")
-    total_kb = sum(
-        getattr(tables, f).nbytes
-        for f in ["piece", "anchor", "action_id", "cells", "n_cells",
-                  "adj_cells", "n_adj", "attach_cells", "n_attach",
-                  "action_to_move_id"]
-    ) / 1024
+    total_kb = (
+        sum(
+            getattr(tables, f).nbytes
+            for f in [
+                "piece",
+                "anchor",
+                "action_id",
+                "cells",
+                "n_cells",
+                "adj_cells",
+                "n_adj",
+                "attach_cells",
+                "n_attach",
+                "action_to_move_id",
+            ]
+        )
+        / 1024
+    )
     print(f"  total:        {total_kb:.1f} KB")
 
     expected = 13_729
@@ -669,12 +690,12 @@ def main() -> int:
     lookup = build_lookup_table(tables, BOARD_SIZE, verbose=True)
 
     print()
-    print(f"OK: built MoveTables ({tables.num_moves:,} moves) + "
-          f"LookupTable ({lookup.total_entries:,} entries).")
+    print(f"OK: built MoveTables ({tables.num_moves:,} moves) + LookupTable ({lookup.total_entries:,} entries).")
     print(f"Matches Pentobi's Move.h:32 count of {expected:,}.")
     return 0
 
 
 if __name__ == "__main__":
     import sys
+
     sys.exit(main())

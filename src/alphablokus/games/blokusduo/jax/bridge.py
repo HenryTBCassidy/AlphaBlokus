@@ -18,7 +18,8 @@ if TYPE_CHECKING:
 
 
 def numpy_state_from_board(
-    board: BlokusDuoBoard, current_player: int,
+    board: BlokusDuoBoard,
+    current_player: int,
 ) -> tuple[NDArray, NDArray, NDArray, np.int8]:
     """Extract ``(ppb, remaining, last_piece, current_player)`` numpy arrays.
 

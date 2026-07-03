@@ -19,6 +19,7 @@ so a glance tells you both where you are in the run and what's happening.
 Each section's panels match the ``define_metric`` namespaces wired in
 ``core/storage.py``.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -285,15 +286,18 @@ def build_sections() -> list[ws.Section]:
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument(
-        "--entity", required=True,
+        "--entity",
+        required=True,
         help="W&B entity (user or team) that owns the project",
     )
     parser.add_argument(
-        "--project", required=True,
+        "--project",
+        required=True,
         help="W&B project name (e.g. alphablokus-poc)",
     )
     parser.add_argument(
-        "--name", default="AlphaBlokus default",
+        "--name",
+        default="AlphaBlokus default",
         help="Saved-view name. Re-running with the same name overwrites the view.",
     )
     args = parser.parse_args()

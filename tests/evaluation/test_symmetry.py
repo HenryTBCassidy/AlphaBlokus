@@ -5,6 +5,7 @@ TicTacToe network. We don't assert specific KL values — they depend on
 random init — but we do assert that the result has the right shape and
 that an artificially symmetric net produces zero divergence.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -40,9 +41,7 @@ def test_build_diagnostic_positions_first_is_empty_start_board(
     be ~0 there regardless of net behaviour).
     """
     positions = build_diagnostic_positions(ttt_game, n=5, seed=0)
-    assert (positions[0].as_2d == 0).all(), (
-        "first reference position should be the empty initial board"
-    )
+    assert (positions[0].as_2d == 0).all(), "first reference position should be the empty initial board"
 
 
 def test_build_diagnostic_positions_phases_are_mixed(
@@ -57,8 +56,7 @@ def test_build_diagnostic_positions_phases_are_mixed(
     cells_filled = [int(np.abs(p.as_2d).sum()) for p in positions]
     distinct_depths = len(set(cells_filled))
     assert distinct_depths >= 2, (
-        f"expected positions to span multiple game phases, got only "
-        f"{distinct_depths} distinct fill counts"
+        f"expected positions to span multiple game phases, got only {distinct_depths} distinct fill counts"
     )
 
 
@@ -73,7 +71,8 @@ def test_build_diagnostic_positions_handles_small_n(ttt_game: TicTacToeGame) -> 
 
 
 def test_diagnostic_result_shape(
-    ttt_game: TicTacToeGame, test_config: RunConfig,
+    ttt_game: TicTacToeGame,
+    test_config: RunConfig,
 ) -> None:
     """Result has one KL per non-identity symmetry and a real-valued mean."""
     nnet = NNetWrapper(ttt_game, test_config)
@@ -88,7 +87,8 @@ def test_diagnostic_result_shape(
 
 
 def test_perfectly_symmetric_net_scores_zero_kl(
-    ttt_game: TicTacToeGame, test_config: RunConfig,
+    ttt_game: TicTacToeGame,
+    test_config: RunConfig,
 ) -> None:
     """A network whose policy is exactly the uniform distribution is
     trivially equivariant — KL must be (very close to) zero on every

@@ -5,6 +5,7 @@ save/load/resume round-trips through :class:`SelfPlayStore`) live in one
 place. This is also where the continuous-generations work (IDEAS I4 lineage)
 and the sparse-on-disk format (``docs/plans/oom-hardening.md`` O1–O3) land.
 """
+
 from __future__ import annotations
 
 from collections import deque
@@ -81,10 +82,7 @@ class ReplayBuffer:
         # store keeps dense, so densify a transient copy here. By this point the
         # self-play worker pool is torn down, so the memory is free.
         action_size = self._game.get_action_size()
-        dense = deque(
-            (board, as_dense(pi, action_size), value)
-            for board, pi, value in flat
-        )
+        dense = deque((board, as_dense(pi, action_size), value) for board, pi, value in flat)
         self._store.save(dense, file_index, game_sizes=game_sizes)
 
     def load_recent(self, up_to_generation: int) -> None:
@@ -98,7 +96,8 @@ class ReplayBuffer:
         # Loaded games hold DENSE policies (the on-disk format) while live
         # self-play appends sparse ones — tracked by oom-hardening O2.
         self.games = self._store.load_recent_games(  # type: ignore[assignment]
-            up_to_generation, self._config.replay_buffer_games,
+            up_to_generation,
+            self._config.replay_buffer_games,
         )
 
     def load_for_resume(self, last_completed_generation: int) -> None:

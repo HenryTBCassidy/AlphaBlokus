@@ -36,8 +36,9 @@ class MoveRecord:
     selected. Defaults to 0.0 for non-NetworkPlayer moves where no policy
     was exposed.
     """
-    player: int          # +1 or -1 — who moved
-    action: int          # action index chosen
+
+    player: int  # +1 or -1 — who moved
+    action: int  # action index chosen
     top_k_actions: tuple[int, ...]  # in descending probability order
     top_k_probs: tuple[float, ...]  # aligned with top_k_actions
     played_prob: float = 0.0  # raw visit fraction for the played action
@@ -50,6 +51,7 @@ class GameRecord:
     ``outcome`` is from player 1's perspective: +1 if player1 won, -1 if
     player2 won, ~0 for a draw.
     """
+
     moves: tuple[MoveRecord, ...]
     outcome: GameResult
     player1_was_white: bool  # which side player1 played (alternates in play_games)
@@ -72,13 +74,7 @@ class Arena:
     - Human players
     """
 
-    def __init__(
-        self,
-        player1: Player,
-        player2: Player,
-        game: IGame,
-        display: DisplayFn | None = None
-    ) -> None:
+    def __init__(self, player1: Player, player2: Player, game: IGame, display: DisplayFn | None = None) -> None:
         self.player1 = player1
         self.player2 = player2
         self.game = game
@@ -142,19 +138,23 @@ class Arena:
 
             if record:
                 top_actions, top_probs, played_prob = _extract_top_k(
-                    current_player, top_k, played_action=int(action),
+                    current_player,
+                    top_k,
+                    played_action=int(action),
                 )
-                recorded_moves.append(MoveRecord(
-                    player=cur_player,
-                    action=int(action),
-                    top_k_actions=tuple(top_actions),
-                    top_k_probs=tuple(top_probs),
-                    played_prob=played_prob,
-                ))
+                recorded_moves.append(
+                    MoveRecord(
+                        player=cur_player,
+                        action=int(action),
+                        top_k_actions=tuple(top_actions),
+                        top_k_probs=tuple(top_probs),
+                        played_prob=played_prob,
+                    )
+                )
 
             if valids[action] == 0:
-                logger.error(f'Action {action} is not valid!')
-                logger.debug(f'valids = {valids}')
+                logger.error(f"Action {action} is not valid!")
+                logger.debug(f"valids = {valids}")
                 assert valids[action] > 0, f"Player {cur_player} attempted invalid move {action}"
 
             # Notify opponent of the move if they implement the notification hook
@@ -184,7 +184,6 @@ class Arena:
                 player1_was_white=True,  # set per-game by play_games when it alternates
             )
         return outcome, recorded
-
 
     def play_games(
         self,
@@ -226,9 +225,13 @@ class Arena:
                 draws += 1
             if rec is not None:
                 # First half: player1 played as White (cur_player=1 starts).
-                records.append(GameRecord(
-                    moves=rec.moves, outcome=rec.outcome, player1_was_white=True,
-                ))
+                records.append(
+                    GameRecord(
+                        moves=rec.moves,
+                        outcome=rec.outcome,
+                        player1_was_white=True,
+                    )
+                )
 
         # Swap players for second half
         self.player1, self.player2 = self.player2, self.player1
@@ -246,9 +249,13 @@ class Arena:
                 # Second half: the (swapped) self.player1 is actually original
                 # player2. From original-player1's perspective, they played as
                 # Black this game.
-                records.append(GameRecord(
-                    moves=rec.moves, outcome=-rec.outcome, player1_was_white=False,
-                ))
+                records.append(
+                    GameRecord(
+                        moves=rec.moves,
+                        outcome=-rec.outcome,
+                        player1_was_white=False,
+                    )
+                )
 
         # Swap back so the Arena ends in its original state.
         self.player1, self.player2 = self.player2, self.player1
@@ -256,7 +263,9 @@ class Arena:
 
 
 def _extract_top_k(
-    player: Player, k: int, played_action: int | None = None,
+    player: Player,
+    k: int,
+    played_action: int | None = None,
 ) -> tuple[list[int], list[float], float]:
     """Pull top-K **visited** actions + probs + the played action's prob.
 
@@ -286,15 +295,11 @@ def _extract_top_k(
         return [], [], 0.0
     nonzero_idx = np.flatnonzero(pi > 0)
     if len(nonzero_idx) == 0:
-        played_prob = (
-            float(pi[played_action]) if played_action is not None else 0.0
-        )
+        played_prob = float(pi[played_action]) if played_action is not None else 0.0
         return [], [], played_prob
     nonzero_probs = pi[nonzero_idx]
     order_within = np.argsort(-nonzero_probs)[:k]
     top_actions = nonzero_idx[order_within].tolist()
     top_probs = pi[top_actions].tolist()
-    played_prob = (
-        float(pi[played_action]) if played_action is not None else 0.0
-    )
+    played_prob = float(pi[played_action]) if played_action is not None else 0.0
     return top_actions, top_probs, played_prob

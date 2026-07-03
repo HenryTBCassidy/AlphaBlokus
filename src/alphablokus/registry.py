@@ -6,6 +6,7 @@ strings to concrete classes — game construction, network construction, and
 the jax self-play backend. New games register here and nowhere else. Do not
 import ``alphablokus.games.*`` from framework code outside this module.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -72,11 +73,11 @@ def resolve_jax_selfplay_backend(config: RunConfig) -> SelfPlayBackendFn:
     match config.game:
         case "blokusduo":
             from alphablokus.games.blokusduo.jax.backend import generate_self_play_games
+
             return generate_self_play_games
         case unknown:
             raise ValueError(
-                f"selfplay_backend 'jax' supports only 'blokusduo' (got {unknown!r}); "
-                "use selfplay_backend 'python'.",
+                f"selfplay_backend 'jax' supports only 'blokusduo' (got {unknown!r}); use selfplay_backend 'python'.",
             )
 
 

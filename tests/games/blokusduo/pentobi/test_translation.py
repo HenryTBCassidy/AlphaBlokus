@@ -8,6 +8,7 @@ coordinate or a wrong shape-match silently corrupts every benchmark game. Two gu
 2. **Round-trip identity:** index → Pentobi string → index recovers the original action
    for every orientation × valid anchor (this exercises ``cells_to_action`` in reverse).
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -56,7 +57,8 @@ def test_pass_roundtrips(tr: PentobiMoveTranslator, game: BlokusDuoGame) -> None
 
 
 def test_action_translation_matches_placement_and_roundtrips(
-    tr: PentobiMoveTranslator, game: BlokusDuoGame,
+    tr: PentobiMoveTranslator,
+    game: BlokusDuoGame,
 ) -> None:
     """For every orientation × every anchor that actually fits on an empty board:
     (1) the translated cells equal the cells ``with_piece`` fills, and
@@ -76,13 +78,8 @@ def test_action_translation_matches_placement_and_roundtrips(
 
                 # (1) ground truth: cells with_piece actually filled
                 occupied = np.argwhere(placed.as_2d != 0)
-                gt = {
-                    tr.coord_to_pentobi(*decoder.to_coordinate((int(r), int(c))))
-                    for r, c in occupied
-                }
-                assert set(tr.action_to_cells(action).split(",")) == gt, (
-                    f"cells mismatch for {action}"
-                )
+                gt = {tr.coord_to_pentobi(*decoder.to_coordinate((int(r), int(c)))) for r, c in occupied}
+                assert set(tr.action_to_cells(action).split(",")) == gt, f"cells mismatch for {action}"
 
                 # (2) index round-trip (exercises cells_to_action)
                 idx = game.action_codec.encode(action)
@@ -95,8 +92,9 @@ def test_action_translation_matches_placement_and_roundtrips(
 
 def test_render_board_smoke(tr: PentobiMoveTranslator, game: BlokusDuoGame) -> None:
     """Renderer produces the a–n / 1–14 grid with the placed piece marked."""
-    board = game.initialise_board().with_piece(Action(1, next(iter(
-        game.piece_manager.pieces[1].basis_orientations)), 4, 4), 1)
+    board = game.initialise_board().with_piece(
+        Action(1, next(iter(game.piece_manager.pieces[1].basis_orientations)), 4, 4), 1
+    )
     out = tr.render_board(board)
     assert out.splitlines()[0].strip().startswith("a b c")
     assert "W" in out  # the placed white piece shows up

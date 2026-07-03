@@ -15,6 +15,7 @@ Usage:
     uv run python -m scripts.benchmark_predict_batch --cuda --iters 50
     uv run python -m scripts.benchmark_predict_batch --ks 1,8,16,32
 """
+
 from __future__ import annotations
 
 import argparse
@@ -81,8 +82,7 @@ def _time_serial(nnet: NNetWrapper, boards: list, iters: int, cuda: bool) -> flo
 def main() -> None:
     parser = argparse.ArgumentParser(description="Microbenchmark predict_batch vs serial predict")
     parser.add_argument("--cuda", action="store_true", help="Run on GPU (default: CPU)")
-    parser.add_argument("--ks", type=str, default="1,2,4,8,16,32",
-                        help="Comma-separated batch sizes to sweep")
+    parser.add_argument("--ks", type=str, default="1,2,4,8,16,32", help="Comma-separated batch sizes to sweep")
     parser.add_argument("--iters", type=int, default=30, help="Timed iterations per K (after warmup)")
     parser.add_argument("--warmup", type=int, default=5, help="Warmup iterations (discarded)")
     parser.add_argument("--filters", type=int, default=64)
@@ -92,19 +92,30 @@ def main() -> None:
     ks = [int(k) for k in args.ks.split(",")]
     game = BlokusDuoGame(pieces_config_path=_PIECES)
     net_cfg = NetConfig(
-        learning_rate=1e-3, dropout=0.3, epochs=1, batch_size=64, cuda=args.cuda,
-        num_filters=args.filters, num_residual_blocks=args.blocks,
+        learning_rate=1e-3,
+        dropout=0.3,
+        epochs=1,
+        batch_size=64,
+        cuda=args.cuda,
+        num_filters=args.filters,
+        num_residual_blocks=args.blocks,
     )
     run_cfg = RunConfig(
-        game="blokusduo", run_name="microbench", num_generations=1, num_eps=2,
-        temp_threshold=5, update_threshold=0.55, num_arena_matches=2,
-        root_directory=Path("/tmp/microbench"), load_model=False,
-        mcts_config=MCTSConfig(num_mcts_sims=1, cpuct=1.0), net_config=net_cfg,
+        game="blokusduo",
+        run_name="microbench",
+        num_generations=1,
+        num_eps=2,
+        temp_threshold=5,
+        update_threshold=0.55,
+        num_arena_matches=2,
+        root_directory=Path("/tmp/microbench"),
+        load_model=False,
+        mcts_config=MCTSConfig(num_mcts_sims=1, cpuct=1.0),
+        net_config=net_cfg,
     )
     nnet = NNetWrapper(game, run_cfg)
     device = "CUDA" if args.cuda else "CPU"
-    print(f"Device: {device} | net {args.filters}f x {args.blocks}b | "
-          f"iters={args.iters} (warmup {args.warmup})")
+    print(f"Device: {device} | net {args.filters}f x {args.blocks}b | iters={args.iters} (warmup {args.warmup})")
     print(f"{'K':>4} {'serial/leaf':>13} {'batched/leaf':>14} {'speedup':>9} {'batched leaves/s':>18}")
 
     max_boards = _make_boards(game, max(ks), seed=42)
@@ -122,8 +133,10 @@ def main() -> None:
         batched_per_leaf = batched / k
         speedup = serial / batched if batched > 0 else float("nan")
         leaves_per_s = k / batched if batched > 0 else float("nan")
-        print(f"{k:>4} {serial_per_leaf * 1e3:>10.3f}ms {batched_per_leaf * 1e3:>11.3f}ms "
-              f"{speedup:>8.2f}x {leaves_per_s:>16.0f}")
+        print(
+            f"{k:>4} {serial_per_leaf * 1e3:>10.3f}ms {batched_per_leaf * 1e3:>11.3f}ms "
+            f"{speedup:>8.2f}x {leaves_per_s:>16.0f}"
+        )
 
 
 if __name__ == "__main__":

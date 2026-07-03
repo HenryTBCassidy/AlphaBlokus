@@ -7,6 +7,7 @@ game replays with board visualisation.
 Usage:
     uv run python -m scripts.move_count_analysis [--num-games 100] [--replay-games 3]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -49,14 +50,16 @@ def play_random_game(game: BlokusDuoGame) -> tuple[list[dict], list[dict]]:
         moves = game.valid_actions(board, player)
         elapsed_ms = (time.perf_counter() - t0) * 1000
 
-        records.append({
-            "turn": turn,
-            "player": player,
-            "num_moves": len(moves),
-            "remaining_pieces": len(board.remaining_piece_ids(player)),
-            "placement_points": len(board.placement_points(player)),
-            "valid_moves_time_ms": elapsed_ms,
-        })
+        records.append(
+            {
+                "turn": turn,
+                "player": player,
+                "num_moves": len(moves),
+                "remaining_pieces": len(board.remaining_piece_ids(player)),
+                "placement_points": len(board.placement_points(player)),
+                "valid_moves_time_ms": elapsed_ms,
+            }
+        )
 
         if not moves:
             actions.append({"turn": turn, "player": player, "pass": True})
@@ -66,15 +69,17 @@ def play_random_game(game: BlokusDuoGame) -> tuple[list[dict], list[dict]]:
 
         consecutive_passes = 0
         action = random.choice(moves)
-        actions.append({
-            "turn": turn,
-            "player": player,
-            "pass": False,
-            "piece_id": int(action.piece_id),
-            "orientation": str(action.orientation.value),
-            "x": int(action.x_coordinate),
-            "y": int(action.y_coordinate),
-        })
+        actions.append(
+            {
+                "turn": turn,
+                "player": player,
+                "pass": False,
+                "piece_id": int(action.piece_id),
+                "orientation": str(action.orientation.value),
+                "x": int(action.x_coordinate),
+                "y": int(action.y_coordinate),
+            }
+        )
         board = board.with_piece(action, player_side=player)
         turn += 1
 
@@ -127,21 +132,29 @@ def build_report(
     max_length = game_lengths.max()
 
     # Per-turn aggregates
-    turn_stats = df.groupby("turn").agg(
-        mean_moves=("num_moves", "mean"),
-        std_moves=("num_moves", "std"),
-        median_moves=("num_moves", "median"),
-        mean_placement_pts=("placement_points", "mean"),
-        mean_remaining=("remaining_pieces", "mean"),
-        mean_time_ms=("valid_moves_time_ms", "mean"),
-    ).reset_index()
+    turn_stats = (
+        df.groupby("turn")
+        .agg(
+            mean_moves=("num_moves", "mean"),
+            std_moves=("num_moves", "std"),
+            median_moves=("num_moves", "median"),
+            mean_placement_pts=("placement_points", "mean"),
+            mean_remaining=("remaining_pieces", "mean"),
+            mean_time_ms=("valid_moves_time_ms", "mean"),
+        )
+        .reset_index()
+    )
     turn_stats["std_moves"] = turn_stats["std_moves"].fillna(0)
 
     # Per-turn by player
-    player_turn_stats = df.groupby(["turn", "player"]).agg(
-        mean_moves=("num_moves", "mean"),
-        std_moves=("num_moves", "std"),
-    ).reset_index()
+    player_turn_stats = (
+        df.groupby(["turn", "player"])
+        .agg(
+            mean_moves=("num_moves", "mean"),
+            std_moves=("num_moves", "std"),
+        )
+        .reset_index()
+    )
     player_turn_stats["std_moves"] = player_turn_stats["std_moves"].fillna(0)
     player_turn_stats["player_label"] = player_turn_stats["player"].map({1: "White", -1: "Black"})
 
@@ -153,72 +166,114 @@ def build_report(
     # -- Charts --
 
     fig_moves = go.Figure()
-    fig_moves.add_trace(go.Scatter(
-        x=turn_stats["turn"], y=turn_stats["mean_moves"] + turn_stats["std_moves"],
-        mode="lines", line=dict(width=0), showlegend=False,
-    ))
-    fig_moves.add_trace(go.Scatter(
-        x=turn_stats["turn"], y=turn_stats["mean_moves"] - turn_stats["std_moves"],
-        mode="lines", line=dict(width=0), fill="tonexty",
-        fillcolor="rgba(99, 110, 250, 0.15)", showlegend=False,
-    ))
-    fig_moves.add_trace(go.Scatter(
-        x=turn_stats["turn"], y=turn_stats["mean_moves"],
-        mode="lines", line=dict(color="#636efa", width=2), name="Mean",
-    ))
+    fig_moves.add_trace(
+        go.Scatter(
+            x=turn_stats["turn"],
+            y=turn_stats["mean_moves"] + turn_stats["std_moves"],
+            mode="lines",
+            line=dict(width=0),
+            showlegend=False,
+        )
+    )
+    fig_moves.add_trace(
+        go.Scatter(
+            x=turn_stats["turn"],
+            y=turn_stats["mean_moves"] - turn_stats["std_moves"],
+            mode="lines",
+            line=dict(width=0),
+            fill="tonexty",
+            fillcolor="rgba(99, 110, 250, 0.15)",
+            showlegend=False,
+        )
+    )
+    fig_moves.add_trace(
+        go.Scatter(
+            x=turn_stats["turn"],
+            y=turn_stats["mean_moves"],
+            mode="lines",
+            line=dict(color="#636efa", width=2),
+            name="Mean",
+        )
+    )
     fig_moves.update_layout(
         title="Legal Moves Per Turn (Mean +/- Std Dev)",
-        xaxis_title="Turn", yaxis_title="Number of Legal Moves",
-        height=450, template="plotly_white",
+        xaxis_title="Turn",
+        yaxis_title="Number of Legal Moves",
+        height=450,
+        template="plotly_white",
     )
 
     fig_by_player = px.line(
-        player_turn_stats, x="turn", y="mean_moves", color="player_label",
+        player_turn_stats,
+        x="turn",
+        y="mean_moves",
+        color="player_label",
         title="Legal Moves Per Turn By Player",
         labels={"mean_moves": "Mean Legal Moves", "turn": "Turn", "player_label": "Player"},
         color_discrete_map={"White": "#636efa", "Black": "#ef553b"},
-        height=450, template="plotly_white",
+        height=450,
+        template="plotly_white",
     )
 
     fig_points = go.Figure()
-    fig_points.add_trace(go.Scatter(
-        x=turn_stats["turn"], y=turn_stats["mean_placement_pts"],
-        mode="lines", line=dict(color="#00cc96", width=2),
-    ))
+    fig_points.add_trace(
+        go.Scatter(
+            x=turn_stats["turn"],
+            y=turn_stats["mean_placement_pts"],
+            mode="lines",
+            line=dict(color="#00cc96", width=2),
+        )
+    )
     fig_points.update_layout(
         title="Placement Points Per Turn (Mean)",
-        xaxis_title="Turn", yaxis_title="Number of Placement Points",
-        height=450, template="plotly_white",
+        xaxis_title="Turn",
+        yaxis_title="Number of Placement Points",
+        height=450,
+        template="plotly_white",
     )
 
     fig_hist = px.histogram(
-        game_lengths, nbins=20,
+        game_lengths,
+        nbins=20,
         title="Game Length Distribution",
         labels={"value": "Total Turns", "count": "Games"},
-        height=400, template="plotly_white",
+        height=400,
+        template="plotly_white",
     )
     fig_hist.update_layout(xaxis_title="Total Turns", yaxis_title="Number of Games")
 
     fig_time = go.Figure()
-    fig_time.add_trace(go.Scatter(
-        x=turn_stats["turn"], y=turn_stats["mean_time_ms"],
-        mode="lines", line=dict(color="#ab63fa", width=2),
-    ))
+    fig_time.add_trace(
+        go.Scatter(
+            x=turn_stats["turn"],
+            y=turn_stats["mean_time_ms"],
+            mode="lines",
+            line=dict(color="#ab63fa", width=2),
+        )
+    )
     fig_time.update_layout(
         title="valid_moves() Call Time Per Turn (Mean)",
-        xaxis_title="Turn", yaxis_title="Time (ms)",
-        height=450, template="plotly_white",
+        xaxis_title="Turn",
+        yaxis_title="Time (ms)",
+        height=450,
+        template="plotly_white",
     )
 
     fig_remaining = go.Figure()
-    fig_remaining.add_trace(go.Scatter(
-        x=turn_stats["turn"], y=turn_stats["mean_remaining"],
-        mode="lines", line=dict(color="#ffa15a", width=2),
-    ))
+    fig_remaining.add_trace(
+        go.Scatter(
+            x=turn_stats["turn"],
+            y=turn_stats["mean_remaining"],
+            mode="lines",
+            line=dict(color="#ffa15a", width=2),
+        )
+    )
     fig_remaining.update_layout(
         title="Remaining Pieces Per Turn (Mean)",
-        xaxis_title="Turn", yaxis_title="Remaining Pieces",
-        height=450, template="plotly_white",
+        xaxis_title="Turn",
+        yaxis_title="Remaining Pieces",
+        height=450,
+        template="plotly_white",
     )
 
     # -- Game replays (all games, shown/hidden via dropdown) --
@@ -229,7 +284,7 @@ def build_report(
         game_len = len(all_actions[gid])
         replays_html += f'<div class="game-container" id="game-{gid}" style="display:none;">\n'
         replays_html += build_game_replay_html(game, all_actions[gid], gid)
-        replays_html += '</div>\n'
+        replays_html += "</div>\n"
         game_options_html += f'<option value="{gid}">Game {gid} ({game_len} turns)</option>\n'
 
     # -- HTML Report --

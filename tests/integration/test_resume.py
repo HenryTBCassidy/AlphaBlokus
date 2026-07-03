@@ -4,6 +4,7 @@ A run must be continuable in place: after it stops, ``--resume`` picks up from t
 last *completed* generation, keeps the original frozen Elo baseline, and never
 overwrites the generations already on disk.
 """
+
 import json
 from dataclasses import replace
 
@@ -28,7 +29,8 @@ def test_read_progress_marker_roundtrip(test_config: RunConfig) -> None:
 
 @pytest.mark.slow
 def test_resume_continues_without_clobber(
-    ttt_game: TicTacToeGame, test_config: RunConfig,
+    ttt_game: TicTacToeGame,
+    test_config: RunConfig,
 ) -> None:
     """A 2-generation run, then `--resume` to 4 generations:
 
@@ -41,7 +43,10 @@ def test_resume_continues_without_clobber(
     # preserved on resume); a small games-sized buffer (num_eps=2 → 2 games/gen)
     # forces the resume reload to span multiple generation files.
     cfg = replace(
-        test_config, num_generations=2, elo_games_per_gen=2, replay_buffer_games=3,
+        test_config,
+        num_generations=2,
+        elo_games_per_gen=2,
+        replay_buffer_games=3,
     )
 
     # --- initial run: 2 generations ---------------------------------------

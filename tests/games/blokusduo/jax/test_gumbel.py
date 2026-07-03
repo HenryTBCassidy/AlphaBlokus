@@ -54,20 +54,27 @@ def setup(tmp_path_factory, blokus_game_module: BlokusDuoGame):
             players.append(player)
         if len(boards) >= N_POSITIONS:
             break
-    states = GameState(*(
-        np.stack(rows) for rows in zip(
-            *(numpy_state_from_board(b, p) for b, p in zip(boards, players, strict=True)), strict=True
+    states = GameState(
+        *(
+            np.stack(rows)
+            for rows in zip(*(numpy_state_from_board(b, p) for b, p in zip(boards, players, strict=True)), strict=True)
         )
-    ))
+    )
     return params, kernels, states
 
 
 @pytest.mark.skipif(not DEV_CACHE_PATH.exists(), reason="dev_5000 cache not built")
 def test_gumbel_structural_invariants(setup) -> None:
     params, kernels, states = setup
-    search = make_search(kernels, SearchConfig(
-        num_simulations=SIMS, top_k=64, policy="gumbel", gumbel_max_considered=16,
-    ))
+    search = make_search(
+        kernels,
+        SearchConfig(
+            num_simulations=SIMS,
+            top_k=64,
+            policy="gumbel",
+            gumbel_max_considered=16,
+        ),
+    )
     result = search(params, jax.random.PRNGKey(0), states)
 
     weights = np.asarray(result.action_weights)
@@ -97,7 +104,10 @@ def test_gumbel_backend_generates_games(tmp_path) -> None:
     config = dataclasses.replace(
         config,
         mcts_config=MCTSConfig(
-            num_mcts_sims=16, cpuct=2.5, search_policy="gumbel", gumbel_max_considered=8,
+            num_mcts_sims=16,
+            cpuct=2.5,
+            search_policy="gumbel",
+            gumbel_max_considered=8,
         ),
         jax_selfplay=JaxSelfPlayConfig(batch_size=2, top_k=32, dtype="float32", wave_plies=16),
         num_eps=2,

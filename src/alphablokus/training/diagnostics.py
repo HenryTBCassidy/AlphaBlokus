@@ -1,4 +1,5 @@
 """Process-level resource diagnostics logged at training phase transitions."""
+
 from __future__ import annotations
 
 from dataclasses import dataclass

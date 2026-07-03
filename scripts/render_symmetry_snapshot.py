@@ -21,6 +21,7 @@ axis of reflection drawn as a dashed line via per-cell ``::after`` SVG
 overlays — anchored to the cells themselves so it always tracks the
 diagonal regardless of header-label widths.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -47,10 +48,14 @@ def main() -> None:
     transposed = board.transposed()
 
     panel_original = _snapshot_panel(
-        board, game, label="Original mid-game position",
+        board,
+        game,
+        label="Original mid-game position",
     )
     panel_transposed = _snapshot_panel(
-        transposed, game, label="After BlokusDuoBoard.transposed()",
+        transposed,
+        game,
+        label="After BlokusDuoBoard.transposed()",
     )
 
     html = _wrap(panel_original, panel_transposed)
@@ -82,7 +87,10 @@ def _build_mid_game_position(game: BlokusDuoGame) -> BlokusDuoBoard:
 
 
 def _snapshot_panel(
-    board: BlokusDuoBoard, game: BlokusDuoGame, *, label: str,
+    board: BlokusDuoBoard,
+    game: BlokusDuoGame,
+    *,
+    label: str,
 ) -> str:
     """Wrap a single rendered board for the snapshot. All annotations
     (starting-square rings + dashed-diagonal segments) are applied via CSS
@@ -90,7 +98,11 @@ def _snapshot_panel(
     that the CSS selectors target.
     """
     body = render_board_html(
-        board=board, game=game, current_player=1, turn=-1, action_desc=label,
+        board=board,
+        game=game,
+        current_player=1,
+        turn=-1,
+        action_desc=label,
         num_moves_white=len(game.valid_actions(board, 1)),
         num_moves_black=len(game.valid_actions(board, -1)),
     )
@@ -130,12 +142,10 @@ def _wrap(panel_left: str, panel_right: str) -> str:
     )
 
     diagonal_position_selectors = ",\n".join(
-        f".snapshot-panel .board-grid tr:nth-child({i + 2}) td:nth-child({i + 2})"
-        for i in range(n)
+        f".snapshot-panel .board-grid tr:nth-child({i + 2}) td:nth-child({i + 2})" for i in range(n)
     )
     diagonal_after_selectors = ",\n".join(
-        f".snapshot-panel .board-grid tr:nth-child({i + 2}) td:nth-child({i + 2})::after"
-        for i in range(n)
+        f".snapshot-panel .board-grid tr:nth-child({i + 2}) td:nth-child({i + 2})::after" for i in range(n)
     )
 
     annotation_css = f"""

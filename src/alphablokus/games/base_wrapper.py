@@ -41,7 +41,7 @@ class AverageMeter:
         self.count: int = 0
 
     def __repr__(self) -> str:
-        return f'{self.avg:.2e}'
+        return f"{self.avg:.2e}"
 
     def update(self, val: float, n: int = 1) -> None:
         """
@@ -117,8 +117,8 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         self.nnet = self._create_network()
         # torch stubs type attribute access on Module as Tensor | Module;
         # these are plain ints on our net classes.
-        self.board_rows: int = cast('int', self.nnet.board_rows)
-        self.board_cols: int = cast('int', self.nnet.board_cols)
+        self.board_rows: int = cast("int", self.nnet.board_rows)
+        self.board_cols: int = cast("int", self.nnet.board_cols)
 
         self._device = self._resolve_device()
         self.nnet.to(self._device)
@@ -208,11 +208,10 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         sample_v = vs_np[0]
         expected_board_shape = (sample_board.shape[0], self.board_rows, self.board_cols)
         assert sample_board.shape == expected_board_shape, (
-            f"Encoded board shape {sample_board.shape} != expected {expected_board_shape}")
-        assert abs(sample_pi.sum() - 1.0) < 0.01, (
-            f"Policy vector sums to {sample_pi.sum()}, expected ~1.0")
-        assert -1.0 <= sample_v <= 1.0, (
-            f"Value {sample_v} outside [-1, 1]")
+            f"Encoded board shape {sample_board.shape} != expected {expected_board_shape}"
+        )
+        assert abs(sample_pi.sum() - 1.0) < 0.01, f"Policy vector sums to {sample_pi.sum()}, expected ~1.0"
+        assert -1.0 <= sample_v <= 1.0, f"Value {sample_v} outside [-1, 1]"
         dataset = _LazyPolicyDataset(boards_np, raw_pis, vs_np, action_size, encode_fn)
 
         # Full-pass training: every position in the buffer is trained on exactly
@@ -227,11 +226,13 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             v_losses = AverageMeter()
 
             loader = DataLoader(dataset, batch_size=self.net_config.batch_size, shuffle=True)
-            t = tqdm(loader, desc='Training Net')
+            t = tqdm(loader, desc="Training Net")
             for batch_number, (boards, target_pis, target_vs) in enumerate(t):
-                boards, target_pis, target_vs = (boards.to(self._device),
-                                                 target_pis.to(self._device),
-                                                 target_vs.to(self._device))
+                boards, target_pis, target_vs = (
+                    boards.to(self._device),
+                    target_pis.to(self._device),
+                    target_vs.to(self._device),
+                )
 
                 out_pi, out_v = self.nnet(boards)
                 l_pi = self.loss_pi(target_pis, out_pi)
@@ -354,7 +355,9 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         pred_v = np.asarray(predicted_values, dtype=float)
         bucket_edges = np.linspace(-1.0, 1.0, 11)
         bucket_idx = np.clip(
-            np.digitize(pred_v, bucket_edges) - 1, 0, len(bucket_edges) - 2,
+            np.digitize(pred_v, bucket_edges) - 1,
+            0,
+            len(bucket_edges) - 2,
         )
         bucket_centers = (bucket_edges[:-1] + bucket_edges[1:]) / 2.0
         bucket_means = np.full(10, np.nan, dtype=float)
@@ -441,7 +444,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
     @staticmethod
     def loss_pi(targets: Tensor, outputs: Tensor) -> Tensor:
         """Calculate the policy loss (KL divergence)."""
-        return F.kl_div(outputs, targets, reduction='batchmean')
+        return F.kl_div(outputs, targets, reduction="batchmean")
 
     @staticmethod
     def loss_v(targets: Tensor, outputs: Tensor) -> Tensor:
@@ -460,11 +463,11 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             logger.info("Checkpoint Directory exists!")
 
         checkpoint = {
-            'state_dict': self.nnet.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
+            "state_dict": self.nnet.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
         }
         if self.scheduler is not None:
-            checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
+            checkpoint["scheduler_state_dict"] = self.scheduler.state_dict()
         torch.save(checkpoint, filepath)
 
     def load_checkpoint(self, filename: str) -> None:
@@ -476,10 +479,10 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             logger.error(f"No model in path {filepath}")
             raise FileNotFoundError(f"No model in path {filepath}")
 
-        map_location = None if self.net_config.cuda else 'cpu'
+        map_location = None if self.net_config.cuda else "cpu"
         checkpoint = torch.load(filepath, map_location=map_location)
-        self.nnet.load_state_dict(checkpoint['state_dict'])
-        if 'optimizer_state_dict' in checkpoint:
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        if self.scheduler is not None and 'scheduler_state_dict' in checkpoint:
-            self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        self.nnet.load_state_dict(checkpoint["state_dict"])
+        if "optimizer_state_dict" in checkpoint:
+            self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        if self.scheduler is not None and "scheduler_state_dict" in checkpoint:
+            self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])

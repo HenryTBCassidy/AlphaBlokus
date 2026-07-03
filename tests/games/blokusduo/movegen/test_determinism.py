@@ -18,6 +18,7 @@ Why this is stricter:
 The test uses MCTS with very few sims to stay fast; the determinism
 invariant is independent of sim count.
 """
+
 from __future__ import annotations
 
 from unittest.mock import patch

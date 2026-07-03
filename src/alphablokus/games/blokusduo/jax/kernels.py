@@ -166,9 +166,7 @@ def make_kernels(tables: JaxTables) -> JaxKernels:
     def _score(state: GameState, slot: jnp.ndarray) -> jnp.ndarray:
         """Mirrors ``BlokusDuoGame._calculate_score``."""
         remaining_row = state.remaining[slot]
-        remaining_squares = jnp.matmul(
-            remaining_row.astype(jnp.int32), piece_sizes, preferred_element_type=jnp.int32
-        )
+        remaining_squares = jnp.matmul(remaining_row.astype(jnp.int32), piece_sizes, preferred_element_type=jnp.int32)
         all_placed = ~remaining_row[1:].any()
         bonus = 15 + jnp.where(state.last_piece[slot] == 1, 5, 0)
         return jnp.where(all_placed, bonus, -remaining_squares)

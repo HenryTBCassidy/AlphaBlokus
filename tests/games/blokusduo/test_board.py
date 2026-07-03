@@ -339,6 +339,7 @@ def test_canonical_player_neg1_swaps_perspective(
 
 # -- Incremental side-danger equivalence --------------------------------------
 
+
 def _brute_force_side_danger(board_2d: np.ndarray, player: int) -> np.ndarray:
     """Independent reference for the side-danger zone.
 
@@ -352,10 +353,12 @@ def _brute_force_side_danger(board_2d: np.ndarray, player: int) -> np.ndarray:
     danger = np.zeros((n, n), dtype=bool)
     for i in range(n):
         for j in range(n):
-            if ((i > 0 and board_2d[i - 1, j] == player)
-                    or (i < n - 1 and board_2d[i + 1, j] == player)
-                    or (j > 0 and board_2d[i, j - 1] == player)
-                    or (j < n - 1 and board_2d[i, j + 1] == player)):
+            if (
+                (i > 0 and board_2d[i - 1, j] == player)
+                or (i < n - 1 and board_2d[i + 1, j] == player)
+                or (j > 0 and board_2d[i, j - 1] == player)
+                or (j < n - 1 and board_2d[i, j + 1] == player)
+            ):
                 danger[i, j] = True
     return danger
 

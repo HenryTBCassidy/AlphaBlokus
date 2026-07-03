@@ -19,6 +19,7 @@ Usage::
 
 Output lands at ``temp/benchmarks/<run_name>_benchmark/``.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -114,7 +115,10 @@ def _force_detailed_profiling(config: RunConfig) -> RunConfig:
 
 
 def _run_self_play_phase(
-    config: RunConfig, game: IGame, nnet: INeuralNetWrapper, num_workers: int,
+    config: RunConfig,
+    game: IGame,
+    nnet: INeuralNetWrapper,
+    num_workers: int,
 ) -> PhaseResult:
     """Self-play phase, sequential or process-pool-parallel based on
     ``num_workers``.
@@ -131,7 +135,9 @@ def _run_self_play_phase(
 
 
 def _run_self_play_phase_serial(
-    config: RunConfig, game: IGame, nnet: INeuralNetWrapper,
+    config: RunConfig,
+    game: IGame,
+    nnet: INeuralNetWrapper,
 ) -> PhaseResult:
     heartbeat = _PhaseHeartbeat("Self-Play", config.num_eps)
     per_game_stats: list[MCTSEpisodeStats] = []
@@ -151,7 +157,9 @@ def _run_self_play_phase_serial(
 
 
 def _run_self_play_phase_parallel(
-    config: RunConfig, nnet: INeuralNetWrapper, num_workers: int,
+    config: RunConfig,
+    nnet: INeuralNetWrapper,
+    num_workers: int,
 ) -> PhaseResult:
     """Dispatch self-play across ``num_workers`` worker processes via the
     parallel self-play orchestrator. Saves the current ``nnet`` to a
@@ -159,8 +167,7 @@ def _run_self_play_phase_parallel(
     """
     from alphablokus.parallel.pool import run_self_play_episodes_parallel
 
-    print(f"[Self-Play] {config.num_eps} games across {num_workers} workers — starting",
-          flush=True)
+    print(f"[Self-Play] {config.num_eps} games across {num_workers} workers — starting", flush=True)
     checkpoint = "benchmark_worker_init.pth.tar"
     nnet.save_checkpoint(filename=checkpoint)
 
@@ -176,7 +183,9 @@ def _run_self_play_phase_parallel(
 
 
 def _play_one_self_play_episode(
-    game: IGame, mcts: MCTS, config: RunConfig,
+    game: IGame,
+    mcts: MCTS,
+    config: RunConfig,
 ) -> int:
     """Replays ``Coach.execute_episode`` but without storing training examples.
 
@@ -237,8 +246,12 @@ def _combine_episode_stats(stats_list: list[MCTSEpisodeStats]) -> MCTSEpisodeSta
 
 def _run_two_player_phase(
     *,
-    phase_name: str, num_games: int, config: RunConfig,
-    game: IGame, nnet_a: INeuralNetWrapper, nnet_b: INeuralNetWrapper,
+    phase_name: str,
+    num_games: int,
+    config: RunConfig,
+    game: IGame,
+    nnet_a: INeuralNetWrapper,
+    nnet_b: INeuralNetWrapper,
     num_workers: int,
 ) -> PhaseResult:
     """Shared engine for arena and Elo phases. Two-player game, swapped halfway.
@@ -250,19 +263,31 @@ def _run_two_player_phase(
     """
     if num_workers > 1:
         return _run_two_player_phase_parallel(
-            phase_name=phase_name, num_games=num_games, config=config,
-            nnet_a=nnet_a, nnet_b=nnet_b, num_workers=num_workers,
+            phase_name=phase_name,
+            num_games=num_games,
+            config=config,
+            nnet_a=nnet_a,
+            nnet_b=nnet_b,
+            num_workers=num_workers,
         )
     return _run_two_player_phase_serial(
-        phase_name=phase_name, num_games=num_games, config=config,
-        game=game, nnet_a=nnet_a, nnet_b=nnet_b,
+        phase_name=phase_name,
+        num_games=num_games,
+        config=config,
+        game=game,
+        nnet_a=nnet_a,
+        nnet_b=nnet_b,
     )
 
 
 def _run_two_player_phase_serial(
     *,
-    phase_name: str, num_games: int, config: RunConfig,
-    game: IGame, nnet_a: INeuralNetWrapper, nnet_b: INeuralNetWrapper,
+    phase_name: str,
+    num_games: int,
+    config: RunConfig,
+    game: IGame,
+    nnet_a: INeuralNetWrapper,
+    nnet_b: INeuralNetWrapper,
 ) -> PhaseResult:
     heartbeat = _PhaseHeartbeat(phase_name, num_games)
     per_game_stats: list[MCTSEpisodeStats] = []
@@ -279,18 +304,26 @@ def _run_two_player_phase_serial(
             player_a, player_b = nnet_b, nnet_a
 
         net_player_a = NetworkPlayer(
-            game=game, nnet=player_a, mcts_config=config.mcts_config, temp=0.0,
+            game=game,
+            nnet=player_a,
+            mcts_config=config.mcts_config,
+            temp=0.0,
         )
         net_player_b = NetworkPlayer(
-            game=game, nnet=player_b, mcts_config=config.mcts_config, temp=0.0,
+            game=game,
+            nnet=player_b,
+            mcts_config=config.mcts_config,
+            temp=0.0,
         )
         arena = Arena(net_player_a, net_player_b, game)
         _, _ = arena.play_game(record=False)
 
-        combined = _combine_episode_stats([
-            net_player_a._mcts.get_episode_stats(),
-            net_player_b._mcts.get_episode_stats(),
-        ])
+        combined = _combine_episode_stats(
+            [
+                net_player_a._mcts.get_episode_stats(),
+                net_player_b._mcts.get_episode_stats(),
+            ]
+        )
         per_game_stats.append(combined)
         heartbeat.tick(moves=combined.num_moves, search_time_s=combined.total_search_time_s)
 
@@ -300,8 +333,12 @@ def _run_two_player_phase_serial(
 
 def _run_two_player_phase_parallel(
     *,
-    phase_name: str, num_games: int, config: RunConfig,
-    nnet_a: INeuralNetWrapper, nnet_b: INeuralNetWrapper, num_workers: int,
+    phase_name: str,
+    num_games: int,
+    config: RunConfig,
+    nnet_a: INeuralNetWrapper,
+    nnet_b: INeuralNetWrapper,
+    num_workers: int,
 ) -> PhaseResult:
     """Parallel two-player phase via the parallel self-play orchestrator.
 
@@ -371,6 +408,7 @@ def _build_estimator_table(
     plus a flat per-gen training overhead (taken from
     ``docs/08-TRAINING-ESTIMATES.md`` — ~3 min/gen at 64f×4b).
     """
+
     def mean_per_game(p: PhaseResult) -> float:
         if not p.stats:
             return 0.0
@@ -380,7 +418,7 @@ def _build_estimator_table(
     arena_mean = mean_per_game(phases["Arena"])
     elo_mean = mean_per_game(phases["Elo"])
     training_overhead_s = 180.0  # ~3 min — replace once we measure this in
-                                 # the benchmark too if it matters
+    # the benchmark too if it matters
 
     rows = []
     for scale in extrapolate_scales:
@@ -389,28 +427,31 @@ def _build_estimator_table(
         elo_s = elo_mean * scale["elo_games"] * scale["num_gens"]
         train_s = training_overhead_s * scale["num_gens"]
         total_s = sp_s + ar_s + elo_s + train_s
-        rows.append({
-            "Scale": scale["name"],
-            "Gens × Eps × Arena × Elo":
-                f"{scale['num_gens']} × {scale['num_eps']} × {scale['num_arena']} × {scale['elo_games']}",
-            "Self-play": _fmt_duration(sp_s),
-            "Arena": _fmt_duration(ar_s),
-            "Elo": _fmt_duration(elo_s),
-            "Training (est.)": _fmt_duration(train_s),
-            "Total": _fmt_duration(total_s),
-        })
+        rows.append(
+            {
+                "Scale": scale["name"],
+                "Gens × Eps × Arena × Elo": (
+                    f"{scale['num_gens']} × {scale['num_eps']} × {scale['num_arena']} × {scale['elo_games']}"
+                ),
+                "Self-play": _fmt_duration(sp_s),
+                "Arena": _fmt_duration(ar_s),
+                "Elo": _fmt_duration(elo_s),
+                "Training (est.)": _fmt_duration(train_s),
+                "Total": _fmt_duration(total_s),
+            }
+        )
 
     if not rows:
         return ""
     headers = list(rows[0].keys())
-    out = "<table class=\"summary\"><thead><tr>"
+    out = '<table class="summary"><thead><tr>'
     out += "".join(f"<th>{h}</th>" for h in headers)
     out += "</tr></thead><tbody>"
     for r in rows:
         out += "<tr>" + "".join(f"<td>{r[h]}</td>" for h in headers) + "</tr>"
     out += "</tbody></table>"
     out += (
-        "<p class=\"subtitle\">Self-play/arena/Elo costs scale linearly with "
+        '<p class="subtitle">Self-play/arena/Elo costs scale linearly with '
         "their game counts × number of generations. Training overhead is a "
         "rough 3-min/gen estimate (refresh once F4 work changes it).</p>"
     )
@@ -432,52 +473,67 @@ def _write_parquets(phases: dict[str, PhaseResult], output_dir: Path) -> None:
     rows = []
     for name, p in phases.items():
         for i, s in enumerate(p.stats):
-            rows.append({
-                "phase": name, "game_idx": i, "num_moves": s.num_moves,
-                "total_sims": s.total_sims,
-                "search_time_s": s.total_search_time_s,
-                "inference_time_s": s.total_inference_time_s,
-                "valid_moves_time_s": s.total_valid_moves_time_s,
-                "game_ended_time_s": s.total_game_ended_time_s,
-            })
+            rows.append(
+                {
+                    "phase": name,
+                    "game_idx": i,
+                    "num_moves": s.num_moves,
+                    "total_sims": s.total_sims,
+                    "search_time_s": s.total_search_time_s,
+                    "inference_time_s": s.total_inference_time_s,
+                    "valid_moves_time_s": s.total_valid_moves_time_s,
+                    "game_ended_time_s": s.total_game_ended_time_s,
+                }
+            )
     per_game_df = pd.DataFrame(rows)
     per_game_df.to_parquet(output_dir / "per_game.parquet")
 
     summary_rows = []
     for name, p in phases.items():
-        summary_rows.append({
-            "phase": name, "games": len(p.stats),
-            "wall_clock_s": p.wall_clock_s,
-            "mean_per_game_s": p.wall_clock_s / max(len(p.stats), 1),
-        })
+        summary_rows.append(
+            {
+                "phase": name,
+                "games": len(p.stats),
+                "wall_clock_s": p.wall_clock_s,
+                "mean_per_game_s": p.wall_clock_s / max(len(p.stats), 1),
+            }
+        )
     pd.DataFrame(summary_rows).to_parquet(output_dir / "phase_summary.parquet")
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Benchmark self-play / arena / Elo phases")
     parser.add_argument(
-        "--config", type=str, default="run_configurations/profile_baseline.json",
+        "--config",
+        type=str,
+        default="run_configurations/profile_baseline.json",
         help="Path to a run config JSON. The benchmark uses num_eps, "
         "num_arena_matches, elo_games_per_gen, and the MCTS + net configs.",
     )
     parser.add_argument(
-        "--output-dir", type=str, default=None,
-        help="Where to write the report + parquets. Defaults to "
-        "<config.root>/<run_name>_benchmark/.",
+        "--output-dir",
+        type=str,
+        default=None,
+        help="Where to write the report + parquets. Defaults to <config.root>/<run_name>_benchmark/.",
     )
     parser.add_argument(
-        "--num-workers", type=int, default=1,
+        "--num-workers",
+        type=int,
+        default=1,
         help="Parallelism level (placeholder for F1 — sequential for now, "
         "labelled in the report so before/after comparisons are clear).",
     )
     parser.add_argument(
-        "--use-f2", action="store_true",
+        "--use-f2",
+        action="store_true",
         help="Enable the F2 precomputed-move-list move generator (Blokus only). "
         "Overrides ``use_optimised_movegen`` in the config JSON. Effective in "
         "both the main process and any spawned workers.",
     )
     parser.add_argument(
-        "--mcts-batch-size", type=int, default=None,
+        "--mcts-batch-size",
+        type=int,
+        default=None,
         help="F3 batched-inference leaf batch size K. Overrides "
         "``mcts_config.mcts_batch_size``. K=1 is the pre-F3 behaviour; K>1 "
         "collects K virtual-loss-diversified leaves per single batched GPU "
@@ -488,9 +544,11 @@ def main() -> None:
     config = _force_detailed_profiling(load_args(args.config))
     if args.use_f2:
         from dataclasses import replace as dc_replace
+
         config = dc_replace(config, use_optimised_movegen=True)
     if args.mcts_batch_size is not None:
         from dataclasses import replace as dc_replace
+
         config = dc_replace(
             config,
             mcts_config=dc_replace(config.mcts_config, mcts_batch_size=args.mcts_batch_size),
@@ -512,9 +570,10 @@ def main() -> None:
     # Enable the optimised move generator in the main-process game if
     # requested. Workers handle this themselves via
     # ``alphablokus.parallel.pool._maybe_enable_f2``.
-    if getattr(config, "use_optimised_movegen", False) and (
-        enable := getattr(game, "enable_optimised_movegen", None)
-    ) is not None:
+    if (
+        getattr(config, "use_optimised_movegen", False)
+        and (enable := getattr(game, "enable_optimised_movegen", None)) is not None
+    ):
         print("[F2] Enabling optimised move generator on main game", flush=True)
         enable()
 
@@ -522,28 +581,35 @@ def main() -> None:
     phases: dict[str, PhaseResult] = {}
     phases["Self-Play"] = _run_self_play_phase(config, game, nnet, args.num_workers)
     phases["Arena"] = _run_two_player_phase(
-        phase_name="Arena", num_games=config.num_arena_matches, config=config,
-        game=game, nnet_a=nnet, nnet_b=nnet_opponent, num_workers=args.num_workers,
+        phase_name="Arena",
+        num_games=config.num_arena_matches,
+        config=config,
+        game=game,
+        nnet_a=nnet,
+        nnet_b=nnet_opponent,
+        num_workers=args.num_workers,
     )
     phases["Elo"] = _run_two_player_phase(
-        phase_name="Elo", num_games=config.elo_games_per_gen, config=config,
-        game=game, nnet_a=nnet, nnet_b=nnet_opponent, num_workers=args.num_workers,
+        phase_name="Elo",
+        num_games=config.elo_games_per_gen,
+        config=config,
+        game=game,
+        nnet_a=nnet,
+        nnet_b=nnet_opponent,
+        num_workers=args.num_workers,
     )
     overall_wall = time.perf_counter() - overall_start
 
     _write_parquets(phases, output_dir)
 
     estimator_html = _build_estimator_table(
-        phases, config,
+        phases,
+        config,
         extrapolate_scales=[
-            {"name": "Sanity (1×5×5×5)",
-             "num_eps": 5, "num_arena": 5, "elo_games": 5, "num_gens": 1},
-            {"name": "blokus_pc_second (5×80×50×20)",
-             "num_eps": 80, "num_arena": 50, "elo_games": 20, "num_gens": 5},
-            {"name": "Long (20×80×50×20)",
-             "num_eps": 80, "num_arena": 50, "elo_games": 20, "num_gens": 20},
-            {"name": "Serious (50×200×100×50)",
-             "num_eps": 200, "num_arena": 100, "elo_games": 50, "num_gens": 50},
+            {"name": "Sanity (1×5×5×5)", "num_eps": 5, "num_arena": 5, "elo_games": 5, "num_gens": 1},
+            {"name": "blokus_pc_second (5×80×50×20)", "num_eps": 80, "num_arena": 50, "elo_games": 20, "num_gens": 5},
+            {"name": "Long (20×80×50×20)", "num_eps": 80, "num_arena": 50, "elo_games": 20, "num_gens": 20},
+            {"name": "Serious (50×200×100×50)", "num_eps": 200, "num_arena": 100, "elo_games": 50, "num_gens": 50},
         ],
     )
 
@@ -564,8 +630,7 @@ def main() -> None:
     print(f"Total wall-clock: {_fmt_duration(overall_wall)}")
     for name, p in phases.items():
         per = p.wall_clock_s / max(len(p.stats), 1)
-        print(f"  {name}: {_fmt_duration(p.wall_clock_s)} "
-              f"({len(p.stats)} games, {per:.2f}s/game)")
+        print(f"  {name}: {_fmt_duration(p.wall_clock_s)} ({len(p.stats)} games, {per:.2f}s/game)")
     print(f"Report → {report_path}")
 
 

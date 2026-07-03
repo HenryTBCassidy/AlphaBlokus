@@ -6,6 +6,7 @@ implementation had an alpha-beta + memoisation bug that occasionally lost to
 random opponents (~1 in 200 games), which is exactly the kind of subtle
 regression we want a stress test to catch.
 """
+
 from __future__ import annotations
 
 import numpy as np
@@ -58,9 +59,9 @@ def test_minimax_blocks_immediate_loss(game: TicTacToeGame) -> None:
     # Threat: X would win with action 6 (col 2,row 0). O must play 6 to block.
     board = game.initialise_board()
     # X plays action 0 (top-left), O plays elsewhere, X plays action 3 (top-middle), now O must block.
-    board, _ = game.get_next_state(board, 1, 0)   # X
+    board, _ = game.get_next_state(board, 1, 0)  # X
     board, _ = game.get_next_state(board, -1, 4)  # O centre — doesn't matter where
-    board, _ = game.get_next_state(board, 1, 3)   # X creates threat on top row
+    board, _ = game.get_next_state(board, 1, 3)  # X creates threat on top row
     canonical = game.get_canonical_form(board, -1)  # O's turn
 
     minimax = MinimaxTicTacToePlayer(game)

@@ -3,6 +3,7 @@
 Pure functions: dataframe in, styled figure out. Shared style constants and
 helpers live here so every chart in the report reads as one system.
 """
+
 from __future__ import annotations
 
 import pandas as pd
@@ -59,6 +60,7 @@ def accepted_mask(arena_data: pd.DataFrame, update_threshold: float) -> pd.Serie
     function** the coach uses, so reporting can never diverge.
     """
     from alphablokus.evaluation.acceptance import is_accepted_score_rule
+
     if "accepted" in arena_data.columns:
         return arena_data["accepted"].fillna(False).astype(bool)
     return arena_data.apply(
@@ -72,7 +74,6 @@ def accepted_mask(arena_data: pd.DataFrame, update_threshold: float) -> pd.Serie
     )
 
 
-
 def make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
     """Line chart with mean pi_loss, v_loss, and total_loss per generation.
 
@@ -83,38 +84,56 @@ def make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
     """
     sorted_df = df.sort_values(["generation", "epoch", "batch_number"])
     last_epoch = sorted_df.groupby("generation")["epoch"].max()
-    last_epoch_df = sorted_df[
-        sorted_df["epoch"] == sorted_df["generation"].map(last_epoch)
-    ]
-    agg = last_epoch_df.groupby("generation").agg(
-        pi_loss=("pi_loss", "mean"),
-        v_loss=("v_loss", "mean"),
-        total_loss=("total_loss", "mean"),
-    ).reset_index().sort_values("generation")
+    last_epoch_df = sorted_df[sorted_df["epoch"] == sorted_df["generation"].map(last_epoch)]
+    agg = (
+        last_epoch_df.groupby("generation")
+        .agg(
+            pi_loss=("pi_loss", "mean"),
+            v_loss=("v_loss", "mean"),
+            total_loss=("total_loss", "mean"),
+        )
+        .reset_index()
+        .sort_values("generation")
+    )
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=agg["generation"], y=agg["total_loss"],
-        mode="lines+markers", name="Total",
-        line={"width": 3, "color": _COLORS["primary"]},
-    ))
-    fig.add_trace(go.Scatter(
-        x=agg["generation"], y=agg["pi_loss"],
-        mode="lines+markers", name="Policy",
-        line={"width": 2, "color": _COLORS["secondary"]},
-    ))
-    fig.add_trace(go.Scatter(
-        x=agg["generation"], y=agg["v_loss"],
-        mode="lines+markers", name="Value",
-        line={"width": 2, "color": _COLORS["tertiary"]},
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=agg["generation"],
+            y=agg["total_loss"],
+            mode="lines+markers",
+            name="Total",
+            line={"width": 3, "color": _COLORS["primary"]},
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=agg["generation"],
+            y=agg["pi_loss"],
+            mode="lines+markers",
+            name="Policy",
+            line={"width": 2, "color": _COLORS["secondary"]},
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=agg["generation"],
+            y=agg["v_loss"],
+            mode="lines+markers",
+            name="Value",
+            line={"width": 2, "color": _COLORS["tertiary"]},
+        )
+    )
 
     # "Worse than random" band for value loss
     max_v = float(agg["v_loss"].max())
     if max_v > 1.0:
         fig.add_hrect(
-            y0=1.0, y1=max(max_v * 1.05, 1.4),
-            fillcolor=_COLORS["negative"], opacity=0.06, line_width=0,
+            y0=1.0,
+            y1=max(max_v * 1.05, 1.4),
+            fillcolor=_COLORS["negative"],
+            opacity=0.06,
+            line_width=0,
             annotation_text="Value loss > 1.0: worse than random",
             annotation_position="top left",
             annotation_font_size=10,
@@ -128,6 +147,7 @@ def make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
 # ---------------------------------------------------------------------------
 # Smoothed per-batch loss timeline
 # ---------------------------------------------------------------------------
+
 
 def make_loss_timeline(df: pd.DataFrame) -> go.Figure:
     """Smoothed loss over the full training timeline with generation boundaries.
@@ -154,18 +174,27 @@ def make_loss_timeline(df: pd.DataFrame) -> go.Figure:
 
     for col, name, color in series:
         # Raw data — visible context, secondary to the smoothed line.
-        fig.add_trace(go.Scatter(
-            x=sorted_df["step"], y=sorted_df[col],
-            mode="markers", marker={"size": 3, "color": color, "opacity": 0.25},
-            showlegend=False, hoverinfo="skip",
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=sorted_df["step"],
+                y=sorted_df[col],
+                mode="markers",
+                marker={"size": 3, "color": color, "opacity": 0.25},
+                showlegend=False,
+                hoverinfo="skip",
+            )
+        )
         # Smoothed line
         smoothed = sorted_df[col].ewm(span=span, adjust=False).mean()
-        fig.add_trace(go.Scatter(
-            x=sorted_df["step"], y=smoothed,
-            mode="lines", name=name,
-            line={"width": 2, "color": color},
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=sorted_df["step"],
+                y=smoothed,
+                mode="lines",
+                name=name,
+                line={"width": 2, "color": color},
+            )
+        )
 
     # Generation boundary lines
     gen_boundaries = sorted_df.groupby("generation")["step"].min()
@@ -173,25 +202,34 @@ def make_loss_timeline(df: pd.DataFrame) -> go.Figure:
         if step == 0:
             continue
         fig.add_vline(
-            x=step, line_dash="dot", line_color=_COLORS["neutral"], line_width=1,
-            annotation_text=f"Gen {gen}", annotation_position="top",
-            annotation_font_size=9, annotation_font_color=_COLORS["neutral"],
+            x=step,
+            line_dash="dot",
+            line_color=_COLORS["neutral"],
+            line_width=1,
+            annotation_text=f"Gen {gen}",
+            annotation_position="top",
+            annotation_font_size=9,
+            annotation_font_color=_COLORS["neutral"],
         )
 
     fig.update_layout(
-        xaxis_title="Training Step (sequential)", yaxis_title="Loss",
+        xaxis_title="Training Step (sequential)",
+        yaxis_title="Loss",
         title="Per-Batch Loss (smoothed)",
-        updatemenus=[{
-            "type": "buttons",
-            "direction": "right",
-            "x": 1.0, "y": 1.15, "xanchor": "right", "yanchor": "top",
-            "buttons": [
-                {"label": "Linear", "method": "relayout",
-                 "args": [{"yaxis.type": "linear"}]},
-                {"label": "Log", "method": "relayout",
-                 "args": [{"yaxis.type": "log"}]},
-            ],
-        }],
+        updatemenus=[
+            {
+                "type": "buttons",
+                "direction": "right",
+                "x": 1.0,
+                "y": 1.15,
+                "xanchor": "right",
+                "yanchor": "top",
+                "buttons": [
+                    {"label": "Linear", "method": "relayout", "args": [{"yaxis.type": "linear"}]},
+                    {"label": "Log", "method": "relayout", "args": [{"yaxis.type": "log"}]},
+                ],
+            }
+        ],
     )
     return _apply_defaults(fig)
 
@@ -218,9 +256,7 @@ def make_per_gen_loss_curves(df: pd.DataFrame) -> go.Figure:
     n_gens = len(gens)
 
     # Sample the Viridis colorscale at n_gens evenly-spaced points.
-    sample_positions = (
-        [i / max(n_gens - 1, 1) for i in range(n_gens)] if n_gens > 1 else [0.5]
-    )
+    sample_positions = [i / max(n_gens - 1, 1) for i in range(n_gens)] if n_gens > 1 else [0.5]
     palette = pc.sample_colorscale("Viridis", sample_positions)
 
     fig = go.Figure()
@@ -232,48 +268,60 @@ def make_per_gen_loss_curves(df: pd.DataFrame) -> go.Figure:
         # within-gen learning curve we're trying to see.
         span = max(3, len(gen_df) // 10)
         smoothed = gen_df["total_loss"].ewm(span=span, adjust=False).mean()
-        fig.add_trace(go.Scatter(
-            x=gen_df["step_in_gen"], y=smoothed,
-            mode="lines",
-            line={"width": 1.5, "color": colour},
-            name=f"Gen {gen}",
-            showlegend=False,
-            hovertemplate=f"Gen {gen}, step %{{x}}: loss %{{y:.3f}}<extra></extra>",
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=gen_df["step_in_gen"],
+                y=smoothed,
+                mode="lines",
+                line={"width": 1.5, "color": colour},
+                name=f"Gen {gen}",
+                showlegend=False,
+                hovertemplate=f"Gen {gen}, step %{{x}}: loss %{{y:.3f}}<extra></extra>",
+            )
+        )
 
     # Invisible scatter trace just to carry the colorbar.
-    fig.add_trace(go.Scatter(
-        x=[None], y=[None],
-        mode="markers",
-        marker={
-            "size": 0.1,
-            "colorscale": "Viridis",
-            "cmin": min(gens), "cmax": max(gens),
-            "color": [min(gens)],
-            "showscale": True,
-            "colorbar": {
-                "title": {"text": "Generation"},
-                "thickness": 12, "len": 0.85,
+    fig.add_trace(
+        go.Scatter(
+            x=[None],
+            y=[None],
+            mode="markers",
+            marker={
+                "size": 0.1,
+                "colorscale": "Viridis",
+                "cmin": min(gens),
+                "cmax": max(gens),
+                "color": [min(gens)],
+                "showscale": True,
+                "colorbar": {
+                    "title": {"text": "Generation"},
+                    "thickness": 12,
+                    "len": 0.85,
+                },
             },
-        },
-        showlegend=False, hoverinfo="skip",
-    ))
+            showlegend=False,
+            hoverinfo="skip",
+        )
+    )
 
     fig.update_layout(
         xaxis_title="Batch within generation",
         yaxis_title="Total loss",
         title="Loss Curves by Generation (overlaid)",
-        updatemenus=[{
-            "type": "buttons",
-            "direction": "right",
-            "x": 1.0, "y": 1.15, "xanchor": "right", "yanchor": "top",
-            "buttons": [
-                {"label": "Linear", "method": "relayout",
-                 "args": [{"yaxis.type": "linear"}]},
-                {"label": "Log", "method": "relayout",
-                 "args": [{"yaxis.type": "log"}]},
-            ],
-        }],
+        updatemenus=[
+            {
+                "type": "buttons",
+                "direction": "right",
+                "x": 1.0,
+                "y": 1.15,
+                "xanchor": "right",
+                "yanchor": "top",
+                "buttons": [
+                    {"label": "Linear", "method": "relayout", "args": [{"yaxis.type": "linear"}]},
+                    {"label": "Log", "method": "relayout", "args": [{"yaxis.type": "log"}]},
+                ],
+            }
+        ],
     )
     return _apply_defaults(fig)
 
@@ -281,6 +329,7 @@ def make_per_gen_loss_curves(df: pd.DataFrame) -> go.Figure:
 # ---------------------------------------------------------------------------
 # Arena
 # ---------------------------------------------------------------------------
+
 
 def make_arena_plot(arena_data: pd.DataFrame, update_threshold: float) -> go.Figure:
     """Line chart of the per-generation acceptance score vs the threshold.
@@ -301,6 +350,7 @@ def make_arena_plot(arena_data: pd.DataFrame, update_threshold: float) -> go.Fig
     # raw wins. acceptance_score() is the very function the training loop uses,
     # so the chart and the decision cannot diverge.
     from alphablokus.evaluation.acceptance import acceptance_score
+
     df["pct_score"] = 100 * df.apply(
         lambda r: acceptance_score(int(r["wins"]), int(r["losses"]), int(r["draws"])),
         axis=1,
@@ -311,54 +361,85 @@ def make_arena_plot(arena_data: pd.DataFrame, update_threshold: float) -> go.Fig
 
     fig = go.Figure()
     # Composition lines — full W/L picture, off by default to keep it clean.
-    fig.add_trace(go.Scatter(
-        x=gens, y=df["pct_wins"], name="Wins %", mode="lines",
-        line={"color": _COLORS["positive"], "width": 1}, opacity=0.5,
-        visible="legendonly",
-        hovertemplate="Gen %{x} — Wins %{y:.0f}%<extra></extra>",
-    ))
-    fig.add_trace(go.Scatter(
-        x=gens, y=df["pct_losses"], name="Losses %", mode="lines",
-        line={"color": _COLORS["negative"], "width": 1}, opacity=0.5,
-        visible="legendonly",
-        hovertemplate="Gen %{x} — Losses %{y:.0f}%<extra></extra>",
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=gens,
+            y=df["pct_wins"],
+            name="Wins %",
+            mode="lines",
+            line={"color": _COLORS["positive"], "width": 1},
+            opacity=0.5,
+            visible="legendonly",
+            hovertemplate="Gen %{x} — Wins %{y:.0f}%<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=gens,
+            y=df["pct_losses"],
+            name="Losses %",
+            mode="lines",
+            line={"color": _COLORS["negative"], "width": 1},
+            opacity=0.5,
+            visible="legendonly",
+            hovertemplate="Gen %{x} — Losses %{y:.0f}%<extra></extra>",
+        )
+    )
     # Primary: the acceptance-score line.
-    fig.add_trace(go.Scatter(
-        x=gens, y=df["pct_score"], name="Score (wins + ½ draws)", mode="lines",
-        line={"color": "#333333", "width": 1.5},
-        customdata=df[["wins", "losses", "draws"]].to_numpy(),
-        hovertemplate=(
-            "Gen %{x}<br>Score %{y:.0f}%<br>"
-            "W%{customdata[0]} · L%{customdata[1]} · D%{customdata[2]}<extra></extra>"
-        ),
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=gens,
+            y=df["pct_score"],
+            name="Score (wins + ½ draws)",
+            mode="lines",
+            line={"color": "#333333", "width": 1.5},
+            customdata=df[["wins", "losses", "draws"]].to_numpy(),
+            hovertemplate=(
+                "Gen %{x}<br>Score %{y:.0f}%<br>"
+                "W%{customdata[0]} · L%{customdata[1]} · D%{customdata[2]}<extra></extra>"
+            ),
+        )
+    )
     # Accept / reject markers on the score line — replaces the per-bar "✓
     # Accepted" text (which smeared together once accepts got dense).
     acc, rej = df[df["is_accepted"]], df[~df["is_accepted"]]
-    fig.add_trace(go.Scatter(
-        x=acc["generation"].astype(int), y=acc["pct_score"], name="Accepted",
-        mode="markers",
-        marker={"symbol": "circle", "size": 8, "color": _COLORS["positive"],
-                "line": {"width": 1, "color": "#222222"}},
-        hovertemplate="Gen %{x} ACCEPTED — score %{y:.0f}%<extra></extra>",
-    ))
-    fig.add_trace(go.Scatter(
-        x=rej["generation"].astype(int), y=rej["pct_score"], name="Rejected",
-        mode="markers",
-        marker={"symbol": "circle-open", "size": 7, "color": _COLORS["negative"],
-                "line": {"width": 1.5}},
-        hovertemplate="Gen %{x} rejected — score %{y:.0f}%<extra></extra>",
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=acc["generation"].astype(int),
+            y=acc["pct_score"],
+            name="Accepted",
+            mode="markers",
+            marker={
+                "symbol": "circle",
+                "size": 8,
+                "color": _COLORS["positive"],
+                "line": {"width": 1, "color": "#222222"},
+            },
+            hovertemplate="Gen %{x} ACCEPTED — score %{y:.0f}%<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=rej["generation"].astype(int),
+            y=rej["pct_score"],
+            name="Rejected",
+            mode="markers",
+            marker={"symbol": "circle-open", "size": 7, "color": _COLORS["negative"], "line": {"width": 1.5}},
+            hovertemplate="Gen %{x} rejected — score %{y:.0f}%<extra></extra>",
+        )
+    )
 
     fig.add_hline(
-        y=update_threshold * 100, line_dash="dash", line_color=_COLORS["primary"],
+        y=update_threshold * 100,
+        line_dash="dash",
+        line_color=_COLORS["primary"],
         annotation_text=f"Accept threshold ({update_threshold:.0%})",
         annotation_position="top left",
     )
 
     fig.update_layout(
-        xaxis_title="Generation", yaxis_title="Score / win-rate (%)",
+        xaxis_title="Generation",
+        yaxis_title="Score / win-rate (%)",
         yaxis_range=[0, 105],
         title="Arena: New Net vs Predecessor",
     )
@@ -369,6 +450,7 @@ def make_arena_plot(arena_data: pd.DataFrame, update_threshold: float) -> go.Fig
 # Performance charts (half-width for grid)
 # ---------------------------------------------------------------------------
 
+
 def make_timing_plot(timings_data: pd.DataFrame) -> go.Figure:
     """Stacked bar of phase durations per generation."""
     df = timings_data[timings_data["cycle_stage"] != "WholeCycle"].copy()
@@ -376,14 +458,19 @@ def make_timing_plot(timings_data: pd.DataFrame) -> go.Figure:
     fig = go.Figure()
     for phase in ["SelfPlay", "Training", "Arena"]:
         phase_df = df[df["cycle_stage"] == phase]
-        fig.add_trace(go.Bar(
-            x=phase_df["generation"], y=phase_df["time_elapsed"],
-            name=phase, marker_color=_PHASE_COLORS[phase],
-        ))
+        fig.add_trace(
+            go.Bar(
+                x=phase_df["generation"],
+                y=phase_df["time_elapsed"],
+                name=phase,
+                marker_color=_PHASE_COLORS[phase],
+            )
+        )
 
     fig.update_layout(
         barmode="stack",
-        xaxis_title="Generation", yaxis_title="Time (s)",
+        xaxis_title="Generation",
+        yaxis_title="Time (s)",
         title="Time per Generation",
     )
     return _apply_defaults(fig, width=_HALF_WIDTH, height=_GRID_HEIGHT)
@@ -391,16 +478,24 @@ def make_timing_plot(timings_data: pd.DataFrame) -> go.Figure:
 
 def make_throughput_plot(throughput_data: pd.DataFrame) -> go.Figure:
     """Bar chart of average training throughput per generation."""
-    agg = throughput_data.groupby("generation").agg(
-        avg_throughput=("samples_per_second", "mean"),
-    ).reset_index()
+    agg = (
+        throughput_data.groupby("generation")
+        .agg(
+            avg_throughput=("samples_per_second", "mean"),
+        )
+        .reset_index()
+    )
 
-    fig = go.Figure(go.Bar(
-        x=agg["generation"], y=agg["avg_throughput"],
-        marker_color=_COLORS["primary"],
-    ))
+    fig = go.Figure(
+        go.Bar(
+            x=agg["generation"],
+            y=agg["avg_throughput"],
+            marker_color=_COLORS["primary"],
+        )
+    )
     fig.update_layout(
-        xaxis_title="Generation", yaxis_title="Samples/s",
+        xaxis_title="Generation",
+        yaxis_title="Samples/s",
         title="Training Throughput",
     )
     return _apply_defaults(fig, width=_HALF_WIDTH, height=_GRID_HEIGHT)
@@ -416,20 +511,30 @@ def make_network_entropy_plot(entropy_data: pd.DataFrame) -> go.Figure:
     isolates the network from MCTS noise.
     """
     df = entropy_data.copy()
-    agg = df.groupby("generation").agg(
-        mean=("mean_entropy", "mean"),
-        std=("mean_entropy", "std"),
-    ).reset_index().sort_values("generation")
+    agg = (
+        df.groupby("generation")
+        .agg(
+            mean=("mean_entropy", "mean"),
+            std=("mean_entropy", "std"),
+        )
+        .reset_index()
+        .sort_values("generation")
+    )
     agg["std"] = agg["std"].fillna(0.0)
 
     fig = go.Figure()
     _mean_band_trace(
-        fig, agg["generation"], agg["mean"], agg["std"],
-        color=_COLORS["accent"], name="Network Entropy",
+        fig,
+        agg["generation"],
+        agg["mean"],
+        agg["std"],
+        color=_COLORS["accent"],
+        name="Network Entropy",
         unit="nats",
     )
     fig.update_layout(
-        xaxis_title="Generation", yaxis_title="Mean entropy (nats)",
+        xaxis_title="Generation",
+        yaxis_title="Mean entropy (nats)",
         title="Network Policy Entropy on Held-Out Set",
         xaxis={"dtick": 1 if agg["generation"].max() < 40 else 5},
     )
@@ -442,6 +547,7 @@ def make_network_entropy_plot(entropy_data: pd.DataFrame) -> go.Figure:
 # render a representative *sample*: generations spread evenly across the run
 # (always keeping the first and last) and the first few games of each. The
 # full record stays in the ArenaReplays parquets either way.
+
 
 def make_elo_plot(
     elo_data: pd.DataFrame,
@@ -473,63 +579,84 @@ def make_elo_plot(
         # older runs without the column persisted.
         mask = accepted_mask(arena_data, update_threshold=0.5)
         accepted_lookup = pd.Series(
-            mask.values, index=arena_data["generation"].astype(int).values,
+            mask.values,
+            index=arena_data["generation"].astype(int).values,
         )
-        df["accepted"] = (
-            df["generation"].astype(int).map(accepted_lookup).fillna(True).astype(bool)
-        )
+        df["accepted"] = df["generation"].astype(int).map(accepted_lookup).fillna(True).astype(bool)
     else:
         df["accepted"] = True
 
     fig = go.Figure()
     # Single connecting line through all gens, regardless of accept/reject.
-    fig.add_trace(go.Scatter(
-        x=df["generation"], y=df["elo_rating"],
-        mode="lines", name="", showlegend=False,
-        line={"width": 2.5, "color": _COLORS["accent"]},
-        hoverinfo="skip",
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=df["generation"],
+            y=df["elo_rating"],
+            mode="lines",
+            name="",
+            showlegend=False,
+            line={"width": 2.5, "color": _COLORS["accent"]},
+            hoverinfo="skip",
+        )
+    )
     # Accepted-gen markers (filled).
     accepted_df = df[df["accepted"]]
-    fig.add_trace(go.Scatter(
-        x=accepted_df["generation"], y=accepted_df["elo_rating"],
-        mode="markers", name="Accepted (newly-trained net)",
-        marker={"size": 9, "color": _COLORS["accent"], "symbol": "circle"},
-        customdata=accepted_df[["elo_diff", "score_rate", "wins", "losses", "draws"]].values,
-        hovertemplate=(
-            "Gen %{x} (accepted) — Elo: %{y:.0f} "
-            "(%{customdata[0]:+.0f} vs baseline)<br>"
-            "Score: %{customdata[1]:.3f} "
-            "(W%{customdata[2]} L%{customdata[3]} D%{customdata[4]})"
-            "<extra></extra>"
-        ),
-    ))
-    # Rejected-gen markers (open) — these re-evaluate the previous accepted net.
-    rejected_df = df[~df["accepted"]]
-    if not rejected_df.empty:
-        fig.add_trace(go.Scatter(
-            x=rejected_df["generation"], y=rejected_df["elo_rating"],
-            mode="markers", name="Rejected (re-evaluation of prev best)",
-            marker={"size": 9, "color": _COLORS["accent"], "symbol": "circle-open",
-                    "line": {"width": 2, "color": _COLORS["accent"]}},
-            customdata=rejected_df[["elo_diff", "score_rate", "wins", "losses", "draws"]].values,
+    fig.add_trace(
+        go.Scatter(
+            x=accepted_df["generation"],
+            y=accepted_df["elo_rating"],
+            mode="markers",
+            name="Accepted (newly-trained net)",
+            marker={"size": 9, "color": _COLORS["accent"], "symbol": "circle"},
+            customdata=accepted_df[["elo_diff", "score_rate", "wins", "losses", "draws"]].values,
             hovertemplate=(
-                "Gen %{x} (rejected — rating shown is the reverted "
-                "previous-best net) — Elo: %{y:.0f} "
+                "Gen %{x} (accepted) — Elo: %{y:.0f} "
                 "(%{customdata[0]:+.0f} vs baseline)<br>"
                 "Score: %{customdata[1]:.3f} "
                 "(W%{customdata[2]} L%{customdata[3]} D%{customdata[4]})"
                 "<extra></extra>"
             ),
-        ))
+        )
+    )
+    # Rejected-gen markers (open) — these re-evaluate the previous accepted net.
+    rejected_df = df[~df["accepted"]]
+    if not rejected_df.empty:
+        fig.add_trace(
+            go.Scatter(
+                x=rejected_df["generation"],
+                y=rejected_df["elo_rating"],
+                mode="markers",
+                name="Rejected (re-evaluation of prev best)",
+                marker={
+                    "size": 9,
+                    "color": _COLORS["accent"],
+                    "symbol": "circle-open",
+                    "line": {"width": 2, "color": _COLORS["accent"]},
+                },
+                customdata=rejected_df[["elo_diff", "score_rate", "wins", "losses", "draws"]].values,
+                hovertemplate=(
+                    "Gen %{x} (rejected — rating shown is the reverted "
+                    "previous-best net) — Elo: %{y:.0f} "
+                    "(%{customdata[0]:+.0f} vs baseline)<br>"
+                    "Score: %{customdata[1]:.3f} "
+                    "(W%{customdata[2]} L%{customdata[3]} D%{customdata[4]})"
+                    "<extra></extra>"
+                ),
+            )
+        )
     fig.add_hline(
-        y=baseline, line_dash="dash", line_color=_COLORS["neutral"], line_width=1,
+        y=baseline,
+        line_dash="dash",
+        line_color=_COLORS["neutral"],
+        line_width=1,
         annotation_text=f"Baseline (gen 0) = {baseline}",
         annotation_position="bottom right",
-        annotation_font_size=10, annotation_font_color=_COLORS["neutral"],
+        annotation_font_size=10,
+        annotation_font_color=_COLORS["neutral"],
     )
     fig.update_layout(
-        xaxis_title="Generation", yaxis_title="Elo rating",
+        xaxis_title="Generation",
+        yaxis_title="Elo rating",
         title="Elo Rating vs Frozen Gen-0 Baseline",
         xaxis={"dtick": 1 if df["generation"].max() < 40 else 5},
     )
@@ -546,20 +673,29 @@ def make_minimax_plot(minimax_data: pd.DataFrame) -> go.Figure:
     """
     df = minimax_data.sort_values("generation").copy()
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=df["generation"], y=100 * df["draw_rate"],
-        mode="lines+markers", name="Draw rate (target: 100%)",
-        line={"width": 2.5, "color": _COLORS["tertiary"]},
-        hovertemplate="Gen %{x} — draws: %{y:.0f}%<extra></extra>",
-    ))
-    fig.add_trace(go.Scatter(
-        x=df["generation"], y=100 * df["loss_rate"],
-        mode="lines+markers", name="Loss rate (target: 0%)",
-        line={"width": 2.5, "color": _COLORS["negative"], "dash": "dot"},
-        hovertemplate="Gen %{x} — losses: %{y:.0f}%<extra></extra>",
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=df["generation"],
+            y=100 * df["draw_rate"],
+            mode="lines+markers",
+            name="Draw rate (target: 100%)",
+            line={"width": 2.5, "color": _COLORS["tertiary"]},
+            hovertemplate="Gen %{x} — draws: %{y:.0f}%<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=df["generation"],
+            y=100 * df["loss_rate"],
+            mode="lines+markers",
+            name="Loss rate (target: 0%)",
+            line={"width": 2.5, "color": _COLORS["negative"], "dash": "dot"},
+            hovertemplate="Gen %{x} — losses: %{y:.0f}%<extra></extra>",
+        )
+    )
     fig.update_layout(
-        xaxis_title="Generation", yaxis_title="Rate (%)",
+        xaxis_title="Generation",
+        yaxis_title="Rate (%)",
         yaxis_range=[-2, 102],
         title="Vs Perfect-Play Minimax (TTT)",
         xaxis={"dtick": 1 if df["generation"].max() < 40 else 5},
@@ -568,7 +704,8 @@ def make_minimax_plot(minimax_data: pd.DataFrame) -> go.Figure:
 
 
 def make_policy_accuracy_plot(
-    accuracy_data: pd.DataFrame, game_name: str,
+    accuracy_data: pd.DataFrame,
+    game_name: str,
 ) -> go.Figure:
     """Per-generation top-K agreement between the network's raw policy and
     the eval-set target. ``game_name`` switches the framing only — the
@@ -585,10 +722,15 @@ def make_policy_accuracy_plot(
     per generation is shown (mean across epochs).
     """
     df = accuracy_data.copy()
-    agg = df.groupby("generation").agg(
-        top1_mean=("top1_accuracy", "mean"),
-        top5_mean=("top5_accuracy", "mean"),
-    ).reset_index().sort_values("generation")
+    agg = (
+        df.groupby("generation")
+        .agg(
+            top1_mean=("top1_accuracy", "mean"),
+            top5_mean=("top5_accuracy", "mean"),
+        )
+        .reset_index()
+        .sort_values("generation")
+    )
 
     if game_name == "tictactoe":
         title = "Policy Agreement vs Minimax Oracle (held-out set)"
@@ -596,28 +738,39 @@ def make_policy_accuracy_plot(
         title = "Policy Agreement vs MCTS (held-out set)"
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=agg["generation"], y=100 * agg["top1_mean"],
-        mode="lines+markers", name="Top-1",
-        line={"width": 2.5, "color": _COLORS["primary"]},
-        hovertemplate="Gen %{x} — top-1: %{y:.1f}%<extra></extra>",
-    ))
-    fig.add_trace(go.Scatter(
-        x=agg["generation"], y=100 * agg["top5_mean"],
-        mode="lines+markers", name="Top-5",
-        line={"width": 2.5, "color": _COLORS["tertiary"], "dash": "dot"},
-        hovertemplate="Gen %{x} — top-5: %{y:.1f}%<extra></extra>",
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=agg["generation"],
+            y=100 * agg["top1_mean"],
+            mode="lines+markers",
+            name="Top-1",
+            line={"width": 2.5, "color": _COLORS["primary"]},
+            hovertemplate="Gen %{x} — top-1: %{y:.1f}%<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=agg["generation"],
+            y=100 * agg["top5_mean"],
+            mode="lines+markers",
+            name="Top-5",
+            line={"width": 2.5, "color": _COLORS["tertiary"], "dash": "dot"},
+            hovertemplate="Gen %{x} — top-5: %{y:.1f}%<extra></extra>",
+        )
+    )
     fig.update_layout(
-        xaxis_title="Generation", yaxis_title="Agreement (%)",
-        yaxis_range=[0, 105], title=title,
+        xaxis_title="Generation",
+        yaxis_title="Agreement (%)",
+        yaxis_range=[0, 105],
+        title=title,
         xaxis={"dtick": 1 if agg["generation"].max() < 40 else 5},
     )
     return _apply_defaults(fig)
 
 
 def make_value_calibration_plot(
-    calibration_data: pd.DataFrame, game_name: str,
+    calibration_data: pd.DataFrame,
+    game_name: str,
 ) -> go.Figure:
     """Reliability diagram for the value head, latest epoch.
 
@@ -649,31 +802,41 @@ def make_value_calibration_plot(
         hover_label = "outcome mean"
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=[-1, 1], y=[-1, 1],
-        mode="lines", name="Perfect calibration (y=x)",
-        line={"dash": "dash", "color": _COLORS["neutral"], "width": 1},
-        hoverinfo="skip",
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=[-1, 1],
+            y=[-1, 1],
+            mode="lines",
+            name="Perfect calibration (y=x)",
+            line={"dash": "dash", "color": _COLORS["neutral"], "width": 1},
+            hoverinfo="skip",
+        )
+    )
     max_count = max(int(latest["bucket_count"].max()), 1)
     sizes = 6 + 24 * latest["bucket_count"] / max_count
-    fig.add_trace(go.Scatter(
-        x=latest["bucket_center"], y=latest["bucket_mean_actual"],
-        mode="markers+lines", name=f"Gen {int(last_gen)} epoch {int(last_epoch)}",
-        marker={
-            "size": sizes, "color": _COLORS["accent"],
-            "line": {"width": 1, "color": _COLORS["accent"]},
-        },
-        customdata=latest["bucket_count"],
-        hovertemplate=(
-            "Predicted ≈ %{x:.1f}, " + hover_label + ": %{y:.2f}"
-            " (%{customdata} positions)<extra></extra>"
-        ),
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=latest["bucket_center"],
+            y=latest["bucket_mean_actual"],
+            mode="markers+lines",
+            name=f"Gen {int(last_gen)} epoch {int(last_epoch)}",
+            marker={
+                "size": sizes,
+                "color": _COLORS["accent"],
+                "line": {"width": 1, "color": _COLORS["accent"]},
+            },
+            customdata=latest["bucket_count"],
+            hovertemplate=(
+                "Predicted ≈ %{x:.1f}, " + hover_label + ": %{y:.2f} (%{customdata} positions)<extra></extra>"
+            ),
+        )
+    )
     fig.update_layout(
         xaxis_title="Predicted value (bucket centre)",
-        yaxis_title=y_label, title=title,
-        xaxis_range=[-1.05, 1.05], yaxis_range=[-1.05, 1.05],
+        yaxis_title=y_label,
+        title=title,
+        xaxis_range=[-1.05, 1.05],
+        yaxis_range=[-1.05, 1.05],
     )
     return _apply_defaults(fig)
 
@@ -696,39 +859,50 @@ def make_symmetry_diagnostic_plot(symmetry_data: pd.DataFrame) -> go.Figure:
     df = df.sort_values(["generation", "position_idx", "symmetry_idx"])
     # Mean across symmetries for each (gen, position)
     per_position = (
-        df.groupby(["generation", "position_idx"])
-        .agg(position_mean_kl=("kl_divergence", "mean"))
-        .reset_index()
+        df.groupby(["generation", "position_idx"]).agg(position_mean_kl=("kl_divergence", "mean")).reset_index()
     )
     overall = (
         per_position.groupby("generation")
-        .agg(mean_kl=("position_mean_kl", "mean"),
-             max_kl=("position_mean_kl", "max"))
+        .agg(mean_kl=("position_mean_kl", "mean"), max_kl=("position_mean_kl", "max"))
         .reset_index()
         .sort_values("generation")
     )
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=overall["generation"], y=overall["mean_kl"],
-        mode="lines+markers", name="Mean across positions",
-        line={"width": 2.5, "color": _COLORS["primary"]},
-        hovertemplate="Gen %{x} — mean KL: %{y:.4f}<extra></extra>",
-    ))
+    fig.add_trace(
+        go.Scatter(
+            x=overall["generation"],
+            y=overall["mean_kl"],
+            mode="lines+markers",
+            name="Mean across positions",
+            line={"width": 2.5, "color": _COLORS["primary"]},
+            hovertemplate="Gen %{x} — mean KL: %{y:.4f}<extra></extra>",
+        )
+    )
     for pos_idx, group in per_position.sort_values("position_idx").groupby("position_idx"):
-        fig.add_trace(go.Scatter(
-            x=group["generation"], y=group["position_mean_kl"],
-            mode="lines", name=f"Position {pos_idx}",
-            line={"width": 1, "dash": "dot", "color": _COLORS["neutral"]},
-            opacity=0.5, hoverinfo="skip", showlegend=True,
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=group["generation"],
+                y=group["position_mean_kl"],
+                mode="lines",
+                name=f"Position {pos_idx}",
+                line={"width": 1, "dash": "dot", "color": _COLORS["neutral"]},
+                opacity=0.5,
+                hoverinfo="skip",
+                showlegend=True,
+            )
+        )
     fig.add_hline(
-        y=0.0, line_width=1, line_dash="dash", line_color=_COLORS["neutral"],
+        y=0.0,
+        line_width=1,
+        line_dash="dash",
+        line_color=_COLORS["neutral"],
         annotation_text="Perfect equivariance",
         annotation_position="bottom right",
     )
     fig.update_layout(
-        xaxis_title="Generation", yaxis_title="KL divergence (lower = more symmetric)",
+        xaxis_title="Generation",
+        yaxis_title="KL divergence (lower = more symmetric)",
         title="Network policy symmetry diagnostic",
         xaxis={"dtick": 1 if overall["generation"].max() < 40 else 5},
     )
@@ -742,7 +916,7 @@ def make_resource_usage_plot(resource_data: pd.DataFrame) -> go.Figure:
     with more than a few generations.
     """
     df = resource_data.copy()
-    df["rss_mb"] = df["process_rss_bytes"] / (1024 ** 2)
+    df["rss_mb"] = df["process_rss_bytes"] / (1024**2)
     df = df.sort_values("generation")
 
     has_gpu = (
@@ -751,29 +925,37 @@ def make_resource_usage_plot(resource_data: pd.DataFrame) -> go.Figure:
         and (df["gpu_memory_bytes"].fillna(0) > 0).any()
     )
     if has_gpu:
-        df["gpu_mb"] = df["gpu_memory_bytes"] / (1024 ** 2)
+        df["gpu_mb"] = df["gpu_memory_bytes"] / (1024**2)
 
     fig = go.Figure()
     for stage in ["SelfPlay", "Training", "Arena"]:
         stage_df = df[df["cycle_stage"] == stage]
         if stage_df.empty:
             continue
-        fig.add_trace(go.Scatter(
-            x=stage_df["generation"], y=stage_df["rss_mb"],
-            mode="lines+markers", name=f"{stage} (RSS)",
-            line={"width": 2, "color": _PHASE_COLORS.get(stage, _COLORS["neutral"])},
-        ))
+        fig.add_trace(
+            go.Scatter(
+                x=stage_df["generation"],
+                y=stage_df["rss_mb"],
+                mode="lines+markers",
+                name=f"{stage} (RSS)",
+                line={"width": 2, "color": _PHASE_COLORS.get(stage, _COLORS["neutral"])},
+            )
+        )
         if has_gpu:
-            fig.add_trace(go.Scatter(
-                x=stage_df["generation"], y=stage_df["gpu_mb"],
-                mode="lines+markers", name=f"{stage} (GPU)",
-                line={"width": 2, "dash": "dot",
-                      "color": _PHASE_COLORS.get(stage, _COLORS["neutral"])},
-                showlegend=True,
-            ))
+            fig.add_trace(
+                go.Scatter(
+                    x=stage_df["generation"],
+                    y=stage_df["gpu_mb"],
+                    mode="lines+markers",
+                    name=f"{stage} (GPU)",
+                    line={"width": 2, "dash": "dot", "color": _PHASE_COLORS.get(stage, _COLORS["neutral"])},
+                    showlegend=True,
+                )
+            )
 
     fig.update_layout(
-        xaxis_title="Generation", yaxis_title="Memory (MB)",
+        xaxis_title="Generation",
+        yaxis_title="Memory (MB)",
         title="Memory Usage" if has_gpu else "Process Memory (RSS)",
     )
     return _apply_defaults(fig, width=_HALF_WIDTH, height=_GRID_HEIGHT)
@@ -796,19 +978,25 @@ def make_profiling_plot(profiling_data: pd.DataFrame) -> go.Figure:
     df = profiling_data.copy()
     if "mean_policy_entropy" not in df.columns:
         df["mean_policy_entropy"] = 0.0  # backward compat with older runs
-    agg = df.groupby("generation").agg(
-        moves_mean=("num_moves", "mean"),
-        moves_std=("num_moves", "std"),
-        sims_mean=("sims_per_second", "mean"),
-        sims_std=("sims_per_second", "std"),
-        entropy_mean=("mean_policy_entropy", "mean"),
-        entropy_std=("mean_policy_entropy", "std"),
-    ).reset_index().sort_values("generation")
+    agg = (
+        df.groupby("generation")
+        .agg(
+            moves_mean=("num_moves", "mean"),
+            moves_std=("num_moves", "std"),
+            sims_mean=("sims_per_second", "mean"),
+            sims_std=("sims_per_second", "std"),
+            entropy_mean=("mean_policy_entropy", "mean"),
+            entropy_std=("mean_policy_entropy", "std"),
+        )
+        .reset_index()
+        .sort_values("generation")
+    )
     for col in ("moves_std", "sims_std", "entropy_std"):
         agg[col] = agg[col].fillna(0.0)
 
     fig = make_subplots(
-        rows=3, cols=1,
+        rows=3,
+        cols=1,
         subplot_titles=[
             "Game Length (moves)",
             "MCTS Throughput (sims/s)",
@@ -818,25 +1006,45 @@ def make_profiling_plot(profiling_data: pd.DataFrame) -> go.Figure:
     )
 
     _mean_band_trace(
-        fig, agg["generation"], agg["moves_mean"], agg["moves_std"],
-        color=_COLORS["primary"], name="Game Length",
-        unit="moves", row=1, col=1,
+        fig,
+        agg["generation"],
+        agg["moves_mean"],
+        agg["moves_std"],
+        color=_COLORS["primary"],
+        name="Game Length",
+        unit="moves",
+        row=1,
+        col=1,
     )
     _mean_band_trace(
-        fig, agg["generation"], agg["sims_mean"], agg["sims_std"],
-        color=_COLORS["secondary"], name="Sims/s",
-        unit="sims/s", row=2, col=1,
+        fig,
+        agg["generation"],
+        agg["sims_mean"],
+        agg["sims_std"],
+        color=_COLORS["secondary"],
+        name="Sims/s",
+        unit="sims/s",
+        row=2,
+        col=1,
     )
     _mean_band_trace(
-        fig, agg["generation"], agg["entropy_mean"], agg["entropy_std"],
-        color=_COLORS["accent"], name="Policy Entropy",
-        unit="nats", row=3, col=1,
+        fig,
+        agg["generation"],
+        agg["entropy_mean"],
+        agg["entropy_std"],
+        color=_COLORS["accent"],
+        name="Policy Entropy",
+        unit="nats",
+        row=3,
+        col=1,
     )
 
     fig.update_xaxes(title_text="Generation", row=3, col=1)
     for r in (1, 2, 3):
         fig.update_xaxes(
-            row=r, col=1, dtick=1 if agg["generation"].max() < 40 else 5,
+            row=r,
+            col=1,
+            dtick=1 if agg["generation"].max() < 40 else 5,
         )
     fig.update_layout(title="Self-Play Profiling", showlegend=False)
     return _apply_defaults(fig, width=_HALF_WIDTH, height=int(_GRID_HEIGHT * 1.4))
@@ -883,15 +1091,14 @@ def _mean_band_trace(
     # Mean line
     fig.add_trace(
         go.Scatter(
-            x=x, y=mean,
-            mode="lines+markers", name=name,
+            x=x,
+            y=mean,
+            mode="lines+markers",
+            name=name,
             line={"width": 2.5, "color": color},
             marker={"size": 5},
             customdata=std,
-            hovertemplate=(
-                f"Gen %{{x}} — mean: %{{y:.2f}} {unit}, "
-                f"± %{{customdata:.2f}}<extra></extra>"
-            ),
+            hovertemplate=(f"Gen %{{x}} — mean: %{{y:.2f}} {unit}, ± %{{customdata:.2f}}<extra></extra>"),
         ),
         **target,
     )
@@ -900,4 +1107,3 @@ def _mean_band_trace(
 # ---------------------------------------------------------------------------
 # Config table (unchanged content, moved to bottom)
 # ---------------------------------------------------------------------------
-

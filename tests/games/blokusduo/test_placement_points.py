@@ -135,27 +135,23 @@ def test_side_adjacent_piece_removes_placement_point(blokus_board: BlokusDuoBoar
     """Place white monomino at (7,7) creating point at (6,6). Then place another
     white piece whose side touches (6,6) — the point should be removed."""
     # First piece: monomino at (7,7) → points at (6,6), (6,8), (8,6), (8,8)
-    board = blokus_board.with_piece(
-        _action_at_idx(1, Orientation.Identity, 7, 7), player_side=1)
+    board = blokus_board.with_piece(_action_at_idx(1, Orientation.Identity, 7, 7), player_side=1)
     assert (6, 6) in board.placement_points(1)
 
     # Second piece: monomino at (6,5) — this is side-adjacent to (6,6)
     # (6,5) is left of (6,6), so (6,6) now has a friendly side
-    board = board.with_piece(
-        _action_at_idx(4, Orientation.Identity, 6, 5), player_side=1)
+    board = board.with_piece(_action_at_idx(4, Orientation.Identity, 6, 5), player_side=1)
     assert (6, 6) not in board.placement_points(1)
 
 
 def test_piece_placed_on_placement_point_removes_it(blokus_board: BlokusDuoBoard):
     """Place a piece directly on an existing placement point — it should be removed."""
     # Monomino at (7,7) → point at (6,6)
-    board = blokus_board.with_piece(
-        _action_at_idx(1, Orientation.Identity, 7, 7), player_side=1)
+    board = blokus_board.with_piece(_action_at_idx(1, Orientation.Identity, 7, 7), player_side=1)
     assert (6, 6) in board.placement_points(1)
 
     # Place another white piece at (6,6) — occupies the placement point
-    board = board.with_piece(
-        _action_at_idx(4, Orientation.Identity, 6, 6), player_side=1)
+    board = board.with_piece(_action_at_idx(4, Orientation.Identity, 6, 6), player_side=1)
     assert (6, 6) not in board.placement_points(1)
 
 
@@ -165,13 +161,11 @@ def test_piece_placed_on_placement_point_removes_it(blokus_board: BlokusDuoBoard
 def test_opponent_piece_removes_placement_point_by_occupation(blokus_board: BlokusDuoBoard):
     """If black places a piece on a white placement point, white loses that point."""
     # White monomino at (7,7) → white points at (6,6), (6,8), (8,6), (8,8)
-    board = blokus_board.with_piece(
-        _action_at_idx(1, Orientation.Identity, 7, 7), player_side=1)
+    board = blokus_board.with_piece(_action_at_idx(1, Orientation.Identity, 7, 7), player_side=1)
     assert (6, 6) in board.placement_points(1)
 
     # Black places on (6,6)
-    board = board.with_piece(
-        _action_at_idx(1, Orientation.Identity, 6, 6), player_side=-1)
+    board = board.with_piece(_action_at_idx(1, Orientation.Identity, 6, 6), player_side=-1)
     assert (6, 6) not in board.placement_points(1)
 
 
@@ -179,14 +173,12 @@ def test_opponent_side_does_not_remove_placement_point(blokus_board: BlokusDuoBo
     """A black piece side-adjacent to a white placement point should NOT remove it.
     Only friendly sides invalidate placement points."""
     # White monomino at (7,7) → white points at (6,6), (6,8), (8,6), (8,8)
-    board = blokus_board.with_piece(
-        _action_at_idx(1, Orientation.Identity, 7, 7), player_side=1)
+    board = blokus_board.with_piece(_action_at_idx(1, Orientation.Identity, 7, 7), player_side=1)
     assert (6, 6) in board.placement_points(1)
 
     # Black places at (6,5) — side-adjacent to white's placement point (6,6)
     # This should NOT invalidate (6,6) for white
-    board = board.with_piece(
-        _action_at_idx(4, Orientation.Identity, 6, 5), player_side=-1)
+    board = board.with_piece(_action_at_idx(4, Orientation.Identity, 6, 5), player_side=-1)
     assert (6, 6) in board.placement_points(1)
 
 
@@ -196,12 +188,10 @@ def test_opponent_side_does_not_remove_placement_point(blokus_board: BlokusDuoBo
 def test_players_have_independent_placement_points(blokus_board: BlokusDuoBoard):
     """Each player's placement points should only reflect their own pieces."""
     # White monomino at (7,7)
-    board = blokus_board.with_piece(
-        _action_at_idx(1, Orientation.Identity, 7, 7), player_side=1)
+    board = blokus_board.with_piece(_action_at_idx(1, Orientation.Identity, 7, 7), player_side=1)
 
     # Black monomino at (3,3)
-    board = board.with_piece(
-        _action_at_idx(1, Orientation.Identity, 3, 3), player_side=-1)
+    board = board.with_piece(_action_at_idx(1, Orientation.Identity, 3, 3), player_side=-1)
 
     white_points = set(board.placement_points(1).keys())
     black_points = set(board.placement_points(-1).keys())
@@ -223,14 +213,12 @@ def test_second_piece_adds_new_points_and_preserves_existing(blokus_board: Bloku
     """Placing a second piece far from the first should add new placement points
     while preserving all existing points from the first piece."""
     # White monomino at (2,2) → points at (1,1), (1,3), (3,1), (3,3)
-    board = blokus_board.with_piece(
-        _action_at_idx(1, Orientation.Identity, 2, 2), player_side=1)
+    board = blokus_board.with_piece(_action_at_idx(1, Orientation.Identity, 2, 2), player_side=1)
     first_points = set(board.placement_points(1).keys())
     assert first_points == {(1, 1), (1, 3), (3, 1), (3, 3)}
 
     # White monomino at (10,10) — far away, no interference
-    board = board.with_piece(
-        _action_at_idx(2, Orientation.Identity, 10, 10), player_side=1)
+    board = board.with_piece(_action_at_idx(2, Orientation.Identity, 10, 10), player_side=1)
     white_points = set(board.placement_points(1).keys())
 
     # All original points preserved

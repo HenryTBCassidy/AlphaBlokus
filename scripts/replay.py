@@ -15,6 +15,7 @@ Example::
 (The companion interactive HTML widget lives in ``Reporting/report.html``
 under the "Arena Game Replays" section.)
 """
+
 from __future__ import annotations
 
 import argparse
@@ -28,9 +29,11 @@ from alphablokus.games.blokusduo.pieces import default_pieces_path
 def _instantiate_game(game_name: str):
     if game_name == "tictactoe":
         from alphablokus.games.tictactoe.game import TicTacToeGame
+
         return TicTacToeGame()
     if game_name == "blokusduo":
         from alphablokus.games.blokusduo.game import BlokusDuoGame
+
         return BlokusDuoGame(default_pieces_path())
     raise ValueError(f"Unknown game: {game_name}")
 
@@ -38,6 +41,7 @@ def _instantiate_game(game_name: str):
 def _infer_game_from_run(run_dir: Path) -> str:
     """Read the run's config to figure out which game was trained."""
     import json
+
     # Each run directory has a sibling JSON config — we don't strictly know its
     # name, so look for any file with a ``game`` key.
     config_dir = Path("run_configurations")
@@ -53,8 +57,7 @@ def _infer_game_from_run(run_dir: Path) -> str:
         except Exception:
             continue
     raise SystemExit(
-        f"Couldn't infer game for run {run_dir.name!r}; checked "
-        f"{candidate} and all configs in {config_dir}."
+        f"Couldn't infer game for run {run_dir.name!r}; checked {candidate} and all configs in {config_dir}."
     )
 
 
@@ -77,9 +80,7 @@ def main() -> None:
 
     sub = df[(df["generation"] == args.gen) & (df["game_idx"] == args.game)]
     if sub.empty:
-        raise SystemExit(
-            f"No game at gen={args.gen} game={args.game} in {replays_dir}."
-        )
+        raise SystemExit(f"No game at gen={args.gen} game={args.game} in {replays_dir}.")
     sub = sub.sort_values("move_idx")
 
     game_name = _infer_game_from_run(run_dir)
@@ -108,9 +109,10 @@ def main() -> None:
 
         canonical = game.get_canonical_form(board, cur_player)
         print(f"\nMove {int(m['move_idx']) + 1} — player {int(m['player']):+d}:")
-        print(f"  Top-{args.top_k}: " + ", ".join(
-            f"action {a} ({p:.0%})" for a, p in zip(top_actions, top_probs, strict=False)
-        ))
+        print(
+            f"  Top-{args.top_k}: "
+            + ", ".join(f"action {a} ({p:.0%})" for a, p in zip(top_actions, top_probs, strict=False))
+        )
         print(f"  Played: action {action}")
 
         # Game-specific ASCII dump for context.

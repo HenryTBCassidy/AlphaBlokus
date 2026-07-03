@@ -28,6 +28,7 @@ games. The orchestrator uses ``ProcessPoolExecutor.map`` with
 ``chunksize=1`` so the main process sees results in submission order
 and one slow game doesn't block neighbours behind it.
 """
+
 from __future__ import annotations
 
 import multiprocessing as mp
@@ -254,7 +255,9 @@ def _run_inference_server(
 
 
 def _worker_init_self_play_server(
-    config: RunConfig, handles: ChannelHandles, counter: Synchronized,  # mp.Value('i')
+    config: RunConfig,
+    handles: ChannelHandles,
+    counter: Synchronized,  # mp.Value('i')
 ) -> None:
     """Pool initialiser for self-play workers in inference-server mode.
 
@@ -330,7 +333,9 @@ def _worker_play_self_play_episode(
 
     mcts = MCTS(_WORKER_GAME, _WORKER_NNET_A, _WORKER_CONFIG.mcts_config)
     examples = play_self_play_episode(
-        _WORKER_GAME, mcts, _WORKER_CONFIG.temp_threshold,
+        _WORKER_GAME,
+        mcts,
+        _WORKER_CONFIG.temp_threshold,
     )
     stats = mcts.get_episode_stats()
     return examples, stats
@@ -378,12 +383,16 @@ def _worker_play_two_player_game(
     _seed_worker_rngs(derive_episode_seed(base_seed, generation, episode_idx, phase))
 
     player_a = NetworkPlayer(
-        game=_WORKER_GAME, nnet=_WORKER_NNET_A,
-        mcts_config=_WORKER_CONFIG.mcts_config, temp=0.0,
+        game=_WORKER_GAME,
+        nnet=_WORKER_NNET_A,
+        mcts_config=_WORKER_CONFIG.mcts_config,
+        temp=0.0,
     )
     player_b = NetworkPlayer(
-        game=_WORKER_GAME, nnet=_WORKER_NNET_B,
-        mcts_config=_WORKER_CONFIG.mcts_config, temp=0.0,
+        game=_WORKER_GAME,
+        nnet=_WORKER_NNET_B,
+        mcts_config=_WORKER_CONFIG.mcts_config,
+        temp=0.0,
     )
 
     if a_first:
@@ -453,7 +462,9 @@ def run_self_play_episodes_parallel(
 
     logger.info(
         "Spawning {} worker(s) for {} self-play episodes (gen {})",
-        num_workers, config.num_eps, generation,
+        num_workers,
+        config.num_eps,
+        generation,
     )
 
     per_episode_examples: list[list[ProcessedExample]] = []
@@ -490,7 +501,9 @@ def run_self_play_episodes_parallel(
         initargs: tuple = (config, channel.handles(), worker_counter)
         logger.info(
             "F5 inference server enabled (max_batch={} = {} workers × {} leaves)",
-            max_batch, num_workers, max_leaves,
+            max_batch,
+            num_workers,
+            max_leaves,
         )
     else:
         initializer = _worker_init_self_play
@@ -597,18 +610,15 @@ def run_two_player_games_parallel(
     half = num_games // 2
     # First ``half`` games: A goes first. Next ``half``: B goes first.
     # Episode indices stay 0..2*half-1 so seeds are unique per game.
-    tasks = [
-        (base_seed, generation, ep_idx, True, record, top_k, phase)
-        for ep_idx in range(half)
-    ]
-    tasks += [
-        (base_seed, generation, ep_idx, False, record, top_k, phase)
-        for ep_idx in range(half, 2 * half)
-    ]
+    tasks = [(base_seed, generation, ep_idx, True, record, top_k, phase) for ep_idx in range(half)]
+    tasks += [(base_seed, generation, ep_idx, False, record, top_k, phase) for ep_idx in range(half, 2 * half)]
 
     logger.info(
         "Spawning {} worker(s) for {} two-player games (gen {}, phase {})",
-        num_workers, len(tasks), generation, phase,
+        num_workers,
+        len(tasks),
+        generation,
+        phase,
     )
 
     a_wins = 0

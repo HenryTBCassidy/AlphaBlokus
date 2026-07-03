@@ -5,6 +5,7 @@ notation) and array indices (top-left origin, numpy). ``CoordinateIndexDecoder``
 converts between them; ``ActionCodec`` maps ``Action`` dataclasses to flat
 action indices (0-17,836, pass last) and back.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -53,6 +54,7 @@ class Action:
     - x_coordinate: X coordinate of the placement (bottom-left origin)
     - y_coordinate: Y coordinate of the placement (bottom-left origin)
     """
+
     piece_id: int
     orientation: Orientation
     x_coordinate: int
@@ -80,9 +82,7 @@ class ActionCodec:
 
     def encode(self, action: Action) -> int:
         """Convert an Action to a flat action index."""
-        orientation_id = self._piece_manager.get_piece_orientation_id(
-            (action.piece_id, action.orientation)
-        )
+        orientation_id = self._piece_manager.get_piece_orientation_id((action.piece_id, action.orientation))
         return (
             action.y_coordinate * (self._board_size * self._num_orientations)
             + action.x_coordinate * self._num_orientations
@@ -105,7 +105,12 @@ class ActionCodec:
         return Action(piece_id, orientation, x, y)
 
     def encode_from_components(
-        self, *, piece_id: int, orientation_id: int, x: int, y: int,
+        self,
+        *,
+        piece_id: int,
+        orientation_id: int,
+        x: int,
+        y: int,
     ) -> int:
         """Encode from primitive components without constructing an Action.
 
@@ -115,11 +120,7 @@ class ActionCodec:
         decoded.
         """
         del piece_id  # used only for symmetry of the call site
-        return (
-            y * (self._board_size * self._num_orientations)
-            + x * self._num_orientations
-            + orientation_id
-        )
+        return y * (self._board_size * self._num_orientations) + x * self._num_orientations + orientation_id
 
     def is_pass(self, index: int) -> bool:
         """Check if an action index represents the pass action."""

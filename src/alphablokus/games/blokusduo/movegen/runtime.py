@@ -55,6 +55,7 @@ calls. For multi-process self-play, each worker rebuilds at import
 time — also ~200 ms once per process, then free for thousands of
 subsequent calls.
 """
+
 from __future__ import annotations
 
 import os
@@ -132,12 +133,14 @@ def _fill_mask_kernel(
         anchor = anchors[ai]
         if forbidden[anchor]:
             continue
-        adj = (forbidden[adj_status_cells[anchor, 0]]
-               | (forbidden[adj_status_cells[anchor, 1]] << 1)
-               | (forbidden[adj_status_cells[anchor, 2]] << 2)
-               | (forbidden[adj_status_cells[anchor, 3]] << 3)
-               | (forbidden[adj_status_cells[anchor, 4]] << 4)
-               | (forbidden[adj_status_cells[anchor, 5]] << 5))
+        adj = (
+            forbidden[adj_status_cells[anchor, 0]]
+            | (forbidden[adj_status_cells[anchor, 1]] << 1)
+            | (forbidden[adj_status_cells[anchor, 2]] << 2)
+            | (forbidden[adj_status_cells[anchor, 3]] << 3)
+            | (forbidden[adj_status_cells[anchor, 4]] << 4)
+            | (forbidden[adj_status_cells[anchor, 5]] << 5)
+        )
         for pi in range(remaining.shape[0]):
             piece_idx = remaining[pi] - 1
             begin = lookup_begin[anchor, adj, piece_idx]
@@ -146,11 +149,13 @@ def _fill_mask_kernel(
                 mid = lookup_move_ids[begin + off]
                 if seen[mid]:
                     continue
-                if not (forbidden[move_cells[mid, 0]]
-                        | forbidden[move_cells[mid, 1]]
-                        | forbidden[move_cells[mid, 2]]
-                        | forbidden[move_cells[mid, 3]]
-                        | forbidden[move_cells[mid, 4]]):
+                if not (
+                    forbidden[move_cells[mid, 0]]
+                    | forbidden[move_cells[mid, 1]]
+                    | forbidden[move_cells[mid, 2]]
+                    | forbidden[move_cells[mid, 3]]
+                    | forbidden[move_cells[mid, 4]]
+                ):
                     seen[mid] = True
                     out[move_action_id[mid]] = True
 
@@ -175,23 +180,27 @@ def _has_any_move_kernel(
         anchor = anchors[ai]
         if forbidden[anchor]:
             continue
-        adj = (forbidden[adj_status_cells[anchor, 0]]
-               | (forbidden[adj_status_cells[anchor, 1]] << 1)
-               | (forbidden[adj_status_cells[anchor, 2]] << 2)
-               | (forbidden[adj_status_cells[anchor, 3]] << 3)
-               | (forbidden[adj_status_cells[anchor, 4]] << 4)
-               | (forbidden[adj_status_cells[anchor, 5]] << 5))
+        adj = (
+            forbidden[adj_status_cells[anchor, 0]]
+            | (forbidden[adj_status_cells[anchor, 1]] << 1)
+            | (forbidden[adj_status_cells[anchor, 2]] << 2)
+            | (forbidden[adj_status_cells[anchor, 3]] << 3)
+            | (forbidden[adj_status_cells[anchor, 4]] << 4)
+            | (forbidden[adj_status_cells[anchor, 5]] << 5)
+        )
         for pi in range(remaining.shape[0]):
             piece_idx = remaining[pi] - 1
             begin = lookup_begin[anchor, adj, piece_idx]
             size = lookup_size[anchor, adj, piece_idx]
             for off in range(size):
                 mid = lookup_move_ids[begin + off]
-                if not (forbidden[move_cells[mid, 0]]
-                        | forbidden[move_cells[mid, 1]]
-                        | forbidden[move_cells[mid, 2]]
-                        | forbidden[move_cells[mid, 3]]
-                        | forbidden[move_cells[mid, 4]]):
+                if not (
+                    forbidden[move_cells[mid, 0]]
+                    | forbidden[move_cells[mid, 1]]
+                    | forbidden[move_cells[mid, 2]]
+                    | forbidden[move_cells[mid, 3]]
+                    | forbidden[move_cells[mid, 4]]
+                ):
                     return True
     return False
 
@@ -199,6 +208,7 @@ def _has_any_move_kernel(
 # ---------------------------------------------------------------------------
 # Generator
 # ---------------------------------------------------------------------------
+
 
 class F2MoveGenerator:
     """Stateless front-end to the precomputed move tables.
@@ -234,7 +244,10 @@ class F2MoveGenerator:
         return cls(tables, lookup)
 
     def valid_move_mask(
-        self, game: BlokusDuoGame, board: BlokusDuoBoard, player: int,
+        self,
+        game: BlokusDuoGame,
+        board: BlokusDuoBoard,
+        player: int,
     ) -> NDArray:
         """Return the legal-actions bool mask for ``(board, player)``.
 
@@ -273,13 +286,22 @@ class F2MoveGenerator:
             # irrelevant — the output is the union of legal moves.
             anchors = self._marshal_anchors(board, player)
             remaining_ids = np.fromiter(
-                board.remaining_piece_ids(player), dtype=np.int32,
+                board.remaining_piece_ids(player),
+                dtype=np.int32,
             )
             seen_mask = np.zeros(self._num_moves, dtype=np.bool_)
             _fill_mask_kernel(
-                forbidden, anchors, self._adj_status_cells,
-                self._lookup_begin, self._lookup_size, self._lookup_move_ids,
-                self._move_cells, self._move_action_id, remaining_ids, out, seen_mask,
+                forbidden,
+                anchors,
+                self._adj_status_cells,
+                self._lookup_begin,
+                self._lookup_size,
+                self._lookup_move_ids,
+                self._move_cells,
+                self._move_action_id,
+                remaining_ids,
+                out,
+                seen_mask,
             )
         else:
             # Dedup set — a single move can be emitted by multiple attach
@@ -288,7 +310,7 @@ class F2MoveGenerator:
             # set since action_size is only ~17k.
             remaining = board.remaining_piece_ids(player)
             seen: set[int] = set()
-            for (anchor_row, anchor_col) in board.placement_points(player):
+            for anchor_row, anchor_col in board.placement_points(player):
                 anchor = anchor_row * BOARD_SIZE + anchor_col
                 if forbidden[anchor]:
                     # Attach point itself has become forbidden since it was
@@ -296,7 +318,12 @@ class F2MoveGenerator:
                     continue
                 adj_status = self._compute_adj_status(forbidden, anchor)
                 self._fill_legal_actions_for_anchor(
-                    anchor, adj_status, remaining, forbidden, out, seen,
+                    anchor,
+                    adj_status,
+                    remaining,
+                    forbidden,
+                    out,
+                    seen,
                 )
 
         if not out.any():
@@ -304,7 +331,10 @@ class F2MoveGenerator:
         return out
 
     def has_any_move(
-        self, game: BlokusDuoGame, board: BlokusDuoBoard, player: int,
+        self,
+        game: BlokusDuoGame,
+        board: BlokusDuoBoard,
+        player: int,
     ) -> bool:
         """Return True iff ``player`` has at least one legal placement.
 
@@ -324,16 +354,24 @@ class F2MoveGenerator:
         if self._use_numba:
             anchors = self._marshal_anchors(board, player)
             remaining_ids = np.fromiter(
-                board.remaining_piece_ids(player), dtype=np.int32,
+                board.remaining_piece_ids(player),
+                dtype=np.int32,
             )
-            return bool(_has_any_move_kernel(
-                forbidden, anchors, self._adj_status_cells,
-                self._lookup_begin, self._lookup_size, self._lookup_move_ids,
-                self._move_cells, remaining_ids,
-            ))
+            return bool(
+                _has_any_move_kernel(
+                    forbidden,
+                    anchors,
+                    self._adj_status_cells,
+                    self._lookup_begin,
+                    self._lookup_size,
+                    self._lookup_move_ids,
+                    self._move_cells,
+                    remaining_ids,
+                )
+            )
 
         remaining = board.remaining_piece_ids(player)
-        for (anchor_row, anchor_col) in board.placement_points(player):
+        for anchor_row, anchor_col in board.placement_points(player):
             anchor = anchor_row * BOARD_SIZE + anchor_col
             if forbidden[anchor]:
                 continue
@@ -357,7 +395,9 @@ class F2MoveGenerator:
     # -- Hot-path helpers ------------------------------------------------------
 
     def _build_forbidden_array(
-        self, board: BlokusDuoBoard, player: int,
+        self,
+        board: BlokusDuoBoard,
+        player: int,
     ) -> NDArray:
         """Build the (NUM_CELLS + 1,) uint8 forbidden array.
 
@@ -405,14 +445,27 @@ class F2MoveGenerator:
         out = np.zeros(1, dtype=np.bool_)
         seen = np.zeros(self._num_moves, dtype=np.bool_)
         _fill_mask_kernel(
-            forbidden, anchors, self._adj_status_cells,
-            self._lookup_begin, self._lookup_size, self._lookup_move_ids,
-            self._move_cells, self._move_action_id, remaining, out, seen,
+            forbidden,
+            anchors,
+            self._adj_status_cells,
+            self._lookup_begin,
+            self._lookup_size,
+            self._lookup_move_ids,
+            self._move_cells,
+            self._move_action_id,
+            remaining,
+            out,
+            seen,
         )
         _has_any_move_kernel(
-            forbidden, anchors, self._adj_status_cells,
-            self._lookup_begin, self._lookup_size, self._lookup_move_ids,
-            self._move_cells, remaining,
+            forbidden,
+            anchors,
+            self._adj_status_cells,
+            self._lookup_begin,
+            self._lookup_size,
+            self._lookup_move_ids,
+            self._move_cells,
+            remaining,
         )
 
     def _compute_adj_status(self, forbidden: NDArray, anchor: int) -> int:
@@ -463,7 +516,10 @@ class F2MoveGenerator:
                 out[self._move_action_id[move_id]] = True
 
     def _fill_first_move_mask(
-        self, game: BlokusDuoGame, board: BlokusDuoBoard, player: int,
+        self,
+        game: BlokusDuoGame,
+        board: BlokusDuoBoard,
+        player: int,
         out: NDArray,
     ) -> None:
         """Populate ``out`` with the legal first moves for a player.

@@ -56,9 +56,9 @@ def test_legal_mask_parity_dev_cache(blokus_game_module: BlokusDuoGame) -> None:
     mismatches: list[int] = []
     jax_masks = np.empty((len(rows), kernels.action_size), dtype=np.bool_)
     for start in range(0, len(rows), CHUNK):
-        chunk = rows[start:start + CHUNK]
+        chunk = rows[start : start + CHUNK]
         batch = GameState(*(np.stack([row[field] for row in chunk]) for field in range(4)))
-        jax_masks[start:start + len(chunk)] = np.asarray(kernels.legal_mask_batch(batch))
+        jax_masks[start : start + len(chunk)] = np.asarray(kernels.legal_mask_batch(batch))
 
     for index in range(len(rows)):
         if not np.array_equal(jax_masks[index], f2_masks[index]):
@@ -70,11 +70,13 @@ def test_legal_mask_parity_dev_cache(blokus_game_module: BlokusDuoGame) -> None:
         f"(diff at {mismatches[0]}: jax-only="
         f"{np.flatnonzero(jax_masks[mismatches[0]] & ~f2_masks[mismatches[0]])[:10]}, f2-only="
         f"{np.flatnonzero(~jax_masks[mismatches[0]] & f2_masks[mismatches[0]])[:10]})"
-        if mismatches else ""
+        if mismatches
+        else ""
     )
 
     for index, expected_ids in reference_ids.items():
         np.testing.assert_array_equal(
-            np.flatnonzero(jax_masks[index]), expected_ids,
+            np.flatnonzero(jax_masks[index]),
+            expected_ids,
             err_msg=f"JAX mask disagrees with reference generator at position {index}",
         )

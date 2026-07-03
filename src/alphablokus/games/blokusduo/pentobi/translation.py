@@ -16,6 +16,7 @@ letters ``a``–``n`` (a=0…n=13), rows are 1-indexed (1=bottom): so ``x = lett
 
 See docs/06-INTERFACES.md §1 for the design.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING

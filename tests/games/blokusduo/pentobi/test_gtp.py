@@ -4,6 +4,7 @@ These spawn the *real* ``pentobi-gtp`` binary, so they skip when it isn't built
 (CI / other machines). Build it per docs/plans/pentobi-harness.md (H2) or set
 ``$PENTOBI_GTP_PATH`` to run them.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -27,8 +28,8 @@ def test_play_genmove_and_score() -> None:
     """A short scripted game: place both start pieces, generate a reply, score it."""
     with PentobiGtp(level=1, seed=1) as engine:
         engine.clear_board()
-        engine.play("b", "e10")   # our White's start square
-        engine.play("w", "j5")    # our Black's start square
+        engine.play("b", "e10")  # our White's start square
+        engine.play("w", "j5")  # our Black's start square
         board = engine.showboard()
         assert "X" in board and "O" in board  # both pieces on the board
         move = engine.genmove("b")

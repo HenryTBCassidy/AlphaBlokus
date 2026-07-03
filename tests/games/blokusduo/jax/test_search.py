@@ -67,11 +67,12 @@ def setup(tmp_path_factory, blokus_game_module: BlokusDuoGame):
             players.append(player)
         if len(boards) >= N_POSITIONS:
             break
-    states = GameState(*(
-        np.stack(rows) for rows in zip(
-            *(numpy_state_from_board(b, p) for b, p in zip(boards, players, strict=True)), strict=True
+    states = GameState(
+        *(
+            np.stack(rows)
+            for rows in zip(*(numpy_state_from_board(b, p) for b, p in zip(boards, players, strict=True)), strict=True)
         )
-    ))
+    )
     return game, nnet, params, kernels, boards, players, states
 
 
@@ -86,7 +87,9 @@ def test_structural_invariants(setup) -> None:
     np.testing.assert_allclose(weights.sum(axis=1), 1.0, atol=1e-5)
     assert (weights >= 0).all()
     np.testing.assert_allclose(
-        np.asarray(result.visit_counts).sum(axis=1), SIMS, atol=0,
+        np.asarray(result.visit_counts).sum(axis=1),
+        SIMS,
+        atol=0,
         err_msg="root visit counts must sum to num_simulations",
     )
 
@@ -114,9 +117,7 @@ def test_terminal_root_resolves_to_pass(setup) -> None:
 @pytest.mark.skipif(not DEV_CACHE_PATH.exists(), reason="dev_5000 cache not built")
 def test_root_noise_stays_legal_and_perturbs(setup) -> None:
     _game, _nnet, params, kernels, _boards, _players, states = setup
-    noisy = make_search(
-        kernels, SearchConfig(num_simulations=SIMS, top_k=128, cpuct=2.5, dirichlet_epsilon=0.25)
-    )
+    noisy = make_search(kernels, SearchConfig(num_simulations=SIMS, top_k=128, cpuct=2.5, dirichlet_epsilon=0.25))
     clean = make_search(kernels, SearchConfig(num_simulations=SIMS, top_k=128, cpuct=2.5))
     noisy_result = noisy(params, jax.random.PRNGKey(2), states)
     clean_result = clean(params, jax.random.PRNGKey(2), states)

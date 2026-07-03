@@ -57,12 +57,12 @@ def read_progress_marker(config: RunConfig) -> dict | None:
 class Coach:
     """
     Main training coordinator for the AlphaZero-style learning process.
-    
+
     This class orchestrates the entire training loop:
     1. Self-play: Generate training data using MCTS + current neural network
     2. Training: Update network weights using generated data
     3. Evaluation: Compare new network against previous version
-    
+
     The process is iterative, with each complete cycle called a 'generation'.
     The neural network improves over time by learning from self-play games,
     but only if the new version proves stronger than the previous one.
@@ -156,7 +156,7 @@ class Coach:
         1. Self-play: Generate new games using MCTS + current network
         2. Training: Update network weights using accumulated game data
         3. Arena: Evaluate new network against previous version
-        
+
         The new network is only accepted if it wins >= update_threshold
         fraction of games against the previous version.
 
@@ -179,16 +179,19 @@ class Coach:
         starting partway through appends rather than overwriting earlier work.
         """
         for generation in range(start_generation, self.config.num_generations + 1):
-            logger.info(f'Starting Generation #{generation} ...')
+            logger.info(f"Starting Generation #{generation} ...")
             generation_start = time.perf_counter()
             self.metrics.log_progress(generation, self.config.num_generations)
 
             # PHASE 1: Generate new training data through self-play
-            logger.info(f'Starting Self-Play For Generation #{generation} ...')
+            logger.info(f"Starting Self-Play For Generation #{generation} ...")
             self_play_start = time.perf_counter()
 
             fresh_games = generate_games(
-                self.config, self.game, self.nnet, generation,
+                self.config,
+                self.game,
+                self.nnet,
+                generation,
                 log_stats=partial(self._log_self_play_stats, generation),
             )
 
@@ -197,8 +200,10 @@ class Coach:
 
             snapshot = get_memory_snapshot()
             self.metrics.log_resource_usage(
-                generation, CycleStage.SELF_PLAY,
-                snapshot.process_rss_bytes, snapshot.gpu_bytes,
+                generation,
+                CycleStage.SELF_PLAY,
+                snapshot.process_rss_bytes,
+                snapshot.gpu_bytes,
             )
 
             # Rolling buffer: oldest games auto-evict via maxlen.
@@ -215,19 +220,21 @@ class Coach:
             self._ensure_eval_set(train_examples)
 
             # Preserve current best network
-            self.nnet.save_checkpoint(filename='temp.pth.tar')
-            self.pnet.load_checkpoint(filename='temp.pth.tar')
+            self.nnet.save_checkpoint(filename="temp.pth.tar")
+            self.pnet.load_checkpoint(filename="temp.pth.tar")
             MCTS(self.game, self.pnet, self.config.mcts_config)
 
             # Train network on the whole buffer (epochs full passes — use all the
             # data). Log the emergent reuse (epochs × B/F) and staleness (B/F) so
             # the data regime is visible without it being a tunable knob.
             self._log_training_dynamics(generation, len(train_examples))
-            logger.info(f'Starting Training For Generation #{generation} ...')
+            logger.info(f"Starting Training For Generation #{generation} ...")
             training_start = time.perf_counter()
             self.nnet.train(
-                train_examples, generation,
-                metrics=self.metrics, eval_set=self._eval_set,
+                train_examples,
+                generation,
+                metrics=self.metrics,
+                eval_set=self._eval_set,
             )
             training_end = time.perf_counter()
             self.metrics.log_timing(generation, CycleStage.TRAINING, training_end - training_start)
@@ -235,12 +242,14 @@ class Coach:
             # Memory snapshot after training phase
             snapshot = get_memory_snapshot()
             self.metrics.log_resource_usage(
-                generation, CycleStage.TRAINING,
-                snapshot.process_rss_bytes, snapshot.gpu_bytes,
+                generation,
+                CycleStage.TRAINING,
+                snapshot.process_rss_bytes,
+                snapshot.gpu_bytes,
             )
 
             # PHASE 3: Evaluate new network
-            logger.info(f'Evaluating Against Previous Version For Generation #{generation} ...')
+            logger.info(f"Evaluating Against Previous Version For Generation #{generation} ...")
             arena_start = time.perf_counter()
             # ``top_k`` capped at the action-space size (TTT only has 10
             # actions; for Blokus's 17,837 actions 20 is plenty to capture
@@ -251,7 +260,8 @@ class Coach:
 
             if self.config.num_parallel_workers > 1:
                 nwins, pwins, draws, game_records = self._run_arena_parallel(
-                    generation, top_k_to_record,
+                    generation,
+                    top_k_to_record,
                 )
             else:
                 nwins, pwins, draws, game_records = self._run_arena_serial(
@@ -261,7 +271,11 @@ class Coach:
             arena_end = time.perf_counter()
             accepted = self._should_accept_new_network(nwins, pwins, draws)
             self.metrics.log_arena(
-                generation, wins=nwins, losses=pwins, draws=draws, accepted=accepted,
+                generation,
+                wins=nwins,
+                losses=pwins,
+                draws=draws,
+                accepted=accepted,
             )
             self.metrics.log_timing(generation, CycleStage.ARENA, arena_end - arena_start)
 
@@ -277,20 +291,22 @@ class Coach:
             # Memory snapshot after arena phase
             snapshot = get_memory_snapshot()
             self.metrics.log_resource_usage(
-                generation, CycleStage.ARENA,
-                snapshot.process_rss_bytes, snapshot.gpu_bytes,
+                generation,
+                CycleStage.ARENA,
+                snapshot.process_rss_bytes,
+                snapshot.gpu_bytes,
             )
 
             # Accept or reject new network
-            logger.info(f'NEW/PREV WINS : {nwins}/{pwins}; DRAWS : {draws}')
+            logger.info(f"NEW/PREV WINS : {nwins}/{pwins}; DRAWS : {draws}")
             if accepted:
-                logger.info('ACCEPTING NEW MODEL')
+                logger.info("ACCEPTING NEW MODEL")
                 self.nnet.save_checkpoint(filename=f"accepted_{generation}.pth.tar")
-                self.nnet.save_checkpoint(filename='best.pth.tar')
+                self.nnet.save_checkpoint(filename="best.pth.tar")
             else:
-                logger.info('REJECTING NEW MODEL')
-                self.nnet.save_checkpoint(filename=f'rejected_{generation}.pth.tar')
-                self.nnet.load_checkpoint(filename='temp.pth.tar')
+                logger.info("REJECTING NEW MODEL")
+                self.nnet.save_checkpoint(filename=f"rejected_{generation}.pth.tar")
+                self.nnet.load_checkpoint(filename="temp.pth.tar")
 
             # PHASE 4: Strength evaluation against fixed baselines.
             # The new network this gen is measured against the frozen gen-0
@@ -356,27 +372,36 @@ class Coach:
         )
 
     def _run_arena_serial(
-        self, top_k_to_record: int,
+        self,
+        top_k_to_record: int,
     ) -> tuple[int, int, int, list]:
         """Sequential arena loop. Returns
         ``(new_wins, prev_wins, draws, game_records)``.
         """
         prev_player = NetworkPlayer(
-            game=self.game, nnet=self.pnet,
-            mcts_config=self.config.mcts_config, temp=0.0,
+            game=self.game,
+            nnet=self.pnet,
+            mcts_config=self.config.mcts_config,
+            temp=0.0,
         )
         new_player = NetworkPlayer(
-            game=self.game, nnet=self.nnet,
-            mcts_config=self.config.mcts_config, temp=0.0,
+            game=self.game,
+            nnet=self.nnet,
+            mcts_config=self.config.mcts_config,
+            temp=0.0,
         )
         arena = Arena(prev_player, new_player, self.game)
         pwins, nwins, draws, records = arena.play_games(
-            self.config.num_arena_matches, record=True, top_k=top_k_to_record,
+            self.config.num_arena_matches,
+            record=True,
+            top_k=top_k_to_record,
         )
         return nwins, pwins, draws, records
 
     def _run_arena_parallel(
-        self, generation: int, top_k_to_record: int,
+        self,
+        generation: int,
+        top_k_to_record: int,
     ) -> tuple[int, int, int, list]:
         """Parallel arena across the worker pool.
 
@@ -413,7 +438,7 @@ class Coach:
             config=self.config,
             generation=generation,
             checkpoint_a_path=prev_checkpoint,  # A = prev (matches serial player1)
-            checkpoint_b_path=new_checkpoint,   # B = new
+            checkpoint_b_path=new_checkpoint,  # B = new
             num_games=self.config.num_arena_matches,
             num_workers=self.config.num_parallel_workers,
             phase=PHASE_ARENA,
@@ -464,11 +489,23 @@ class Coach:
         elapsed = time.perf_counter() - elo_start
         logger.info(
             "Gen {} Elo: {:.0f} ({:+.0f} vs baseline) — W{} L{} D{}, score rate {:.3f}, {:.1f}s",
-            generation, absolute, elo_diff, wins, losses, draws, score_rate, elapsed,
+            generation,
+            absolute,
+            elo_diff,
+            wins,
+            losses,
+            draws,
+            score_rate,
+            elapsed,
         )
         self.metrics.log_elo(
-            generation=generation, elo_diff=elo_diff, baseline_rating=baseline_rating,
-            score_rate=score_rate, wins=wins, losses=losses, draws=draws,
+            generation=generation,
+            elo_diff=elo_diff,
+            baseline_rating=baseline_rating,
+            score_rate=score_rate,
+            wins=wins,
+            losses=losses,
+            draws=draws,
             games=wins + losses + draws,
         )
 
@@ -476,12 +513,16 @@ class Coach:
         """Sequential Elo loop. Returns ``(new_wins, baseline_wins, draws)``."""
         assert self.elo_baseline_net is not None
         new_player = NetworkPlayer(
-            game=self.game, nnet=self.nnet,
-            mcts_config=self.config.mcts_config, temp=0.0,
+            game=self.game,
+            nnet=self.nnet,
+            mcts_config=self.config.mcts_config,
+            temp=0.0,
         )
         baseline_player = NetworkPlayer(
-            game=self.game, nnet=self.elo_baseline_net,
-            mcts_config=self.config.mcts_config, temp=0.0,
+            game=self.game,
+            nnet=self.elo_baseline_net,
+            mcts_config=self.config.mcts_config,
+            temp=0.0,
         )
         arena = Arena(new_player, baseline_player, self.game)
         wins, losses, draws, _ = arena.play_games(n)
@@ -526,8 +567,10 @@ class Coach:
         mm_start = time.perf_counter()
 
         new_player = NetworkPlayer(
-            game=self.game, nnet=self.nnet,
-            mcts_config=self.config.mcts_config, temp=0.0,
+            game=self.game,
+            nnet=self.nnet,
+            mcts_config=self.config.mcts_config,
+            temp=0.0,
         )
         assert self._oracle is not None  # caller-guarded in _evaluate_strength_vs_baselines
         oracle_player = self._oracle.make_player()
@@ -536,11 +579,18 @@ class Coach:
         elapsed = time.perf_counter() - mm_start
         logger.info(
             "Gen {} vs minimax: W{} L{} D{} (draw_rate {:.2f}, {:.1f}s)",
-            generation, wins, losses, draws,
-            draws / max(wins + losses + draws, 1), elapsed,
+            generation,
+            wins,
+            losses,
+            draws,
+            draws / max(wins + losses + draws, 1),
+            elapsed,
         )
         self.metrics.log_minimax(
-            generation=generation, wins=wins, losses=losses, draws=draws,
+            generation=generation,
+            wins=wins,
+            losses=losses,
+            draws=draws,
             games=wins + losses + draws,
         )
 
@@ -562,7 +612,8 @@ class Coach:
 
         if self._symmetry_diagnostic_positions is None:
             self._symmetry_diagnostic_positions = build_diagnostic_positions(
-                self.game, n=self.config.symmetry_diagnostic_positions,
+                self.game,
+                n=self.config.symmetry_diagnostic_positions,
             )
 
         start = time.perf_counter()
@@ -577,7 +628,9 @@ class Coach:
             mean_of_means = float(np.mean([m for _, m, _, _ in position_results]))
             logger.info(
                 "Gen {} symmetry diagnostic: mean KL = {:.4f} across {} positions ({:.2f}s)",
-                generation, mean_of_means, len(position_results),
+                generation,
+                mean_of_means,
+                len(position_results),
                 time.perf_counter() - start,
             )
         self.metrics.log_symmetry_diagnostic(generation, position_results)
@@ -587,7 +640,11 @@ class Coach:
         if self._eval_set is not None:
             return
         self._eval_set = build_or_load_eval_set(
-            self.config, self.game, self._oracle, train_examples, self._eval_set_size,
+            self.config,
+            self.game,
+            self._oracle,
+            train_examples,
+            self._eval_set_size,
         )
 
     def _log_training_dynamics(self, generation: int, buffer_positions: int) -> None:
@@ -608,8 +665,13 @@ class Coach:
         logger.info(
             "Gen {} data regime: epochs={} buffer={}/{} games ({} positions), "
             "staleness ≈{:.1f} gens, emergent reuse ≈{:.1f} (epochs × B/F)",
-            generation, epochs, buffer_games, buffer_capacity_games,
-            buffer_positions, staleness_gens, emergent_reuse,
+            generation,
+            epochs,
+            buffer_games,
+            buffer_capacity_games,
+            buffer_positions,
+            staleness_gens,
+            emergent_reuse,
         )
         self.metrics.log_training_dynamics(
             generation=generation,
@@ -622,7 +684,10 @@ class Coach:
         )
 
     def _should_accept_new_network(
-        self, new_wins: int, prev_wins: int, draws: int = 0,
+        self,
+        new_wins: int,
+        prev_wins: int,
+        draws: int = 0,
     ) -> bool:
         """Decide whether to accept the newly trained network.
 
@@ -632,8 +697,11 @@ class Coach:
         for the full rationale.
         """
         from alphablokus.evaluation.acceptance import is_accepted_score_rule
+
         return is_accepted_score_rule(
-            new_wins=new_wins, prev_wins=prev_wins, draws=draws,
+            new_wins=new_wins,
+            prev_wins=prev_wins,
+            draws=draws,
             threshold=self.config.update_threshold,
         )
 

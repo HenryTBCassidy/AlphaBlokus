@@ -6,6 +6,7 @@ or the in-process serial loop — and returns the identical
 one-list-per-game contract from all three, so the Coach never cares which
 backend produced the data.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable

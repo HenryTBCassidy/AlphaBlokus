@@ -9,6 +9,7 @@ The renderers themselves do all the actual drawing — this file is the thin
 abstraction layer so reporting code can render any game without importing
 game-specific symbols.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Protocol, TypeVar
@@ -75,7 +76,6 @@ class IBoardRenderer(Protocol[TBoard_contra]):
         ...
 
 
-
 def get_renderer(game_name: str) -> IBoardRenderer:
     """Return the renderer for the named game.
 
@@ -84,8 +84,10 @@ def get_renderer(game_name: str) -> IBoardRenderer:
     """
     if game_name == "tictactoe":
         from alphablokus.reporting.display_tictactoe import TicTacToeRenderer
+
         return TicTacToeRenderer()
     if game_name == "blokusduo":
         from alphablokus.reporting.display_blokusduo import BlokusDuoRenderer
+
         return BlokusDuoRenderer()
     raise ValueError(f"No renderer registered for game {game_name!r}")

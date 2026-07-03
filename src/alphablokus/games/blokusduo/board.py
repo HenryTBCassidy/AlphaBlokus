@@ -41,10 +41,10 @@ def encode_planes_from_placement(ppb: NDArray) -> NDArray:
     """
     rep = np.zeros((44, BlokusDuoBoard.N, BlokusDuoBoard.N), dtype=np.float32)
     for piece_id in range(1, 22):
-        rep[piece_id - 1] = (ppb == piece_id)
-        rep[21 + piece_id - 1] = (ppb == -piece_id)
-    rep[42] = ppb > 0   # Aggregate: current player
-    rep[43] = ppb < 0   # Aggregate: opponent
+        rep[piece_id - 1] = ppb == piece_id
+        rep[21 + piece_id - 1] = ppb == -piece_id
+    rep[42] = ppb > 0  # Aggregate: current player
+    rep[43] = ppb < 0  # Aggregate: opponent
     return rep
 
 
@@ -189,10 +189,10 @@ class BlokusDuoBoard(IBoard):
             IndexError: If the piece doesn't fit on the board.
             RuntimeError: If trying to place on an occupied square.
         """
-        piece_orientation = self._piece_manager.get_piece_orientation_array(
-            action.piece_id, action.orientation)
+        piece_orientation = self._piece_manager.get_piece_orientation_array(action.piece_id, action.orientation)
         length_idx, width_idx = self._coordinate_index_decoder.to_idx(
-            coordinate=(action.x_coordinate, action.y_coordinate))
+            coordinate=(action.x_coordinate, action.y_coordinate)
+        )
 
         # Create new placement board with piece applied
         new_ppb = self._piece_placement_board.copy()
@@ -204,14 +204,16 @@ class BlokusDuoBoard(IBoard):
                     ri, ci = length_idx + i, width_idx + j
                     if ri >= self.N or ci >= self.N:
                         detail = self._piece_insertion_error_message(
-                            piece_orientation, action.x_coordinate, action.y_coordinate)
+                            piece_orientation, action.x_coordinate, action.y_coordinate
+                        )
                         raise IndexError(
-                            f"Piece cannot be inserted at this index, it does not fit on the board! \n{detail}")
+                            f"Piece cannot be inserted at this index, it does not fit on the board! \n{detail}"
+                        )
                     if new_ppb[ri, ci] != 0:
                         detail = self._piece_insertion_error_message(
-                            piece_orientation, action.x_coordinate, action.y_coordinate)
-                        raise RuntimeError(
-                            f"Trying to insert piece into board over existing piece! \n{detail}")
+                            piece_orientation, action.x_coordinate, action.y_coordinate
+                        )
+                        raise RuntimeError(f"Trying to insert piece into board over existing piece! \n{detail}")
                     new_ppb[ri, ci] = np.int8(action.piece_id * player_side)
 
         # Update remaining pieces
@@ -231,9 +233,11 @@ class BlokusDuoBoard(IBoard):
         new_black_points: PlacementDict = dict(self._black_placement_points)
         board_2d = np.sign(new_ppb).astype(np.int8)
         BlokusDuoBoard._update_placement_points(
-            new_white_points, 1, (length_idx, width_idx), piece_orientation, board_2d)
+            new_white_points, 1, (length_idx, width_idx), piece_orientation, board_2d
+        )
         BlokusDuoBoard._update_placement_points(
-            new_black_points, -1, (length_idx, width_idx), piece_orientation, board_2d)
+            new_black_points, -1, (length_idx, width_idx), piece_orientation, board_2d
+        )
 
         # Side-danger only grows for the player who just moved (it's "adjacent to
         # a *friendly* piece"), so the opponent's zone is carried over unchanged by
@@ -292,12 +296,8 @@ class BlokusDuoBoard(IBoard):
         # indices, so we transpose by swapping the two components of each
         # key. Inner dicts are currently empty (move-generation cache slot);
         # an empty-dict copy is fine.
-        new_white_points: PlacementDict = {
-            (j, i): {} for (i, j) in self._white_placement_points
-        }
-        new_black_points: PlacementDict = {
-            (j, i): {} for (i, j) in self._black_placement_points
-        }
+        new_white_points: PlacementDict = {(j, i): {} for (i, j) in self._white_placement_points}
+        new_black_points: PlacementDict = {(j, i): {} for (i, j) in self._black_placement_points}
         return BlokusDuoBoard._from_state(
             piece_placement_board=new_ppb,
             white_remaining=self._white_piece_ids_remaining,
@@ -384,10 +384,10 @@ class BlokusDuoBoard(IBoard):
         instead of recomputing the whole board (bit-identical).
         """
         danger = np.zeros_like(friendly)
-        danger[1:, :] |= friendly[:-1, :]   # piece above
-        danger[:-1, :] |= friendly[1:, :]   # piece below
-        danger[:, 1:] |= friendly[:, :-1]   # piece left
-        danger[:, :-1] |= friendly[:, 1:]   # piece right
+        danger[1:, :] |= friendly[:-1, :]  # piece above
+        danger[:-1, :] |= friendly[1:, :]  # piece below
+        danger[:, 1:] |= friendly[:, :-1]  # piece left
+        danger[:, :-1] |= friendly[:, 1:]  # piece right
         return danger
 
     @classmethod
@@ -428,8 +428,7 @@ class BlokusDuoBoard(IBoard):
         """Check if a square can be validly placed on (empty + corner rule + no-sides rule)."""
         if board[i, j] != 0:
             return False
-        return (cls._at_least_one_corner(i, j, side, board)
-                and cls._no_sides(i, j, side, board))
+        return cls._at_least_one_corner(i, j, side, board) and cls._no_sides(i, j, side, board)
 
     @classmethod
     def _update_placement_points(
@@ -465,7 +464,4 @@ class BlokusDuoBoard(IBoard):
         x_coordinate: int,
         y_coordinate: int,
     ) -> str:
-        return (f"Board: \n {self.as_2d}, \n "
-                f"Piece: \n {piece_orientation}, \n"
-                f"At ({x_coordinate}, {y_coordinate})")
-
+        return f"Board: \n {self.as_2d}, \n Piece: \n {piece_orientation}, \nAt ({x_coordinate}, {y_coordinate})"

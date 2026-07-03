@@ -56,4 +56,4 @@ def test_as_dense_accepts_sparse_and_dense() -> None:
     dense = np.array([0, 0.5, 0, 0.5, 0], dtype=np.float32)
     sparse = sparsify(dense)
     np.testing.assert_array_equal(as_dense(sparse, 5), dense)  # sparse tuple -> dense
-    np.testing.assert_array_equal(as_dense(dense, 5), dense)   # already-dense -> passthrough
+    np.testing.assert_array_equal(as_dense(dense, 5), dense)  # already-dense -> passthrough

@@ -45,15 +45,21 @@ def _artefacts(config: RunConfig) -> dict[str, Any]:
 
     if config.game != "blokusduo":
         raise ValueError(
-            f"selfplay_backend 'jax' supports only blokusduo (got {config.game!r}); "
-            "use selfplay_backend 'python'."
+            f"selfplay_backend 'jax' supports only blokusduo (got {config.game!r}); use selfplay_backend 'python'."
         )
     jax_config = config.jax_selfplay
     mcts = config.mcts_config
     key = (
-        jax_config.batch_size, jax_config.top_k, jax_config.dtype, jax_config.wave_plies,
-        mcts.num_mcts_sims, mcts.cpuct, mcts.dirichlet_epsilon, mcts.dirichlet_alpha,
-        mcts.search_policy, mcts.gumbel_max_considered,
+        jax_config.batch_size,
+        jax_config.top_k,
+        jax_config.dtype,
+        jax_config.wave_plies,
+        mcts.num_mcts_sims,
+        mcts.cpuct,
+        mcts.dirichlet_epsilon,
+        mcts.dirichlet_alpha,
+        mcts.search_policy,
+        mcts.gumbel_max_considered,
         config.temp_threshold,
     )
     if key not in _ARTEFACT_CACHE:
@@ -61,23 +67,28 @@ def _artefacts(config: RunConfig) -> dict[str, Any]:
             logger.warning(
                 "jax backend ignores sim_schedule={!r}: fixed-shape search uses a flat "
                 "num_mcts_sims={} budget (see the plan's fidelity contract).",
-                mcts.sim_schedule, mcts.num_mcts_sims,
+                mcts.sim_schedule,
+                mcts.num_mcts_sims,
             )
         game = instantiate_game(config)
         assert isinstance(game, BlokusDuoGame)  # config.game validated above
         kernels = make_kernels(build_jax_tables(game))
-        search = make_search(kernels, SearchConfig(
-            num_simulations=mcts.num_mcts_sims,
-            top_k=jax_config.top_k,
-            cpuct=mcts.cpuct,
-            dirichlet_epsilon=mcts.dirichlet_epsilon,
-            dirichlet_alpha=mcts.dirichlet_alpha,
-            dtype=jax_config.dtype,
-            policy=mcts.search_policy,
-            gumbel_max_considered=mcts.gumbel_max_considered,
-        ))
+        search = make_search(
+            kernels,
+            SearchConfig(
+                num_simulations=mcts.num_mcts_sims,
+                top_k=jax_config.top_k,
+                cpuct=mcts.cpuct,
+                dirichlet_epsilon=mcts.dirichlet_epsilon,
+                dirichlet_alpha=mcts.dirichlet_alpha,
+                dtype=jax_config.dtype,
+                policy=mcts.search_policy,
+                gumbel_max_considered=mcts.gumbel_max_considered,
+            ),
+        )
         initial_carry, run_wave = make_actor(
-            kernels, search,
+            kernels,
+            search,
             batch_size=jax_config.batch_size,
             temp_threshold=config.temp_threshold,
             wave_plies=jax_config.wave_plies,
@@ -106,7 +117,9 @@ def _stats_for(record: HarvestedGame, num_sims: int, seconds_per_move: float) ->
 
 
 def generate_self_play_games(
-    config: RunConfig, generation: int, checkpoint_path: str,
+    config: RunConfig,
+    generation: int,
+    checkpoint_path: str,
 ) -> tuple[list[list[ProcessedExample]], list[MCTSEpisodeStats]]:
     """Generate ``config.num_eps`` self-play games on the GPU.
 
@@ -130,7 +143,8 @@ def generate_self_play_games(
     artefacts = _artefacts(config)
     params = params_to_device(
         convert_torch_checkpoint(
-            config.net_directory / checkpoint_path, config.net_config.num_residual_blocks,
+            config.net_directory / checkpoint_path,
+            config.net_config.num_residual_blocks,
         ),
         dtype=config.jax_selfplay.dtype,
     )
@@ -162,12 +176,13 @@ def generate_self_play_games(
         logger.info(
             "jax self-play gen {}: kept {} games ({} overflow beyond num_eps dropped, "
             "{} truncated tail games discarded)",
-            generation, len(records), overflow, harvester.truncated_games,
+            generation,
+            len(records),
+            overflow,
+            harvester.truncated_games,
         )
 
     seconds_per_move = wave_seconds / max(total_moves, 1)
     examples = [record.examples for record in records]
-    stats = [
-        _stats_for(record, config.mcts_config.num_mcts_sims, seconds_per_move) for record in records
-    ]
+    stats = [_stats_for(record, config.mcts_config.num_mcts_sims, seconds_per_move) for record in records]
     return examples, stats

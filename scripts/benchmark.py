@@ -19,6 +19,7 @@ Usage::
 Reuses the live code paths (``play_self_play_episode``,
 ``run_self_play_episodes_parallel``, ``nnet.train``) so the numbers reflect production.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -43,14 +44,23 @@ from alphablokus.selfplay.episode import play_self_play_episode
 # -- Suite parameters (edit here, not via ad-hoc args) -----------------------------
 TIMING_GAMES = 5
 WORKER_COUNTS = (1, 2, 4, 8, 16)
-SWEEP_GAMES_PER_WORKER = 4          # sweep num_eps = this * N (>= one full batch each)
+SWEEP_GAMES_PER_WORKER = 4  # sweep num_eps = this * N (>= one full batch each)
 TRAIN_RAMP_EXAMPLES = (50_000, 150_000, 250_000, 350_000)
 DEFAULT_CONFIG = "run_configurations/bench_workers_gpu8.json"
 
 # cProfile category buckets, matched by (filename substring, name predicate).
 _MOVEGEN_NAMES = (
-    "placement", "cells_valid", "generate_valid", "valid_placement", "corner",
-    "adj_status", "valid_move", "forbidden", "fill_legal", "has_valid", "game_ended",
+    "placement",
+    "cells_valid",
+    "generate_valid",
+    "valid_placement",
+    "corner",
+    "adj_status",
+    "valid_move",
+    "forbidden",
+    "fill_legal",
+    "has_valid",
+    "game_ended",
 )
 
 
@@ -72,6 +82,7 @@ def _categorise(filename: str, func: str) -> str:
 
 
 # -- Measurements ------------------------------------------------------------------
+
 
 def measure_timing(game, nnet, config: RunConfig, n_games: int) -> dict:
     """Single-process self-play timing over ``n_games`` games."""
@@ -115,10 +126,7 @@ def measure_cprofile(game, nnet, config: RunConfig) -> dict:
     return {
         "categories": categories,
         "total_own_s": total_tt,
-        "top_functions": [
-            {"own_s": tt, "cum_s": ct, "name": name, "cat": cat}
-            for tt, ct, name, cat in rows[:15]
-        ],
+        "top_functions": [{"own_s": tt, "cum_s": ct, "name": name, "cat": cat} for tt, ct, name, cat in rows[:15]],
     }
 
 
@@ -132,8 +140,10 @@ def measure_worker_sweep(config: RunConfig, worker_counts) -> dict:
         cfg = replace(config, num_parallel_workers=n, num_eps=eps)
         t0 = time.perf_counter()
         run_self_play_episodes_parallel(
-            config=cfg, generation=1,
-            checkpoint_path="benchmark_worker_init.pth.tar", num_workers=n,
+            config=cfg,
+            generation=1,
+            checkpoint_path="benchmark_worker_init.pth.tar",
+            num_workers=n,
         )
         dt = time.perf_counter() - t0
         out[n] = {"games_per_s": eps / dt, "eps": eps, "wall_s": dt}
@@ -160,21 +170,35 @@ def measure_train_ramp(config_path: str, sizes) -> dict:
     out = {}
     for n in sizes:
         proc = subprocess.run(
-            ["uv", "run", "python", "-m", "scripts.profile_self_play",
-             "--config", config_path, "--mode", "train", "--examples", str(n)],
-            capture_output=True, text=True, timeout=900,
+            [
+                "uv",
+                "run",
+                "python",
+                "-m",
+                "scripts.profile_self_play",
+                "--config",
+                config_path,
+                "--mode",
+                "train",
+                "--examples",
+                str(n),
+            ],
+            capture_output=True,
+            text=True,
+            timeout=900,
         )
         text = proc.stdout + proc.stderr
         m = re.search(r"RSS=(\d+)\s*MB", text)
-        out[n] = {"rss_mb": int(m.group(1)) if m else None,
-                  "ok": m is not None and proc.returncode == 0}
+        out[n] = {"rss_mb": int(m.group(1)) if m else None, "ok": m is not None and proc.returncode == 0}
     return out
 
 
 # -- HTML rendering ----------------------------------------------------------------
 
+
 def _fig_b64(fig) -> str:
     import matplotlib.pyplot as plt
+
     buf = io.BytesIO()
     fig.savefig(buf, format="png", dpi=110, bbox_inches="tight")
     plt.close(fig)
@@ -183,6 +207,7 @@ def _fig_b64(fig) -> str:
 
 def render_html(data: dict, out_path: Path) -> None:
     import matplotlib
+
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
 
@@ -192,8 +217,9 @@ def render_html(data: dict, out_path: Path) -> None:
     cats = data["cprofile"]["categories"]
     items = sorted(cats.items(), key=lambda kv: kv[1], reverse=True)
     fig, ax = plt.subplots(figsize=(6, 4.6))
-    ax.pie([v for _, v in items], labels=[k for k, _ in items], autopct="%d%%",
-           startangle=90, textprops={"fontsize": 8})
+    ax.pie(
+        [v for _, v in items], labels=[k for k, _ in items], autopct="%d%%", startangle=90, textprops={"fontsize": 8}
+    )
     ax.set_title("Single-worker self-play CPU time split (cProfile own-time)")
     imgs["pie"] = _fig_b64(fig)
 
@@ -234,9 +260,7 @@ def render_html(data: dict, out_path: Path) -> None:
 
     t = data["timing"]
     hdr = data["header"]
-    sweep_rows = "".join(
-        f"<tr><td>{n}</td><td>{sw[n]['games_per_s']:.3f}</td><td>{sw[n]['eps']}</td></tr>"
-        for n in ns)
+    sweep_rows = "".join(f"<tr><td>{n}</td><td>{sw[n]['games_per_s']:.3f}</td><td>{sw[n]['eps']}</td></tr>" for n in ns)
     style = (
         "body{font-family:-apple-system,Segoe UI,sans-serif;max-width:900px;margin:2rem auto;"
         "padding:0 1rem;line-height:1.5;color:#1a1a1a}h1{border-bottom:2px solid #333}"
@@ -246,26 +270,26 @@ def render_html(data: dict, out_path: Path) -> None:
     html = f"""<!doctype html><html><head><meta charset=utf-8><title>Self-Play Benchmark</title>
 <style>{style}</style></head><body>
 <h1>Self-Play Benchmark</h1>
-<p class=meta>{hdr['config']} &middot; net {hdr['net']} &middot; sims {hdr['sims']}, K={hdr['k']}
-&middot; commit {hdr['commit']} &middot; {hdr['timestamp']}</p>
+<p class=meta>{hdr["config"]} &middot; net {hdr["net"]} &middot; sims {hdr["sims"]}, K={hdr["k"]}
+&middot; commit {hdr["commit"]} &middot; {hdr["timestamp"]}</p>
 
 <h2>Single-worker timing</h2>
 <table><tr><th>games</th><th>avg s/game</th><th>± std</th><th>examples/game</th><th>tree states</th></tr>
-<tr><td>{t['n_games']}</td><td>{t['avg_s']:.2f}</td><td>{t['std_s']:.2f}</td>
-<td>{t['examples_per_game']:.0f}</td><td>{t['tree_states']:.0f}</td></tr></table>
+<tr><td>{t["n_games"]}</td><td>{t["avg_s"]:.2f}</td><td>{t["std_s"]:.2f}</td>
+<td>{t["examples_per_game"]:.0f}</td><td>{t["tree_states"]:.0f}</td></tr></table>
 
 <h2>Where the time goes (single worker)</h2>
-<img src="data:image/png;base64,{imgs['pie']}">
-<img src="data:image/png;base64,{imgs['funcs']}">
+<img src="data:image/png;base64,{imgs["pie"]}">
+<img src="data:image/png;base64,{imgs["funcs"]}">
 
 <h2>Throughput vs workers</h2>
-<img src="data:image/png;base64,{imgs['sweep']}">
+<img src="data:image/png;base64,{imgs["sweep"]}">
 <table><tr><th>workers</th><th>games/s</th><th>games run</th></tr>{sweep_rows}</table>
 
 <h2>Memory</h2>
-<p>In-episode MCTS tree: peak Python heap <b>{data['memory']['peak_heap_mb']:.1f} MB</b>
-({data['memory']['tree_states']:.0f} tree states/game).</p>
-{('<img src="data:image/png;base64,' + imgs['mem'] + '">') if 'mem' in imgs else '<p>(train ramp unavailable)</p>'}
+<p>In-episode MCTS tree: peak Python heap <b>{data["memory"]["peak_heap_mb"]:.1f} MB</b>
+({data["memory"]["tree_states"]:.0f} tree states/game).</p>
+{('<img src="data:image/png;base64,' + imgs["mem"] + '">') if "mem" in imgs else "<p>(train ramp unavailable)</p>"}
 </body></html>"""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(html)
@@ -279,8 +303,9 @@ def main() -> None:
 
     config = load_args(args.config)
     game, nnet = instantiate_game_and_network(config)
-    if (enable := getattr(game, "enable_optimised_movegen", None)) is not None and \
-            getattr(config, "use_optimised_movegen", False):
+    if (enable := getattr(game, "enable_optimised_movegen", None)) is not None and getattr(
+        config, "use_optimised_movegen", False
+    ):
         enable()
 
     print("[benchmark] timing...", flush=True)
@@ -295,18 +320,24 @@ def main() -> None:
     train_ramp = measure_train_ramp(args.config, TRAIN_RAMP_EXAMPLES)
 
     import subprocess
-    commit = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                            capture_output=True, text=True).stdout.strip() or "?"
+
+    commit = (
+        subprocess.run(["git", "rev-parse", "--short", "HEAD"], capture_output=True, text=True).stdout.strip() or "?"
+    )
     data = {
         "header": {
             "config": args.config,
             "net": f"{config.net_config.num_filters}f×{config.net_config.num_residual_blocks}b",
-            "sims": config.mcts_config.num_mcts_sims, "k": config.mcts_config.mcts_batch_size,
+            "sims": config.mcts_config.num_mcts_sims,
+            "k": config.mcts_config.mcts_batch_size,
             "commit": commit,
             "timestamp": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
         },
-        "timing": timing, "cprofile": cprof, "memory": memory,
-        "worker_sweep": sweep, "train_ramp": train_ramp,
+        "timing": timing,
+        "cprofile": cprof,
+        "memory": memory,
+        "worker_sweep": sweep,
+        "train_ramp": train_ramp,
     }
     out = Path(args.out or f"temp/benchmarks/benchmark_{commit}.html")
     render_html(data, out)

@@ -10,6 +10,7 @@ via cProfile + the built-in MCTS phase timers + a synthetic-buffer training run.
 
 Usage:  uv run python -m scripts.profile_report   ->  docs/research/profiling-report.html
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -79,15 +80,24 @@ BLUE, GREEN, AMBER, GREY, RED = "#2563eb", "#16a34a", "#d97706", "#9ca3af", "#dc
 
 
 def _bar(labels, values, colors, title, xtitle, texts=None):
-    fig = go.Figure(go.Bar(
-        x=values, y=labels, orientation="h",
-        marker_color=colors, text=texts or [f"{v}" for v in values],
-        textposition="auto",
-    ))
+    fig = go.Figure(
+        go.Bar(
+            x=values,
+            y=labels,
+            orientation="h",
+            marker_color=colors,
+            text=texts or [f"{v}" for v in values],
+            textposition="auto",
+        )
+    )
     fig.update_layout(
-        title=title, xaxis_title=xtitle, height=360,
-        margin=dict(l=10, r=30, t=50, b=40), yaxis=dict(autorange="reversed"),
-        template="plotly_white", font=dict(size=13),
+        title=title,
+        xaxis_title=xtitle,
+        height=360,
+        margin=dict(l=10, r=30, t=50, b=40),
+        yaxis=dict(autorange="reversed"),
+        template="plotly_white",
+        font=dict(size=13),
     )
     return fig
 
@@ -100,35 +110,51 @@ def build() -> None:
     mins = [m for _, m, _ in FULL_CYCLE]
     colors = [GREEN if h else GREY for _, _, h in FULL_CYCLE]
     pct = [m / total_min * 100 for m in mins]
-    f1 = _bar(labels, [round(p, 1) for p in pct], colors,
-              f"Full training cycle — where a generation's ~{total_min:.0f} min goes "
-              "(green = sped up by MCTS work)", "% of generation",
-              texts=[f"{p:.1f}%  ({m:.1f} min)" for p, m in zip(pct, mins, strict=True)])
+    f1 = _bar(
+        labels,
+        [round(p, 1) for p in pct],
+        colors,
+        f"Full training cycle — where a generation's ~{total_min:.0f} min goes (green = sped up by MCTS work)",
+        "% of generation",
+        texts=[f"{p:.1f}%  ({m:.1f} min)" for p, m in zip(pct, mins, strict=True)],
+    )
 
     # 2. Self-play breakdown
-    f2 = _bar([s for s, _ in SELF_PLAY], [p for _, p in SELF_PLAY],
-              [BLUE, GREEN, AMBER, GREY, GREY, GREY],
-              "Inside one self-play game (7.93 s) — % of game", "% of self-play",
-              texts=[f"{p}%" for _, p in SELF_PLAY])
+    f2 = _bar(
+        [s for s, _ in SELF_PLAY],
+        [p for _, p in SELF_PLAY],
+        [BLUE, GREEN, AMBER, GREY, GREY, GREY],
+        "Inside one self-play game (7.93 s) — % of game",
+        "% of self-play",
+        texts=[f"{p}%" for _, p in SELF_PLAY],
+    )
 
     # 3. Inference decomposition
     icolors = [RED, RED, GREEN, GREY]
-    f3 = _bar([c for c, _ in INFERENCE], [p for _, p in INFERENCE], icolors,
-              "The 33% inference slice — transfers (red) cost ~3× the compute (green)",
-              "% of self-play", texts=[f"{p}%" for _, p in INFERENCE])
+    f3 = _bar(
+        [c for c, _ in INFERENCE],
+        [p for _, p in INFERENCE],
+        icolors,
+        "The 33% inference slice — transfers (red) cost ~3× the compute (green)",
+        "% of self-play",
+        texts=[f"{p}%" for _, p in INFERENCE],
+    )
 
     # 4. Amdahl ceilings
     ceil = [round(1 / (1 - p / 100), 2) for _, p, _ in AMDAHL]
-    f4 = _bar([f"{lv}  ({eff})" for lv, _, eff in AMDAHL], ceil,
-              [AMBER, RED, BLUE, BLUE, GREY],
-              "Amdahl ceiling — max whole-cycle speedup if that slice → 0",
-              "× speedup ceiling", texts=[f"{c}×" for c in ceil])
+    f4 = _bar(
+        [f"{lv}  ({eff})" for lv, _, eff in AMDAHL],
+        ceil,
+        [AMBER, RED, BLUE, BLUE, GREY],
+        "Amdahl ceiling — max whole-cycle speedup if that slice → 0",
+        "× speedup ceiling",
+        texts=[f"{c}×" for c in ceil],
+    )
 
     OUT.parent.mkdir(parents=True, exist_ok=True)
     parts = []
     for i, fig in enumerate([f1, f2, f3, f4]):
-        parts.append(fig.to_html(full_html=False,
-                                 include_plotlyjs="cdn" if i == 0 else False))
+        parts.append(fig.to_html(full_html=False, include_plotlyjs="cdn" if i == 0 else False))
 
     html = f"""<!doctype html><html><head><meta charset="utf-8">
 <title>AlphaBlokus — Profiling Report</title>

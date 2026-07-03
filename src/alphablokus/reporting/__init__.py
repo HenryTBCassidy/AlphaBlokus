@@ -7,6 +7,7 @@ Submodules:
     display*      — per-game board renderers
     mcts_profiling — MCTS profiling report builder
 """
+
 from alphablokus.reporting.report import create_html_report
 
 __all__ = ["create_html_report"]

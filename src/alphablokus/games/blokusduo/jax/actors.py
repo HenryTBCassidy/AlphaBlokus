@@ -128,7 +128,8 @@ def make_actor(
             )
             next_games = jax.tree.map(
                 lambda fresh_leaf, current_leaf: _reset_where(terminated, fresh_leaf, current_leaf),
-                fresh, new_games,
+                fresh,
+                new_games,
             )
             next_counts = jnp.where(terminated, 0, carry.move_counts + 1)
             return ActorCarry(games=next_games, move_counts=next_counts), row

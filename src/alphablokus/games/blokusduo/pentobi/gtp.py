@@ -15,6 +15,7 @@ Gotchas handled (per docs/06-INTERFACES.md §2): flush after every write; read t
 **blank-line** terminator (not one line); ``--quiet`` + stderr→DEVNULL so the engine's
 logging can't fill a pipe and deadlock; EOF on stdout ⇒ the engine died.
 """
+
 from __future__ import annotations
 
 import os
@@ -57,18 +58,20 @@ class PentobiGtp:
         path = Path(binary).expanduser() if binary else find_pentobi_gtp()
         if path is None or not path.exists():
             raise FileNotFoundError(
-                "pentobi-gtp binary not found. Build it (docs/plans/pentobi-harness.md H2) "
-                "or set $PENTOBI_GTP_PATH.",
+                "pentobi-gtp binary not found. Build it (docs/plans/pentobi-harness.md H2) or set $PENTOBI_GTP_PATH.",
             )
-        argv = [str(path), "--game", game, "--level", str(level),
-                "--quiet", "--threads", str(threads)]
+        argv = [str(path), "--game", game, "--level", str(level), "--quiet", "--threads", str(threads)]
         if seed is not None:
             argv += ["--seed", str(seed)]
         # stderr → DEVNULL: --quiet already silences logging; discarding stderr removes
         # any chance of a full-pipe deadlock. GTP errors arrive on stdout as "? ...".
         self._proc = subprocess.Popen(
-            argv, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL, text=True, bufsize=1,
+            argv,
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+            text=True,
+            bufsize=1,
         )
         self.level = level
         # Sanity-check the engine is alive and is what we expect.
@@ -98,7 +101,7 @@ class PentobiGtp:
             if line == "":
                 if lines:
                     break  # blank line terminates the response
-                continue   # skip leading blank lines
+                continue  # skip leading blank lines
             lines.append(line)
         status = lines[0]
         # Strip the leading '='/'?' from the first line; keep any continuation lines.

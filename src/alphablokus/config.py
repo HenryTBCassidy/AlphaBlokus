@@ -21,6 +21,7 @@ class MCTSConfig:
     evaluating positions with the neural network; these parameters control
     that search.
     """
+
     num_mcts_sims: int  # Number of MCTS simulations per move
     cpuct: float  # Exploration constant in the PUCT formula (typically between 1 and 4)
     profiling_level: str = "standard"  # "none", "standard" (episode aggregates), "detailed" (per-move breakdown)
@@ -95,6 +96,7 @@ class NetConfig:
     Controls both the architecture (a residual network with convolutional
     layers for board-state processing) and its training process.
     """
+
     learning_rate: float  # Learning rate for the optimizer
     dropout: float  # Dropout probability for regularisation (0 to 1)
     epochs: int  # Number of full passes over the replay buffer per generation
@@ -133,6 +135,7 @@ class WandbConfig:
     present, ``MetricsCollector`` mirrors its existing ``log_*`` calls to W&B
     in addition to the parquet writes used by the HTML report.
     """
+
     project: str  # W&B project name (e.g. "alphablokus-poc")
     entity: str | None = None  # W&B team/user; None uses the default for the logged-in account
     tags: list[str] = field(default_factory=list)  # Free-text tags surfaced in the W&B UI
@@ -151,6 +154,7 @@ class RunConfig:
     2. Training the neural network on the generated games
     3. Evaluating the new network against the previous version
     """
+
     # Game selection
     game: str  # Game to train on: "tictactoe" or "blokusduo"
 

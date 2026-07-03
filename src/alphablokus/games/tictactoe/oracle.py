@@ -6,6 +6,7 @@ are game-theoretically optimal rather than gen-1 MCTS noise. Reached through
 ``registry.resolve_oracle`` — framework code never imports this module
 directly.
 """
+
 from __future__ import annotations
 
 from typing import TYPE_CHECKING
@@ -34,7 +35,9 @@ class TicTacToeOracle(IOracle):
         return MinimaxTicTacToePlayer(self._game)
 
     def eval_targets(
-        self, compact_boards: list[NDArray], action_size: int,
+        self,
+        compact_boards: list[NDArray],
+        action_size: int,
     ) -> tuple[NDArray, NDArray]:
         """Perfect-play eval-set targets for the given positions.
 

@@ -14,11 +14,15 @@ falls back to :func:`is_accepted_score_rule` when reading older runs.
 That way the single decision lives in one place and is logged with the
 result, so visualisations always agree with the training-time decision.
 """
+
 from __future__ import annotations
 
 
 def is_accepted_score_rule(
-    new_wins: int, prev_wins: int, draws: int, threshold: float,
+    new_wins: int,
+    prev_wins: int,
+    draws: int,
+    threshold: float,
 ) -> bool:
     """Chess-style score-based acceptance.
 

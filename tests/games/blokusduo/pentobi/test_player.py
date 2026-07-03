@@ -8,6 +8,7 @@ Pentobi's own ``final_score`` — a silent coordinate/colour error would flip it
 
 Skips when the binary isn't built (build per docs/plans/pentobi-harness.md H2).
 """
+
 from __future__ import annotations
 
 import pytest
@@ -50,7 +51,8 @@ def game() -> BlokusDuoGame:
 
 @pytest.mark.parametrize("pentobi_is_player1", [False, True])
 def test_full_game_completes_and_winner_agrees(
-    game: BlokusDuoGame, pentobi_is_player1: bool,
+    game: BlokusDuoGame,
+    pentobi_is_player1: bool,
 ) -> None:
     """A full RandomPlayer-vs-Pentobi game (both colour assignments) runs to completion
     with no desync, and our outcome matches Pentobi's final_score."""
@@ -66,8 +68,7 @@ def test_full_game_completes_and_winner_agrees(
         assert outcome in (-1, 0, 1)
         assert record is not None and len(record.moves) > 0
         assert outcome == _pentobi_winner(pentobi.final_score()), (
-            f"winner disagreement: our outcome={outcome}, "
-            f"pentobi final_score={pentobi.final_score()!r}"
+            f"winner disagreement: our outcome={outcome}, pentobi final_score={pentobi.final_score()!r}"
         )
     finally:
         pentobi.close()

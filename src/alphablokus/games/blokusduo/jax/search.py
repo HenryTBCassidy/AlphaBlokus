@@ -155,7 +155,10 @@ def make_search(kernels: JaxKernels, config: SearchConfig) -> Callable[..., Sear
         return values, ids.astype(jnp.int32)
 
     def recurrent_fn(
-        params: dict[str, Any], rng_key: jnp.ndarray, action: jnp.ndarray, embedding: tuple,
+        params: dict[str, Any],
+        rng_key: jnp.ndarray,
+        action: jnp.ndarray,
+        embedding: tuple,
     ) -> tuple[mctx.RecurrentFnOutput, tuple]:
         states, topk_ids = embedding
         batch = jnp.arange(action.shape[0])
@@ -174,13 +177,14 @@ def make_search(kernels: JaxKernels, config: SearchConfig) -> Callable[..., Sear
         child_logits, child_ids = topk_legal(jnp.where(masks, log_pi, -jnp.inf))
 
         output = mctx.RecurrentFnOutput(
-            reward=reward, discount=discount, prior_logits=child_logits, value=value,
+            reward=reward,
+            discount=discount,
+            prior_logits=child_logits,
+            value=value,
         )
         return output, (new_states, child_ids)
 
-    qtransform = (
-        qtransform_raw_value if config.qtransform == "raw" else mctx.qtransform_by_parent_and_siblings
-    )
+    qtransform = qtransform_raw_value if config.qtransform == "raw" else mctx.qtransform_by_parent_and_siblings
 
     def search(params: dict[str, Any], rng_key: jnp.ndarray, states: GameState) -> SearchResult:
         noise_key, search_key = jax.random.split(rng_key)
@@ -193,7 +197,9 @@ def make_search(kernels: JaxKernels, config: SearchConfig) -> Callable[..., Sear
             root_log_pi = jnp.where(masks, root_log_pi, -jnp.inf)
         root_logits, root_ids = topk_legal(root_log_pi)
         root = mctx.RootFnOutput(
-            prior_logits=root_logits, value=root_value, embedding=(states, root_ids),
+            prior_logits=root_logits,
+            value=root_value,
+            embedding=(states, root_ids),
         )
         if config.policy == "gumbel":
             policy_output = mctx.gumbel_muzero_policy(

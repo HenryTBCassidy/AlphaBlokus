@@ -46,6 +46,7 @@ If a position's game ends before reaching the target move count, we
 yield the current state anyway — those forced-end positions are
 themselves interesting test cases.
 """
+
 from __future__ import annotations
 
 import time
@@ -68,9 +69,11 @@ if TYPE_CHECKING:
 # Stratification
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class Phase:
     """A game-phase bucket — range of move counts and sampling weight."""
+
     name: str
     min_moves: int
     max_moves: int
@@ -99,7 +102,10 @@ PAD_ACTION: int = -1
 
 
 def generate_position_sequences(
-    game: BlokusDuoGame, n: int, *, seed: int = 42,
+    game: BlokusDuoGame,
+    n: int,
+    *,
+    seed: int = 42,
 ) -> Iterator[NDArray]:
     """Yield N action sequences that reach stratified random positions.
 
@@ -146,9 +152,14 @@ def generate_position_sequences(
 # Cache: build, save, load
 # ---------------------------------------------------------------------------
 
+
 def build_cache(
-    game: BlokusDuoGame, n: int, *, seed: int = 42,
-    cache_dir: Path, label: str | None = None,
+    game: BlokusDuoGame,
+    n: int,
+    *,
+    seed: int = 42,
+    cache_dir: Path,
+    label: str | None = None,
 ) -> Path:
     """Generate N positions and write them to a .npz cache.
 
@@ -187,8 +198,7 @@ def build_cache(
         n_positions=np.array([n], dtype=np.int32),
     )
 
-    print(f"Generated {n} positions in {gen_elapsed:.1f}s "
-          f"(avg {gen_elapsed * 1000 / max(n, 1):.1f}ms/position).")
+    print(f"Generated {n} positions in {gen_elapsed:.1f}s (avg {gen_elapsed * 1000 / max(n, 1):.1f}ms/position).")
     print(f"Cache size: {out_path.stat().st_size / 1024:.1f} KB at {out_path}")
     return out_path
 
@@ -208,8 +218,10 @@ def load_cache(path: Path) -> tuple[NDArray, NDArray]:
 # Replay
 # ---------------------------------------------------------------------------
 
+
 def replay_to_board(
-    game: BlokusDuoGame, actions: NDArray | list[int],
+    game: BlokusDuoGame,
+    actions: NDArray | list[int],
 ) -> BlokusDuoBoard:
     """Apply ``actions`` (a 1D array of action IDs) to a fresh board.
 
@@ -227,7 +239,8 @@ def replay_to_board(
 
 
 def replay_to_board_and_player(
-    game: BlokusDuoGame, actions: NDArray | list[int],
+    game: BlokusDuoGame,
+    actions: NDArray | list[int],
 ) -> tuple[BlokusDuoBoard, int]:
     """Like :func:`replay_to_board` but also returns the player-to-move."""
     board = game.initialise_board()
@@ -241,7 +254,8 @@ def replay_to_board_and_player(
 
 
 def iter_cached_positions(
-    game: BlokusDuoGame, path: Path,
+    game: BlokusDuoGame,
+    path: Path,
 ) -> Iterator[tuple[BlokusDuoBoard, int, NDArray]]:
     """Iterate ``(board, player_to_move, action_sequence)`` triples from a cache file.
 
