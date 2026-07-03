@@ -92,23 +92,24 @@ Shape and dtype information is stored in the parquet file's schema metadata (not
 - Data includes symmetry-augmented positions (rotations/reflections added by `IGame.get_symmetries()`).
 - The rolling replay buffer keeps the last `replay_buffer_games` games in memory (oldest auto-evict); parquet files on disk are never deleted. On resume, `SelfPlayStore.load_recent_games()` refills the buffer newest-first.
 - Cannot be read with a plain `pd.read_parquet()` — use `SelfPlayStore.load()` / `load_games()` / `load_recent_games()` from `alphablokus.storage.selfplay_store`.
+- **Backend-agnostic:** the JAX self-play backend's harvester (`games/blokusduo/jax/harvest.py`) assembles its examples in the *exact* representation the python episode loop produces (compact canonical boards, sparse policies, same draw-sign convention), so jax-generated generations write, load, and resume through this same format with no marker or schema difference.
 - **Legacy dense files** (pre-`compact_v1`, e.g. run2's parquets) cannot be loaded into the compact buffer; resume such runs from their checkpoints before this refactor.
 
 ---
 
 ## Metrics Tables (Hive-Partitioned)
 
-The remaining 6 datasets are all written by `MetricsCollector.flush()` using the same pattern:
+The remaining **13 datasets** (TrainingData, ArenaData, Timings, SelfPlayProfiling, ResourceUsage, TrainingThroughput, TrainingEntropy, PolicyAccuracy, ValueCalibration, EloRatings, MinimaxResults, SymmetryDiagnostic, ArenaReplays) are all written by `MetricsCollector.flush()` using the same pattern:
 
 1. Components call `log_*()` methods during execution, buffering records in memory.
 2. At the end of each generation, `Coach` calls `flush(config, generation)`.
 3. `flush()` writes each buffer to `{directory}/generation={N}/{filename}`, dropping the `generation` column from the data (it's encoded in the directory name).
 4. Buffers are cleared after writing.
 
-All 6 can be read back with:
+All 13 can be read back with:
 
 ```python
-df = pd.read_parquet(config.training_data_directory)  # or any of the 6
+df = pd.read_parquet(config.training_data_directory)  # or any of the 13
 # 'generation' column is automatically reconstructed from directory names
 ```
 

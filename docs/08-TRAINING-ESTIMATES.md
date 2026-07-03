@@ -2,7 +2,14 @@
 
 Estimated wall-clock time for Blokus Duo self-play training under various configurations. Originally derived from Mac CPU profiling (March 2026); updated 2026-05-18 with `mcts_profiling.py` numbers on a small net; **updated 2026-05-26 with production-net measurements** from `scripts/benchmarks/benchmark_phases.py` on the home PC.
 
-> ⚠️ **These measured numbers are a pre-optimisation baseline.** They were taken before **F2** (precomputed-table move generation), **F3** (batched MCTS inference + virtual loss), and **F4** (conv policy head) landed. All three have since shipped, so the realised per-game cost and the move-gen/inference split below are now stale. The "post F1+F2+F3" columns and the projections are **estimates, not measurements**. Re-run `scripts/benchmarks/benchmark_phases.py` on the PC to get current figures before relying on them — the "Refresh after" note at the bottom lists exactly what to re-measure.
+> 🛑 **SUPERSEDED (2026-07).** Everything below predates the optimisation stack **and** the JAX self-play backend, and the world has moved twice since it was written:
+>
+> 1. **F2/F3/F4 shipped** — the per-game cost and the move-gen/inference split below are stale; the python pipeline's post-optimisation throughput was re-measured in [`research/linux-throughput-rebaseline.md`](research/linux-throughput-rebaseline.md) (~1.6 games/s at the production config).
+> 2. **The JAX/Gumbel backend shipped** — production Blokus self-play no longer runs the python pipeline this doc models at all. The **measured** current numbers are in [`research/jax-pipeline-ab.md`](research/jax-pipeline-ab.md): ~13.5 games/s at 64f×4b, ~12× the python pipeline at production net size (128f×8b), on the single home RTX 3060 Ti. The cloud-ladder cost tables below therefore overstate cost/wall-clock by roughly an order of magnitude and the "8× 4090 node" framing is no longer the natural scaling unit.
+>
+> A full re-measure/rewrite of this doc is **out of scope** for now — it is kept for the cost-model methodology (per-game decomposition, Amdahl analysis, the Pentobi-targeted games ladder), which remains sound. Take any *number* from `docs/research/`, not from here.
+
+> ⚠️ **These measured numbers are a pre-optimisation baseline.** They were taken before **F2** (precomputed-table move generation), **F3** (batched MCTS inference + virtual loss), and **F4** (conv policy head) landed. All three have since shipped, so the realised per-game cost and the move-gen/inference split below are now stale. The "post F1+F2+F3" columns and the projections are **estimates, not measurements**.
 
 **Headline finding (2026-05-26):** the cost split depends heavily on net size. Earlier estimates assumed move generation was ~70% of MCTS time — true with the 32f×1b profiling net, **wrong** with the production 64f×4b net we actually train with. At production net size, **inference is ~50% of search time and move-gen is ~43%**. The GPU is *not* idle at production scale; the previously reported "Python move-gen dominates" picture only holds for tiny nets.
 
@@ -158,7 +165,7 @@ Move generation is **~43% of MCTS search time at production net size**, not the 
 
 i.e. even a 30× move-gen speedup only gets you ~1.7× wall-clock at the current net size, because inference is the bigger slice. To get further you also need batched inference (F3 in `docs/plans/archive/full-cycle-optimisation.md`) — together they push the ceiling much higher.
 
-Optimisation approaches (deferred to `docs/plans/move-gen-further-optimisation.md`): pre-computed piece corners, numpy vectorisation, bitboard representation. Still worth doing but no longer the only thing — the bigger near-term win comes from parallelising self-play across CPU cores (F1) so the per-move cost is paid in parallel across many games, not improved per-game.
+Optimisation approaches (considered and set aside — see [`plans/archive/full-cycle-optimisation.md`](plans/archive/full-cycle-optimisation.md#considered-and-set-aside) and [`research/bitboards.md`](research/bitboards.md)): pre-computed piece corners, numpy vectorisation, bitboard representation. At the time, the bigger near-term win was parallelising self-play across CPU cores (F1) so the per-move cost is paid in parallel across many games; since then the JAX backend removed python move generation from the production path entirely.
 
 ---
 

@@ -1,14 +1,14 @@
 # AlphaBlokus — External Interfaces
 
-Three pieces of infrastructure sit between the AlphaBlokus agent and the outside world: a **Pentobi adapter** for automated benchmarking, a **human-playable UI**, and a shared **translation layer** that converts between internal and external representations. This document scopes all three.
+Three pieces of infrastructure sit between the AlphaBlokus agent and the outside world: a **Pentobi adapter** for automated benchmarking, a **human-playable UI**, and a shared **translation layer** that converts between internal and external representations.
 
-> **Status: this is a design/scoping document — none of these three components are built yet.** The internal pieces they depend on (e.g. `ActionCodec`, the game logic, MCTS players) exist; the adapter, UI, and translation layer do not. Effort estimates below are forward-looking.
+> **Status: the translation layer and Pentobi adapter are BUILT** (`docs/plans/archive/pentobi-harness.md`) — they live in `alphablokus/games/blokusduo/pentobi/` (`translation.py`, `gtp.py`, `player.py`) with the benchmark runner at `scripts/pentobi_benchmark.py`. Sections 1–2 below describe the design as built, with pointers into the code. **The human-playable UI (section 3) remains unbuilt scoping.** The original effort-estimate tables are kept as a record of the pre-build estimates.
 
 ---
 
-## 1. Translation Layer (Shared Foundation)
+## 1. Translation Layer (Shared Foundation) — BUILT
 
-Both the Pentobi adapter and the UI need to convert between AlphaBlokus's internal representation and human/external formats. This layer should be built first.
+Both the Pentobi adapter and the UI need to convert between AlphaBlokus's internal representation and human/external formats. **As built:** `PentobiMoveTranslator` in `alphablokus/games/blokusduo/pentobi/translation.py` — outgoing moves place the orientation array at the action's anchor and emit occupied cells; incoming moves match the cell *shape* against the 91 piece-orientations (each normalised shape maps to exactly one `(piece_id, orientation)` — a bijection built once at init).
 
 ### Internal Representation
 
@@ -37,11 +37,11 @@ Pentobi's GTP interface uses a different format:
 | Players | Two GTP colour letters — **verify the exact letters and first-mover mapping against the actual `pentobi-gtp` build before relying on them** |
 | Pass | The string `pass` |
 
-> ⚠️ **Colour mapping must be pinned down when the adapter is built.** Our internal convention (see [04-BLOKUS-DUO.md](04-BLOKUS-DUO.md) and `games/blokusduo/game.py`) is: **White = player `+1` = first to move, starting at (4, 4)**, mapped onto Pentobi's `Color(0)`; Black = `−1` = second, starting at (9, 9). Earlier drafts of this doc guessed the GTP letters as `b`/`w`, which conflicts with that — don't trust the guess. Confirm against `showboard` / `genmove` output from the real binary, since a swapped mapping silently flips every benchmark result.
+> **Colour mapping — pinned as built** (`pentobi/player.py` `_assign_colors`): our **White = player `+1` = first to move, starting at (4, 4)** maps onto Pentobi's *first* GTP colour letter **`b`**; Black = `−1` = second, starting at (9, 9) = `w`. (Counter-intuitive letters, verified against the real binary's `showboard`/`genmove` output during the harness build — a swapped mapping would silently flip every benchmark result.) One further as-built wrinkle: a **pass is never relayed** via `play` — Pentobi has no `play <colour> pass`; it expresses passes only through `genmove` returning `pass`, and since a pass places nothing, skipping it keeps both boards in sync.
 
 A move in Pentobi does **not** specify which piece or orientation — just the cells the piece occupies. The engine deduces the piece from the coordinates. This is elegant but means the translation layer needs to work in both directions differently.
 
-### Translation Functions Needed
+### Translation Functions (as built in `PentobiMoveTranslator`)
 
 ```
 AlphaBlokus → Pentobi (for sending our moves):
@@ -93,20 +93,28 @@ A text renderer that converts the (14, 14) numpy board to a readable format:
 
 This should be a standalone utility function usable by the CLI, the Pentobi adapter (for debugging), and as a fallback renderer.
 
-### Implementation Estimate
+### Implementation Estimate (historical, pre-build)
 
 | Component | Effort | Notes |
 |-----------|--------|-------|
 | Coordinate converter (AlphaBlokus ↔ Pentobi) | ~20 min | Straightforward mapping |
 | Action → cell list (for outgoing moves) | ~30 min | Apply piece shape at position, collect occupied cells |
 | Cell list → Action (for incoming moves) | ~1 hour | Pattern matching against 91 orientations. Needs care |
-| Action ↔ action index encoder/decoder | — | **Already exists** — `ActionCodec` in `games/blokusduo/codec.py` (encode/decode/is_pass). No work needed |
+| Action ↔ action index encoder/decoder | — | **Already existed** — `ActionCodec` in `games/blokusduo/codec.py` (encode/decode/is_pass). No work needed |
 | Board text renderer | ~15 min | Numpy array → formatted string |
 | **Total** | **~2.5 hours** | Claude-assisted estimate |
 
 ---
 
-## 2. Pentobi Adapter
+## 2. Pentobi Adapter — BUILT
+
+**As built**, the adapter splits into two classes rather than the single `PentobiAdapter` sketched below:
+
+- **`PentobiGtp`** (`pentobi/gtp.py`) — one `pentobi-gtp` subprocess for Blokus Duo: spawn, GTP command send/receive (with the buffering handling described under "Critical gotchas"), `genmove`/`play`/`clear_board`, clean shutdown. The binary is located by `find_pentobi_gtp()`: `$PENTOBI_GTP_PATH` if set, else the local build at `~/code/pentobi/build/pentobi_gtp/pentobi-gtp`.
+- **`PentobiPlayer`** (`pentobi/player.py`) — wraps engine + translator behind the same player callable the **Arena** already uses, so net-vs-Pentobi games reuse the existing game loop, `GameRecord` capture, and replay rendering with no new game-loop code.
+- **`scripts/pentobi_benchmark.py`** — the benchmark runner: one level or a full 1–9 sweep, half the games as each colour, per-level win/loss/draw with 95% Wilson CIs, headline metrics, and an HTML report with embedded replays. E.g. `uv run python -m scripts.pentobi_benchmark --config <run.json> --net best.pth.tar --sweep --games 100`.
+
+The subsections below are the original scoping detail — the GTP facts and gotchas remain accurate reference.
 
 ### How Pentobi Works
 
@@ -142,7 +150,7 @@ Key commands for our use case:
 | `undo` | `undo` | Undo last move |
 | `quit` | `quit` | Terminate engine |
 
-### Adapter Architecture
+### Adapter Architecture (original sketch — superseded by the two-class split above)
 
 ```
 PentobiAdapter
@@ -244,7 +252,7 @@ make -j$(nproc)
 
 Dependencies: CMake 3.19+, C++20 compiler (GCC 12+ or Clang 15+), libatomic. No Qt needed if GUI is disabled.
 
-### Implementation Estimate
+### Implementation Estimate (historical, pre-build)
 
 | Component | Effort | Notes |
 |-----------|--------|-------|
@@ -339,22 +347,22 @@ This same interface is used by:
 
 ## 4. Phasing
 
-These three components have clear dependencies:
+These three components have clear dependencies. **Phases A and B are done** (shipped together via `docs/plans/archive/pentobi-harness.md`); Phase C is the remaining scope:
 
 ```
-Phase A: Translation Layer (~2.5 hours)
+Phase A: Translation Layer (~2.5 hours)  ✅ DONE
   ├── Coordinate conversion
   ├── Action ↔ cell list conversion
   ├── Action ↔ action index encoding (architecture review fix)
   └── Board text renderer
 
-Phase B: Pentobi Adapter (~4 hours, depends on A)
+Phase B: Pentobi Adapter (~4 hours, depends on A)  ✅ DONE
   ├── Build pentobi-gtp from source
   ├── GTP subprocess wrapper
   ├── Game loop + benchmark runner
   └── Metric computation + heatmap
 
-Phase C: Pygame UI (~5.5 hours, depends on A)
+Phase C: Pygame UI (~5.5 hours, depends on A)  ⏳ NOT BUILT
   ├── Board renderer
   ├── Piece interaction
   ├── Game controller with AI threading

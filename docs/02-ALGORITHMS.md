@@ -9,7 +9,7 @@ AlphaBlokus implements the algorithms that form the AlphaZero training loop:
 3. **Arena Evaluation** — decides whether a newly trained network is stronger than the previous best
 4. **Strength evaluation** — measures the new network against fixed baselines (frozen gen-0, and a perfect-play minimax oracle for Tic-Tac-Toe)
 
-These are orchestrated by the **Coach** (`alphablokus/training/coach.py`), which runs one generation at a time.
+These are orchestrated by the **Coach** (`alphablokus/training/coach.py`), which runs one generation at a time. Self-play generation dispatches through `alphablokus/selfplay/generate.py` to one of three backends — serial in-process, the parallel worker pool, or the GPU-native JAX backend (see [The JAX self-play backend](#the-jax-self-play-backend-gpu-native-generation)); arena and strength evaluation always run the python engine.
 
 ```
 Coach.learn() — one generation:
@@ -179,7 +179,7 @@ At runtime the only per-board input is `forbidden = occupied OR side-danger`. Fo
 
 **Equivalence is proven, not assumed:** a position-level test compares the two generators' legal-move *sets* across thousands of stratified positions, and a stronger determinism test confirms self-play at a fixed seed produces bit-identical training trajectories with the fast path on or off.
 
-> Deferred further speedups (Cython, true bitboard) are tracked in [`docs/plans/move-gen-further-optimisation.md`](plans/move-gen-further-optimisation.md). They are not needed to train.
+> Further speedups (Cython, true bitboard) were considered and deliberately set aside — see the [full-cycle-optimisation plan's "Considered and set aside"](plans/archive/full-cycle-optimisation.md#considered-and-set-aside) and [`research/bitboards.md`](research/bitboards.md) for the background. They are not needed to train, and the JAX backend sidesteps python move generation entirely.
 
 ---
 
@@ -225,7 +225,7 @@ Each example is `(board_state, policy_vector, value)`:
 
 - **Board state** — stored **compact** (`IBoard.to_compact()` — the minimal canonical int8 array, e.g. Blokus's 196-byte placement board) and re-encoded to the dense multi-channel network input lazily at batch time via `IGame.encode_compact`. Storing compact instead of dense cuts replay-buffer RAM ~175× (run2's ~12 GB → ~70 MB), removing the training-step OOM ceiling.
 - **Policy vector** — the MCTS visit-count distribution (the improved target the network is trained toward), stored sparse `(indices, values)` and densified per mini-batch.
-- **Value** — `+1` if the player to move at that position eventually won, `−1` if lost, ~0 for a draw.
+- **Value** — `+1` if the player to move at that position eventually won, `−1` if lost, `±1e-4` (≈0) for a draw — `1e-4` is the draw sentinel because `get_game_ended` reserves exactly `0` for "game still running".
 
 ### Symmetry augmentation
 
@@ -252,6 +252,32 @@ Training uses a single rolling buffer sized in **games**, not a generation-keyed
 - **Reuse** = `E × B/F`. e.g. `B=5000, F=1000, E=1` ⇒ reuse 5 (run2's winning regime); `B=2000, F=1000, E=1` ⇒ reuse 2.
 
 The buffer starts empty and self-fills over the first `B/F` generations before it begins sliding — no warmup special-casing. (An earlier draft used a `target_reuse` sampling knob to decouple reuse from `B`; we reversed that — it only helps in a data-rich regime and would *skip* part of the buffer each generation, the opposite of "use all the data." It slots back in as a sampler swap if a future data-rich run needs it.) See `docs/plans/archive/replay-buffer-refactor.md` for the full rationale (and [IDEAS I4](IDEAS.md#i4-continuous-non-gated-training) for the continuous-training direction this is the first step of).
+
+---
+
+## The JAX self-play backend (GPU-native generation)
+
+Blokus self-play generation can run entirely on the GPU (`alphablokus/games/blokusduo/jax/`), selected per run via `RunConfig.selfplay_backend: "jax"` and reached through the same seam as the other backends (`selfplay/generate.py` → `registry.resolve_jax_selfplay_backend`). It is **Blokus-only and inference-only** — training stays in torch, and arena/Elo/Pentobi evaluation always run the python engine above. Full validation results: [`research/jax-pipeline-ab.md`](research/jax-pipeline-ab.md).
+
+### How it works
+
+- **Rules as tensor ops** (`jax/kernels.py`): placement legality, legal-move masks, game-end detection, and board stepping are batched int8 matmuls over the precomputed move tables — hundreds of games (`JaxSelfPlayConfig.batch_size`, default 256) advance in lockstep per device step, bit-identical to the python rules engine (parity-tested across thousands of stratified positions).
+- **Search over a top-K compact action space** (`jax/search.py`): mctx allocates dense `[B, S+1, A]` tree arrays, untenable at A = 17,837 — so each node expansion keeps only the top-`K` legal actions by prior (`top_k`, default 64), with global action ids riding along in the node embedding. Root Dirichlet noise is applied to the **full** legal distribution *before* top-K selection, so noise can still promote low-prior moves into the searched set. Measured move agreement: the K=64 compact search tracks the exact python search *better* than the python engine's own K=16 virtual-loss batching.
+- **Inference-only jnp net** (`jax/net.py` + `checkpoint.py`/`bridge.py`): the torch checkpoint's `state_dict` is bridged into a jnp forward pass (bf16 by default) at the start of each generation — one net, two runtimes, no second training path.
+- **Host-side harvest** (`jax/harvest.py`): completed games are assembled into training examples in the *exact* representation `selfplay/episode.py` produces — compact canonical boards, sparse policies, transpose symmetry augmentation, the same `±1e-4` draw-sign convention — so storage, resume, and training are backend-agnostic.
+
+### Two search modes: PUCT (parity) and Gumbel (production)
+
+`MCTSConfig.search_policy` selects the root algorithm (jax backend only; the python engine is PUCT-only):
+
+- **`"puct"` — the fidelity mode.** mctx's `muzero_policy` tuned to reproduce the python search's arithmetic (raw-Q values, effectively-constant `pb_c ≈ cpuct` — see the module docstring in `jax/search.py`). Same policy targets (root visit counts), same Dirichlet noise and temperature scheme. Used for cross-checks and A/B baselines; at production net size it roughly matches the whole 16-worker python pipeline's throughput while using zero CPU workers.
+- **`"gumbel"` — the production mode.** mctx's `gumbel_muzero_policy` ([Danihelka et al., 2022](https://openreview.net/forum?id=bERaNdoegnO)): the root draws Gumbel noise once and runs **Sequential Halving** over the `gumbel_max_considered` (default 16) most promising actions instead of PUCT selection, which makes very small simulation budgets (n ≈ 64 vs the python path's 300+) statistically efficient. Two deliberate behavioural changes from classic AlphaZero: exploration comes from the Gumbel draw (no Dirichlet noise, no temperature sampling — the argmax action is played), and the **policy target is the "completed-Q" improved policy** (softmax of prior logits + completed Q-values) rather than raw root visit counts — at 64 sims a visit-count target would be a coarse 16-bucket histogram, while the completed-Q target stays smooth.
+
+### Validated results (2026-07, RTX 3060 Ti — details in `research/jax-pipeline-ab.md`)
+
+A three-arm A/B (python-PUCT vs jax-PUCT vs jax-Gumbel, 10 generations × 1,000 games each, identical evaluation machinery) found: the Gumbel-trained net is **statistically indistinguishable from the python baseline** head-to-head, the jax-PUCT net is actually *stronger* (better search → better targets), and Gumbel is **3.5× end-to-end even at the most python-friendly net size, rising to ~12× self-play games/s at production net size** (128f×8b). Hence production Blokus configs run `selfplay_backend: "jax"` + `search_policy: "gumbel"`; PUCT mode stays fully supported as the cross-check mode.
+
+> **Elo caveat:** internal Elo curves are anchored to each run's own random gen-0 net and are **not comparable across runs** — the jax arm trailed python on internal Elo while beating it head-to-head. Use head-to-head arenas to compare runs.
 
 ---
 
