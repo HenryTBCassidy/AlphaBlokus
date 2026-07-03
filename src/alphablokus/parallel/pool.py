@@ -428,7 +428,7 @@ def run_self_play_episodes_parallel(
         num_workers: Number of worker processes. Must be ≥ 1; ``1`` is
             allowed and runs sequentially through the pool (useful for
             testing the worker module in isolation; for the actual
-            single-process path :class:`core.coach.Coach` skips this
+            single-process path :class:`alphablokus.training.coach.Coach` skips this
             function entirely).
 
     Returns:

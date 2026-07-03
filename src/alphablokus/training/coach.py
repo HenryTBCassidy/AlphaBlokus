@@ -2,14 +2,10 @@ import json
 import math
 import os
 import time
-from collections import deque
-from dataclasses import dataclass
 from functools import partial
-from random import shuffle
 from typing import TypeAlias
 
 import numpy as np
-import psutil
 import torch
 from loguru import logger
 from numpy.typing import NDArray
@@ -19,15 +15,16 @@ from alphablokus.core.interfaces import IBoard, IGame, INeuralNetWrapper
 from alphablokus.evaluation.arena import Arena
 from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.search.mcts import MCTS
-from alphablokus.selfplay.episode import GameExamples, ProcessedExample
+from alphablokus.selfplay.episode import ProcessedExample
 from alphablokus.selfplay.generate import generate_games
 from alphablokus.storage.metrics import (
     CycleStage,
     EvalSet,
     MetricsCollector,
 )
-from alphablokus.storage.selfplay_store import SelfPlayStore
 from alphablokus.storage.sparse_policy import as_dense
+from alphablokus.training.diagnostics import get_memory_snapshot
+from alphablokus.training.replay_buffer import ReplayBuffer
 
 
 def _compute_elo(wins: int, losses: int, draws: int) -> tuple[float, float]:
@@ -47,7 +44,6 @@ def _compute_elo(wins: int, losses: int, draws: int) -> tuple[float, float]:
 
 # Type aliases for improved readability
 TrainingExample: TypeAlias = tuple[IBoard, int, NDArray, float | None]  # (board, player, policy, value)
-# One game's worth of positions; the rolling replay buffer is a deque of these.
 
 # Resume marker: written atomically at the end of every completed generation and
 # read by ``alphablokus --resume`` to continue a crashed run in place. Lives in the
@@ -66,38 +62,6 @@ def read_progress_marker(config: RunConfig) -> dict | None:
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
-
-
-@dataclass(frozen=True)
-class MemorySnapshot:
-    """Point-in-time memory usage of the current process.
-
-    All values are in bytes. ``gpu_bytes`` is ``None`` when no GPU is
-    available or the backend doesn't expose an allocation counter.
-    """
-
-    process_rss_bytes: int
-    gpu_bytes: float | None
-
-
-def _get_memory_snapshot() -> MemorySnapshot:
-    """Take a cross-platform snapshot of the current process's memory usage.
-
-    Uses ``psutil`` for process RSS (works identically on macOS, Linux,
-    and Windows — always returns bytes).
-
-    For GPU memory, checks CUDA first, then MPS (Apple Silicon).
-    Returns ``None`` for ``gpu_bytes`` if no GPU is available.
-    """
-    rss = psutil.Process().memory_info().rss
-
-    gpu_mem: float | None = None
-    if torch.cuda.is_available():
-        gpu_mem = float(torch.cuda.memory_allocated())
-    elif hasattr(torch.backends, "mps") and torch.backends.mps.is_available():
-        gpu_mem = float(torch.mps.current_allocated_memory())
-
-    return MemorySnapshot(process_rss_bytes=rss, gpu_bytes=gpu_mem)
 
 
 class Coach:
@@ -159,16 +123,8 @@ class Coach:
         self.pnet = self.nnet.__class__(self.game, config)  # Previous best network
         self.config = config
 
-        # Training state: a single rolling replay buffer holding the last
-        # ``replay_buffer_games`` games' worth of positions (one inner list per
-        # game). Oldest games auto-evict via ``maxlen``. ``_fresh_games_this_gen``
-        # tracks just this generation's self-play games — used to persist them
-        # and to count fresh positions for the reuse-driven training step count.
-        self.replay_buffer: deque[GameExamples] = deque(maxlen=config.replay_buffer_games)
-        self._fresh_games_this_gen: list[GameExamples] = []
-        self.skip_first_self_play = False  # Reserved for a future warm-start path
+        self.replay_buffer = ReplayBuffer(config, game)
         self.metrics = MetricsCollector(config=config, resume_wandb_run_id=resume_wandb_run_id)
-        self._self_play_store = SelfPlayStore(config.self_play_history_directory)
 
         # Frozen held-out positions for per-epoch network diagnostics (policy
         # entropy, top-K accuracy, value calibration). Built lazily from gen
@@ -236,38 +192,31 @@ class Coach:
             self.metrics.log_progress(generation, self.config.num_generations)
 
             # PHASE 1: Generate new training data through self-play
-            if not self.skip_first_self_play or generation > 1:
-                logger.info(f'Starting Self-Play For Generation #{generation} ...')
-                self_play_start = time.perf_counter()
+            logger.info(f'Starting Self-Play For Generation #{generation} ...')
+            self_play_start = time.perf_counter()
 
-                fresh_games = generate_games(
-                    self.config, self.game, self.nnet, generation,
-                    log_stats=partial(self._log_self_play_stats, generation),
-                )
+            fresh_games = generate_games(
+                self.config, self.game, self.nnet, generation,
+                log_stats=partial(self._log_self_play_stats, generation),
+            )
 
-                self_play_end = time.perf_counter()
-                self.metrics.log_timing(generation, CycleStage.SELF_PLAY, self_play_end - self_play_start)
+            self_play_end = time.perf_counter()
+            self.metrics.log_timing(generation, CycleStage.SELF_PLAY, self_play_end - self_play_start)
 
-                # Memory snapshot after self-play phase
-                snapshot = _get_memory_snapshot()
-                self.metrics.log_resource_usage(
-                    generation, CycleStage.SELF_PLAY,
-                    snapshot.process_rss_bytes, snapshot.gpu_bytes,
-                )
+            snapshot = get_memory_snapshot()
+            self.metrics.log_resource_usage(
+                generation, CycleStage.SELF_PLAY,
+                snapshot.process_rss_bytes, snapshot.gpu_bytes,
+            )
 
-                # Push this generation's fresh games into the rolling buffer
-                # (oldest games auto-evict via maxlen), tracking them separately
-                # for persistence and the fresh-position count.
-                self._fresh_games_this_gen = fresh_games
-                self.replay_buffer.extend(fresh_games)
-            else:
-                self._fresh_games_this_gen = []
+            # Rolling buffer: oldest games auto-evict via maxlen.
+            self.replay_buffer.add_generation(fresh_games)
 
             # Persist this generation's fresh games (file index = generation - 1).
             self.save_self_play_history(generation - 1)
 
             # PHASE 2: Train neural network
-            train_examples = self._prepare_training_data()
+            train_examples = self.replay_buffer.flat_shuffled_examples()
 
             # Build/load the frozen eval set used for per-epoch network
             # entropy logging. First gen's self-play is the source.
@@ -292,7 +241,7 @@ class Coach:
             self.metrics.log_timing(generation, CycleStage.TRAINING, training_end - training_start)
 
             # Memory snapshot after training phase
-            snapshot = _get_memory_snapshot()
+            snapshot = get_memory_snapshot()
             self.metrics.log_resource_usage(
                 generation, CycleStage.TRAINING,
                 snapshot.process_rss_bytes, snapshot.gpu_bytes,
@@ -334,7 +283,7 @@ class Coach:
                 )
 
             # Memory snapshot after arena phase
-            snapshot = _get_memory_snapshot()
+            snapshot = get_memory_snapshot()
             self.metrics.log_resource_usage(
                 generation, CycleStage.ARENA,
                 snapshot.process_rss_bytes, snapshot.gpu_bytes,
@@ -391,18 +340,8 @@ class Coach:
         os.replace(tmp, path)
 
     def load_self_play_history_for_resume(self, last_completed_generation: int) -> None:
-        """Refill the rolling replay buffer to resume training at ``last + 1``.
-
-        Self-play parquet files are 0-indexed (file ``k`` holds generation
-        ``k+1``'s data — see ``save_self_play_history``), so generation ``G``'s
-        data lives in file index ``G-1``. We reconstruct the games-sized buffer
-        the next generation would hold by loading recent files newest-first until
-        ``replay_buffer_games`` games are gathered.
-        """
-        last_file_index = last_completed_generation - 1
-        self.replay_buffer = self._self_play_store.load_recent_games(
-            last_file_index, self.config.replay_buffer_games,
-        )
+        """Refill the rolling replay buffer to resume training at ``last + 1``."""
+        self.replay_buffer.load_for_resume(last_completed_generation)
 
     def _log_self_play_stats(self, generation: int, episode_idx: int, stats) -> None:
         """One episode's MCTS profiling → metrics, identical schema for every
@@ -773,17 +712,6 @@ class Coach:
 
         return new_policies, new_values
 
-    def _prepare_training_data(self) -> list[ProcessedExample]:
-        """Flatten the whole rolling buffer to a shuffled list of positions.
-
-        Every position across all games currently in the buffer is used for
-        training (``epochs`` full passes); the per-game structure only governs
-        eviction, not training.
-        """
-        examples = [example for game in self.replay_buffer for example in game]
-        shuffle(examples)
-        return examples
-
     def _log_training_dynamics(self, generation: int, buffer_positions: int) -> None:
         """Log the emergent reuse / staleness of the rolling-buffer data regime.
 
@@ -794,7 +722,7 @@ class Coach:
         fill, then surfaced to the console and W&B.
         """
         epochs = self.config.net_config.epochs
-        buffer_capacity_games = self.config.replay_buffer_games
+        buffer_capacity_games = self.replay_buffer.capacity_games
         fresh_games = max(self.config.num_eps, 1)
         staleness_gens = buffer_capacity_games / fresh_games
         emergent_reuse = epochs * staleness_gens
@@ -832,36 +760,9 @@ class Coach:
         )
 
     def save_self_play_history(self, file_index: int) -> None:
-        """Save this generation's fresh self-play games to a parquet file.
-
-        Persists ``_fresh_games_this_gen`` (the games this generation produced,
-        not the whole buffer) with their per-game sizes so the games-sized buffer
-        can be reconstructed on resume. Delegates to :meth:`SelfPlayStore.save`.
-        """
-        if not self._fresh_games_this_gen:
-            return
-        game_sizes = [len(game) for game in self._fresh_games_this_gen]
-        flat = [example for game in self._fresh_games_this_gen for example in game]
-        if not flat:
-            return
-        # In-RAM examples hold sparse policies (indices, values); the on-disk
-        # store keeps dense, so densify a transient copy here. By this point the
-        # self-play worker pool is torn down, so the memory is free.
-        action_size = self.game.get_action_size()
-        dense = deque(
-            (board, as_dense(pi, action_size), value)
-            for board, pi, value in flat
-        )
-        self._self_play_store.save(dense, file_index, game_sizes=game_sizes)
+        """Persist this generation's fresh games (see :meth:`ReplayBuffer.save_fresh`)."""
+        self.replay_buffer.save_fresh(file_index)
 
     def load_self_play_history(self, up_to_generation: int) -> None:
-        """Refill the rolling replay buffer from parquet files on disk.
-
-        Loads recent generation files (newest at file index ``up_to_generation``)
-        until ``replay_buffer_games`` games are gathered. Used by the
-        ``--load_model`` warm-start path. Delegates to
-        :meth:`SelfPlayStore.load_recent_games`.
-        """
-        self.replay_buffer = self._self_play_store.load_recent_games(
-            up_to_generation, self.config.replay_buffer_games,
-        )
+        """Warm-start refill of the buffer (see :meth:`ReplayBuffer.load_recent`)."""
+        self.replay_buffer.load_recent(up_to_generation)

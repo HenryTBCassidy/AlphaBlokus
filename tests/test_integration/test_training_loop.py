@@ -1,9 +1,9 @@
 import pytest
 
-from alphablokus.core.coach import Coach
 from alphablokus.core.config import RunConfig
 from alphablokus.games.tictactoe.game import TicTacToeGame
 from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
+from alphablokus.training.coach import Coach
 
 
 @pytest.mark.slow

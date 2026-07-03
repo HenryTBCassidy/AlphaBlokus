@@ -9,10 +9,10 @@ from dataclasses import replace
 
 import pytest
 
-from alphablokus.core.coach import PROGRESS_MARKER_FILENAME, Coach, read_progress_marker
 from alphablokus.core.config import RunConfig
 from alphablokus.games.tictactoe.game import TicTacToeGame
 from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
+from alphablokus.training.coach import PROGRESS_MARKER_FILENAME, Coach, read_progress_marker
 
 
 def test_read_progress_marker_roundtrip(test_config: RunConfig) -> None:

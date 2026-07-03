@@ -2,7 +2,7 @@
 
 Pit any two players (network checkpoints, random, perfect-play minimax) against
 each other and print the win/loss/draw breakdown. Used internally by the
-:meth:`core.coach.Coach._evaluate_strength_vs_baselines` flow and exposed here
+:meth:`alphablokus.training.coach.Coach._evaluate_strength_vs_baselines` flow and exposed here
 as a CLI for ad-hoc evaluation: "is gen 11 actually stronger than gen 5?",
 "how does our trained model fare against random?", etc.
 

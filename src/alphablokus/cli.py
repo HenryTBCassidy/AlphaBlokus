@@ -3,10 +3,10 @@ import time
 
 from loguru import logger
 
-from alphablokus.core.coach import Coach, read_progress_marker
 from alphablokus.core.config import load_args
 from alphablokus.registry import instantiate_game_and_network
 from alphablokus.reporting import create_html_report
+from alphablokus.training.coach import Coach, read_progress_marker
 
 
 def main():

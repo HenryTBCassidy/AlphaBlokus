@@ -217,18 +217,18 @@ def test_load_recent_games_keeps_newest_n(store: SelfPlayStore):
 
 def test_coach_save_load_roundtrip(ttt_game, test_config: RunConfig):
     """Coach thin wrappers should delegate to SelfPlayStore correctly."""
-    from alphablokus.core.coach import Coach
     from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
+    from alphablokus.training.coach import Coach
 
     nnet = NNetWrapper(ttt_game, test_config)
     coach = Coach(ttt_game, nnet, test_config)
 
     # One generation's fresh games: a single game of 3 positions.
     original = list(_make_dummy_examples(3))
-    coach._fresh_games_this_gen = [original]
+    coach.replay_buffer.add_generation([original])
     coach.save_self_play_history(file_index=0)
 
-    coach.replay_buffer.clear()
+    coach.replay_buffer.games.clear()
     coach.load_self_play_history(up_to_generation=0)
 
     assert len(coach.replay_buffer) == 1  # one game

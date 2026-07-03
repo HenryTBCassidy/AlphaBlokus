@@ -91,7 +91,7 @@ ignore_missing_imports = true
 # listed here are fully checked — do not add to this list.
 [[tool.mypy.overrides]]
 module = [
-    "alphablokus.core.coach",
+    "alphablokus.training.coach",
     "alphablokus.parallel.inference_channel",
     "alphablokus.games.blokusduo.jax.backend",
     "alphablokus.search.mcts",

@@ -19,7 +19,7 @@ from loguru import logger
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from alphablokus.selfplay.episode import ProcessedExample
+    from alphablokus.selfplay.episode import DenseExample
 
 
 
@@ -51,7 +51,7 @@ class SelfPlayStore:
 
     def save(
         self,
-        examples: deque[ProcessedExample],
+        examples: deque[DenseExample],
         generation: int,
         game_sizes: list[int] | None = None,
     ) -> None:
@@ -102,7 +102,7 @@ class SelfPlayStore:
         pq.write_table(table, filepath)
         logger.info(f"Saved {len(df)} self-play examples to {filepath.name}")
 
-    def load(self, generation: int) -> deque[ProcessedExample] | None:
+    def load(self, generation: int) -> deque[DenseExample] | None:
         """Load a single generation's self-play examples from a parquet file.
 
         Returns ``None`` if the file does not exist (caller decides how to
@@ -112,7 +112,7 @@ class SelfPlayStore:
             generation: Generation number to load.
 
         Returns:
-            A deque of ``ProcessedExample`` tuples, or ``None`` if the file
+            A deque of ``DenseExample`` tuples, or ``None`` if the file
             is missing.
         """
         filepath = self._directory / self._filename(generation)
@@ -139,7 +139,7 @@ class SelfPlayStore:
         policy_dtype = np.dtype(metadata["policy_dtype"])
 
         df = table.to_pandas()
-        examples: deque[ProcessedExample] = deque()
+        examples: deque[DenseExample] = deque()
         for _, row in df.iterrows():
             board = np.frombuffer(row["board"], dtype=board_dtype).reshape(board_shape).copy()
             policy = np.frombuffer(row["policy"], dtype=policy_dtype).reshape(policy_size).copy()
@@ -152,7 +152,7 @@ class SelfPlayStore:
         self,
         up_to_generation: int,
         window_size: int,
-    ) -> list[deque[ProcessedExample]]:
+    ) -> list[deque[DenseExample]]:
         """Load self-play examples for a sliding window of generations.
 
         Loads generations from ``max(0, up_to_generation - window_size)``
@@ -172,7 +172,7 @@ class SelfPlayStore:
             return []
 
         start_gen = max(0, up_to_generation - window_size)
-        history: list[deque[ProcessedExample]] = []
+        history: list[deque[DenseExample]] = []
 
         for gen in range(start_gen, up_to_generation + 1):
             loaded = self.load(gen)
@@ -185,7 +185,7 @@ class SelfPlayStore:
         )
         return history
 
-    def load_games(self, generation: int) -> list[list[ProcessedExample]] | None:
+    def load_games(self, generation: int) -> list[list[DenseExample]] | None:
         """Load a generation's examples split back into per-game lists.
 
         Uses the ``game_sizes`` schema metadata written by :meth:`save` to
@@ -206,7 +206,7 @@ class SelfPlayStore:
             )
             return [list(flat)]
 
-        games: list[list[ProcessedExample]] = []
+        games: list[list[DenseExample]] = []
         iterator = iter(flat)
         for size in game_sizes:
             games.append([next(iterator) for _ in range(size)])
@@ -214,7 +214,7 @@ class SelfPlayStore:
 
     def load_recent_games(
         self, last_file_index: int, num_games: int,
-    ) -> deque[list[ProcessedExample]]:
+    ) -> deque[list[DenseExample]]:
         """Reconstruct the rolling replay buffer from recent generation files.
 
         Loads per-generation files newest-first starting at ``last_file_index``,
@@ -227,14 +227,14 @@ class SelfPlayStore:
             last_file_index: Newest generation file index to load from.
             num_games: Buffer capacity in games (``replay_buffer_games``).
         """
-        buffer: deque[list[ProcessedExample]] = deque(maxlen=num_games)
+        buffer: deque[list[DenseExample]] = deque(maxlen=num_games)
         if not self._directory.exists():
             logger.warning(f"Self-play history directory not found: {self._directory}")
             return buffer
 
         # Collect newest-first, then replay oldest→newest into the maxlen deque
         # so it keeps the newest ``num_games`` games (older overshoot evicts).
-        collected_newest_first: list[list[list[ProcessedExample]]] = []
+        collected_newest_first: list[list[list[DenseExample]]] = []
         total_games = 0
         file_index = last_file_index
         while file_index >= 0 and total_games < num_games:
