@@ -1,8 +1,8 @@
 # Training Time Estimates
 
-Estimated wall-clock time for Blokus Duo self-play training under various configurations. Originally derived from Mac CPU profiling (March 2026); updated 2026-05-18 with `mcts_profiling.py` numbers on a small net; **updated 2026-05-26 with production-net measurements** from `scripts/benchmark_phases.py` on the home PC.
+Estimated wall-clock time for Blokus Duo self-play training under various configurations. Originally derived from Mac CPU profiling (March 2026); updated 2026-05-18 with `mcts_profiling.py` numbers on a small net; **updated 2026-05-26 with production-net measurements** from `scripts/benchmarks/benchmark_phases.py` on the home PC.
 
-> ⚠️ **These measured numbers are a pre-optimisation baseline.** They were taken before **F2** (precomputed-table move generation), **F3** (batched MCTS inference + virtual loss), and **F4** (conv policy head) landed. All three have since shipped, so the realised per-game cost and the move-gen/inference split below are now stale. The "post F1+F2+F3" columns and the projections are **estimates, not measurements**. Re-run `scripts/benchmark_phases.py` on the PC to get current figures before relying on them — the "Refresh after" note at the bottom lists exactly what to re-measure.
+> ⚠️ **These measured numbers are a pre-optimisation baseline.** They were taken before **F2** (precomputed-table move generation), **F3** (batched MCTS inference + virtual loss), and **F4** (conv policy head) landed. All three have since shipped, so the realised per-game cost and the move-gen/inference split below are now stale. The "post F1+F2+F3" columns and the projections are **estimates, not measurements**. Re-run `scripts/benchmarks/benchmark_phases.py` on the PC to get current figures before relying on them — the "Refresh after" note at the bottom lists exactly what to re-measure.
 
 **Headline finding (2026-05-26):** the cost split depends heavily on net size. Earlier estimates assumed move generation was ~70% of MCTS time — true with the 32f×1b profiling net, **wrong** with the production 64f×4b net we actually train with. At production net size, **inference is ~50% of search time and move-gen is ~43%**. The GPU is *not* idle at production scale; the previously reported "Python move-gen dominates" picture only holds for tiny nets.
 
@@ -10,7 +10,7 @@ Estimated wall-clock time for Blokus Duo self-play training under various config
 
 ### Production net (64 filters × 4 residual blocks, 300 sims)
 
-Measured 2026-05-26 with `scripts/benchmark_phases.py --config run_configurations/profile_baseline.json` on the RTX 3060 Ti (16 self-play + 10 arena + 10 Elo games):
+Measured 2026-05-26 with `scripts/benchmarks/benchmark_phases.py --config run_configurations/profile_baseline.json` on the RTX 3060 Ti (16 self-play + 10 arena + 10 Elo games):
 
 | Phase | Per-game wall-clock | Per-move (mean) |
 |---|---|---|
@@ -183,4 +183,4 @@ What's measured vs what's projected:
 
 ---
 
-*Originally compiled March 2026 (Mac CPU only, PC numbers estimated). Updated 2026-05-18 with measured 3060 Ti baseline (5 games, 50 sims/move, small profiling net) from `temp/mcts_profiling/pc_3060ti/`. Updated 2026-05-26 with production-net baseline (16+10+10 games, 300 sims, 64f×4b net) from `temp/profile_baseline_benchmark/` and rewritten configs section with honest labels + cloud Pentobi-targeted ladder. Re-run `scripts/benchmark_phases.py` for end-to-end phase numbers; re-run `scripts/mcts_profiling.py` for component-isolation analysis on a small net.*
+*Originally compiled March 2026 (Mac CPU only, PC numbers estimated). Updated 2026-05-18 with measured 3060 Ti baseline (5 games, 50 sims/move, small profiling net) from `temp/mcts_profiling/pc_3060ti/`. Updated 2026-05-26 with production-net baseline (16+10+10 games, 300 sims, 64f×4b net) from `temp/profile_baseline_benchmark/` and rewritten configs section with honest labels + cloud Pentobi-targeted ladder. Re-run `scripts/benchmarks/benchmark_phases.py` for end-to-end phase numbers; re-run `scripts/profiling/mcts_profiling.py` for component-isolation analysis on a small net.*

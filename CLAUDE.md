@@ -6,7 +6,7 @@ AlphaZero implementation for Blokus Duo. Self-play reinforcement learning on a 1
 
 **Current state:** Core framework complete and validated on Tic-Tac-Toe. Blokus Duo game logic is complete — board, pieces, placement validation, move generation, masking, game-end detection, `get_symmetries` (order-2: identity + main-diagonal transpose), and neural net all work. Blokus training runs have been executed on the PC (see `docs/plans/archive/full-cycle-optimisation.md`), and the full-cycle performance optimisations (F1–F4) have landed. See README.md "Current Status" for details.
 
-**JAX self-play backend (2026-07):** Blokus self-play generation can run GPU-native — rules as int8 matmuls, mctx search over a top-K compact action space, inference-only jnp net bridged from the torch checkpoint each generation (`games/blokusduo/jaxenv/` + `core/jaxplay/`). Selected per run via `RunConfig.selfplay_backend: "python" | "jax"`; production Blokus configs use jax + Gumbel search (`search_policy: "gumbel"`, n=64 — validated at strength parity and ~3.5–12× wall-clock in `docs/research/jax-pipeline-ab.md`). The python path is unchanged, remains the dataclass default, and always drives arena/Elo/Pentobi evaluation. Requires `uv sync --extra jax` (Mac CPU) or `--extra jax-cuda` (box).
+**JAX self-play backend (2026-07):** Blokus self-play generation can run GPU-native — rules as int8 matmuls, mctx search over a top-K compact action space, inference-only jnp net bridged from the torch checkpoint each generation (`games/blokusduo/jax/`). Selected per run via `RunConfig.selfplay_backend: "python" | "jax"`; production Blokus configs use jax + Gumbel search (`search_policy: "gumbel"`, n=64 — validated at strength parity and ~3.5–12× wall-clock in `docs/research/jax-pipeline-ab.md`). The python path is unchanged, remains the dataclass default, and always drives arena/Elo/Pentobi evaluation. Requires `uv sync --extra jax` (Mac CPU) or `--extra jax-cuda` (box).
 
 > ⚠️ The "Critical path" section below is **stale** — it predates the Blokus training runs and the F1–F3 optimisation work. Treat it as historical until refreshed.
 
@@ -17,8 +17,8 @@ uv sync                                          # Install dependencies
 uv sync --extra jax                              # + JAX self-play backend (CPU; use --extra jax-cuda on the box)
 uv run pytest                                    # Run tests
 uv run pytest -m "not slow"                      # Skip integration tests
-uv run pytest tests/test_blokusduo/              # Blokus tests only
-uv run pytest tests/test_core/                   # Core framework tests only
+uv run pytest tests/games/blokusduo/             # Blokus tests only
+uv run pytest tests/search/ tests/training/      # Framework subsets (tests mirror src/alphablokus/)
 uv run alphablokus --config run_configurations/test_run.json   # Run training from some configuration
 ```
 
@@ -26,9 +26,9 @@ uv run alphablokus --config run_configurations/test_run.json   # Run training fr
 
 ## Architecture
 
-Game-agnostic framework (`core/`) with pluggable game implementations (`games/`).
+Game-agnostic framework (`src/alphablokus/`) with pluggable game implementations (`src/alphablokus/games/`).
 
-**Core protocols** (in `core/interfaces.py`):
+**Core protocols** (in `alphablokus/interfaces.py`):
 - `IBoard` — immutable state snapshot: geometry, encoding (`as_multi_channel`), `state_key`, `canonical`
 - `IGame` — rules engine + action space: legal moves, game-over detection, symmetries, board factory
 - `INeuralNetWrapper` — `train`, `predict`, `save_checkpoint`, `load_checkpoint`
@@ -49,7 +49,7 @@ Game-agnostic framework (`core/`) with pluggable game implementations (`games/`)
 1. W&B integration in `MetricsCollector` (additive to existing HTML reports).
 2. End-to-end TicTacToe training run on the home PC's RTX 3060 Ti (CUDA smoke test).
 3. `BlokusDuoGame.get_symmetries()` — symmetric board+policy pairs for data augmentation.
-4. Fix `main.py` checkpoint loading (currently raises when `load_model: true`).
+4. Fix `alphablokus/cli.py` checkpoint loading (currently raises when `load_model: true`).
 5. Switch `"game": "blokusduo"` in run config once the above are done.
 
 Live plan: `docs/plans/gpu-training-poc.md` (to be created on `feat/wandb-integration`).
@@ -72,11 +72,11 @@ Follow `docs/guides/PLAN-FORMAT.md` when creating implementation plans.
 
 1. **Move generation is done; don't rewrite it.** Algorithm is documented inline and in `docs/plans/archive/blokus-valid-move-algorithm.md`. Further speedups (Cython, bitboard) are intentionally deferred — see `docs/plans/move-gen-further-optimisation.md`.
 2. **Action space is huge (17,837).** MCTS iterates only valid moves (`np.where(valids)[0]`).
-3. **Orientation IDs are 0-based (0–90).** `OrientationCodec` in `pieces.py` handles `(piece_id, orientation) ↔ int`. `ActionCodec` in `board.py` handles the full `Action ↔ int` (0–17,836) mapping.
+3. **Orientation IDs are 0-based (0–90).** `OrientationCodec` in `pieces.py` handles `(piece_id, orientation) ↔ int`. `ActionCodec` in `games/blokusduo/codec.py` handles the full `Action ↔ int` (0–17,836) mapping.
 4. **Coordinate systems:** Board = bottom-left origin (Blokus notation). Arrays = top-left origin (numpy). `CoordinateIndexDecoder` handles conversion.
 5. **Board sizes use class constants.** `BlokusDuoBoard.N = 14`, `Board.N = 3` (TicTacToe). Never hardcode board dimensions as literals.
 6. **The jax backend is Blokus-only and inference-only.** `selfplay_backend: "jax"` raises for TicTacToe; training stays in torch (weights bridged per generation). Don't compare internal Elo curves across runs — each is anchored to its own gen-0 net (see `docs/research/jax-pipeline-ab.md` §3.2).
-7. **Device selection is a simple `cuda: bool` flag** in `RunConfig.net_config` (`core/config.py:35`, used in `games/base_wrapper.py`). No MPS auto-detection. On the Mac always set `cuda: false`; on the home PC set `cuda: true`.
+7. **Device selection is a simple `cuda: bool` flag** in `RunConfig.net_config` (`alphablokus/config.py` `NetConfig.cuda`, used in `games/base_wrapper.py`). No MPS auto-detection. On the Mac always set `cuda: false`; on the home PC set `cuda: true`.
 
 ## Documentation
 

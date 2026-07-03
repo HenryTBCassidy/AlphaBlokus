@@ -68,35 +68,36 @@ The optimisation stack makes ~1,000 self-play games/generation cost what 80 used
 
 ```
 AlphaBlokus/
-├── core/                       # Game-agnostic AlphaZero framework
-│   ├── interfaces.py           # IGame / IBoard / INeuralNetWrapper protocols
+├── src/alphablokus/            # The installable package
+│   ├── cli.py                  # Console entry point (`uv run alphablokus`)
 │   ├── config.py               # RunConfig / MCTSConfig / NetConfig / WandbConfig
-│   ├── mcts.py                 # MCTS with PUCT, Dirichlet noise, batched inference + virtual loss
-│   ├── coach.py                # Training orchestrator (self-play → train → arena → strength eval)
-│   ├── self_play.py            # Single-source-of-truth self-play episode loop
-│   ├── parallel_self_play.py   # F1 worker pool (self-play / arena / Elo)
-│   ├── arena.py                # Head-to-head evaluation + replay recording
-│   ├── acceptance.py           # Score-based accept/reject rule (single source of truth)
-│   ├── players.py              # RandomPlayer, NetworkPlayer, ...
-│   ├── symmetry_diagnostic.py  # Per-generation policy-equivariance KL diagnostic
-│   ├── storage.py              # Parquet I/O + W&B mirroring (MetricsCollector, SelfPlayStore)
-│   └── game_factory.py         # (game, nnet) construction from a RunConfig
-├── games/
-│   ├── base_wrapper.py         # Shared NN wrapper (train / predict / predict_batch / checkpoint)
-│   ├── tictactoe/              # Reference implementation (complete) + minimax oracle
-│   └── blokusduo/              # Target game
-│       ├── board.py            # Immutable board, 44-channel encoding, Action/coordinate codecs
-│       ├── game.py             # Rules engine, move generation, get_symmetries
-│       ├── pieces.py           # 21 pieces, 91 orientations, OrientationCodec
-│       ├── movegen_tables.py   # F2 precomputed placement + lookup tables
-│       ├── movegen_runtime.py  # F2 runtime generator (Pentobi-style)
-│       └── neuralnets/         # ResNet trunk + conv/FC policy head + value head
-├── reporting/                  # Interactive HTML report (Plotly + arena replays)
-├── scripts/                    # CLI tools: arena_run, play_ttt, replay, benchmarks, profiling
-├── run_configurations/         # JSON run configs (TTT + Blokus, test → scaled)
-├── tests/                      # Unit + integration tests (core, blokusduo, tictactoe)
+│   ├── interfaces.py           # IBoard / IGame / IPolicyValuePredictor / INeuralNetWrapper / IOracle
+│   ├── registry.py             # Composition root — the one module naming concrete games/backends
+│   ├── search/                 # MCTS with PUCT, Dirichlet noise, batched inference + virtual loss
+│   ├── selfplay/               # Episode loop + backend dispatch (serial / parallel / jax)
+│   ├── parallel/               # Worker pool (self-play / arena / Elo) + inference server
+│   ├── training/               # Coach loop, replay buffer, eval set, memory diagnostics
+│   ├── evaluation/             # Arena, players, acceptance rule, Elo, symmetry diagnostic
+│   ├── storage/                # Parquet I/O + W&B mirroring (MetricsCollector, SelfPlayStore)
+│   ├── games/
+│   │   ├── base_wrapper.py     # Shared NN wrapper (train / predict / predict_batch / checkpoint)
+│   │   ├── tictactoe/          # Reference implementation (complete) + minimax oracle
+│   │   └── blokusduo/          # Target game
+│   │       ├── board.py        # Immutable board, 44-channel encoding
+│   │       ├── codec.py        # Action / ActionCodec / CoordinateIndexDecoder
+│   │       ├── game.py         # Rules engine, move generation, get_symmetries
+│   │       ├── pieces.py       # 21 pieces, 91 orientations, OrientationCodec
+│   │       ├── movegen/        # F2 precomputed tables + runtime generator (Pentobi-style)
+│   │       ├── pentobi/        # GTP client, Pentobi player, move translation
+│   │       ├── jax/            # GPU-native self-play backend (env kernels, mctx search, bridge)
+│   │       └── nn/             # ResNet trunk + conv/FC policy head + value head
+│   ├── reporting/              # Interactive HTML report (Plotly + arena replays)
+│   └── testing/                # Shipped test utilities (position caches)
+├── scripts/                    # Operational CLI tools + benchmarks/ + profiling/
+├── run_configurations/         # JSON run configs (TTT + Blokus, test → scaled; + archive/)
+├── tests/                      # Mirrors src/alphablokus/ one-to-one
 ├── docs/                       # Reference docs, guides, and plans (see below)
-└── src/alphablokus/            # The installable package (core framework, games, reporting)
+└── .github/workflows/ci.yml    # Lint (ruff check + format), mypy, tests (base + jax)
 ```
 
 ---

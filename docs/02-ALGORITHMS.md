@@ -9,7 +9,7 @@ AlphaBlokus implements the algorithms that form the AlphaZero training loop:
 3. **Arena Evaluation** — decides whether a newly trained network is stronger than the previous best
 4. **Strength evaluation** — measures the new network against fixed baselines (frozen gen-0, and a perfect-play minimax oracle for Tic-Tac-Toe)
 
-These are orchestrated by the **Coach** (`core/coach.py`), which runs one generation at a time.
+These are orchestrated by the **Coach** (`alphablokus/training/coach.py`), which runs one generation at a time.
 
 ```
 Coach.learn() — one generation:
@@ -38,7 +38,7 @@ Coach.learn() — one generation:
 
 MCTS builds a search tree by running many simulations from the current position. Each simulation descends the tree picking promising actions, stops when it reaches an unexpanded or terminal position, evaluates that leaf with the neural network, and propagates the value back up. After a fixed number of simulations, the **visit counts** at the root define the move-probability distribution.
 
-### Tree storage (`core/mcts.py`)
+### Tree storage (`alphablokus/search/mcts.py`)
 
 The tree is stored implicitly as a set of dictionaries keyed by **board state** (`state_key` — for Blokus this is the 196-byte signed `int8` placement board; for TTT the flat board bytes). Because the keys are positions, not move sequences, transpositions are handled for free.
 
@@ -170,9 +170,9 @@ The board maintains two caches that this path relies on, both updated incrementa
 
 ### The optimised generator (Pentobi-style precomputed tables)
 
-`games/blokusduo/movegen_tables.py` + `movegen_runtime.py`, enabled by the `use_optimised_movegen` config flag. This is the [Pentobi-derived](https://github.com/enz/pentobi) design credited above. Built once per process (~200 ms):
+`games/blokusduo/movegen/tables.py` + `movegen/runtime.py`, enabled by the `use_optimised_movegen` config flag. This is the [Pentobi-derived](https://github.com/enz/pentobi) design credited above. Built once per process (~200 ms):
 
-- **Geometry table** — every legal `(piece, orientation, anchor)` placement that fits on the board, numbered `move_id` 0..13,728 (**13,729** total, verified against Pentobi's hard-coded constant by `scripts/count_onboard_placements.py`). Each stores its occupied cells, the cells it forbids, the cells it opens as attach points, and its `action_id` in the 17,837-wide action space.
+- **Geometry table** — every legal `(piece, orientation, anchor)` placement that fits on the board, numbered `move_id` 0..13,728 (**13,729** total, verified against Pentobi's hard-coded constant by `scripts/profiling/count_onboard_placements.py`). Each stores its occupied cells, the cells it forbids, the cells it opens as attach points, and its `action_id` in the 17,837-wide action space.
 - **Lookup table** — indexed by `(anchor, adj_status, piece) → short list of candidate move-ids`, where `adj_status` is a 6-bit summary of which of 6 specific neighbour cells around the anchor are currently forbidden. This pre-filters out placements that can't fit given the local blocked cells.
 
 At runtime the only per-board input is `forbidden = occupied OR side-danger`. For each attach point: read its 6 neighbours into a 6-bit `adj_status`, look up the candidate list per remaining piece, and confirm each candidate with an unrolled OR over its (≤5) cells' forbidden bytes (a `NULL_CELL` sentinel slot, always 0, lets the loop run a fixed 5 iterations without bounds checks). A `seen` set dedups moves reachable from multiple attach points.
@@ -183,7 +183,7 @@ At runtime the only per-board input is `forbidden = occupied OR side-danger`. Fo
 
 ---
 
-## Self-Play (`core/self_play.py`)
+## Self-Play (`alphablokus/selfplay/episode.py`)
 
 Each generation the Coach runs `num_eps` complete self-play games. One game (`play_self_play_episode`):
 
@@ -255,7 +255,7 @@ The buffer starts empty and self-fills over the first `B/F` generations before i
 
 ---
 
-## Arena Evaluation (`core/arena.py`)
+## Arena Evaluation (`alphablokus/evaluation/arena.py`)
 
 ### Purpose
 
@@ -267,7 +267,7 @@ Games are played in two halves with the colours swapped, so each network plays W
 
 ### Acceptance criterion (score-based)
 
-The decision lives in one place — `core/acceptance.py` — so the training loop and the report can never disagree:
+The decision lives in one place — `alphablokus/evaluation/acceptance.py` — so the training loop and the report can never disagree:
 
 ```
 score  = (new_wins + 0.5 · draws) / (new_wins + prev_wins + draws)

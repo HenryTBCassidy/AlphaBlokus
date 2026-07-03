@@ -14,8 +14,8 @@ AlphaZero implementation for Blokus Duo. Self-play reinforcement learning on a 1
 uv sync                                          # Install dependencies
 uv run pytest                                    # Run tests
 uv run pytest -m "not slow"                      # Skip integration tests
-uv run pytest tests/test_blokusduo/              # Blokus tests only
-uv run pytest tests/test_core/                   # Core framework tests only
+uv run pytest tests/games/blokusduo/             # Blokus tests only
+uv run pytest tests/search/ tests/training/      # Framework subsets (tests mirror src/alphablokus/)
 uv run alphablokus --config run_configurations/test_run.json   # Run training from some configuration
 ```
 
@@ -23,9 +23,9 @@ uv run alphablokus --config run_configurations/test_run.json   # Run training fr
 
 ## Architecture
 
-Game-agnostic framework (`core/`) with pluggable game implementations (`games/`).
+Game-agnostic framework (`src/alphablokus/`) with pluggable game implementations (`src/alphablokus/games/`).
 
-**Core protocols** (in `core/interfaces.py`):
+**Core protocols** (in `alphablokus/interfaces.py`):
 - `IBoard` — immutable state snapshot: geometry, encoding (`as_multi_channel`), `state_key`, `canonical`
 - `IGame` — rules engine + action space: legal moves, game-over detection, symmetries, board factory
 - `INeuralNetWrapper` — `train`, `predict`, `save_checkpoint`, `load_checkpoint`
@@ -46,7 +46,7 @@ Game-agnostic framework (`core/`) with pluggable game implementations (`games/`)
 1. W&B integration in `MetricsCollector` (additive to existing HTML reports).
 2. End-to-end TicTacToe training run on the home PC's RTX 3060 Ti (CUDA smoke test).
 3. `BlokusDuoGame.get_symmetries()` — symmetric board+policy pairs for data augmentation.
-4. Fix `main.py` checkpoint loading (currently raises when `load_model: true`).
+4. Fix `alphablokus/cli.py` checkpoint loading (currently raises when `load_model: true`).
 5. Switch `"game": "blokusduo"` in run config once the above are done.
 
 Live plan: `docs/plans/gpu-training-poc.md` (to be created on `feat/wandb-integration`).
@@ -69,10 +69,10 @@ Follow `docs/guides/PLAN-FORMAT.md` when creating implementation plans.
 
 1. **Move generation is done; don't rewrite it.** Algorithm is documented inline and in `docs/plans/archive/blokus-valid-move-algorithm.md`. Further speedups (Cython, bitboard) are intentionally deferred — see `docs/plans/move-gen-further-optimisation.md`.
 2. **Action space is huge (17,837).** MCTS iterates only valid moves (`np.where(valids)[0]`).
-3. **Orientation IDs are 0-based (0–90).** `OrientationCodec` in `pieces.py` handles `(piece_id, orientation) ↔ int`. `ActionCodec` in `board.py` handles the full `Action ↔ int` (0–17,836) mapping.
+3. **Orientation IDs are 0-based (0–90).** `OrientationCodec` in `pieces.py` handles `(piece_id, orientation) ↔ int`. `ActionCodec` in `games/blokusduo/codec.py` handles the full `Action ↔ int` (0–17,836) mapping.
 4. **Coordinate systems:** Board = bottom-left origin (Blokus notation). Arrays = top-left origin (numpy). `CoordinateIndexDecoder` handles conversion.
 5. **Board sizes use class constants.** `BlokusDuoBoard.N = 14`, `Board.N = 3` (TicTacToe). Never hardcode board dimensions as literals.
-6. **Device selection is a simple `cuda: bool` flag** in `RunConfig.net_config` (`core/config.py:35`, used in `games/base_wrapper.py`). No MPS auto-detection. On the Mac always set `cuda: false`; on the home PC set `cuda: true`.
+6. **Device selection is a simple `cuda: bool` flag** in `RunConfig.net_config` (`alphablokus/config.py` `NetConfig.cuda`, used in `games/base_wrapper.py`). No MPS auto-detection. On the Mac always set `cuda: false`; on the home PC set `cuda: true`.
 
 ## Documentation
 

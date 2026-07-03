@@ -6,7 +6,7 @@ All persistent data for a training run lives under a single run directory:
 {root_directory}/{run_name}/
 ```
 
-Both paths are set in `RunConfig` (`core/config.py`). Every property below hangs off `RunConfig.run_directory`.
+Both paths are set in `RunConfig` (`alphablokus/config.py`). Every property below hangs off `RunConfig.run_directory`.
 
 ---
 
@@ -46,7 +46,7 @@ Each hive-partitioned directory contains `generation=N/<name>.parquet` subdirect
 
 ## Two Storage Systems
 
-All parquet I/O lives in `core/storage.py`. Data is written by two independent subsystems with different conventions:
+All parquet I/O lives in `alphablokus/storage/` (`selfplay_store.py` + `metrics.py`). Data is written by two independent subsystems with different conventions:
 
 | System | Directories | Partitioning | Read pattern |
 |--------|-------------|-------------|--------------|
@@ -59,7 +59,7 @@ The split exists because self-play data contains numpy arrays serialised as raw 
 
 ## SelfPlayHistory — Raw Training Data
 
-**Writer:** `SelfPlayStore.save()` in `core/storage.py` (called via `Coach.save_self_play_history()`)
+**Writer:** `SelfPlayStore.save()` in `alphablokus/storage/selfplay_store.py` (called via `ReplayBuffer.save_fresh()` in `alphablokus/training/replay_buffer.py`)
 **Path:** `SelfPlayHistory/self_play_{generation}.parquet`
 **Partitioning:** None — flat files, one per generation
 **Granularity:** One row per training example (board position from a self-play game)
@@ -91,7 +91,7 @@ Shape and dtype information is stored in the parquet file's schema metadata (not
 - Boards are stored compact (e.g. Blokus's 196-byte int8 placement board) and re-encoded to the dense `(C,N,N)` network input lazily at batch time via `IGame.encode_compact` — ~175× less buffer RAM than storing the dense planes.
 - Data includes symmetry-augmented positions (rotations/reflections added by `IGame.get_symmetries()`).
 - The rolling replay buffer keeps the last `replay_buffer_games` games in memory (oldest auto-evict); parquet files on disk are never deleted. On resume, `SelfPlayStore.load_recent_games()` refills the buffer newest-first.
-- Cannot be read with a plain `pd.read_parquet()` — use `SelfPlayStore.load()` / `load_games()` / `load_recent_games()` from `core.storage`.
+- Cannot be read with a plain `pd.read_parquet()` — use `SelfPlayStore.load()` / `load_games()` / `load_recent_games()` from `alphablokus.storage.selfplay_store`.
 - **Legacy dense files** (pre-`compact_v1`, e.g. run2's parquets) cannot be loaded into the compact buffer; resume such runs from their checkpoints before this refactor.
 
 ---
@@ -145,7 +145,7 @@ df = pd.read_parquet(config.training_data_directory)  # or any of the 6
 | `draws` | `int` | Drawn games |
 | `accepted` | `bool` | Whether the new network passed the acceptance test (persisted so the report never recomputes it) |
 
-The new network is accepted if `(wins + 0.5·draws) / (wins + losses + draws) >= config.update_threshold` — the score-based rule in `core/acceptance.py`. The decision is computed once there and stored in the `accepted` column.
+The new network is accepted if `(wins + 0.5·draws) / (wins + losses + draws) >= config.update_threshold` — the score-based rule in `alphablokus/evaluation/acceptance.py`. The decision is computed once there and stored in the `accepted` column.
 
 ---
 
@@ -182,7 +182,7 @@ The new network is accepted if `(wins + 0.5·draws) / (wins + losses + draws) >=
 | `sims_per_second` | `float` | **Derived:** `total_sims / total_search_time_s` |
 | `inference_fraction` | `float` | **Derived:** `total_inference_time_s / total_search_time_s` |
 
-MCTS is recreated per episode (`Coach` line 174), so counters are naturally per-game with no reset needed.
+MCTS is recreated per episode (`selfplay/generate.py::_generate_serial`; the worker pool does the same per episode in `parallel/pool.py`), so counters are naturally per-game with no reset needed.
 
 ---
 
@@ -307,13 +307,14 @@ These three are logged by `BaseNNetWrapper.train()` after each epoch when an `Ev
 
 | Concern | File | Key functions/classes |
 |---------|------|-----------------------|
-| Directory paths | `core/config.py` | `RunConfig` properties |
-| All parquet I/O | `core/storage.py` | `MetricsCollector`, `SelfPlayStore` |
-| Coach thin wrappers | `core/coach.py` | `save_self_play_history()`, `load_self_play_history()` |
-| Memory snapshots | `core/coach.py` | `MemorySnapshot`, `_get_memory_snapshot()` |
-| MCTS counters | `core/mcts.py` | `MCTSEpisodeStats`, `get_episode_stats()` |
-| Training loss + throughput logging | `games/base_wrapper.py` | `BaseNNetWrapper.train()` |
-| Wiring (profiling + resources) | `core/coach.py` | `Coach.learn()` |
+| Directory paths | `alphablokus/config.py` | `RunConfig` properties |
+| Metrics parquet I/O + W&B mirroring | `alphablokus/storage/metrics.py` | `MetricsCollector` |
+| Self-play parquet I/O | `alphablokus/storage/selfplay_store.py` | `SelfPlayStore` |
+| Buffer + persistence orchestration | `alphablokus/training/replay_buffer.py` | `ReplayBuffer.save_fresh()`, `load_recent()`, `load_for_resume()` |
+| Memory snapshots | `alphablokus/training/diagnostics.py` | `MemorySnapshot`, `get_memory_snapshot()` |
+| MCTS counters | `alphablokus/search/stats.py` + `search/mcts.py` | `MCTSEpisodeStats`, `get_episode_stats()` |
+| Training loss + throughput logging | `alphablokus/games/base_wrapper.py` | `BaseNNetWrapper.train()` |
+| Wiring (profiling + resources) | `alphablokus/training/coach.py` | `Coach.learn()` |
 
 ---
 
@@ -377,7 +378,7 @@ A `wandb` block in any run config enables it:
 "wandb": {
   "project": "alphablokus-poc",
   "entity": null,
-  "tags": ["ttt", "smoke", "mac"],
+  "tags": ["ttt", "pipeline-check", "mac"],
   "mode": "online"
 }
 ```
@@ -387,7 +388,7 @@ A `wandb` block in any run config enables it:
 - `tags` — free-text tags surfaced in the W&B UI for filtering.
 - `mode` — `"online"` (sync to cloud), `"offline"` (write to local `wandb/` dir, sync later), or `"disabled"` (no-op, useful for tests).
 
-Omit the `wandb` block entirely (or set it to `null`) to disable W&B without code changes — the existing `test_run.json`, `full_run.json`, and `smoke_test.json` would all behave identically to before the W&B integration if the block were removed.
+Omit the `wandb` block entirely (or set it to `null`) to disable W&B without code changes — the existing `test_run.json`, `full_run.json`, and `pipeline_check.json` would all behave identically to before the W&B integration if the block were removed.
 
 ### Authentication
 

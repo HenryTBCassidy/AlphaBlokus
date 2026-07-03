@@ -21,7 +21,7 @@ AlphaBlokus uses two neural network architectures: a simple **4-layer CNN** for 
 | Dropout | Yes (configurable rate) | No |
 | Policy head | FC trunk → `FC(512→10)` | **Fully-convolutional** (1×1 conv → per-orientation planes + pass head); legacy FC head selectable |
 | Parameters (illustrative, 512ch) | ~8.1M | ~19M (4 blocks, conv head) |
-| Source file | `tictactoe/neuralnets/net.py` | `blokusduo/neuralnets/net.py` |
+| Source file | `games/tictactoe/nn/net.py` | `games/blokusduo/nn/net.py` |
 
 > The illustrative parameter counts use 512 channels for comparison with AlphaZero. Production Blokus runs use much smaller nets (e.g. 64 filters × 4 blocks) — see the run configs.
 

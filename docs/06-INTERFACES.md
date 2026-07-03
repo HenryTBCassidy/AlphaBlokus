@@ -100,7 +100,7 @@ This should be a standalone utility function usable by the CLI, the Pentobi adap
 | Coordinate converter (AlphaBlokus ↔ Pentobi) | ~20 min | Straightforward mapping |
 | Action → cell list (for outgoing moves) | ~30 min | Apply piece shape at position, collect occupied cells |
 | Cell list → Action (for incoming moves) | ~1 hour | Pattern matching against 91 orientations. Needs care |
-| Action ↔ action index encoder/decoder | — | **Already exists** — `ActionCodec` in `games/blokusduo/board.py` (encode/decode/is_pass). No work needed |
+| Action ↔ action index encoder/decoder | — | **Already exists** — `ActionCodec` in `games/blokusduo/codec.py` (encode/decode/is_pass). No work needed |
 | Board text renderer | ~15 min | Numpy array → formatted string |
 | **Total** | **~2.5 hours** | Claude-assisted estimate |
 
