@@ -9,10 +9,11 @@ import pytest
 from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.pieces import default_pieces_path
 
-REPO_ROOT = Path(__file__).resolve().parent.parent.parent
+# tests/games/blokusduo/conftest.py -> repo root is three levels above tests/
+TESTS_ROOT = Path(__file__).resolve().parents[2]
 
 #: The 5,000-position stratified parity cache (see tests/fixtures/blokus_positions.py).
-DEV_CACHE_PATH = REPO_ROOT / "tests" / "fixtures" / "blokus_duo_positions" / "dev_5000.npz"
+DEV_CACHE_PATH = TESTS_ROOT / "fixtures" / "blokus_duo_positions" / "dev_5000.npz"
 
 
 @pytest.fixture(scope="module")

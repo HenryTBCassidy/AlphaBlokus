@@ -391,7 +391,7 @@ class Coach:
         Getting this wrong would silently flip the "new net wins" /
         "previous net wins" labels in the HTML report. The convention
         is enforced by a unit test in
-        ``tests/test_core/test_parallel_self_play.py``.
+        ``tests/parallel/test_pool.py``.
         """
         from alphablokus.parallel.pool import (
             PHASE_ARENA,

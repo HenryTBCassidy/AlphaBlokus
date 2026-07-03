@@ -22,7 +22,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from tests.test_blokusduo.conftest import DEV_CACHE_PATH
+from tests.games.blokusduo.conftest import DEV_CACHE_PATH
+from tests.games.blokusduo.jax.conftest import make_search_config
 
 if TYPE_CHECKING:
     from alphablokus.games.blokusduo.game import BlokusDuoGame
@@ -33,7 +34,7 @@ torch = pytest.importorskip("torch")
 
 import jax.numpy as jnp  # noqa: E402
 
-from alphablokus.config import MCTSConfig, NetConfig, RunConfig  # noqa: E402
+from alphablokus.config import MCTSConfig  # noqa: E402
 from alphablokus.games.blokusduo.jax.bridge import numpy_state_from_board  # noqa: E402
 from alphablokus.games.blokusduo.jax.checkpoint import convert_state_dict, params_to_device  # noqa: E402
 from alphablokus.games.blokusduo.jax.kernels import GameState, make_kernels  # noqa: E402
@@ -43,19 +44,6 @@ from alphablokus.search.mcts import MCTS  # noqa: E402
 
 N_POSITIONS = 20
 SIMS = 60
-
-
-def _run_config(tmp_path, num_filters: int = 16, blocks: int = 1) -> RunConfig:
-    return RunConfig(
-        game="blokusduo", run_name="test_jax_search", num_generations=1, num_eps=1,
-        temp_threshold=5, update_threshold=0.55, num_arena_matches=2,
-        root_directory=tmp_path, load_model=False,
-        mcts_config=MCTSConfig(num_mcts_sims=SIMS, cpuct=2.5),
-        net_config=NetConfig(
-            learning_rate=1e-3, dropout=0.0, epochs=1, batch_size=4, cuda=False,
-            num_filters=num_filters, num_residual_blocks=blocks,
-        ),
-    )
 
 
 @pytest.fixture(scope="module")
@@ -68,7 +56,7 @@ def setup(tmp_path_factory, blokus_game_module: BlokusDuoGame):
     game.enable_optimised_movegen()
     from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
 
-    nnet = NNetWrapper(game, _run_config(tmp_path_factory.mktemp("jax_search")))
+    nnet = NNetWrapper(game, make_search_config(tmp_path_factory.mktemp("jax_search")))
     params = params_to_device(convert_state_dict(nnet.nnet.state_dict(), num_residual_blocks=1))
     kernels = make_kernels(build_jax_tables(game))
 

@@ -2,7 +2,7 @@
 
 The serial loop in ``selfplay/generate.py`` and the worker pool in
 ``parallel/pool.py`` use this **same code path**. That equivalence is the basis of the determinism test in
-``tests/test_core/test_parallel_self_play.py`` — if both call sites
+``tests/parallel/test_pool.py`` — if both call sites
 invoke this function with the same seed + same MCTS instance, they
 produce identical training examples regardless of which process runs
 the work.

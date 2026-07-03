@@ -14,7 +14,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from tests.test_blokusduo.conftest import DEV_CACHE_PATH
+from tests.games.blokusduo.conftest import DEV_CACHE_PATH
+from tests.games.blokusduo.jax.conftest import make_search_config
 
 if TYPE_CHECKING:
     from alphablokus.games.blokusduo.game import BlokusDuoGame
@@ -29,7 +30,6 @@ from alphablokus.games.blokusduo.jax.kernels import GameState, make_kernels  # n
 from alphablokus.games.blokusduo.jax.search import SearchConfig, dense_policy, make_search  # noqa: E402
 from alphablokus.games.blokusduo.jax.tables import build_jax_tables  # noqa: E402
 from alphablokus.games.blokusduo.pieces import default_pieces_path  # noqa: E402
-from tests.test_blokusduo.test_jaxenv_search import _run_config  # noqa: E402
 
 N_POSITIONS = 12
 SIMS = 32
@@ -43,7 +43,7 @@ def setup(tmp_path_factory, blokus_game_module: BlokusDuoGame):
     game = blokus_game_module
     from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
 
-    nnet = NNetWrapper(game, _run_config(tmp_path_factory.mktemp("gumbel")))
+    nnet = NNetWrapper(game, make_search_config(tmp_path_factory.mktemp("gumbel")))
     params = params_to_device(convert_state_dict(nnet.nnet.state_dict(), num_residual_blocks=1))
     kernels = make_kernels(build_jax_tables(game))
 
@@ -90,10 +90,10 @@ def test_gumbel_backend_generates_games(tmp_path) -> None:
     from alphablokus.config import JaxSelfPlayConfig, MCTSConfig
     from alphablokus.games.blokusduo.jax.backend import generate_self_play_games
     from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
-    from tests.test_core.test_jaxplay_backend import _config
+    from tests.games.blokusduo.jax.conftest import make_backend_config
 
     torch.manual_seed(6)
-    config = _config(tmp_path)
+    config = make_backend_config(tmp_path)
     config = dataclasses.replace(
         config,
         mcts_config=MCTSConfig(
@@ -119,10 +119,10 @@ def test_gumbel_python_backend_rejected(tmp_path) -> None:
     from alphablokus.games.blokusduo.game import BlokusDuoGame
     from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
     from alphablokus.training.coach import Coach
-    from tests.test_core.test_jaxplay_backend import _config
+    from tests.games.blokusduo.jax.conftest import make_backend_config
 
     config = dataclasses.replace(
-        _config(tmp_path),
+        make_backend_config(tmp_path),
         selfplay_backend="python",
         mcts_config=MCTSConfig(num_mcts_sims=8, cpuct=2.5, search_policy="gumbel"),
     )

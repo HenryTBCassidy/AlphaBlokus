@@ -35,7 +35,7 @@ if TYPE_CHECKING:
     from alphablokus.games.blokusduo.pieces import PieceManager
 
 _PIECES = default_pieces_path()
-_DEV_CACHE = Path(__file__).resolve().parent.parent / "fixtures" / "blokus_duo_positions" / "dev_5000.npz"
+_DEV_CACHE = Path(__file__).resolve().parents[3] / "fixtures" / "blokus_duo_positions" / "dev_5000.npz"
 _N = 14  # Blokus Duo board size
 
 

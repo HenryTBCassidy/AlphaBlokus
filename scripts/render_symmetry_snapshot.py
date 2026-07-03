@@ -11,7 +11,7 @@ Usage::
 
 Writes ``temp/symmetry_snapshot.html`` (a self-contained file safe to
 open with ``open temp/symmetry_snapshot.html``). Pairs with the
-equivariance tests in ``tests/test_blokusduo/test_symmetry.py`` — those
+equivariance tests in ``tests/games/blokusduo/test_symmetry.py`` — those
 prove correctness numerically; this lets a human confirm by eye.
 
 Page chrome and CSS follow the existing ``move_count_analysis`` report so

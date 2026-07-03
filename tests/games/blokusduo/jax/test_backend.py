@@ -11,43 +11,22 @@ seed.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
 import numpy as np
 import pytest
-
-if TYPE_CHECKING:
-    from pathlib import Path
 
 pytest.importorskip("jax")
 pytest.importorskip("mctx")
 pytest.importorskip("torch")
 
-from alphablokus.config import JaxSelfPlayConfig, MCTSConfig, NetConfig, RunConfig  # noqa: E402
 from alphablokus.games.blokusduo.game import BlokusDuoGame  # noqa: E402
 from alphablokus.games.blokusduo.jax.backend import generate_self_play_games  # noqa: E402
 from alphablokus.games.blokusduo.pieces import default_pieces_path
 from alphablokus.search.stats import MCTSEpisodeStats  # noqa: E402
 from alphablokus.storage.sparse_policy import densify  # noqa: E402
+from tests.games.blokusduo.jax.conftest import make_backend_config  # noqa: E402
 
 NUM_EPS = 3
 SIMS = 8
-
-
-def _config(tmp_path: Path) -> RunConfig:
-    return RunConfig(
-        game="blokusduo", run_name="test_jaxplay", num_generations=1, num_eps=NUM_EPS,
-        temp_threshold=12, update_threshold=0.55, num_arena_matches=2,
-        root_directory=tmp_path, load_model=False,
-        mcts_config=MCTSConfig(num_mcts_sims=SIMS, cpuct=2.5, dirichlet_epsilon=0.25, dirichlet_alpha=0.03),
-        net_config=NetConfig(
-            learning_rate=1e-3, dropout=0.0, epochs=1, batch_size=8, cuda=False,
-            num_filters=16, num_residual_blocks=1,
-        ),
-        selfplay_backend="jax",
-        jax_selfplay=JaxSelfPlayConfig(batch_size=2, top_k=32, dtype="float32", wave_plies=16),
-        seed=7,
-    )
 
 
 @pytest.fixture(scope="module")
@@ -60,7 +39,7 @@ def generated(tmp_path_factory):
 
     torch.manual_seed(11)
     tmp_path = tmp_path_factory.mktemp("jaxplay")
-    config = _config(tmp_path)
+    config = make_backend_config(tmp_path)
     game = BlokusDuoGame(pieces_config_path=default_pieces_path())
     nnet = NNetWrapper(game, config)
     nnet.save_checkpoint(filename="init.pth.tar")

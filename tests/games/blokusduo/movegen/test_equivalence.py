@@ -48,7 +48,7 @@ if TYPE_CHECKING:
 # Fixture cache paths
 # ---------------------------------------------------------------------------
 
-_FIXTURE_DIR = Path(__file__).resolve().parent.parent / "fixtures" / "blokus_duo_positions"
+_FIXTURE_DIR = Path(__file__).resolve().parents[3] / "fixtures" / "blokus_duo_positions"
 DEV_CACHE = _FIXTURE_DIR / "dev_5000.npz"
 GAUNTLET_CACHE = _FIXTURE_DIR / "gauntlet_50000.npz"
 

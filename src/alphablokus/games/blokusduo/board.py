@@ -284,7 +284,7 @@ class BlokusDuoBoard(IBoard):
         placement-point caches, side-danger masks — gets transposed or
         carried through as appropriate. See
         ``docs/plans/archive/blokus-symmetries.md`` for the derivation and
-        the test suite in ``tests/test_blokusduo/test_symmetry.py`` for the
+        the test suite in ``tests/games/blokusduo/test_symmetry.py`` for the
         layered correctness checks.
         """
         new_ppb = np.transpose(self._piece_placement_board).astype(np.int8)

@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from tests.test_blokusduo.conftest import DEV_CACHE_PATH
+from tests.games.blokusduo.conftest import DEV_CACHE_PATH
 
 if TYPE_CHECKING:
     from alphablokus.games.blokusduo.game import BlokusDuoGame

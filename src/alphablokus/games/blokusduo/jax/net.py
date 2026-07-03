@@ -8,7 +8,7 @@ conv+BN pair into a single conv-with-bias — the params pytree here has no BN
 notion at all. Training never happens on this side; torch remains the learner.
 
 Parity with ``predict_encoded`` is pinned by
-``tests/test_blokusduo/test_jaxenv_net.py`` (fp32 tolerance + bf16 agreement).
+``tests/games/blokusduo/test_jaxenv_net.py`` (fp32 tolerance + bf16 agreement).
 """
 
 from __future__ import annotations

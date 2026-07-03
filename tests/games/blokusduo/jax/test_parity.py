@@ -1,6 +1,6 @@
 """J3: JAX legal-mask parity with the Python engine on the dev-5000 cache.
 
-Three-way oracle, mirroring ``tests/test_blokusduo/test_movegen_equivalence.py``:
+Three-way oracle, mirroring ``tests/games/blokusduo/test_movegen_equivalence.py``:
 
 - all 5,000 positions vs the F2/numba generator (the production fast path),
 - a stratified 500-position subsample vs the reference array generator (the
@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from tests.test_blokusduo.conftest import DEV_CACHE_PATH
+from tests.games.blokusduo.conftest import DEV_CACHE_PATH
 
 if TYPE_CHECKING:
     from alphablokus.games.blokusduo.game import BlokusDuoGame

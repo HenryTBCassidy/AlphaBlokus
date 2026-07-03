@@ -283,7 +283,7 @@ class RunConfig:
     # :mod:`games.blokusduo.movegen_runtime`. Default False to preserve
     # the existing array-based path. Produces bit-identical training
     # trajectories at the same seed (verified by
-    # ``tests/test_blokusduo/test_movegen_determinism.py``). Only
+    # ``tests/games/blokusduo/test_movegen_determinism.py``). Only
     # ``BlokusDuoGame`` consults this flag; TTT ignores it.
     use_optimised_movegen: bool = False
 
