@@ -37,7 +37,7 @@ SIMS = 32
 
 @pytest.fixture(scope="module")
 def setup(tmp_path_factory, blokus_game_module: BlokusDuoGame):
-    from tests.fixtures.blokus_positions import iter_cached_positions
+    from alphablokus.testing.positions import iter_cached_positions
 
     torch.manual_seed(5)
     game = blokus_game_module

@@ -50,13 +50,13 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 
 if TYPE_CHECKING:
     from collections.abc import Iterator
+    from pathlib import Path
 
     from numpy.typing import NDArray
 
@@ -146,14 +146,9 @@ def generate_position_sequences(
 # Cache: build, save, load
 # ---------------------------------------------------------------------------
 
-def _default_cache_dir() -> Path:
-    """Where cached fixtures live by default — alongside this module."""
-    return Path(__file__).resolve().parent / "blokus_duo_positions"
-
-
 def build_cache(
     game: BlokusDuoGame, n: int, *, seed: int = 42,
-    cache_dir: Path | None = None, label: str | None = None,
+    cache_dir: Path, label: str | None = None,
 ) -> Path:
     """Generate N positions and write them to a .npz cache.
 
@@ -164,10 +159,11 @@ def build_cache(
     - ``n_moves`` — ``int32`` shape ``(N,)``, the actual move count
       per position so we know how much of each row is real.
 
-    The output filename is derived from ``label or f"{n}_seed{seed}"``,
+    ``cache_dir`` is explicit — the checked-in caches live at
+    ``tests/fixtures/blokus_duo_positions/``. The output filename is derived
+    from ``label or f"{n}_seed{seed}"``,
     e.g. ``dev_5000_seed42.npz`` or ``gauntlet_50000_seed42.npz``.
     """
-    cache_dir = cache_dir or _default_cache_dir()
     cache_dir.mkdir(parents=True, exist_ok=True)
     label = label or f"{n}_seed{seed}"
     out_path = cache_dir / f"{label}.npz"

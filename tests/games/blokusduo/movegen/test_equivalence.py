@@ -15,7 +15,7 @@ a call into it. The rest of the test machinery stays the same.
 
 Fixtures live at ``tests/fixtures/blokus_duo_positions/dev_5000.npz``
 (5,000 stratified positions). See
-``tests/fixtures/blokus_positions.py`` for the generator, cache format,
+``alphablokus/testing/positions.py`` for the generator, cache format,
 and stratification rationale.
 
 The 50,000-position gauntlet (``gauntlet_50000.npz``) is a separate,
@@ -32,7 +32,7 @@ import pytest
 
 from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.pieces import default_pieces_path
-from tests.fixtures.blokus_positions import (
+from alphablokus.testing.positions import (
     PAD_ACTION,
     load_cache,
     replay_to_board_and_player,
@@ -124,8 +124,9 @@ def test_dev_cache_exists() -> None:
     Regenerate via:
         uv run python -c "from pathlib import Path; \\
             from alphablokus.games.blokusduo.game import BlokusDuoGame; \\
-            from tests.fixtures.blokus_positions import build_cache; \\
-            build_cache(BlokusDuoGame(pieces_config_path=default_pieces_path()), \\
+            from alphablokus.testing.positions import build_cache; \\
+            build_cache(BlokusDuoGame(pieces_config_path=default_pieces_path()), \
+                        cache_dir=Path('tests/fixtures/blokus_duo_positions'), \\
                         n=5_000, seed=42, label='dev_5000')"
     """
     assert DEV_CACHE.exists(), (
@@ -252,8 +253,9 @@ def test_movegen_equivalence_gauntlet(blokus_game_module: BlokusDuoGame) -> None
 
         uv run python -c "from pathlib import Path; \\
             from alphablokus.games.blokusduo.game import BlokusDuoGame; \\
-            from tests.fixtures.blokus_positions import build_cache; \\
-            build_cache(BlokusDuoGame(pieces_config_path=default_pieces_path()), \\
+            from alphablokus.testing.positions import build_cache; \\
+            build_cache(BlokusDuoGame(pieces_config_path=default_pieces_path()), \
+                        cache_dir=Path('tests/fixtures/blokus_duo_positions'), \\
                         n=50_000, seed=42, label='gauntlet_50000')"
 
     Expected build wall-clock: ~20 min.

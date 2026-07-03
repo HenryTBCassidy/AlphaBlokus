@@ -49,7 +49,7 @@ SIMS = 60
 @pytest.fixture(scope="module")
 def setup(tmp_path_factory, blokus_game_module: BlokusDuoGame):
     """Shared: one small random torch net + its jax conversion + mid-game states."""
-    from tests.fixtures.blokus_positions import iter_cached_positions
+    from alphablokus.testing.positions import iter_cached_positions
 
     torch.manual_seed(3)
     game = blokus_game_module

@@ -106,7 +106,7 @@ def _median_time(fn, reps: int = REPS) -> float:
 
 def _load_cache_states(game: BlokusDuoGame, limit: int = 5000) -> GameState:
     """Stack dev-cache positions into one big numpy GameState batch."""
-    from tests.fixtures.blokus_positions import iter_cached_positions
+    from alphablokus.testing.positions import iter_cached_positions
 
     rows = []
     for index, (board, player, _sequence) in enumerate(iter_cached_positions(game, DEV_CACHE_PATH)):
@@ -380,7 +380,7 @@ def _measure_forward_only(forward_only, batch_size: int, dtype_name: str, result
 def measure_python_mask_baseline(game: BlokusDuoGame, sample: int = 500) -> Measurement:
     """Per-call latency of the production F2/numba mask over dev positions."""
     from alphablokus.games.blokusduo.movegen.runtime import get_default_generator
-    from tests.fixtures.blokus_positions import iter_cached_positions
+    from alphablokus.testing.positions import iter_cached_positions
 
     generator = get_default_generator()
     positions = []

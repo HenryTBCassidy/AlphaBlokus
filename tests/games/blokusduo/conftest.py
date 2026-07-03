@@ -12,7 +12,7 @@ from alphablokus.games.blokusduo.pieces import default_pieces_path
 # tests/games/blokusduo/conftest.py -> repo root is three levels above tests/
 TESTS_ROOT = Path(__file__).resolve().parents[2]
 
-#: The 5,000-position stratified parity cache (see tests/fixtures/blokus_positions.py).
+#: The 5,000-position stratified parity cache (see alphablokus/testing/positions.py).
 DEV_CACHE_PATH = TESTS_ROOT / "fixtures" / "blokus_duo_positions" / "dev_5000.npz"
 
 

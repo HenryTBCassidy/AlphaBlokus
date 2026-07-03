@@ -53,7 +53,7 @@ def _assert_states_match(
 
 @pytest.mark.skipif(not DEV_CACHE_PATH.exists(), reason="dev_5000 cache not built")
 def test_step_and_game_ended_replay_parity(blokus_game_module: BlokusDuoGame) -> None:
-    from tests.fixtures.blokus_positions import PAD_ACTION, load_cache
+    from alphablokus.testing.positions import PAD_ACTION, load_cache
 
     game = blokus_game_module
     game.enable_optimised_movegen()  # fast has-any-move path for get_game_ended

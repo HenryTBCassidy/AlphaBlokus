@@ -68,7 +68,7 @@ def main() -> None:
     from alphablokus.games.blokusduo.jax.tables import build_jax_tables
     from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
     from alphablokus.search.mcts import MCTS
-    from tests.fixtures.blokus_positions import iter_cached_positions
+    from alphablokus.testing.positions import iter_cached_positions
 
     game = BlokusDuoGame(pieces_config_path=PIECES_PATH)
     game.enable_optimised_movegen()

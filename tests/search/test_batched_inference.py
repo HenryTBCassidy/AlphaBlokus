@@ -28,7 +28,7 @@ from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.pieces import default_pieces_path
 from alphablokus.games.tictactoe.game import TicTacToeGame
 from alphablokus.search.mcts import MCTS, _Node
-from tests.fixtures.blokus_positions import load_cache, replay_to_board_and_player
+from alphablokus.testing.positions import load_cache, replay_to_board_and_player
 
 if TYPE_CHECKING:
     from alphablokus.games.base_wrapper import BaseNNetWrapper

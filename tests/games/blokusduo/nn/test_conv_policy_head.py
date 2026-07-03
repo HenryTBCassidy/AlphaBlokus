@@ -29,7 +29,7 @@ from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.nn.net import ConvPolicyHead, build_action_permutation
 from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
 from alphablokus.games.blokusduo.pieces import default_pieces_path
-from tests.fixtures.blokus_positions import load_cache, replay_to_board_and_player
+from alphablokus.testing.positions import load_cache, replay_to_board_and_player
 
 if TYPE_CHECKING:
     from alphablokus.games.blokusduo.pieces import PieceManager

@@ -60,7 +60,7 @@ def _random_torch_net(game: BlokusDuoGame, seed: int = 0) -> AlphaBlokusDuo:
 
 @pytest.fixture(scope="module")
 def encoded_positions(blokus_game_module: BlokusDuoGame) -> np.ndarray:
-    from tests.fixtures.blokus_positions import iter_cached_positions
+    from alphablokus.testing.positions import iter_cached_positions
 
     planes = []
     for index, (board, player, _seq) in enumerate(iter_cached_positions(blokus_game_module, DEV_CACHE_PATH)):
