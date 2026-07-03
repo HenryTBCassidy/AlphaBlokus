@@ -16,6 +16,16 @@ jobs:
       - run: uv sync --extra dev
       - run: uv run ruff check .
 
+  typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - run: uv sync --extra dev --extra jax
+      - run: uv run mypy
+
   test:
     runs-on: ubuntu-latest
     steps:

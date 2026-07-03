@@ -21,6 +21,7 @@ dependencies = [
 dev = [
     "pytest>=8.0.0",
     "ruff>=0.4.0",
+    "mypy>=1.14",
 ]
 # JAX spike (docs/plans/jax-spike.md). CPU wheel by default; on the CUDA box
 # install the accelerated variant instead: uv sync --extra jax-cuda
@@ -49,6 +50,58 @@ select = [
     "SIM",   # flake8-simplify
     "TCH",   # flake8-type-checking
 ]
+
+[tool.mypy]
+# Lenient baseline (refactor plan R5). Strictness ratchets to
+# disallow_untyped_defs in R28 once the typing sweep (R27) lands.
+python_version = "3.11"
+files = ["core", "games", "reporting", "main.py"]
+no_implicit_optional = true
+warn_redundant_casts = true
+check_untyped_defs = false
+
+[[tool.mypy.overrides]]
+module = [
+    "mctx.*",
+    "numba.*",
+    "wandb.*",
+    "plotly.*",
+    "dataclass_wizard.*",
+    "pandas.*",
+    "pyarrow.*",
+    "tqdm.*",
+    "psutil.*",
+    "matplotlib.*",
+]
+ignore_missing_imports = true
+
+# Enumerated typing debt (66 errors as of the R5 baseline), burned down by
+# refactor plan rows R27 (annotation sweep), R28 (strict ratchet + the
+# Protocol-narrowing decision), R31 (INeuralNetWrapper drift). Modules NOT
+# listed here are fully checked — do not add to this list.
+[[tool.mypy.overrides]]
+module = [
+    "core.coach",
+    "core.inference_channel",
+    "core.jaxplay.backend",
+    "core.mcts",
+    "core.parallel_self_play",
+    "core.self_play",
+    "core.storage",
+    "games.base_wrapper",
+    "games.blokusduo.board",
+    "games.blokusduo.game",
+    "games.blokusduo.jaxenv.bridge",
+    "games.blokusduo.movegen_runtime",
+    "games.blokusduo.movegen_tables",
+    "games.blokusduo.neuralnets.net",
+    "games.blokusduo.pentobi_player",
+    "games.blokusduo.pentobi_translation",
+    "games.tictactoe.game",
+    "games.tictactoe.minimax",
+    "reporting.display",
+]
+ignore_errors = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

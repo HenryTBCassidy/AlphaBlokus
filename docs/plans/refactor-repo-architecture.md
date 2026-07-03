@@ -16,7 +16,7 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R2 | 0 | Repo hygiene: prune stale worktrees, delete merged branches, remove `scripts/.DS_Store`, extend `.gitignore` | MECH | 20 min | Medium | ✅ |
 | R3 | 0 | Delete `notebooks/` (audit confirms no unique content) | MECH | 10 min | Medium | ✅ |
 | R4 | 0 | Add GitHub Actions CI (ruff + pytest `-m "not slow"`, base + jax jobs) against the *current* layout | MECH | 1 h | High | ✅ |
-| R5 | 0 | Add mypy at a lenient baseline; wire into CI | JUDGE | 1.5 h | High | |
+| R5 | 0 | Add mypy at a lenient baseline; wire into CI | JUDGE | 1.5 h | High | ✅ |
 | R6 | 1 | Move `core/`, `games/`, `reporting/` → `src/alphablokus/`; add `[build-system]`; repo-wide import rewrite (src, tests, scripts) | MECH | 2.5 h | High | |
 | R7 | 1 | `main.py` → `alphablokus/cli.py` + `[project.scripts]` console entry; delete root `main.py`; update every documented command | MECH | 45 min | High | |
 | R8 | 1 | Single `pieces.json` accessor via `importlib.resources`; kill the four divergent load paths | MECH | 1 h | High | |
@@ -386,7 +386,7 @@ Add `from __future__ import annotations` to the 9 files missing it (`config.py`,
 
 ## R28. mypy strict-ish  **(JUDGE)**
 
-Ratchet `[tool.mypy]` to `disallow_untyped_defs = true`, `disallow_incomplete_defs = true`, `no_implicit_optional = true` globally; fix the fallout. Where third-party untypedness forces it, prefer local `# type: ignore[<code>]  # <reason>` over module-wide overrides. From here on, "everything is typed" is machine-enforced, not aspirational. CI typecheck job flips to the strict config.
+Ratchet `[tool.mypy]` to `disallow_untyped_defs = true`, `disallow_incomplete_defs = true`, `no_implicit_optional = true` globally; delete the R5 per-module `ignore_errors` debt list and fix the fallout. One design decision lives here (surfaced by the R5 baseline's 14 `[override]` errors): concrete games narrow Protocol parameter types (`TicTacToeGame.get_next_state(board: Board)` vs `IGame`'s `IBoard`). Resolve by making the protocols generic (`IGame(Protocol[TBoard])`, the mathematically clean fix) or by keeping `IBoard` signatures with internal casts — decide when the errors are in front of you, favouring generics if the churn is contained. Where third-party untypedness forces it, prefer local `# type: ignore[<code>]  # <reason>` over module-wide overrides. From here on, "everything is typed" is machine-enforced, not aspirational. CI typecheck job flips to the strict config.
 
 ## R29. ruff format
 
