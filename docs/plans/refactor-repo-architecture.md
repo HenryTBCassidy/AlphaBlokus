@@ -47,7 +47,7 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R33 | 6 | Sort `run_configurations/` into current vs `archive/`; sweep references | MECH | 45 min | Low | ✅ |
 | R34 | 7 | Mechanical docs path sweep for the new layout (README tree, CLAUDE/AGENTS, 02/03/04/06/07, AI-CONTEXT) | MECH | 1.5 h | High | ✅ |
 | R35 | 7 | README rewrite: status, JAX/Gumbel backend, CI badge, new layout tree | JUDGE | 2 h | High | ✅ |
-| R36 | 7 | Make AGENTS.md canonical with CLAUDE.md as symlink; refresh Critical path, gotchas, doc tree | JUDGE | 1.5 h | High | |
+| R36 | 7 | Make AGENTS.md canonical with CLAUDE.md as symlink; refresh Critical path, gotchas, doc tree | JUDGE | 1.5 h | High | ✅ |
 | R37 | 7 | Rewrite `docs/guides/AI-CONTEXT.md` (five factually wrong claims) | JUDGE | 1 h | High | |
 | R38 | 7 | Freshness fixes to numbered docs: 02, 03, 06, 07, 08, 09 | JUDGE | 2 h | Medium | |
 | R39 | 7 | Guides + IDEAS refresh: STYLE-GUIDE (layout/tooling section), REMOTE-TRAINING (new commands), IDEAS.md (I1/I3 partially shipped), broken-link sweep | JUDGE | 1.5 h | Medium | |
