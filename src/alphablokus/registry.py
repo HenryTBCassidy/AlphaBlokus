@@ -18,7 +18,7 @@ from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper as TicTac
 
 if TYPE_CHECKING:
     from alphablokus.core.config import RunConfig
-    from alphablokus.core.interfaces import IGame, INeuralNetWrapper
+    from alphablokus.core.interfaces import IGame, INeuralNetWrapper, IOracle
     from alphablokus.selfplay.generate import SelfPlayBackendFn
 
 
@@ -78,3 +78,19 @@ def resolve_jax_selfplay_backend(config: RunConfig) -> SelfPlayBackendFn:
                 f"selfplay_backend 'jax' supports only 'blokusduo' (got {unknown!r}); "
                 "use selfplay_backend 'python'.",
             )
+
+
+def resolve_oracle(config: RunConfig, game: IGame) -> IOracle | None:
+    """Resolve the perfect-play oracle for the configured game, if one exists.
+
+    Only games small enough to solve exactly have one (currently TicTacToe's
+    minimax). ``None`` means the framework skips oracle-based evaluation.
+    """
+    match config.game:
+        case "tictactoe":
+            from alphablokus.games.tictactoe.oracle import TicTacToeOracle
+
+            assert isinstance(game, TicTacToeGame), "config.game/game instance mismatch"
+            return TicTacToeOracle(game)
+        case _:
+            return None

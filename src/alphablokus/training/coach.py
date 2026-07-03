@@ -1,5 +1,4 @@
 import json
-import math
 import os
 import time
 from functools import partial
@@ -13,7 +12,9 @@ from numpy.typing import NDArray
 from alphablokus.core.config import RunConfig
 from alphablokus.core.interfaces import IBoard, IGame, INeuralNetWrapper
 from alphablokus.evaluation.arena import Arena
+from alphablokus.evaluation.elo import compute_elo
 from alphablokus.evaluation.players import NetworkPlayer
+from alphablokus.registry import resolve_oracle
 from alphablokus.search.mcts import MCTS
 from alphablokus.selfplay.episode import ProcessedExample
 from alphablokus.selfplay.generate import generate_games
@@ -22,25 +23,9 @@ from alphablokus.storage.metrics import (
     EvalSet,
     MetricsCollector,
 )
-from alphablokus.storage.sparse_policy import as_dense
 from alphablokus.training.diagnostics import get_memory_snapshot
+from alphablokus.training.eval_set import build_or_load_eval_set
 from alphablokus.training.replay_buffer import ReplayBuffer
-
-
-def _compute_elo(wins: int, losses: int, draws: int) -> tuple[float, float]:
-    """Chess-style Elo difference vs an anchor opponent.
-
-    Score rate = (wins + 0.5·draws) / total_games, clamped to [0.001, 0.999]
-    to avoid log(0). Elo difference = 400 · log₁₀(score_rate / (1−score_rate)).
-    Returns ``(elo_diff, score_rate)``.
-    """
-    total = wins + losses + draws
-    if total == 0:
-        return 0.0, 0.0
-    raw = (wins + 0.5 * draws) / total
-    score_rate = max(0.001, min(0.999, raw))
-    elo = 400 * math.log10(score_rate / (1 - score_rate))
-    return elo, raw
 
 # Type aliases for improved readability
 TrainingExample: TypeAlias = tuple[IBoard, int, NDArray, float | None]  # (board, player, policy, value)
@@ -124,6 +109,7 @@ class Coach:
         self.config = config
 
         self.replay_buffer = ReplayBuffer(config, game)
+        self._oracle = resolve_oracle(config, game)
         self.metrics = MetricsCollector(config=config, resume_wandb_run_id=resume_wandb_run_id)
 
         # Frozen held-out positions for per-epoch network diagnostics (policy
@@ -438,12 +424,11 @@ class Coach:
 
         1. **Elo vs gen-0** (always, when ``elo_games_per_gen > 0``): the
            frozen random-init network from training start. Score rate +
-           Elo diff are computed via :func:`_compute_elo` and logged via
-           :meth:`MetricsCollector.log_elo`.
-        2. **TTT minimax** (only when the game is TicTacToe and
-           ``minimax_games_per_gen > 0``): perfect-play opponent. Draw rate
-           rising to 1.0 with loss rate falling to 0 means the model has
-           internalised optimal play.
+           Elo diff are computed via :func:`alphablokus.evaluation.elo.compute_elo`
+           and logged via :meth:`MetricsCollector.log_elo`.
+        2. **Perfect-play oracle** (only when the game has one and
+           ``minimax_games_per_gen > 0``): draw rate rising to 1.0 with loss
+           rate falling to 0 means the model has internalised optimal play.
 
         Both arenas use the same MCTS sim count as the regular accept/reject
         arena, for consistent comparison. The new network's MCTS tree is
@@ -451,11 +436,8 @@ class Coach:
         """
         if self.elo_baseline_net is not None and self.config.elo_games_per_gen > 0:
             self._evaluate_elo_vs_baseline(generation)
-        if (
-            self.config.game == "tictactoe"
-            and self.config.minimax_games_per_gen > 0
-        ):
-            self._evaluate_minimax_tictactoe(generation)
+        if self._oracle is not None and self.config.minimax_games_per_gen > 0:
+            self._evaluate_vs_oracle(generation)
         if self.config.symmetry_diagnostic_positions > 0:
             self._evaluate_symmetry_diagnostic(generation)
 
@@ -471,7 +453,7 @@ class Coach:
         else:
             wins, losses, draws = self._run_elo_serial(n)
 
-        elo_diff, score_rate = _compute_elo(wins, losses, draws)
+        elo_diff, score_rate = compute_elo(wins, losses, draws)
         absolute = baseline_rating + elo_diff
         elapsed = time.perf_counter() - elo_start
         logger.info(
@@ -530,20 +512,19 @@ class Coach:
         )
         return a_wins, b_wins, draws
 
-    def _evaluate_minimax_tictactoe(self, generation: int) -> None:
+    def _evaluate_vs_oracle(self, generation: int) -> None:
         from alphablokus.evaluation.players import NetworkPlayer
-        from alphablokus.games.tictactoe.minimax import MinimaxTicTacToePlayer
 
         n = self.config.minimax_games_per_gen
-        logger.info(f"Evaluating vs TTT minimax perfect-play ({n} games) ...")
+        logger.info(f"Evaluating vs perfect-play oracle ({n} games) ...")
         mm_start = time.perf_counter()
 
         new_player = NetworkPlayer(
             game=self.game, nnet=self.nnet,
             mcts_config=self.config.mcts_config, temp=0.0,
         )
-        minimax_player = MinimaxTicTacToePlayer(self.game)
-        arena = Arena(new_player, minimax_player, self.game)
+        oracle_player = self._oracle.make_player()
+        arena = Arena(new_player, oracle_player, self.game)
         wins, losses, draws, _ = arena.play_games(n)
         elapsed = time.perf_counter() - mm_start
         logger.info(
@@ -595,122 +576,12 @@ class Coach:
         self.metrics.log_symmetry_diagnostic(generation, position_results)
 
     def _ensure_eval_set(self, train_examples: list[ProcessedExample]) -> None:
-        """Build (or load from disk) the frozen held-out eval set.
-
-        For TicTacToe we replace the self-play-derived targets with **minimax
-        oracle** targets: each position's ``target_policies`` row is uniform
-        over all game-theoretically optimal actions, and ``target_values`` is
-        the true minimax value of the position (∈ ``{-1, 0, +1}``). This makes
-        the per-generation top-K agreement plot answer the right question
-        ("does the net pick a truly optimal move?") rather than chasing
-        gen-1's noisy MCTS targets, which is what was making that curve dip
-        over training.
-
-        For other games we keep the original behaviour: the eval set targets
-        are MCTS visit distributions and final game outcomes recorded during
-        gen 1's self-play.
-
-        Sampled once from gen 1's training examples and saved to
-        ``config.eval_set_directory`` as three numpy files: ``boards.npy``,
-        ``target_policies.npy``, ``target_values.npy``. If any of the three is
-        missing on disk we re-sample (which keeps things consistent between
-        old runs and current ones).
-        """
+        """Build/load the frozen eval set once (see :func:`build_or_load_eval_set`)."""
         if self._eval_set is not None:
             return
-
-        eval_dir = self.config.eval_set_directory
-        boards_path = eval_dir / "boards.npy"
-        policies_path = eval_dir / "target_policies.npy"
-        values_path = eval_dir / "target_values.npy"
-        # Marker file: tells us *how* the targets were generated. We refuse to
-        # reuse an on-disk eval set whose targets don't match the current
-        # scheme — otherwise an old "selfplay-targets" file would silently
-        # poison the metrics on a TTT run that now expects minimax targets.
-        marker_path = eval_dir / "targets_kind.txt"
-        expected_kind = "minimax_v1" if self.config.game == "tictactoe" else "selfplay_v1"
-        if (
-            boards_path.exists() and policies_path.exists() and values_path.exists()
-            and marker_path.exists() and marker_path.read_text().strip() == expected_kind
-        ):
-            self._eval_set = EvalSet(
-                boards=np.load(boards_path),
-                target_policies=np.load(policies_path),
-                target_values=np.load(values_path),
-            )
-            logger.info("Loaded eval set ({} positions, kind={}) from {}",
-                        len(self._eval_set), expected_kind, eval_dir)
-            return
-
-        if not train_examples:
-            return
-
-        # Sample positions from the training examples (capped to actual size).
-        # Boards are stored **compact** (``to_compact()``); the eval set feeds
-        # boards straight to the network, so encode the sampled compact boards
-        # to dense planes here. Policies are stored sparse (indices, values) —
-        # densify to the full action-space vector the eval set holds.
-        action_size = self.game.get_action_size()
-        n = min(self._eval_set_size, len(train_examples))
-        rng = np.random.default_rng(seed=self.config.seed or 0)
-        idx = rng.choice(len(train_examples), size=n, replace=False)
-        sampled = [train_examples[i] for i in idx]
-        sampled_compact = [ex[0] for ex in sampled]
-        sampled_boards = np.array([self.game.encode_compact(b) for b in sampled_compact])
-        target_policies = np.array([as_dense(ex[1], action_size) for ex in sampled])
-        target_values = np.array([ex[2] for ex in sampled])
-
-        if self.config.game == "tictactoe":
-            # The minimax oracle decodes positions from the compact grid directly.
-            target_policies, target_values = self._minimax_targets_for_eval_set(
-                sampled_compact, action_size=action_size,
-            )
-
-        self._eval_set = EvalSet(
-            boards=sampled_boards,
-            target_policies=target_policies,
-            target_values=target_values,
+        self._eval_set = build_or_load_eval_set(
+            self.config, self.game, self._oracle, train_examples, self._eval_set_size,
         )
-
-        eval_dir.mkdir(parents=True, exist_ok=True)
-        np.save(boards_path, self._eval_set.boards)
-        np.save(policies_path, self._eval_set.target_policies)
-        np.save(values_path, self._eval_set.target_values)
-        marker_path.write_text(expected_kind)
-        logger.info("Built eval set ({} positions, kind={}) → {}",
-                    n, expected_kind, eval_dir)
-
-    def _minimax_targets_for_eval_set(
-        self, compact_boards: list[NDArray], action_size: int,
-    ) -> tuple[NDArray, NDArray]:
-        """Overwrite eval-set targets with a perfect-play oracle (TTT only).
-
-        Each row of ``target_policies`` becomes a uniform distribution over
-        all minimax-optimal actions; each ``target_values`` entry becomes the
-        position's true game-theoretic value. Boards arrive as the compact 3×3
-        canonical grid (``Board.to_compact()``), so a :class:`Board` is rebuilt
-        directly from it before querying the minimax solver.
-        """
-        from alphablokus.games.tictactoe.board import Board
-        from alphablokus.games.tictactoe.minimax import MinimaxTicTacToePlayer
-
-        minimax = MinimaxTicTacToePlayer(self.game)
-        n = len(compact_boards)
-        new_policies = np.zeros((n, action_size), dtype=np.float32)
-        new_values = np.zeros(n, dtype=np.float32)
-
-        for i, grid in enumerate(compact_boards):
-            # Compact form is the canonical 3×3 grid (+1 side-to-move, -1 opponent).
-            canonical_board = Board._from_pieces(np.asarray(grid).astype(int).tolist())
-
-            new_values[i] = float(minimax.evaluate_position(canonical_board))
-            optimal = minimax.optimal_actions(canonical_board)
-            if optimal:
-                weight = 1.0 / len(optimal)
-                for action in optimal:
-                    new_policies[i, action] = weight
-
-        return new_policies, new_values
 
     def _log_training_dynamics(self, generation: int, buffer_positions: int) -> None:
         """Log the emergent reuse / staleness of the rolling-buffer data regime.

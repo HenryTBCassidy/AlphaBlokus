@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Protocol, TypeAlias
 from numpy.typing import NDArray
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from alphablokus.storage.metrics import MetricsCollector
 
@@ -204,6 +204,25 @@ class IGame(Protocol):
 
         Used by MCTS as a dictionary key for state lookups.
         """
+        ...
+
+
+class IOracle(Protocol):
+    """Perfect-play oracle for games small enough to solve exactly.
+
+    Optional per-game capability, resolved through ``registry.resolve_oracle``.
+    Games without a solver simply have no oracle (the registry returns
+    ``None``) and the framework skips oracle-based evaluation.
+    """
+
+    def make_player(self) -> Callable[[IBoard], int]:
+        """An arena opponent that plays perfectly."""
+        ...
+
+    def eval_targets(
+        self, compact_boards: list[NDArray], action_size: int,
+    ) -> tuple[NDArray, NDArray]:
+        """Ground-truth ``(policies, values)`` eval-set targets for the positions."""
         ...
 
 
