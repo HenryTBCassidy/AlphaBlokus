@@ -70,7 +70,7 @@ def new_valid_moves(game: BlokusDuoGame, board: BlokusDuoBoard, player: int) -> 
     one on every position in the cache. When it fails, the helper
     :func:`_describe_mismatch` formats the discrepancy.
     """
-    from alphablokus.games.blokusduo.movegen_runtime import get_default_generator
+    from alphablokus.games.blokusduo.movegen.runtime import get_default_generator
     mask_bool = get_default_generator().valid_move_mask(game, board, player)
     # Coerce to numerical mask matching the current impl's output dtype
     # (game.valid_move_masking returns float for historical reasons).
@@ -213,7 +213,7 @@ def test_has_any_move_equivalence_dev_cache(blokus_game_module: BlokusDuoGame) -
     on "does this player have any legal move?" for every position — checked here for
     both players across the dev cache.
     """
-    from alphablokus.games.blokusduo.movegen_runtime import get_default_generator
+    from alphablokus.games.blokusduo.movegen.runtime import get_default_generator
 
     f2 = get_default_generator()
     actions_array, n_moves_array = load_cache(DEV_CACHE)

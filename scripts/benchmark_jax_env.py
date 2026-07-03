@@ -379,7 +379,7 @@ def _measure_forward_only(forward_only, batch_size: int, dtype_name: str, result
 
 def measure_python_mask_baseline(game: BlokusDuoGame, sample: int = 500) -> Measurement:
     """Per-call latency of the production F2/numba mask over dev positions."""
-    from alphablokus.games.blokusduo.movegen_runtime import get_default_generator
+    from alphablokus.games.blokusduo.movegen.runtime import get_default_generator
     from tests.fixtures.blokus_positions import iter_cached_positions
 
     generator = get_default_generator()

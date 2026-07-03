@@ -63,7 +63,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 from numba import njit
 
-from alphablokus.games.blokusduo.movegen_tables import (
+from alphablokus.games.blokusduo.movegen.tables import (
     BOARD_SIZE,
     NUM_CELLS,
     LookupTable,

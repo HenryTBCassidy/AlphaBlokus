@@ -30,7 +30,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from alphablokus.games.blokusduo.movegen_tables import NULL_CELL, NUM_CELLS, build_move_tables
+from alphablokus.games.blokusduo.movegen.tables import NULL_CELL, NUM_CELLS, build_move_tables
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray

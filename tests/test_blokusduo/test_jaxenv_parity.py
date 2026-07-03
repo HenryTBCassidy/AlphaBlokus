@@ -37,7 +37,7 @@ REFERENCE_SUBSAMPLE_STRIDE = 10
 
 @pytest.mark.skipif(not DEV_CACHE_PATH.exists(), reason="dev_5000 cache not built")
 def test_legal_mask_parity_dev_cache(blokus_game_module: BlokusDuoGame) -> None:
-    from alphablokus.games.blokusduo.movegen_runtime import get_default_generator
+    from alphablokus.games.blokusduo.movegen.runtime import get_default_generator
     from tests.fixtures.blokus_positions import iter_cached_positions
 
     game = blokus_game_module

@@ -62,7 +62,7 @@ AMDAHL = [  # (lever, slice_pct, effort)
 # Raw cProfile top functions (1 game, 300 sims, F2 on; total 8.941 s) — the evidence.
 CPROFILE_RAW = """\
    ncalls  tottime  cumtime  function
-    57224    1.788    1.842  movegen_runtime.py:201(_fill_legal_actions_for_anchor)   <- move-gen core
+    57224    1.788    1.842  movegen/runtime.py:201(_fill_legal_actions_for_anchor)   <- move-gen core
     14444    1.695    1.938  mcts.py:346(_select_action)                              <- UCB loop (pure Python)
       888    1.242    1.242  {method 'cpu' of torch.TensorBase}                       <- GPU->CPU transfer
      4884    0.369    0.369  {built-in method torch.conv2d}                           <- actual NN compute

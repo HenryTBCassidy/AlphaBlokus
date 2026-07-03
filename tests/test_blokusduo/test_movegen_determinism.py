@@ -26,7 +26,7 @@ import numpy as np
 import pytest
 
 from alphablokus.games.blokusduo.game import BlokusDuoGame
-from alphablokus.games.blokusduo.movegen_runtime import get_default_generator
+from alphablokus.games.blokusduo.movegen.runtime import get_default_generator
 from alphablokus.games.blokusduo.pieces import default_pieces_path
 
 PIECES_PATH = default_pieces_path()

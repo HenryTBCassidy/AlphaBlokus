@@ -74,7 +74,7 @@ class BlokusDuoGame(IGame):
         production codepath (see ``parallel/pool.py``'s
         worker init and ``scripts/benchmark_phases.py``'s setup).
         """
-        from alphablokus.games.blokusduo.movegen_runtime import get_default_generator
+        from alphablokus.games.blokusduo.movegen.runtime import get_default_generator
         self._f2_generator = get_default_generator()
 
     # -- Public methods (IGame protocol, in call order) -------------------------

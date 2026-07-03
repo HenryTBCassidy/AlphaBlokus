@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from alphablokus.games.blokusduo.movegen_tables import (
+from alphablokus.games.blokusduo.movegen.tables import (
     ADJ_STATUS_BITS,
     ADJ_STATUS_COUNT,
     ADJ_STATUS_OFFSETS,
