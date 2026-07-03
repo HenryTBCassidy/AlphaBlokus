@@ -1,6 +1,6 @@
 # AlphaBlokus — Structural Refactor
 
-Everything in this doc is about **how the code is organised, not what it does**. The companion doc ([`bug-fixes.md`](../bug-fixes.md)) covers correctness issues. The goal: clean up structure, naming, tooling, and infrastructure so that the codebase is consistent, testable, and easy to extend — then fix bugs on a solid foundation.
+Everything in this doc is about **how the code is organised, not what it does**. The companion doc ([`bug-fixes.md`](bug-fixes.md)) covers correctness issues. The goal: clean up structure, naming, tooling, and infrastructure so that the codebase is consistent, testable, and easy to extend — then fix bugs on a solid foundation.
 
 ---
 

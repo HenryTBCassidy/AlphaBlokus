@@ -1,6 +1,6 @@
 # MCTS Memory Reduction — lift the per-worker tree footprint
 
-Sub-plan of [lean-self-play-workers](../lean-self-play-workers.md). The lean-workers
+Sub-plan of [lean-self-play-workers](lean-self-play-workers.md). The lean-workers
 work established that the **per-worker MCTS tree (~2 GB) is what caps how many
 self-play workers we can run** — and it's the one cost no OS trick can share
 (the tree is private and constantly mutated, so copy-on-write / shared memory
@@ -19,7 +19,7 @@ appending the concrete change rows once the targets are known. This mirrors the
 [profiling-investigation](profiling-investigation.md) →
 [report](../../research/profiling-report.md) pattern that worked for the cycle profile.
 
-The MCTS is dict-based ([`core/mcts.py`](../../../core/mcts.py)); the suspect
+The MCTS is dict-based ([`core/mcts.py`](../../../src/alphablokus/search/mcts.py)); the suspect
 consumers, in rough order of expected size:
 - `policy_priors: dict[StateKey, PolicyVector]` — a policy vector per state (dense = 17,837 floats ≈ 71 KB/state)
 - `valid_moves_cache: dict[StateKey, ValidMoves]` — a legal-move representation per state
@@ -50,7 +50,7 @@ Bit-identical: the game is unchanged (6,540 states · 6,599 state-actions · 25 
 
 ## M1. Build an MCTS memory profiler
 
-Extend the existing `memory` mode in [`scripts/profile_self_play.py`](../../../scripts/profile_self_play.py)
+Extend the existing `memory` mode in [`scripts/profile_self_play.py`](../../../scripts/profiling/profile_self_play.py)
 (which already plays one game under `tracemalloc` and reports peak heap + tree
 size) to **attribute** memory rather than just total it. After playing one
 self-play game at production settings (`blokus_scaled_15.json`, 300 sims), report

@@ -1,6 +1,6 @@
 # AlphaBlokus — Training-Cycle Profiling Report
 
-**Measured 2026-06-05** on the RTX 3060 Ti at the production config (`blokus_scaled_15.json`: 300 sims, K=16, conv 64f×4b, CUDA, **F2 move-gen on**), via [`scripts/profile_self_play.py`](../../scripts/profile_self_play.py) — cProfile for function times, the built-in MCTS phase timers for inference-vs-rest, and a synthetic-buffer run for training cost. The tables below render on GitHub. For the interactive charts version, regenerate it locally with [`scripts/profile_report.py`](../../scripts/profile_report.py) → `temp/profiling-report.html` (gitignored build output).
+**Measured 2026-06-05** on the RTX 3060 Ti at the production config (`blokus_scaled_15.json`: 300 sims, K=16, conv 64f×4b, CUDA, **F2 move-gen on**), via [`scripts/profile_self_play.py`](../../scripts/profiling/profile_self_play.py) — cProfile for function times, the built-in MCTS phase timers for inference-vs-rest, and a synthetic-buffer run for training cost. The tables below render on GitHub. For the interactive charts version, regenerate it locally with `scripts/profile_report.py` (since deleted in the scripts reorg — see git history) → `temp/profiling-report.html` (gitignored build output).
 
 > **Headline.** Self-play is **CPU-bound** (GPU idles ~0–30%). No single bottleneck — inference, move-gen, and the UCB loop are three roughly **co-equal thirds**. **Training is ~1% of the cycle.** Surprise: inference's cost is dominated by GPU↔CPU **transfers**, not compute.
 

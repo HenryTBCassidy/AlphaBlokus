@@ -1,6 +1,8 @@
 # Remote Training Runbook
 
-How to run AlphaBlokus training jobs on a home PC (with CUDA-capable GPU) from a development machine over Tailscale + WSL2 + SSH. Companion to `docs/guides/STYLE-GUIDE.md` (code conventions) and `docs/plans/archive/remote-training-setup.md` (the original infrastructure setup, since superseded by this runbook for operational guidance).
+How to run AlphaBlokus training jobs on a home PC (with CUDA-capable GPU) from a development machine over SSH. Companion to `docs/guides/STYLE-GUIDE.md` (code conventions) and `docs/plans/archive/remote-training-setup.md` (the original infrastructure setup, since superseded by this runbook for operational guidance).
+
+> **The box runs native Ubuntu now.** Start at [the 2026-06-12 section](#-2026-06-12--the-box-is-now-native-ubuntu-gpu-linux-mac-tailscale-is-dead) — it lists the live access routes (`gpu-linux` / `gpu-anywhere` / browser tunnels) and the box invariants. Everything mentioning WSL2, PowerShell mangling, or the "unattended runs are UNSOLVED" saga applies **only when the PC is booted into Windows** and is kept as the historical record; on Ubuntu a run is just `ssh gpu-linux`, `tmux new -s train`, `uv run alphablokus --config ...`.
 
 This guide assumes Tailscale + WSL2 + OpenSSH + key auth are already working between the two machines (per the archived setup plan). It covers everything from logging in to a fresh PC environment through to pulling trained models back to the dev machine.
 
@@ -182,7 +184,7 @@ Run this in a **long-running foreground SSH session** held by some process on th
 **Always `wandb.mode: "online"` for real runs.** It mirrors metrics live, so progress is recorded even if the process dies, *and* it's how you watch the run without holding SSH. (Disabling it on the first attempt is why that run left nothing to inspect.)
 
 **Cleanup recipe** when launches leave a mess:
-- Kill strays: `wsl -d Ubuntu -- bash -lc 'pkill -9 -f "[m]ain.py"'`
+- Kill strays: `wsl -d Ubuntu -- bash -lc 'pkill -9 -f "[a]lphablokus"'`
 - Remove stray units/tasks: `systemctl disable --now <svc>` ; `schtasks /delete /tn <name> /f`
 - Delete stray W&B runs by date with a `wandb.Api()` script (filter `r.created_at` to the day, `r.delete()`) — see `wandb_cleanup.py` pattern used 2026-06-03.
 
@@ -255,7 +257,7 @@ For shell scripts longer than one line: write to a file locally, `scp` to PC, ru
 
 | Symptom | Likely cause | Fix |
 |---------|--------------|-----|
-| Long run dies partway with `Read from remote host … Operation timed out` / `Broken pipe` | The attached SSH session dropped (Tailscale) and took the run with it — the run is tethered to that session | No fire-and-forget launch works on this box yet (tmux/setsid/nohup/systemd-run/Windows-Start-Process all reaped — tested 2026-06-02). Always run W&B `online` so progress is recorded; see [Long runs: the persistence problem](#️-long-runs-the-persistence-problem--read-before-launching-anything-multi-hour) |
+| Long run dies partway with `Read from remote host … Operation timed out` / `Broken pipe` | The attached SSH session dropped (Tailscale) and took the run with it — the run is tethered to that session | (Windows/WSL only.) No fire-and-forget launch works on WSL (tmux/setsid/nohup/systemd-run/Windows-Start-Process all reaped — tested 2026-06-02). Always run W&B `online` so progress is recorded; see [Unattended long runs are UNSOLVED](#-unattended-long-runs-are-unsolved-on-this-box--read-before-launching-anything-multi-hour) |
 | Can't find the run in W&B | `wandb.mode` was `"disabled"` in the config | Set `wandb.mode: "online"` for every real run — never disable monitoring |
 | Training dies after ~30s with no traceback in the log | Disowned process killed when SSH session closed | Use a long-running SSH session (don't `nohup & disown`) |
 | Detached run via `systemd-run --user --unit=…` dies ~15s in (`systemctl --user` shows `inactive`, journal shows `Stopping …`) | WSL idle-terminates the whole distro once the launching session returns; this tears the user unit down too. `loginctl enable-linger` keeps the *user manager* alive across logins but does **not** stop the VM teardown. Confirmed 2026-06-01 during the F3 benchmark. | Don't rely on `systemd-run --user` for detached runs. Hold a long-running foreground SSH session for the run's duration (a Claude Code background task works), exactly as in [The launch pattern](#the-launch-pattern). |
@@ -266,7 +268,7 @@ For shell scripts longer than one line: write to a file locally, `scp` to PC, ru
 | `bash: line 1: C:Users<windows-user>/.local/bin/env: No such file` | PowerShell substituted `$HOME` | Use literal `/home/<wsl-user>/...` |
 | `An expression was expected after '('` | PowerShell parsed `()` in your Python | Base64-encode the Python |
 | nvidia-smi from Windows shows no python process | Windows nvidia-smi only sees Windows processes | Query inside WSL: `wsl -- bash -lc "nvidia-smi"` |
-| Two W&B runs with the same name | `wandb.init(name=config.run_name)` collides on re-runs | We now append a UTC timestamp suffix — see `core/storage.py` `_init_wandb` |
+| Two W&B runs with the same name | `wandb.init(name=config.run_name)` collides on re-runs | We now append a UTC timestamp suffix — see `alphablokus/storage/metrics.py` `_init_wandb` |
 | `ssh: Operation timed out` to `<gpu-host>` | PC dropped off the tailnet (sleep, Tailscale service stopped, VPN interference) — `tailscale status` shows `offline, last seen Xh ago` | See [Tailscale connectivity recovery](#tailscale-connectivity-recovery) below |
 | PC `active` in `tailscale status` but `tailscale ping` and SSH both time out | Mac-side Tailscale system extension stuck — typically a `MagicSock function ReceiveIPv4 is not running` health warning | Force-kill **both** `Tailscale` and `IPNExtension` on the Mac, then relaunch — see recovery section below |
 

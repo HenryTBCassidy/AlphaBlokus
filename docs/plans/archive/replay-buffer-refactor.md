@@ -3,7 +3,7 @@
 Replaces the generation-keyed training buffer with a single **rolling replay buffer sized in games**,
 trained the way we already train — **full-pass epoch training over the whole buffer (use all the
 data)** — plus a compact on-disk/in-RAM board representation. This is the pragmatic first step of
-[IDEAS I4](../IDEAS.md#i4-continuous-non-gated-training) (continuous training) and it fixes three
+[IDEAS I4](../../IDEAS.md#i4-continuous-non-gated-training) (continuous training) and it fixes three
 problems at once:
 
 > **Direction change (2026-06-25).** An earlier draft of R5/R6 introduced a `target_reuse` knob with
@@ -42,7 +42,7 @@ training with an explicit reuse dial, removal of the generation-window machinery
 continuous training. Both are the wrong move for a game-limited single-GPU project (the GPU is never
 contended today — self-play and training are temporally separate — and async would steal cycles from
 the self-play that is the actual bottleneck). The gate stays as cheap insurance in this noisy
-small-scale regime. See [IDEAS I4](../IDEAS.md#i4-continuous-non-gated-training) for the full case.
+small-scale regime. See [IDEAS I4](../../IDEAS.md#i4-continuous-non-gated-training) for the full case.
 
 **Relationship to [`lazy-board-encoding.md`](lazy-board-encoding.md):** that plan's L1/L2 (per-item
 densify of the *dense* buffer, no second copy) already landed and independently unblock resuming
@@ -363,11 +363,11 @@ position in the buffer is trained on exactly `epochs` times per generation. No `
 - Short parity run on the box (small net, e.g. the `linux_15` shape) at `epochs=1` with a buffer matching
   the old effective window: confirm it learns at least as well as the buggy-window equivalent, RSS stays
   flat, no OOM.
-- Update the [full-cycle-optimisation baseline table](archive/full-cycle-optimisation.md) only if a
+- Update the [full-cycle-optimisation baseline table](full-cycle-optimisation.md) only if a
   throughput number changes (it shouldn't — this is a data-regime change, not a speed change).
 - `git mv` this plan to `docs/plans/archive/`; add a Scope additions section if anything landed beyond
   the checklist.
-- Flip [IDEAS I4](../IDEAS.md#i4-continuous-non-gated-training) status to **Promoted**, pointing at
+- Flip [IDEAS I4](../../IDEAS.md#i4-continuous-non-gated-training) status to **Promoted**, pointing at
   this plan (and the archived location once moved).
 
 > **Status (2026-06-25).** R1–R6 landed and the full suite is green (an end-to-end TTT run confirmed

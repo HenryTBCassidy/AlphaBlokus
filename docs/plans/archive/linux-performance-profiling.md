@@ -19,9 +19,9 @@ conclusion (those were measured on the tiny 340K-param net).
 
 **Prereqs / assets:** Linux box (`gpu-anywhere`); prod config
 `run_configurations/blokus_linux16_15.json`; existing harness
-[`scripts/profile_self_play.py`](../../../scripts/profile_self_play.py) (`timing` /
-`cprofile` / `memory` modes), [`scripts/profile_mcts_memory.py`](../../../scripts/profile_mcts_memory.py),
-report generator [`scripts/profile_report.py`](../../../scripts/profile_report.py);
+[`scripts/profile_self_play.py`](../../../scripts/profiling/profile_self_play.py) (`timing` /
+`cprofile` / `memory` modes), [`scripts/profile_mcts_memory.py`](../../../scripts/profiling/profile_mcts_memory.py),
+report generator `scripts/profile_report.py` (since deleted in the scripts reorg — see git history);
 MCTS already carries detailed per-phase timers (`MCTSEpisodeStats`). Tool rationale
 + Amdahl method: [self-play-speed-investigation.md](../../research/self-play-speed-investigation.md).
 

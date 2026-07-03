@@ -2,7 +2,7 @@
 
 The headline + the decision. Full detail in the two reports:
 **[Time profile](linux-time-profile.md)** · **[Memory profile](linux-memory-profile.md)**.
-Plan: [linux-performance-profiling.md](../plans/linux-performance-profiling.md).
+Plan: [linux-performance-profiling.md](../plans/archive/linux-performance-profiling.md).
 
 Profiled the current Linux config and two larger-net candidates (64f×4b / 128f×8b /
 256f×10b), single-worker (cProfile/Scalene) and multi-worker (py-spy, 16 workers), plus

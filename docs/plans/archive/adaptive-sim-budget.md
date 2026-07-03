@@ -35,4 +35,4 @@ standardised benchmark:
 First production use: `run_configurations/blokus_run1_taper.json` (branching, cap 400 / floor 60),
 launched as the first principled overnight run (W&B `ta6t5s6g`, 2026-06-20). Dirichlet root
 noise was already active in the run configs (ε=0.25, α=0.03). Measuring that run's strength
-against Pentobi is its own plan: [pentobi-harness.md](../pentobi-harness.md).
+against Pentobi is its own plan: [pentobi-harness.md](pentobi-harness.md).

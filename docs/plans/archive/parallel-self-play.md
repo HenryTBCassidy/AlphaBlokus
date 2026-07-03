@@ -6,8 +6,8 @@ Expected wall-clock impact: **5–7× on the self-play + arena + Elo phases comb
 
 Companion docs:
 - [`docs/plans/full-cycle-optimisation.md`](full-cycle-optimisation.md) — master plan and the F1 row this sub-plan implements.
-- [`docs/02-ALGORITHMS.md`](../02-ALGORITHMS.md) — self-play / arena / Elo phase definitions.
-- [`docs/07-DATA-STORAGE.md`](../07-DATA-STORAGE.md) — how training examples flow back into the per-gen replay buffer (matters for the result-aggregation step).
+- [`docs/02-ALGORITHMS.md`](../../02-ALGORITHMS.md) — self-play / arena / Elo phase definitions.
+- [`docs/07-DATA-STORAGE.md`](../../07-DATA-STORAGE.md) — how training examples flow back into the per-gen replay buffer (matters for the result-aggregation step).
 
 ---
 

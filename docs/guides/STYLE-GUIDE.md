@@ -2,7 +2,7 @@
 
 Living document. Append as we discover new conventions. All code in this repo should follow these rules. Claude should reference this before reviewing or writing code.
 
-Last updated: 2026-03-14
+Last updated: 2026-07-04
 
 ---
 
@@ -14,6 +14,34 @@ Last updated: 2026-03-14
 - **Mathematical where appropriate.** RL has standard notation. Use it when it aids understanding, but not at the cost of readability for non-specialists.
 - **Flat is better than nested.** Prefer early returns, guard clauses, and flat loops over deep nesting.
 - **Delete dead code.** Don't comment it out, don't leave it behind a flag. Git has history.
+
+---
+
+## Project Layout
+
+The code is an installable `src/`-layout package (`src/alphablokus/`, hatchling build, console script `alphablokus`). Tests and scripts import the installed package — never rely on the repo root being on `sys.path`, and never add `PYTHONPATH` incantations.
+
+```
+src/alphablokus/
+├── cli.py / config.py / interfaces.py / registry.py   # entry point, config, protocols, composition root
+├── search/       # MCTS + its stats instrumentation
+├── selfplay/     # episode loop + backend dispatch (serial / parallel / jax)
+├── parallel/     # worker pool + inference server/channel
+├── training/     # Coach, ReplayBuffer, eval set, memory diagnostics
+├── evaluation/   # arena, players, acceptance, Elo, symmetry diagnostic
+├── storage/      # MetricsCollector (parquet + W&B), SelfPlayStore, sparse policy
+├── games/        # base_wrapper + tictactoe/ + blokusduo/ (movegen/, pentobi/, jax/, nn/)
+├── reporting/    # HTML report (report/charts/arena_replays/display*)
+└── testing/      # shipped test utilities (position caches)
+```
+
+**Where new code goes:**
+
+- New framework code goes in the subpackage matching its pipeline phase (`selfplay/`, `training/`, `evaluation/`) or shared concern (`search/`, `parallel/`, `storage/`). Small cross-cutting modules (config, protocols) stay at the package root.
+- Game-specific code — including game-specific backends like the Blokus jax path — lives under `games/<game>/`, never in the framework.
+- **The registry rule:** `registry.py` is the *only* framework module allowed to import concrete game classes or backends. Everything else depends on the protocols in `interfaces.py`. Adding a game = implement the protocols under `games/<name>/` + register it in `registry.py`.
+- Tests mirror the source tree one-to-one under `tests/` (`tests/search/test_mcts.py` ↔ `search/mcts.py`). Shared test utilities that scripts also need ship in `alphablokus/testing/`, not in `tests/`.
+- Operational scripts go at `scripts/` top level; measurement tooling under `scripts/benchmarks/` or `scripts/profiling/`.
 
 ---
 
@@ -29,7 +57,7 @@ Last updated: 2026-03-14
 | Constants | SCREAMING_SNAKE | `BOARD_SIZE`, `PASS_ACTION_INDEX` |
 | Type aliases | PascalCase | `PolicyVector`, `StateStr`, `BoardArray` |
 | Files / modules | snake_case | `game.py`, `base_wrapper.py` |
-| Directories | snake_case | `run_configurations/`, `neuralnets/` |
+| Directories | snake_case | `run_configurations/`, `selfplay/` |
 | Test files | `test_` prefix | `test_game.py`, `test_mcts.py` |
 
 ### Specific conventions
@@ -192,7 +220,7 @@ def valid_placement(board: NDArray, piece: Piece, row: int, col: int) -> bool:
 - Don't state the obvious. `i += 1  # increment i` is noise.
 - **Do** explain *why*, not *what*: `# Multiply by player to get canonical form (my pieces = +1, opponent = -1)`
 - **Do** flag non-obvious correctness constraints: `# Must check >= 0, not > 0 (row 0 is a valid neighbour)`
-- Use `# TODO:` for known work items. Include a ticket/doc reference when possible: `# TODO: see docs/plans/bug-fixes.md §4`
+- Use `# TODO:` for known work items. Include a ticket/doc reference when possible: `# TODO: see docs/plans/oom-hardening.md O4`
 
 ---
 
@@ -214,16 +242,16 @@ import numpy as np
 import torch
 from loguru import logger
 
-from core.config import RunConfig, MCTSConfig
-from core.interfaces import IGame
+from alphablokus.config import RunConfig, MCTSConfig
+from alphablokus.interfaces import IGame
 ```
 
 ### Rules
 
 - **No `*` imports.** Ever. `from module import *` hides dependencies.
-- **No relative imports.** Always use absolute: `from core.config import RunConfig`, not `from .config import RunConfig`.
+- **No relative imports.** Always use absolute: `from alphablokus.config import RunConfig`, not `from .config import RunConfig`.
 - **Import modules, not individual names** when you'll use many things from the same module: `import numpy as np` not `from numpy import array, zeros, where, float64`.
-- **Exception:** importing specific names from local modules is fine and preferred: `from core.config import RunConfig`.
+- **Exception:** importing specific names from local modules is fine and preferred: `from alphablokus.config import RunConfig`.
 
 ---
 
@@ -233,7 +261,7 @@ from core.interfaces import IGame
 
 A file should have one main class plus any helpers that only that class uses. If a helper is used by multiple classes, it gets its own file.
 
-**Exception:** multiple classes in one file is fine when they share a single cohesive concern (e.g. `core/storage.py` has `MetricsCollector` and `SelfPlayStore` — both are parquet I/O and neither is large enough to warrant its own module).
+**Exception:** multiple classes in one file is fine when they share a single cohesive concern (e.g. `storage/metrics.py` holds `MetricsCollector` alongside `EvalSet` and `CycleStage` — all part of one metrics-logging surface).
 
 ### Module layout
 
@@ -371,6 +399,16 @@ If you find yourself wanting a body, that's a signal the commit is doing too muc
 
 ---
 
+## Tooling
+
+All three gates run in CI (`.github/workflows/ci.yml`) on every push/PR; keep them green locally before pushing.
+
+- **mypy — strict typing is machine-enforced.** `uv run mypy` with `disallow_untyped_defs`, `disallow_incomplete_defs`, and `no_implicit_optional` globally (`[tool.mypy]` in pyproject.toml). "Type everything" is a build failure, not a convention. For genuinely untypeable third-party corners, prefer a narrow local `# type: ignore[<code>]  # <reason>` over module-wide overrides.
+- **ruff — lint and format.** `uv run ruff check .` plus `uv run ruff format --check src tests scripts` (line length 120). Formatting is not a matter of taste in this repo — run `ruff format` before committing; never hand-fight the formatter.
+- **pytest — base and jax jobs.** CI runs `pytest -m "not slow"` twice: once with base extras, once with `--extra jax` (the jax parity/search suites run on CPU). Run the full suite including `slow` before merging anything that touches the training loop.
+
+---
+
 ## Anti-Patterns — What We Don't Do
 
 - ❌ `print()` for output — use logging
@@ -396,7 +434,7 @@ If you find yourself wanting a body, that's a signal the commit is doing too muc
 - ✅ Protocol-based interfaces with explicit subclassing (`class Board(IBoard)`)
 - ✅ StrEnum for enumerations
 - ✅ Computed properties on config objects
-- ✅ Separation of concerns: core/ is game-agnostic
+- ✅ Separation of concerns: the framework is game-agnostic; `registry.py` is the one composition root
 - ✅ Google-style docstrings with Args/Returns
 - ✅ `time.perf_counter()` for timing (not `time.time()`)
 - ✅ pathlib.Path for all filesystem operations

@@ -3,8 +3,8 @@
 Build the long-planned **Pentobi adapter + benchmark** so we can finally measure absolute
 strength against the strongest open-source Blokus AI — the project's actual goal ("beat
 Pentobi level 9 in a majority of 100 games"). This *executes* the design already scoped in
-**[06-INTERFACES.md](../06-INTERFACES.md)** (translation layer + GTP adapter, with the build
-recipe and gotchas) against the metrics defined in **[05-EVALUATION.md](../05-EVALUATION.md)**
+**[06-INTERFACES.md](../../06-INTERFACES.md)** (translation layer + GTP adapter, with the build
+recipe and gotchas) against the metrics defined in **[05-EVALUATION.md](../../05-EVALUATION.md)**
 (Pentobi Level / Score / Weighted Score / per-level profile + the heatmap). Read both before
 implementing — this plan is the *execution checklist*, not a re-derivation.
 
@@ -64,7 +64,7 @@ H1–H5 deliver the standalone benchmark — the goal of this branch — and are
 
 ## H1. Translation layer
 
-Per [06-INTERFACES.md §1](../06-INTERFACES.md). Build, with `ActionCodec` reused (already
+Per [06-INTERFACES.md §1](../../06-INTERFACES.md). Build, with `ActionCodec` reused (already
 exists), in a new module (e.g. `games/blokusduo/pentobi_translation.py`):
 - **Coordinate converter** AlphaBlokus `(x,y)` ↔ Pentobi `<letter><number>` (a1–n14). Both
   bottom-left origin; only letters-vs-numbers + 0-vs-1 indexing differ.
@@ -147,7 +147,7 @@ uv run python -m scripts.pentobi_benchmark --net <checkpoint> --sweep --games 10
   `reporting/` + `scripts/replay.py` render the games **identically to training arena replays**
   (the consistency you want — same board renderer, same replay viewer).
 - **Report:** simple stats (wins/losses/draws by level and colour, win rate + 95% CI) plus the
-  [05-EVALUATION §2](../05-EVALUATION.md) headline metrics (**Pentobi Level**, **Score**,
+  [05-EVALUATION §2](../../05-EVALUATION.md) headline metrics (**Pentobi Level**, **Score**,
   **Weighted Score**, **per-level profile**); on a sweep, the levels×winrate **heatmap**. Built
   with the same `reporting/` infra as the training report so charts/boards look consistent.
 
