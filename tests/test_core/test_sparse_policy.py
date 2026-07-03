@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from alphablokus.core.sparse_policy import densify, sparsify
+from alphablokus.storage.sparse_policy import densify, sparsify
 
 
 def test_densify_inverts_sparsify_exactly() -> None:
@@ -51,7 +51,7 @@ def test_memory_footprint_is_much_smaller() -> None:
 
 
 def test_as_dense_accepts_sparse_and_dense() -> None:
-    from alphablokus.core.sparse_policy import as_dense
+    from alphablokus.storage.sparse_policy import as_dense
 
     dense = np.array([0, 0.5, 0, 0.5, 0], dtype=np.float32)
     sparse = sparsify(dense)

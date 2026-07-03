@@ -18,15 +18,15 @@ from alphablokus.core.arena import Arena
 from alphablokus.core.config import RunConfig
 from alphablokus.core.interfaces import IBoard, IGame, INeuralNetWrapper
 from alphablokus.core.players import NetworkPlayer
-from alphablokus.core.sparse_policy import as_dense
-from alphablokus.core.storage import (
+from alphablokus.core.self_play import ProcessedExample
+from alphablokus.search.mcts import MCTS
+from alphablokus.storage.metrics import (
     CycleStage,
     EvalSet,
     MetricsCollector,
-    ProcessedExample,
-    SelfPlayStore,
 )
-from alphablokus.search.mcts import MCTS
+from alphablokus.storage.selfplay_store import SelfPlayStore
+from alphablokus.storage.sparse_policy import as_dense
 
 
 def _compute_elo(wins: int, losses: int, draws: int) -> tuple[float, float]:

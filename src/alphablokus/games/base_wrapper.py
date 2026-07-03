@@ -17,13 +17,13 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from alphablokus.core.interfaces import IBoard, IGame, INeuralNetWrapper
-from alphablokus.core.sparse_policy import as_dense
+from alphablokus.storage.sparse_policy import as_dense
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from alphablokus.core.config import RunConfig
-    from alphablokus.core.storage import EvalSet, MetricsCollector
+    from alphablokus.storage.metrics import EvalSet, MetricsCollector
 
 
 class AverageMeter:

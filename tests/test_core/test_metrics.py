@@ -3,7 +3,7 @@ import pandas as pd
 import pytest
 
 from alphablokus.core.config import RunConfig
-from alphablokus.core.storage import CycleStage, MetricsCollector
+from alphablokus.storage.metrics import CycleStage, MetricsCollector
 
 
 @pytest.fixture

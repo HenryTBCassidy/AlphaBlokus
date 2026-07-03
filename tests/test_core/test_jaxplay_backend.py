@@ -25,10 +25,10 @@ pytest.importorskip("torch")
 
 from alphablokus.core.config import JaxSelfPlayConfig, MCTSConfig, NetConfig, RunConfig  # noqa: E402
 from alphablokus.core.jaxplay.backend import generate_self_play_games  # noqa: E402
-from alphablokus.core.sparse_policy import densify  # noqa: E402
 from alphablokus.games.blokusduo.game import BlokusDuoGame  # noqa: E402
 from alphablokus.games.blokusduo.pieces import default_pieces_path
 from alphablokus.search.stats import MCTSEpisodeStats  # noqa: E402
+from alphablokus.storage.sparse_policy import densify  # noqa: E402
 
 NUM_EPS = 3
 SIMS = 8

@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from alphablokus.core.sparse_policy import sparsify
+from alphablokus.storage.sparse_policy import sparsify
 
 if TYPE_CHECKING:
     from alphablokus.core.interfaces import IGame

@@ -7,7 +7,7 @@ from numpy.typing import NDArray
 if TYPE_CHECKING:
     from collections.abc import Sequence
 
-    from alphablokus.core.storage import MetricsCollector
+    from alphablokus.storage.metrics import MetricsCollector
 
 # Type aliases for commonly used types
 TrainingExample: TypeAlias = tuple[NDArray, NDArray, float]  # (board_state, policy_vector, value)

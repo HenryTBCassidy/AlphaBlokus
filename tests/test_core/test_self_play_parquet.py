@@ -11,7 +11,8 @@ import pyarrow.parquet as pq
 import pytest
 
 from alphablokus.core.config import RunConfig
-from alphablokus.core.storage import ProcessedExample, SelfPlayStore
+from alphablokus.core.self_play import ProcessedExample
+from alphablokus.storage.selfplay_store import SelfPlayStore
 
 
 def _make_dummy_examples(n: int = 5) -> deque[ProcessedExample]:
