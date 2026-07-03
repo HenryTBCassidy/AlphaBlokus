@@ -15,7 +15,7 @@ import pytest
 
 from alphablokus.games.blokusduo.codec import Action, CoordinateIndexDecoder
 from alphablokus.games.blokusduo.game import BlokusDuoGame
-from alphablokus.games.blokusduo.pentobi_translation import PASS, PentobiMoveTranslator
+from alphablokus.games.blokusduo.pentobi.translation import PASS, PentobiMoveTranslator
 from alphablokus.games.blokusduo.pieces import default_pieces_path
 
 _PIECES = default_pieces_path()

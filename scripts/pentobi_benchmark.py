@@ -30,8 +30,8 @@ from pathlib import Path
 from alphablokus.config import RunConfig, load_args
 from alphablokus.evaluation.arena import Arena
 from alphablokus.evaluation.players import NetworkPlayer
-from alphablokus.games.blokusduo.pentobi_gtp import find_pentobi_gtp
-from alphablokus.games.blokusduo.pentobi_player import PentobiPlayer
+from alphablokus.games.blokusduo.pentobi.gtp import find_pentobi_gtp
+from alphablokus.games.blokusduo.pentobi.player import PentobiPlayer
 from alphablokus.registry import instantiate_game_and_network
 
 EVAL_SIMS_DEFAULT = 400

@@ -25,8 +25,8 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from alphablokus.games.blokusduo.pentobi_gtp import PentobiGtp
-from alphablokus.games.blokusduo.pentobi_translation import PASS, PentobiMoveTranslator
+from alphablokus.games.blokusduo.pentobi.gtp import PentobiGtp
+from alphablokus.games.blokusduo.pentobi.translation import PASS, PentobiMoveTranslator
 
 if TYPE_CHECKING:
     from alphablokus.games.blokusduo.game import BlokusDuoGame
@@ -79,7 +79,7 @@ class PentobiPlayer:
 
         A **pass** is *not* relayed: Pentobi has no ``play <c> pass`` (it expresses passes
         only via ``genmove`` returning ``pass``), and a pass places nothing on the board,
-        so skipping it keeps both boards in sync. (Verified: Pentobi генmoves the other
+        so skipping it keeps both boards in sync. (Verified: Pentobi genmoves the other
         colour fine without being told about the opponent's pass.)
         """
         self._assign_colors(i_am_white=False)

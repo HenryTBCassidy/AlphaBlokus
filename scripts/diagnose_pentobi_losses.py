@@ -16,7 +16,7 @@ import numpy as np
 from alphablokus.config import load_args
 from alphablokus.evaluation.arena import Arena
 from alphablokus.evaluation.players import NetworkPlayer
-from alphablokus.games.blokusduo.pentobi_player import PentobiPlayer
+from alphablokus.games.blokusduo.pentobi.player import PentobiPlayer
 from alphablokus.registry import instantiate_game_and_network
 
 

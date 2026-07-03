@@ -32,7 +32,7 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R18 | 2 | Delete emptied `core/`; final import sweep; green-suite checkpoint | MECH | 30 min | High | ✅ |
 | R19 | 3 | Extract `games/blokusduo/codec.py` from `board.py`; absorb the `ActionCodec.encode_from_components` monkey-patch | JUDGE | 1.5 h | High | ✅ |
 | R20 | 3 | `games/blokusduo/movegen/` subpackage (`runtime.py`, `tables.py`, table-build CLI) | MECH | 45 min | Medium | ✅ |
-| R21 | 3 | `games/blokusduo/pentobi/` subpackage (`gtp.py`, `player.py`, `translation.py`) | MECH | 30 min | Medium | |
+| R21 | 3 | `games/blokusduo/pentobi/` subpackage (`gtp.py`, `player.py`, `translation.py`) | MECH | 30 min | Medium | ✅ |
 | R22 | 3 | Rename `neuralnets/` → `nn/` in both games | MECH | 20 min | Low | |
 | R23 | 3 | Split `reporting/training.py` (1,824 lines) → `report.py` + `charts.py` + `arena_replays.py` | JUDGE | 2 h | High | |
 | R24 | 3 | Remove reporting's private reach-ins; add the small public accessors it needs on board/game | JUDGE | 1 h | Medium | |
