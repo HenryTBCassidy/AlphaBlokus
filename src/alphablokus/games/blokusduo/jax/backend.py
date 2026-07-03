@@ -35,6 +35,7 @@ _ARTEFACT_CACHE: dict[tuple, dict[str, Any]] = {}
 
 
 def _artefacts(config: RunConfig) -> dict[str, Any]:
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
     from alphablokus.games.blokusduo.jax.actors import make_actor
     from alphablokus.games.blokusduo.jax.harvest import TraceHarvester
     from alphablokus.games.blokusduo.jax.kernels import make_kernels
@@ -63,6 +64,7 @@ def _artefacts(config: RunConfig) -> dict[str, Any]:
                 mcts.sim_schedule, mcts.num_mcts_sims,
             )
         game = instantiate_game(config)
+        assert isinstance(game, BlokusDuoGame)  # config.game validated above
         kernels = make_kernels(build_jax_tables(game))
         search = make_search(kernels, SearchConfig(
             num_simulations=mcts.num_mcts_sims,

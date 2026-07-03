@@ -207,7 +207,7 @@ class AlphaBlokusDuo(nn.Module):
                     f"action_size {self.action_size} is not cells·O+1 for a "
                     f"{self.board_rows}×{self.board_cols} board; conv head needs "
                     "an (orientation, cell) action space.")
-            self.policy_head = ConvPolicyHead(
+            self.policy_head: nn.Module = ConvPolicyHead(
                 num_filters=config.num_filters,
                 num_orientations=num_orientations,
                 board_rows=self.board_rows,

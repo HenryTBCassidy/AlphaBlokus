@@ -18,6 +18,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from alphablokus.games.tictactoe.board import Board
+
 if TYPE_CHECKING:
     from alphablokus.games.tictactoe.game import TicTacToeGame
     from alphablokus.interfaces import IBoard
@@ -37,9 +39,10 @@ class MinimaxTicTacToePlayer:
 
     def __call__(self, board: IBoard) -> int:
         """Return the action with the highest minimax value from this state."""
+        assert isinstance(board, Board)  # Player contract is IBoard; this player is TTT-only
         return self.optimal_actions(board)[0]
 
-    def evaluate_position(self, board: IBoard) -> float:
+    def evaluate_position(self, board: Board) -> float:
         """Return the game-theoretic value of ``board`` from side-to-move's
         perspective: ``+1`` if the side-to-move can force a win, ``-1`` if they
         will lose against perfect play, ``0`` for a draw.
@@ -51,7 +54,7 @@ class MinimaxTicTacToePlayer:
         """
         return self._negamax(board)
 
-    def optimal_actions(self, board: IBoard) -> list[int]:
+    def optimal_actions(self, board: Board) -> list[int]:
         """Return *all* actions whose minimax value matches the best value.
 
         Used by the TTT eval set so a network is credited for picking any
@@ -77,7 +80,7 @@ class MinimaxTicTacToePlayer:
 
     # -- internal --------------------------------------------------------------
 
-    def _negamax(self, board: IBoard) -> float:
+    def _negamax(self, board: Board) -> float:
         """Negamax value of ``board`` from the side-to-move's perspective.
 
         ``board`` must be in canonical form (side to move = ``+1``). Pure

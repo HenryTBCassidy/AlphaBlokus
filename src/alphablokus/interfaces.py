@@ -1,13 +1,14 @@
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol, TypeAlias
+from typing import TYPE_CHECKING, Protocol, TypeAlias, TypeVar
 
 from numpy.typing import NDArray
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from alphablokus.storage.metrics import MetricsCollector
+    from alphablokus.selfplay.episode import ProcessedExample
+    from alphablokus.storage.metrics import EvalSet, MetricsCollector
 
 # Type aliases for commonly used types
 TrainingExample: TypeAlias = tuple[NDArray, NDArray, float]  # (board_state, policy_vector, value)
@@ -88,8 +89,16 @@ class IBoard(Protocol):
         ...
 
 
-class IGame(Protocol):
+TBoard = TypeVar("TBoard", bound="IBoard")
+"""The concrete board type a game implementation operates on."""
+
+
+class IGame(Protocol[TBoard]):
     """Rules engine and action space for a two-player, adversarial, turn-based game.
+
+    Generic over ``TBoard`` so implementations declare their concrete board
+    (``class BlokusDuoGame(IGame[BlokusDuoBoard])``) and keep precise
+    signatures; framework code that is board-agnostic uses bare ``IGame``.
 
     The game knows:
     - How to create a board (``initialise_board``)
@@ -99,11 +108,11 @@ class IGame(Protocol):
     - Whether the game is over and who won (``get_game_ended``)
     - Symmetries for data augmentation (``get_symmetries``)
 
-    The game does NOT hold mutable state — it operates on IBoard snapshots
+    The game does NOT hold mutable state — it operates on board snapshots
     passed as arguments. Player identifiers: 1 (player 1), -1 (player 2).
     """
 
-    def initialise_board(self) -> IBoard:
+    def initialise_board(self) -> TBoard:
         """Create and return the initial game board state."""
         ...
 
@@ -119,7 +128,7 @@ class IGame(Protocol):
         """Get the total number of possible actions in the game."""
         ...
 
-    def get_next_state(self, board: IBoard, player: int, action: int) -> tuple[IBoard, int]:
+    def get_next_state(self, board: TBoard, player: int, action: int) -> tuple[TBoard, int]:
         """Apply an action to the current board state and return the resulting state.
 
         Args:
@@ -132,7 +141,7 @@ class IGame(Protocol):
         """
         ...
 
-    def valid_move_masking(self, board: IBoard, player: int) -> NDArray:
+    def valid_move_masking(self, board: TBoard, player: int) -> NDArray:
         """Generate a binary mask of valid moves for the current board state.
 
         Args:
@@ -144,7 +153,7 @@ class IGame(Protocol):
         """
         ...
 
-    def get_game_ended(self, board: IBoard, player: int) -> float:
+    def get_game_ended(self, board: TBoard, player: int) -> float:
         """Check if the game has ended and return the result.
 
         Args:
@@ -157,7 +166,7 @@ class IGame(Protocol):
         """
         ...
 
-    def get_canonical_form(self, board: IBoard, player: int) -> IBoard:
+    def get_canonical_form(self, board: TBoard, player: int) -> TBoard:
         """Convert the board to canonical form (player 1 perspective).
 
         Args:
@@ -178,14 +187,14 @@ class IGame(Protocol):
         for the board the compact array came from.
 
         Args:
-            compact: Compact int8 array from ``IBoard.to_compact``.
+            compact: Compact int8 array from ``TBoard.to_compact``.
 
         Returns:
             NDArray of shape ``(C, H, W)`` with float32 dtype.
         """
         ...
 
-    def get_symmetries(self, board: IBoard, pi: NDArray) -> list[tuple[IBoard, NDArray]]:
+    def get_symmetries(self, board: TBoard, pi: NDArray) -> list[tuple[TBoard, NDArray]]:
         """Generate all symmetric forms of the board state and policy vector.
 
         Used to augment training data.
@@ -199,7 +208,7 @@ class IGame(Protocol):
         """
         ...
 
-    def state_key(self, board: IBoard) -> bytes:
+    def state_key(self, board: TBoard) -> bytes:
         """Return a hashable key that uniquely identifies the board state.
 
         Used by MCTS as a dictionary key for state lookups.
@@ -226,7 +235,25 @@ class IOracle(Protocol):
         ...
 
 
-class INeuralNetWrapper(Protocol):
+class IPolicyValuePredictor(Protocol):
+    """The inference surface of a network: boards in, (policy, value) out.
+
+    What MCTS actually depends on. Full wrappers implement it as part of
+    :class:`INeuralNetWrapper`; the inference-server client
+    (``parallel.inference_channel.InferenceClientNet``) implements *only*
+    this, routing evaluations to the server process.
+    """
+
+    def predict(self, board: IBoard) -> PolicyValue:
+        """Make a prediction for a given board state (canonical form)."""
+        ...
+
+    def predict_batch(self, boards: Sequence[IBoard]) -> tuple[list[NDArray], list[float]]:
+        """Run the network on N boards in a single forward pass."""
+        ...
+
+
+class INeuralNetWrapper(IPolicyValuePredictor, Protocol):
     """Interface for neural network wrappers used in game-playing models.
 
     Handles training on self-play data, making predictions for game states,
@@ -238,18 +265,27 @@ class INeuralNetWrapper(Protocol):
 
     def train(
         self,
-        examples: list[TrainingExample],
+        examples: list[ProcessedExample],
         generation: int,
         metrics: MetricsCollector | None = None,
+        eval_set: EvalSet | None = None,
     ) -> None:
         """Train the neural network with full passes over the replay buffer.
 
         Args:
-            examples: The whole replay buffer flattened to (board, policy, value)
-                tuples — every position is trained on ``epochs`` times.
+            examples: The whole replay buffer flattened to
+                ``(compact_board, sparse_policy, value)`` tuples — every
+                position is trained on ``epochs`` times (densified lazily
+                per mini-batch).
             generation: Current iteration in the self-play training cycle.
             metrics: Optional metrics collector for recording training loss data.
+            eval_set: Optional frozen held-out positions for per-epoch
+                network diagnostics.
         """
+        ...
+
+    def predict_encoded(self, planes: NDArray) -> tuple[NDArray, NDArray]:
+        """Run the network on pre-encoded input planes (inference-server path)."""
         ...
 
     def predict(self, board: IBoard) -> PolicyValue:

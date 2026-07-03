@@ -4,7 +4,7 @@ import os
 import time
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, nullcontext
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import torch
@@ -23,6 +23,7 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
     from alphablokus.config import RunConfig
+    from alphablokus.selfplay.episode import ProcessedExample
     from alphablokus.storage.metrics import EvalSet, MetricsCollector
 
 
@@ -114,8 +115,10 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         self.config = config
         self.net_config = config.net_config
         self.nnet = self._create_network()
-        self.board_rows: int = self.nnet.board_rows
-        self.board_cols: int = self.nnet.board_cols
+        # torch stubs type attribute access on Module as Tensor | Module;
+        # these are plain ints on our net classes.
+        self.board_rows: int = cast('int', self.nnet.board_rows)
+        self.board_cols: int = cast('int', self.nnet.board_cols)
 
         self._device = self._resolve_device()
         self.nnet.to(self._device)
@@ -159,7 +162,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
 
     def train(
         self,
-        examples: list[tuple[np.ndarray, np.ndarray, float]],
+        examples: list[ProcessedExample],
         generation: int,
         metrics: MetricsCollector | None = None,
         eval_set: EvalSet | None = None,

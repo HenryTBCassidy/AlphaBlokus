@@ -34,6 +34,8 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from alphablokus.interfaces import IPolicyValuePredictor
+
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from multiprocessing.context import BaseContext
@@ -256,7 +258,7 @@ class SharedMemoryRequestSource:
         self._remaining: dict[int, int] = {}
         self._poll_first_timeout_s = poll_first_timeout_s
 
-    def poll(self, timeout_s: float) -> list[_SharedPendingRequest]:
+    def poll(self, timeout_s: float) -> Sequence[_SharedPendingRequest]:
         worker_ids: list[int] = []
         # Block briefly for the first arrival, then drain the rest without waiting.
         try:
@@ -285,7 +287,7 @@ class SharedMemoryRequestSource:
         return bool(self.channel.stop_event.is_set())
 
 
-class InferenceClientNet:
+class InferenceClientNet(IPolicyValuePredictor):
     """Worker-side stand-in for the network that routes inference to the server.
 
     Implements only the inference surface MCTS uses (``predict`` /

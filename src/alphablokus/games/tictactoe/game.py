@@ -11,7 +11,7 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
-class TicTacToeGame(IGame):
+class TicTacToeGame(IGame[Board]):
 
     def __init__(self) -> None:
         super().__init__()

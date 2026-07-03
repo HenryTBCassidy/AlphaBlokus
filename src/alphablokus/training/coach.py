@@ -110,7 +110,8 @@ class Coach:
 
         self.game = game
         self.nnet = nnet
-        self.pnet = self.nnet.__class__(self.game, config)  # Previous best network
+        # Concrete wrappers share the (game, config) constructor; Protocols can't declare __init__.
+        self.pnet = self.nnet.__class__(self.game, config)  # type: ignore[call-arg]
         self.config = config
 
         self.replay_buffer = ReplayBuffer(config, game)
@@ -142,7 +143,7 @@ class Coach:
                 self.nnet.save_checkpoint(filename="elo_baseline.pth.tar")
             elif self.resume:
                 logger.info("Resume: reusing existing Elo baseline {}", baseline_path)
-            self.elo_baseline_net: INeuralNetWrapper | None = self.nnet.__class__(self.game, config)
+            self.elo_baseline_net: INeuralNetWrapper | None = self.nnet.__class__(self.game, config)  # type: ignore[call-arg]
             self.elo_baseline_net.load_checkpoint(filename="elo_baseline.pth.tar")
         else:
             self.elo_baseline_net = None
@@ -528,6 +529,7 @@ class Coach:
             game=self.game, nnet=self.nnet,
             mcts_config=self.config.mcts_config, temp=0.0,
         )
+        assert self._oracle is not None  # caller-guarded in _evaluate_strength_vs_baselines
         oracle_player = self._oracle.make_player()
         arena = Arena(new_player, oracle_player, self.game)
         wins, losses, draws, _ = arena.play_games(n)

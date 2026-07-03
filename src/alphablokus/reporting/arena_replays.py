@@ -6,13 +6,14 @@ from typing import TYPE_CHECKING
 
 from loguru import logger
 
+from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.registry import instantiate_game
 
 if TYPE_CHECKING:
-
     import pandas as pd
 
     from alphablokus.config import RunConfig
+    from alphablokus.interfaces import IGame
 
 
 
@@ -218,7 +219,7 @@ def build_arena_replays_section(
 
 
 def _format_played_action_caption(
-    game, action_id: int, played_prob: float, colour_name: str,  # noqa: ARG001
+    game: IGame, action_id: int, played_prob: float, colour_name: str,  # noqa: ARG001
 ) -> str:
     """Build the annotation for the actual-board panel — describes the move
     in human-readable terms and surfaces its raw MCTS visit probability.
@@ -237,7 +238,7 @@ def _format_played_action_caption(
         f" — {played_prob * 100:.1f}% of visits"
         if played_prob > 0 else " — visit % not recorded"
     )
-    if game.__class__.__name__ == "BlokusDuoGame":
+    if isinstance(game, BlokusDuoGame):
         if game.action_codec.is_pass(action_id):
             return f"Played: PASS{prob_suffix}"
         decoded = game.action_codec.decode(action_id)

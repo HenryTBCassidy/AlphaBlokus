@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from alphablokus.games.blokusduo.movegen.runtime import F2MoveGenerator
 
 
-class BlokusDuoGame(IGame):
+class BlokusDuoGame(IGame[BlokusDuoBoard]):
     """
     Rules engine and action space for Blokus Duo.
 

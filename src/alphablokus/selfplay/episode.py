@@ -83,7 +83,7 @@ def play_self_play_episode(
         # Symmetry augmentation: store every symmetric (board, policy)
         # pair the game exposes. Multiplies training-example count per
         # position by the size of the symmetry group.
-        symmetries = game.get_symmetries(canonical_board, pi)
+        symmetries = game.get_symmetries(canonical_board, np.asarray(pi))
         for symmetric_board, symmetric_pi in symmetries:
             train_examples.append((symmetric_board, current_player, symmetric_pi, None))
 

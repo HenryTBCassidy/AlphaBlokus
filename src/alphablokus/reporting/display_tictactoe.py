@@ -9,10 +9,8 @@ Stylistic convention follows the Blokus Duo renderer:
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from alphablokus.games.tictactoe.board import Board
+from alphablokus.games.tictactoe.board import Board
+from alphablokus.reporting.display import IBoardRenderer
 
 # Matched to the Blokus palette so both games look like they belong in the
 # same report. Slight transparency on the "last-move" highlight so the colour
@@ -26,7 +24,7 @@ _CELL_SIZE_PX = 56
 _BOARD_CLASS = "ttt-board"
 
 
-class TicTacToeRenderer:
+class TicTacToeRenderer(IBoardRenderer[Board]):
     """Renders a 3×3 TTT board as an HTML table.
 
     Two render modes:

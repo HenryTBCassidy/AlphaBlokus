@@ -11,7 +11,7 @@ from alphablokus.reporting import create_html_report
 from alphablokus.training.coach import Coach, read_progress_marker
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(description="AlphaBlokus training pipeline")
     parser.add_argument(
         "--config",

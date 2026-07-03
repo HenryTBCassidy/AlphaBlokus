@@ -17,7 +17,7 @@ CUDA.
 from __future__ import annotations
 
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Protocol, runtime_checkable
 
@@ -99,7 +99,7 @@ class PendingRequest(Protocol):
 class RequestSource(Protocol):
     """Where the server pulls pending requests from (transport-agnostic)."""
 
-    def poll(self, timeout_s: float) -> list[PendingRequest]:
+    def poll(self, timeout_s: float) -> Sequence[PendingRequest]:
         """Return any requests available within ``timeout_s`` (possibly empty)."""
         ...
 

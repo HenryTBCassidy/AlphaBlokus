@@ -14,7 +14,7 @@ from alphablokus.search.stats import MCTSEpisodeStats, MCTSMoveStats
 
 if TYPE_CHECKING:
     from alphablokus.config import MCTSConfig
-    from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper
+    from alphablokus.interfaces import IBoard, IGame, IPolicyValuePredictor
 
 # Constants
 EPS: Final[float] = 1e-8  # Small constant to prevent division by zero
@@ -96,7 +96,7 @@ class MCTS:
     4. Backpropagation: Update statistics for all visited nodes
     """
 
-    def __init__(self, game: IGame, nnet: INeuralNetWrapper, config: MCTSConfig) -> None:
+    def __init__(self, game: IGame, nnet: IPolicyValuePredictor, config: MCTSConfig) -> None:
         self.game = game
         self.nnet = nnet
         self.config = config
@@ -214,8 +214,8 @@ class MCTS:
         if temp == 0:
             best_actions = np.array(np.argwhere(counts == np.max(counts))).flatten()
             best_action = np.random.choice(best_actions)
-            probs = [0] * len(counts)
-            probs[best_action] = 1
+            probs: list[float] = [0.0] * len(counts)
+            probs[best_action] = 1.0
             return probs
 
         # Apply temperature and normalise to get probabilities
@@ -306,6 +306,7 @@ class MCTS:
         for descent in descents:
             if descent.needs_eval and descent.key not in seen:
                 seen.add(descent.key)
+                assert descent.board is not None  # needs_eval descents carry the board
                 eval_keys.append(descent.key)
                 eval_boards.append(descent.board)
 
@@ -327,7 +328,11 @@ class MCTS:
         # virtual loss it deposited along the way.
         root_values: list[float] = []
         for descent in descents:
-            leaf_value = descent.value if not descent.needs_eval else values_by_key[descent.key]
+            if descent.needs_eval:
+                leaf_value = values_by_key[descent.key]
+            else:
+                assert descent.value is not None  # terminal leaves carry the cached value
+                leaf_value = descent.value
             root_values.append(self._backprop(descent.path, leaf_value))
             self._remove_virtual_loss(descent.path)
         return root_values

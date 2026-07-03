@@ -55,10 +55,11 @@ from alphablokus.registry import instantiate_game, instantiate_game_and_network
 from alphablokus.search.mcts import MCTS
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
     from multiprocessing.sharedctypes import Synchronized
 
     from alphablokus.config import RunConfig
-    from alphablokus.interfaces import IGame, INeuralNetWrapper
+    from alphablokus.interfaces import IGame, IPolicyValuePredictor
     from alphablokus.search.stats import MCTSEpisodeStats
     from alphablokus.selfplay.episode import ProcessedExample
 
@@ -74,8 +75,8 @@ if TYPE_CHECKING:
 # populate both.
 _WORKER_CONFIG: RunConfig | None = None
 _WORKER_GAME: IGame | None = None
-_WORKER_NNET_A: INeuralNetWrapper | None = None
-_WORKER_NNET_B: INeuralNetWrapper | None = None
+_WORKER_NNET_A: IPolicyValuePredictor | None = None
+_WORKER_NNET_B: IPolicyValuePredictor | None = None
 # A self-play worker's view of the shared-memory inference channel, when the
 # cross-worker inference server is enabled. ``None`` when each worker holds its
 # own copy of the network instead.
@@ -292,12 +293,15 @@ def _worker_init_two_nets(
     _WORKER_CUDA = config.worker_cuda
     torch.set_num_threads(1)  # one torch thread/worker — N workers each grabbing all cores oversubscribes
     worker_config = _worker_net_config(config)
-    _WORKER_GAME, _WORKER_NNET_A = instantiate_game_and_network(worker_config)
-    _WORKER_NNET_A.load_checkpoint(filename=checkpoint_a_path)
-    # Second net shares the already-constructed game; only the wrapper
-    # itself is rebuilt with fresh weights (on the same worker device).
-    _WORKER_NNET_B = _WORKER_NNET_A.__class__(_WORKER_GAME, worker_config)
-    _WORKER_NNET_B.load_checkpoint(filename=checkpoint_b_path)
+    _WORKER_GAME, nnet_a = instantiate_game_and_network(worker_config)
+    nnet_a.load_checkpoint(filename=checkpoint_a_path)
+    # Second net shares the already-constructed game; only the wrapper itself
+    # is rebuilt with fresh weights (on the same worker device). Concrete
+    # wrappers share the (game, config) constructor; Protocols can't declare
+    # __init__.
+    nnet_b = nnet_a.__class__(_WORKER_GAME, worker_config)  # type: ignore[call-arg]
+    nnet_b.load_checkpoint(filename=checkpoint_b_path)
+    _WORKER_NNET_A, _WORKER_NNET_B = nnet_a, nnet_b
     _maybe_enable_f2(config, _WORKER_GAME)
 
 
@@ -475,14 +479,14 @@ def run_self_play_episodes_parallel(
             action_size=probe_game.get_action_size(),
         )
         channel = SharedInferenceChannel.create(spec, ctx=ctx)
-        server_proc = ctx.Process(
+        server_proc = ctx.Process(  # type: ignore[attr-defined]  # concrete mp contexts provide Process
             target=_run_inference_server,
             args=(channel.handles(), config, checkpoint_path, max_batch),
             daemon=True,
         )
         server_proc.start()
         worker_counter = ctx.Value("i", 0)
-        initializer = _worker_init_self_play_server
+        initializer: Callable[..., None] = _worker_init_self_play_server
         initargs: tuple = (config, channel.handles(), worker_counter)
         logger.info(
             "F5 inference server enabled (max_batch={} = {} workers × {} leaves)",

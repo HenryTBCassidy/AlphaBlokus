@@ -25,6 +25,7 @@ from alphablokus.games.blokusduo.codec import Action, CoordinateIndexDecoder
 if TYPE_CHECKING:
     from alphablokus.games.blokusduo.board import BlokusDuoBoard
     from alphablokus.games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.pieces import Orientation
 
 PASS = "pass"
 
@@ -43,7 +44,7 @@ class PentobiMoveTranslator:
         # Bijection: normalised occupied shape -> (piece_id, orientation, r0, c0).
         # r0/c0 are the orientation array's own min offsets, kept so the anchor can
         # be recovered exactly (robust even if an orientation array isn't tight).
-        self._shape_to_po: dict[frozenset[tuple[int, int]], tuple[int, object, int, int]] = {}
+        self._shape_to_po: dict[frozenset[tuple[int, int]], tuple[int, Orientation, int, int]] = {}
         for piece_id, orientation in self._pm.all_piece_id_basis_orientations():
             filled = self._pm.get_filled_cells(piece_id, orientation)
             r0 = int(filled[:, 0].min())

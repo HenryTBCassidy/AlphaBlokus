@@ -39,7 +39,7 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R25 | 4 | Restructure `tests/` to mirror `src/alphablokus/`; move cross-test helper imports into conftest/fixtures | MECH | 1.5 h | High | ✅ |
 | R26 | 4 | `tests/fixtures/blokus_positions.py` → `alphablokus/testing/positions.py` (it is imported by 3 scripts + 7 test files) | MECH | 45 min | Medium | ✅ |
 | R27 | 5 | Typing-gap sweep: missing `from __future__ import annotations` (9 files) + every unannotated signature | MECH | 2 h | High | ✅ |
-| R28 | 5 | Raise mypy to `disallow_untyped_defs` globally; fix fallout | JUDGE | 2.5 h | High | |
+| R28 | 5 | Raise mypy to `disallow_untyped_defs` globally; fix fallout | JUDGE | 2.5 h | High | ✅ |
 | R29 | 5 | Adopt `ruff format` in one dedicated commit; enable format check in CI | MECH | 45 min | Medium | |
 | R30 | 5 | Comment-noise pass: delete restating comments, keep rationale; deduplicate docstrings | JUDGE | 2 h | Medium | |
 | R31 | 5 | Dead-code removals + fix `INeuralNetWrapper.train` protocol drift | MECH | 1 h | Medium | |
@@ -388,7 +388,7 @@ Add `from __future__ import annotations` to the 9 files missing it (`config.py`,
 
 ## R28. mypy strict-ish  **(JUDGE)**
 
-Ratchet `[tool.mypy]` to `disallow_untyped_defs = true`, `disallow_incomplete_defs = true`, `no_implicit_optional = true` globally; delete the R5 per-module `ignore_errors` debt list and fix the fallout. One design decision lives here (surfaced by the R5 baseline's 14 `[override]` errors): concrete games narrow Protocol parameter types (`TicTacToeGame.get_next_state(board: Board)` vs `IGame`'s `IBoard`). Resolve by making the protocols generic (`IGame(Protocol[TBoard])`, the mathematically clean fix) or by keeping `IBoard` signatures with internal casts — decide when the errors are in front of you, favouring generics if the churn is contained. Where third-party untypedness forces it, prefer local `# type: ignore[<code>]  # <reason>` over module-wide overrides. From here on, "everything is typed" is machine-enforced, not aspirational. CI typecheck job flips to the strict config.
+Ratchet `[tool.mypy]` to `disallow_untyped_defs = true`, `disallow_incomplete_defs = true`, `no_implicit_optional = true` globally; delete the R5 per-module `ignore_errors` debt list and fix the fallout. One design decision lives here (surfaced by the R5 baseline's 14 `[override]` errors): concrete games narrow Protocol parameter types (`TicTacToeGame.get_next_state(board: Board)` vs `IGame`'s `IBoard`). Resolved with **generics**: `IGame(Protocol[TBoard])` with implementations declaring `IGame[Board]` / `IGame[BlokusDuoBoard]`; churn was two class headers plus interfaces.py. Same treatment for `IBoardRenderer` (contravariant `TBoard_contra` — renderers only consume boards). Also landed here because the strict ratchet forced them: the `INeuralNetWrapper.train` drift fix and `predict_encoded` addition (from R31), a new `IPolicyValuePredictor` protocol (the inference surface MCTS/`InferenceClientNet` actually share), and deletion of the deprecated `render_top_k_moves_html` (from R31). Where third-party untypedness forces it, prefer local `# type: ignore[<code>]  # <reason>` over module-wide overrides. From here on, "everything is typed" is machine-enforced, not aspirational. CI typecheck job flips to the strict config.
 
 ## R29. ruff format
 

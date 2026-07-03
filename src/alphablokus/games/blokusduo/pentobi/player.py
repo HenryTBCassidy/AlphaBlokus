@@ -83,6 +83,7 @@ class PentobiPlayer:
         colour fine without being told about the opponent's pass.)
         """
         self._assign_colors(i_am_white=False)
+        assert self._opp_color is not None  # set by _assign_colors
         move = self._translator.action_index_to_pentobi(int(action))
         if move == PASS:
             return
@@ -99,6 +100,7 @@ class PentobiPlayer:
         First call before any ``notify`` ⇒ we move first ⇒ we're White.
         """
         self._assign_colors(i_am_white=True)
+        assert self._my_color is not None  # set by _assign_colors
         return self._translator.pentobi_to_action_index(self._engine.genmove(self._my_color))
 
     # -- lifecycle / helpers ---------------------------------------------------

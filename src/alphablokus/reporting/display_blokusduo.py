@@ -12,11 +12,12 @@ from alphablokus.games.blokusduo.board import BlokusDuoBoard, PlayerSide
 from alphablokus.games.blokusduo.codec import Action, CoordinateIndexDecoder
 from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.pieces import Orientation, default_pieces_path
+from alphablokus.reporting.display import IBoardRenderer
 
 _decoder = CoordinateIndexDecoder(14)
 
 
-class BlokusDuoRenderer:
+class BlokusDuoRenderer(IBoardRenderer[BlokusDuoBoard]):
     """Renders Blokus Duo boards and candidate moves to HTML.
 
     Implements :class:`~reporting.display.IBoardRenderer`. Heavy lifting is
@@ -107,17 +108,6 @@ class BlokusDuoRenderer:
             f'{annotation_html}'
             f'<div class="candidate-cards">{"".join(cards)}</div>'
             f'</div>'
-        )
-
-    def render_top_k_moves_html(
-        self,
-        board: BlokusDuoBoard,
-        actions: list[int],
-        probs: list[float],
-    ) -> str:
-        """Compatibility shim — translates to :meth:`render_policy_html`."""
-        return self.render_policy_html(
-            board, dict(zip(actions, probs, strict=False)),
         )
 
 

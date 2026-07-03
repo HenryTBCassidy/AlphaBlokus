@@ -184,7 +184,7 @@ class MetricsCollector:
         run_name = f"{self.config.run_name}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
         # On resume, re-attach to the original run id so the dashboard shows one
         # continuous run; resume="allow" creates it if the id isn't found.
-        resume_kwargs = (
+        resume_kwargs: dict[str, Any] = (
             {"id": self.resume_wandb_run_id, "resume": "allow"}
             if self.resume_wandb_run_id else {}
         )

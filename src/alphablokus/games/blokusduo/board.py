@@ -218,8 +218,8 @@ class BlokusDuoBoard(IBoard):
         if player_side == 1:
             new_white_remaining = self._white_piece_ids_remaining - {action.piece_id}
             new_black_remaining = self._black_piece_ids_remaining
-            new_white_last = action.piece_id
-            new_black_last = self._black_last_piece_played
+            new_white_last: int | None = action.piece_id
+            new_black_last: int | None = self._black_last_piece_played
         else:
             new_white_remaining = self._white_piece_ids_remaining
             new_black_remaining = self._black_piece_ids_remaining - {action.piece_id}

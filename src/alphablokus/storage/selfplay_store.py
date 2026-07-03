@@ -19,7 +19,11 @@ from loguru import logger
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from alphablokus.selfplay.episode import DenseExample
+# One on-disk row: (compact board, DENSE policy, value). The live replay
+# buffer holds sparse policies (``selfplay.episode.ProcessedExample``); the
+# store densifies on save and rehydrates dense on load. Unifying the two on a
+# sparse on-disk format is ``docs/plans/oom-hardening.md`` O1/O2.
+DenseExample = tuple[np.ndarray, np.ndarray, float]
 
 
 

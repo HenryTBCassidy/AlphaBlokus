@@ -21,7 +21,7 @@ from typing import TYPE_CHECKING, TypeAlias
 
 import numpy as np
 
-from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper
+from alphablokus.interfaces import IBoard, IGame, IPolicyValuePredictor
 
 if TYPE_CHECKING:
     from alphablokus.config import MCTSConfig
@@ -63,7 +63,7 @@ class NetworkPlayer:
     def __init__(
         self,
         game: IGame,
-        nnet: INeuralNetWrapper,
+        nnet: IPolicyValuePredictor,
         mcts_config: MCTSConfig,
         temp: float = 0.0,
         opening_temp: float = 0.0,

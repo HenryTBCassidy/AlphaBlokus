@@ -272,14 +272,14 @@ class F2MoveGenerator:
             # bool scratch array (vs the Python set); anchor order is
             # irrelevant — the output is the union of legal moves.
             anchors = self._marshal_anchors(board, player)
-            remaining = np.fromiter(
+            remaining_ids = np.fromiter(
                 board.remaining_piece_ids(player), dtype=np.int32,
             )
-            seen = np.zeros(self._num_moves, dtype=np.bool_)
+            seen_mask = np.zeros(self._num_moves, dtype=np.bool_)
             _fill_mask_kernel(
                 forbidden, anchors, self._adj_status_cells,
                 self._lookup_begin, self._lookup_size, self._lookup_move_ids,
-                self._move_cells, self._move_action_id, remaining, out, seen,
+                self._move_cells, self._move_action_id, remaining_ids, out, seen_mask,
             )
         else:
             # Dedup set — a single move can be emitted by multiple attach
@@ -323,13 +323,13 @@ class F2MoveGenerator:
 
         if self._use_numba:
             anchors = self._marshal_anchors(board, player)
-            remaining = np.fromiter(
+            remaining_ids = np.fromiter(
                 board.remaining_piece_ids(player), dtype=np.int32,
             )
             return bool(_has_any_move_kernel(
                 forbidden, anchors, self._adj_status_cells,
                 self._lookup_begin, self._lookup_size, self._lookup_move_ids,
-                self._move_cells, remaining,
+                self._move_cells, remaining_ids,
             ))
 
         remaining = board.remaining_piece_ids(player)

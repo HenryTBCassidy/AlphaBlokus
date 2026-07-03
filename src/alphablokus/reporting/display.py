@@ -11,17 +11,21 @@ game-specific symbols.
 """
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 if TYPE_CHECKING:
     from alphablokus.interfaces import IBoard
 
 
-class IBoardRenderer(Protocol):
+TBoard_contra = TypeVar("TBoard_contra", bound="IBoard", contravariant=True)
+"""Renderers only *consume* boards, so the protocol is contravariant."""
+
+
+class IBoardRenderer(Protocol[TBoard_contra]):
     """Renders boards and candidate moves to HTML for the training report.
 
     All implementations must:
-    1. Accept ``IBoard`` instances (not raw arrays) — every game has a
+    1. Accept board instances (not raw arrays) — every game has a
        different multi-channel encoding and the board object knows its own.
     2. Produce HTML fragments — strings, not files — so the caller can embed
        them anywhere in the report.
@@ -33,7 +37,7 @@ class IBoardRenderer(Protocol):
 
     def render_board_html(
         self,
-        board: IBoard,
+        board: TBoard_contra,
         last_action: int | None = None,
         annotation: str = "",
     ) -> str:
@@ -49,7 +53,7 @@ class IBoardRenderer(Protocol):
 
     def render_policy_html(
         self,
-        board: IBoard,
+        board: TBoard_contra,
         action_probs: dict[int, float],
         annotation: str = "",
         current_player: int = 1,
@@ -70,20 +74,6 @@ class IBoardRenderer(Protocol):
         """
         ...
 
-    def render_top_k_moves_html(
-        self,
-        board: IBoard,
-        actions: list[int],
-        probs: list[float],
-    ) -> str:
-        """[Deprecated] Render top-K candidate moves as a small HTML fragment.
-
-        Older method, kept around so Blokus's stub implementation still
-        type-checks. New code should prefer :meth:`render_policy_html` which
-        takes the full action distribution and renders a board that lines up
-        with :meth:`render_board_html`.
-        """
-        ...
 
 
 def get_renderer(game_name: str) -> IBoardRenderer:
