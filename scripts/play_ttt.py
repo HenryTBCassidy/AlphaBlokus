@@ -101,7 +101,7 @@ def main() -> None:
         raise SystemExit(f"play_ttt only supports tictactoe; config is {config.game!r}")
 
     game = TicTacToeGame()
-    from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
     wrapper = NNetWrapper(game, config)
 
     ckpt_path = Path(args.checkpoint)

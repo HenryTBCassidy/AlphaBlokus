@@ -26,8 +26,8 @@ import torch
 from alphablokus.config import MCTSConfig, NetConfig, RunConfig
 from alphablokus.games.blokusduo.codec import Action, ActionCodec, CoordinateIndexDecoder
 from alphablokus.games.blokusduo.game import BlokusDuoGame
-from alphablokus.games.blokusduo.neuralnets.net import ConvPolicyHead, build_action_permutation
-from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
+from alphablokus.games.blokusduo.nn.net import ConvPolicyHead, build_action_permutation
+from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
 from alphablokus.games.blokusduo.pieces import default_pieces_path
 from tests.fixtures.blokus_positions import load_cache, replay_to_board_and_player
 

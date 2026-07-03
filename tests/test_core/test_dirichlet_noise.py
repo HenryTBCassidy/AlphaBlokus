@@ -11,7 +11,7 @@ import numpy as np
 
 from alphablokus.config import MCTSConfig, NetConfig, RunConfig
 from alphablokus.games.tictactoe.game import TicTacToeGame
-from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
+from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
 from alphablokus.search.mcts import MCTS
 
 if TYPE_CHECKING:

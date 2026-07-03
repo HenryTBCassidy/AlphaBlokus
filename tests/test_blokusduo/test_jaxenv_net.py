@@ -32,7 +32,7 @@ import jax.numpy as jnp  # noqa: E402
 from alphablokus.config import NetConfig  # noqa: E402
 from alphablokus.games.blokusduo.jax.checkpoint import convert_state_dict, params_to_device  # noqa: E402
 from alphablokus.games.blokusduo.jax.net import forward_jit  # noqa: E402
-from alphablokus.games.blokusduo.neuralnets.net import AlphaBlokusDuo  # noqa: E402
+from alphablokus.games.blokusduo.nn.net import AlphaBlokusDuo  # noqa: E402
 
 N_POSITIONS = 200
 

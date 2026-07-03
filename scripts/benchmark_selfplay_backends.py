@@ -105,7 +105,7 @@ def main() -> None:
     from alphablokus.config import JaxSelfPlayConfig
     from alphablokus.games.blokusduo.game import BlokusDuoGame
     from alphablokus.games.blokusduo.jax.backend import generate_self_play_games
-    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
 
     checkpoint = args.checkpoint.resolve()
     results = []

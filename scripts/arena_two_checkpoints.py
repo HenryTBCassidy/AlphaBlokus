@@ -59,7 +59,7 @@ def main() -> None:
     from alphablokus.evaluation.arena import Arena
     from alphablokus.evaluation.players import NetworkPlayer
     from alphablokus.games.blokusduo.game import BlokusDuoGame
-    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
 
     game = BlokusDuoGame(pieces_config_path=PIECES_PATH)
     game.enable_optimised_movegen()

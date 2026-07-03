@@ -1,7 +1,7 @@
 """Inference-only JAX port of ``AlphaBlokusDuo`` (plan step G3).
 
 Runs the exact eval-mode forward pass of the torch net
-(``games/blokusduo/neuralnets/net.py``, conv policy head) on parameters
+(``games/blokusduo/nn/net.py``, conv policy head) on parameters
 converted from a torch checkpoint by :mod:`games.blokusduo.jax.checkpoint`.
 Eval-mode BatchNorm is a fixed affine transform, so the converter folds every
 conv+BN pair into a single conv-with-bias — the params pytree here has no BN

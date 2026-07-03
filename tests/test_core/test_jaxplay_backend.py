@@ -56,7 +56,7 @@ def generated(tmp_path_factory):
 
     import torch
 
-    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
 
     torch.manual_seed(11)
     tmp_path = tmp_path_factory.mktemp("jaxplay")

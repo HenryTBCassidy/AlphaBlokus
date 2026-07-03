@@ -217,7 +217,7 @@ def test_load_recent_games_keeps_newest_n(store: SelfPlayStore):
 
 def test_coach_save_load_roundtrip(ttt_game, test_config: RunConfig):
     """Coach thin wrappers should delegate to SelfPlayStore correctly."""
-    from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
     from alphablokus.training.coach import Coach
 
     nnet = NNetWrapper(ttt_game, test_config)

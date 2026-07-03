@@ -43,7 +43,7 @@ _DEV_CACHE = Path(__file__).resolve().parent.parent / "fixtures" / "blokus_duo_p
 # ---------------------------------------------------------------------------
 
 def _ttt_wrapper(tmp_path: Path) -> tuple[TicTacToeGame, BaseNNetWrapper]:
-    from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
 
     game = TicTacToeGame()
     config = _run_config(tmp_path, game="tictactoe", num_filters=32, blocks=1)
@@ -51,7 +51,7 @@ def _ttt_wrapper(tmp_path: Path) -> tuple[TicTacToeGame, BaseNNetWrapper]:
 
 
 def _blokus_wrapper(tmp_path: Path) -> tuple[BlokusDuoGame, BaseNNetWrapper]:
-    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
 
     game = BlokusDuoGame(pieces_config_path=_PIECES_PATH)
     config = _run_config(tmp_path, game="blokusduo", num_filters=16, blocks=1)
@@ -440,7 +440,7 @@ def test_fp16_inference_flag_noop_on_cpu(tmp_path: Path) -> None:
             root_directory=tmp_path, load_model=False,
             mcts_config=MCTSConfig(num_mcts_sims=2, cpuct=1.0), net_config=net_config,
         )
-        from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
+        from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
         return NNetWrapper(game, run_config).predict(board)
 
     pol_off, val_off = predict_with(False)

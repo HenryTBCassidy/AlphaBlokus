@@ -11,7 +11,7 @@ import pytest
 
 from alphablokus.config import RunConfig
 from alphablokus.games.tictactoe.game import TicTacToeGame
-from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
+from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
 from alphablokus.training.coach import PROGRESS_MARKER_FILENAME, Coach, read_progress_marker
 
 

@@ -15,7 +15,7 @@ from alphablokus.evaluation.symmetry import (
     build_diagnostic_positions,
     compute_symmetry_diagnostic,
 )
-from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
+from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
 
 if TYPE_CHECKING:
     from alphablokus.config import RunConfig

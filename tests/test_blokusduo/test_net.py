@@ -5,7 +5,7 @@ import torch
 from alphablokus.config import NetConfig
 from alphablokus.games.blokusduo.board import BlokusDuoBoard
 from alphablokus.games.blokusduo.game import BlokusDuoGame
-from alphablokus.games.blokusduo.neuralnets.net import AlphaBlokusDuo
+from alphablokus.games.blokusduo.nn.net import AlphaBlokusDuo
 
 
 @pytest.fixture

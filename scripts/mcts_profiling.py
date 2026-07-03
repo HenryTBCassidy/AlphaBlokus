@@ -20,10 +20,10 @@ import numpy as np
 
 from alphablokus.config import MCTSConfig, NetConfig, RunConfig
 from alphablokus.games.blokusduo.game import BlokusDuoGame
-from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper as BlokusDuoNNetWrapper
+from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper as BlokusDuoNNetWrapper
 from alphablokus.games.blokusduo.pieces import default_pieces_path
 from alphablokus.games.tictactoe.game import TicTacToeGame
-from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper as TicTacToeNNetWrapper
+from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper as TicTacToeNNetWrapper
 from alphablokus.reporting.mcts_profiling import build_single_phase_report
 from alphablokus.search.mcts import MCTS
 

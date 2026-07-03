@@ -66,7 +66,7 @@ def setup(tmp_path_factory, blokus_game_module: BlokusDuoGame):
     torch.manual_seed(3)
     game = blokus_game_module
     game.enable_optimised_movegen()
-    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
 
     nnet = NNetWrapper(game, _run_config(tmp_path_factory.mktemp("jax_search")))
     params = params_to_device(convert_state_dict(nnet.nnet.state_dict(), num_residual_blocks=1))

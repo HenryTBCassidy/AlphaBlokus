@@ -66,7 +66,7 @@ def main() -> None:
     from alphablokus.games.blokusduo.jax.kernels import GameState, make_kernels
     from alphablokus.games.blokusduo.jax.search import SearchConfig, dense_policy, make_search
     from alphablokus.games.blokusduo.jax.tables import build_jax_tables
-    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
     from alphablokus.search.mcts import MCTS
     from tests.fixtures.blokus_positions import iter_cached_positions
 

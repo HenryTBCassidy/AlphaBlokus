@@ -105,7 +105,7 @@ module = [
     "alphablokus.games.blokusduo.jax.bridge",
     "alphablokus.games.blokusduo.movegen.runtime",
     "alphablokus.games.blokusduo.movegen.tables",
-    "alphablokus.games.blokusduo.neuralnets.net",
+    "alphablokus.games.blokusduo.nn.net",
     "alphablokus.games.blokusduo.pentobi.player",
     "alphablokus.games.blokusduo.pentobi.translation",
     "alphablokus.games.tictactoe.game",

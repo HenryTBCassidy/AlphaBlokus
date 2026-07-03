@@ -41,7 +41,7 @@ def setup(tmp_path_factory, blokus_game_module: BlokusDuoGame):
 
     torch.manual_seed(5)
     game = blokus_game_module
-    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
 
     nnet = NNetWrapper(game, _run_config(tmp_path_factory.mktemp("gumbel")))
     params = params_to_device(convert_state_dict(nnet.nnet.state_dict(), num_residual_blocks=1))
@@ -89,7 +89,7 @@ def test_gumbel_backend_generates_games(tmp_path) -> None:
 
     from alphablokus.config import JaxSelfPlayConfig, MCTSConfig
     from alphablokus.games.blokusduo.jax.backend import generate_self_play_games
-    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
     from tests.test_core.test_jaxplay_backend import _config
 
     torch.manual_seed(6)
@@ -117,7 +117,7 @@ def test_gumbel_python_backend_rejected(tmp_path) -> None:
 
     from alphablokus.config import MCTSConfig
     from alphablokus.games.blokusduo.game import BlokusDuoGame
-    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
     from alphablokus.training.coach import Coach
     from tests.test_core.test_jaxplay_backend import _config
 

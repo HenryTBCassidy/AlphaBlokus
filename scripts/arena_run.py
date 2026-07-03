@@ -61,10 +61,10 @@ def _get_game(game_name: str) -> IGame:
 
 def _get_nnet_class(game_name: str) -> type[INeuralNetWrapper]:
     if game_name == "tictactoe":
-        from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
+        from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
         return NNetWrapper
     if game_name == "blokusduo":
-        from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
+        from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
         return NNetWrapper
     raise ValueError(f"Unknown game: {game_name!r}")
 

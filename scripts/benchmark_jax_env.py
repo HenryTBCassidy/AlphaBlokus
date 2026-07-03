@@ -276,7 +276,7 @@ def make_net_rollout(
         pass_logit = (pooled * params["pass_head"]).sum(axis=1, keepdims=True)
         value = jnp.tanh((pooled * params["value"]).sum(axis=1))
         # NOTE: plane order vs ActionCodec order differs by a fixed permutation
-        # (see games/blokusduo/neuralnets/net.py::build_action_permutation);
+        # (see games/blokusduo/nn/net.py::build_action_permutation);
         # irrelevant for throughput, omitted here.
         logits = jnp.concatenate([placement_logits, pass_logit], axis=1)
         return logits, value
