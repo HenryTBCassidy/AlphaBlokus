@@ -50,7 +50,7 @@ TrainingExample: TypeAlias = tuple[IBoard, int, NDArray, float | None]  # (board
 GameExamples: TypeAlias = list[ProcessedExample]
 
 # Resume marker: written atomically at the end of every completed generation and
-# read by ``main.py --resume`` to continue a crashed run in place. Lives in the
+# read by ``alphablokus --resume`` to continue a crashed run in place. Lives in the
 # run's log directory (already created early in ``main``).
 PROGRESS_MARKER_FILENAME = "progress.json"
 

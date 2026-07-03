@@ -18,7 +18,7 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R4 | 0 | Add GitHub Actions CI (ruff + pytest `-m "not slow"`, base + jax jobs) against the *current* layout | MECH | 1 h | High | ✅ |
 | R5 | 0 | Add mypy at a lenient baseline; wire into CI | JUDGE | 1.5 h | High | ✅ |
 | R6 | 1 | Move `core/`, `games/`, `reporting/` → `src/alphablokus/`; add `[build-system]`; repo-wide import rewrite (src, tests, scripts) | MECH | 2.5 h | High | ✅ |
-| R7 | 1 | `main.py` → `alphablokus/cli.py` + `[project.scripts]` console entry; delete root `main.py`; update every documented command | MECH | 45 min | High | |
+| R7 | 1 | `main.py` → `alphablokus/cli.py` + `[project.scripts]` console entry; delete root `main.py`; update every documented command | MECH | 45 min | High | ✅ |
 | R8 | 1 | Single `pieces.json` accessor via `importlib.resources`; kill the four divergent load paths | MECH | 1 h | High | ✅ |
 | R9 | 2 | `search/`: move `mcts.py`; extract profiling dataclasses to `search/stats.py` | MECH | 1 h | High | |
 | R10 | 2 | `storage/`: split `storage.py` → `metrics.py` + `selfplay_store.py`; move `sparse_policy.py`; single `ProcessedExample` home | MECH | 1.5 h | High | |

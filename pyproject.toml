@@ -21,6 +21,9 @@ dependencies = [
     "numba>=0.65.1",
 ]
 
+[project.scripts]
+alphablokus = "alphablokus.cli:main"
+
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0.0",
@@ -62,7 +65,7 @@ select = [
 # Lenient baseline (refactor plan R5). Strictness ratchets to
 # disallow_untyped_defs in R28 once the typing sweep (R27) lands.
 python_version = "3.11"
-files = ["src/alphablokus", "main.py"]
+files = ["src/alphablokus"]
 no_implicit_optional = true
 warn_redundant_casts = true
 check_untyped_defs = false

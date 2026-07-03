@@ -53,7 +53,7 @@ ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "cd ~/AlphaBlokus && git fetch origin 
 
 # 1. Launch training in a long-running SSH session (held open as a background task)
 ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 <gpu-host> \
-  'wsl -d Ubuntu -- bash -lc "source /home/<wsl-user>/.local/bin/env && cd /home/<wsl-user>/AlphaBlokus && uv run python main.py --config run_configurations/<config>.json"' \
+  'wsl -d Ubuntu -- bash -lc "source /home/<wsl-user>/.local/bin/env && cd /home/<wsl-user>/AlphaBlokus && uv run alphablokus --config run_configurations/<config>.json"' \
   > /tmp/training_local.log 2>&1
 
 # 2. While that's running, in a separate session, capture the live W&B URL
@@ -143,7 +143,7 @@ The credentials land in WSL's `~/.netrc` and are persistent across restarts.
 
 ```bash
 ssh -o ServerAliveInterval=30 -o ServerAliveCountMax=10 <gpu-host> \
-  'wsl -d Ubuntu -- bash -lc "source /home/<wsl-user>/.local/bin/env && cd /home/<wsl-user>/AlphaBlokus && uv run python main.py --config run_configurations/<config>.json"' \
+  'wsl -d Ubuntu -- bash -lc "source /home/<wsl-user>/.local/bin/env && cd /home/<wsl-user>/AlphaBlokus && uv run alphablokus --config run_configurations/<config>.json"' \
   > /tmp/training_local.log 2>&1
 ```
 
@@ -206,7 +206,7 @@ tail -f /tmp/training_local.log
 ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv,noheader"'
 
 # Process check
-ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "pgrep -af main.py"'
+ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "pgrep -af alphablokus"'
 ```
 
 Or just open the W&B URL — that's the easiest live view.
@@ -381,16 +381,16 @@ Total time spent debugging this the first time: ~30 minutes. With this section, 
 
 ```bash
 # Find the process
-ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "pgrep -af main.py"'
+ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "pgrep -af alphablokus"'
 
 # Kill it cleanly (lets Coach._learn_loop's finally close W&B)
-ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "pkill -INT -f main.py"'
+ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "pkill -INT -f alphablokus"'
 
 # If that doesn't work after 30s
-ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "pkill -9 -f main.py"'
+ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "pkill -9 -f alphablokus"'
 
 # Confirm gone
-ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "pgrep -af main.py"'
+ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "pgrep -af alphablokus"'
 ```
 
 If WSL itself is wedged: `ssh <gpu-host> 'wsl --shutdown'` from PowerShell, then re-launch. This wipes `/tmp` but leaves `~/` intact (training results in `~/AlphaBlokus/temp/` survive).
@@ -424,7 +424,7 @@ ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "uptime; whoami"'
 ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "nvidia-smi --query-gpu=name,memory.used,memory.total --format=csv,noheader"'
 
 # "Is there a training run going?"
-ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "pgrep -af main.py"'
+ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "pgrep -af alphablokus"'
 
 # "What's the latest W&B run?"
 ssh <gpu-host> "wsl -d Ubuntu -- bash -lc 'cd /home/<wsl-user>/AlphaBlokus && uv run python -c \"import wandb; print(list(wandb.Api().runs(\\\"<wandb-entity>/<project>\\\", per_page=1))[0].url)\"'"

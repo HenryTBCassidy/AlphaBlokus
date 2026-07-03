@@ -801,7 +801,7 @@ def _render_game_options(games: list[dict]) -> str:
 
 
 def _instantiate_game(game_name: str):
-    """Match main.py's mapping — needed for arena-replay board reconstruction."""
+    """Match the cli entry point's game mapping — needed for arena-replay board reconstruction."""
     if game_name == "tictactoe":
         from alphablokus.games.tictactoe.game import TicTacToeGame
         return TicTacToeGame()

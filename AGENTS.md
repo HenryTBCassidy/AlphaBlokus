@@ -16,7 +16,7 @@ uv run pytest                                    # Run tests
 uv run pytest -m "not slow"                      # Skip integration tests
 uv run pytest tests/test_blokusduo/              # Blokus tests only
 uv run pytest tests/test_core/                   # Core framework tests only
-uv run python main.py --config run_configurations/test_run.json   # Run training from some configuration
+uv run alphablokus --config run_configurations/test_run.json   # Run training from some configuration
 ```
 
 **Linter:** `ruff` (configured in pyproject.toml). Line length 120, Python 3.11+.
