@@ -7,7 +7,7 @@ temperature semantics (sample from the visit distribution before
 ``temp_threshold`` plies, argmax with random tie-break after —
 ``selfplay/episode.py`` (temperature block) / ``search/mcts.py`` (``get_action_prob``)), steps the env, and
 resets any finished slot to a fresh game in place. Each step emits one
-fixed-shape trace row; the host (:mod:`core.jaxplay.harvest`) assembles rows
+fixed-shape trace row; the host (:mod:`games.blokusduo.jax.harvest`) assembles rows
 into completed games between waves.
 
 Draw-sign parity detail: the trace records the terminal state's player-to-move
@@ -26,8 +26,8 @@ import jax.numpy as jnp
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from alphablokus.games.blokusduo.jaxenv.kernels import GameState, JaxKernels
-    from alphablokus.games.blokusduo.jaxenv.search import SearchResult
+    from alphablokus.games.blokusduo.jax.kernels import GameState, JaxKernels
+    from alphablokus.games.blokusduo.jax.search import SearchResult
 
 
 class ActorCarry(NamedTuple):

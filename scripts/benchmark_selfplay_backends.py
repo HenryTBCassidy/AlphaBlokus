@@ -103,8 +103,8 @@ def main() -> None:
     args = parser.parse_args()
 
     from alphablokus.core.config import JaxSelfPlayConfig
-    from alphablokus.core.jaxplay.backend import generate_self_play_games
     from alphablokus.games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.jax.backend import generate_self_play_games
     from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
 
     checkpoint = args.checkpoint.resolve()

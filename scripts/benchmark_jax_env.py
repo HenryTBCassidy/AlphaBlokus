@@ -40,9 +40,9 @@ import numpy as np
 from loguru import logger
 
 from alphablokus.games.blokusduo.game import BlokusDuoGame
-from alphablokus.games.blokusduo.jaxenv.bridge import numpy_state_from_board
-from alphablokus.games.blokusduo.jaxenv.kernels import GameState, JaxKernels, make_kernels
-from alphablokus.games.blokusduo.jaxenv.tables import JaxTables, build_jax_tables
+from alphablokus.games.blokusduo.jax.bridge import numpy_state_from_board
+from alphablokus.games.blokusduo.jax.kernels import GameState, JaxKernels, make_kernels
+from alphablokus.games.blokusduo.jax.tables import JaxTables, build_jax_tables
 from alphablokus.games.blokusduo.pieces import default_pieces_path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent

@@ -11,7 +11,7 @@ import numpy as np
 import pytest
 
 from alphablokus.games.blokusduo.board import Action
-from alphablokus.games.blokusduo.jaxenv.tables import JaxTables, build_jax_tables
+from alphablokus.games.blokusduo.jax.tables import JaxTables, build_jax_tables
 from alphablokus.games.blokusduo.movegen_tables import build_move_tables
 from alphablokus.games.blokusduo.pieces import Orientation
 

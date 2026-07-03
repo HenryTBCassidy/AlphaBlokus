@@ -23,11 +23,11 @@ jax = pytest.importorskip("jax")
 pytest.importorskip("mctx")
 torch = pytest.importorskip("torch")
 
-from alphablokus.games.blokusduo.jaxenv.bridge import numpy_state_from_board  # noqa: E402
-from alphablokus.games.blokusduo.jaxenv.checkpoint import convert_state_dict, params_to_device  # noqa: E402
-from alphablokus.games.blokusduo.jaxenv.kernels import GameState, make_kernels  # noqa: E402
-from alphablokus.games.blokusduo.jaxenv.search import SearchConfig, dense_policy, make_search  # noqa: E402
-from alphablokus.games.blokusduo.jaxenv.tables import build_jax_tables  # noqa: E402
+from alphablokus.games.blokusduo.jax.bridge import numpy_state_from_board  # noqa: E402
+from alphablokus.games.blokusduo.jax.checkpoint import convert_state_dict, params_to_device  # noqa: E402
+from alphablokus.games.blokusduo.jax.kernels import GameState, make_kernels  # noqa: E402
+from alphablokus.games.blokusduo.jax.search import SearchConfig, dense_policy, make_search  # noqa: E402
+from alphablokus.games.blokusduo.jax.tables import build_jax_tables  # noqa: E402
 from alphablokus.games.blokusduo.pieces import default_pieces_path  # noqa: E402
 from tests.test_blokusduo.test_jaxenv_search import _run_config  # noqa: E402
 
@@ -88,7 +88,7 @@ def test_gumbel_backend_generates_games(tmp_path) -> None:
     import dataclasses
 
     from alphablokus.core.config import JaxSelfPlayConfig, MCTSConfig
-    from alphablokus.core.jaxplay.backend import generate_self_play_games
+    from alphablokus.games.blokusduo.jax.backend import generate_self_play_games
     from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
     from tests.test_core.test_jaxplay_backend import _config
 

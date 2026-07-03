@@ -106,7 +106,7 @@ def _generate_jax(
 ) -> list[GameExamples]:
     """GPU-native batched backend. The jax import is deferred so
     python-backend runs never require the ``jax`` extra."""
-    from alphablokus.core.jaxplay.backend import generate_self_play_games
+    from alphablokus.games.blokusduo.jax.backend import generate_self_play_games
 
     nnet.save_checkpoint(filename=WORKER_INIT_CHECKPOINT)
     per_game_examples, per_game_stats = generate_self_play_games(

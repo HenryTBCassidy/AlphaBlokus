@@ -93,7 +93,7 @@ ignore_missing_imports = true
 module = [
     "alphablokus.core.coach",
     "alphablokus.parallel.inference_channel",
-    "alphablokus.core.jaxplay.backend",
+    "alphablokus.games.blokusduo.jax.backend",
     "alphablokus.search.mcts",
     "alphablokus.parallel.pool",
     "alphablokus.selfplay.episode",
@@ -102,7 +102,7 @@ module = [
     "alphablokus.games.base_wrapper",
     "alphablokus.games.blokusduo.board",
     "alphablokus.games.blokusduo.game",
-    "alphablokus.games.blokusduo.jaxenv.bridge",
+    "alphablokus.games.blokusduo.jax.bridge",
     "alphablokus.games.blokusduo.movegen_runtime",
     "alphablokus.games.blokusduo.movegen_tables",
     "alphablokus.games.blokusduo.neuralnets.net",

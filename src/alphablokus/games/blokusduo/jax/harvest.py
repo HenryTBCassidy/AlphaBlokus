@@ -1,6 +1,6 @@
 """Host-side assembly of actor traces into training games (plan step G5).
 
-Consumes :class:`core.jaxplay.actors.WaveTrace` rows (as numpy) and produces
+Consumes :class:`games.blokusduo.jax.actors.WaveTrace` rows (as numpy) and produces
 ``list[ProcessedExample]`` per completed game in the **exact** representation
 ``selfplay/episode.py::play_self_play_episode`` stores:
 
@@ -29,8 +29,8 @@ import numpy as np
 from alphablokus.storage.sparse_policy import sparsify
 
 if TYPE_CHECKING:
-    from alphablokus.core.jaxplay.actors import WaveTrace
     from alphablokus.games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.jax.actors import WaveTrace
     from alphablokus.selfplay.episode import ProcessedExample
 
 #: Board side (Blokus Duo); kept in sync with BlokusDuoBoard.N via the tests.
@@ -51,7 +51,7 @@ class _OpenGame:
 
 
 @dataclass
-class GameRecord:
+class HarvestedGame:
     """One completed game plus the diagnostics the stats layer needs."""
 
     examples: list[ProcessedExample]
@@ -75,7 +75,7 @@ class TraceHarvester:
         probe = np.arange(self._action_size, dtype=np.int64)
         return self._game.transpose_policy(probe).astype(np.int64)
 
-    def harvest(self, trace: WaveTrace) -> list[GameRecord]:
+    def harvest(self, trace: WaveTrace) -> list[HarvestedGame]:
         """Fold one wave's trace into slot buffers; return games completed."""
         ppb = np.asarray(trace.ppb)  # (T, B, 196) int8
         player = np.asarray(trace.player)
@@ -86,7 +86,7 @@ class TraceHarvester:
         result_white = np.asarray(trace.result_white)
         end_player = np.asarray(trace.end_player)
 
-        completed: list[GameRecord] = []
+        completed: list[HarvestedGame] = []
         plies, batch = terminated.shape
         for t in range(plies):
             for b in range(batch):
@@ -108,7 +108,7 @@ class TraceHarvester:
                     self._slots[b] = _OpenGame()
         return completed
 
-    def _finish_game(self, slot: _OpenGame, result_white: float, end_player: int) -> GameRecord:
+    def _finish_game(self, slot: _OpenGame, result_white: float, end_player: int) -> HarvestedGame:
         examples: list[ProcessedExample] = []
         is_draw = abs(result_white) < 0.5  # results are ±1.0 or the ~1e-4 draw sentinel (float32)
         for board, mover, dense in zip(slot.boards, slot.players, slot.policies, strict=True):
@@ -120,7 +120,7 @@ class TraceHarvester:
             transposed_pi = dense[self._transpose_perm]
             examples.append((board, sparsify(dense), float(value)))
             examples.append((transposed_board, sparsify(transposed_pi), float(value)))
-        return GameRecord(
+        return HarvestedGame(
             examples=examples,
             num_moves=len(slot.boards),
             mean_policy_entropy=float(np.mean(slot.entropies)) if slot.entropies else 0.0,

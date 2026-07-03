@@ -26,12 +26,12 @@ from typing import TYPE_CHECKING, NamedTuple
 import jax
 import jax.numpy as jnp
 
-from alphablokus.games.blokusduo.jaxenv.tables import NUM_PIECE_IDS
+from alphablokus.games.blokusduo.jax.tables import NUM_PIECE_IDS
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from alphablokus.games.blokusduo.jaxenv.tables import JaxTables
+    from alphablokus.games.blokusduo.jax.tables import JaxTables
 
 #: Result encoding shared with ``BlokusDuoGame.get_game_ended``.
 DRAW_VALUE = 1e-4

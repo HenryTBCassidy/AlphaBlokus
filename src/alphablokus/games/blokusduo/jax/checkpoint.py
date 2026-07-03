@@ -2,7 +2,7 @@
 
 Loads an ``AlphaBlokusDuo`` state dict (raw, or wrapped in the
 ``BaseNNetWrapper`` checkpoint format with a ``state_dict`` key) and emits the
-numpy pytree :func:`games.blokusduo.jaxenv.net.forward` consumes.
+numpy pytree :func:`games.blokusduo.jax.net.forward` consumes.
 
 Every conv+BatchNorm pair is folded into a single conv-with-bias using the
 eval-mode identity ``BN(x) = x·s + t`` with ``s = γ/√(σ²+eps)``,

@@ -24,9 +24,9 @@ if TYPE_CHECKING:
 
 jax = pytest.importorskip("jax")
 
-from alphablokus.games.blokusduo.jaxenv.bridge import numpy_state_from_board  # noqa: E402
-from alphablokus.games.blokusduo.jaxenv.kernels import GameState, make_kernels  # noqa: E402
-from alphablokus.games.blokusduo.jaxenv.tables import build_jax_tables  # noqa: E402
+from alphablokus.games.blokusduo.jax.bridge import numpy_state_from_board  # noqa: E402
+from alphablokus.games.blokusduo.jax.kernels import GameState, make_kernels  # noqa: E402
+from alphablokus.games.blokusduo.jax.tables import build_jax_tables  # noqa: E402
 
 # Every Nth sequence also compares get_game_ended after every single ply.
 PER_PLY_GAME_ENDED_STRIDE = 25

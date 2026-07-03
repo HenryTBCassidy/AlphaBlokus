@@ -25,7 +25,7 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R11 | 2 | `evaluation/`: move `arena.py`, `players.py`, `acceptance.py`, `symmetry_diagnostic.py`→`symmetry.py`; dedupe `Player` alias; fix stale docstring + no-op ternary | MECH | 1 h | High | ✅ |
 | R12 | 2 | `parallel/`: `parallel_self_play.py`→`pool.py`; move `inference_server.py`/`inference_channel.py`; co-locate server lifecycle helpers | MECH | 1.5 h | High | ✅ |
 | R13 | 2 | `selfplay/`: `self_play.py`→`episode.py`; extract backend dispatch from `Coach` into `selfplay/generate.py` | JUDGE | 1.5 h | High | ✅ |
-| R14 | 2 | Consolidate `core/jaxplay/` + `games/blokusduo/jaxenv/` → `games/blokusduo/jax/`; rename colliding `GameRecord` | MECH | 1.5 h | High | |
+| R14 | 2 | Consolidate `core/jaxplay/` + `games/blokusduo/jaxenv/` → `games/blokusduo/jax/`; rename colliding `GameRecord` | MECH | 1.5 h | High | ✅ |
 | R15 | 2 | `registry.py`: rename `game_factory.py`; concentrate ALL core→games coupling (game, net, jax backend, TTT oracle) | JUDGE | 1.5 h | High | |
 | R16 | 2 | `training/`: move `coach.py`; extract `replay_buffer.py` + `diagnostics.py` (memory snapshots) | JUDGE | 2 h | High | |
 | R17 | 2 | Extract `training/eval_set.py`, `evaluation/elo.py`; TTT-specific eval → `games/tictactoe/oracle.py` | JUDGE | 2 h | High | |

@@ -61,11 +61,11 @@ def main() -> None:
 
     from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
     from alphablokus.games.blokusduo.game import BlokusDuoGame
-    from alphablokus.games.blokusduo.jaxenv.bridge import numpy_state_from_board
-    from alphablokus.games.blokusduo.jaxenv.checkpoint import convert_torch_checkpoint, params_to_device
-    from alphablokus.games.blokusduo.jaxenv.kernels import GameState, make_kernels
-    from alphablokus.games.blokusduo.jaxenv.search import SearchConfig, dense_policy, make_search
-    from alphablokus.games.blokusduo.jaxenv.tables import build_jax_tables
+    from alphablokus.games.blokusduo.jax.bridge import numpy_state_from_board
+    from alphablokus.games.blokusduo.jax.checkpoint import convert_torch_checkpoint, params_to_device
+    from alphablokus.games.blokusduo.jax.kernels import GameState, make_kernels
+    from alphablokus.games.blokusduo.jax.search import SearchConfig, dense_policy, make_search
+    from alphablokus.games.blokusduo.jax.tables import build_jax_tables
     from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
     from alphablokus.search.mcts import MCTS
     from tests.fixtures.blokus_positions import iter_cached_positions

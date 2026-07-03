@@ -26,7 +26,7 @@ from alphablokus.search.stats import MCTSEpisodeStats
 
 if TYPE_CHECKING:
     from alphablokus.core.config import RunConfig
-    from alphablokus.core.jaxplay.harvest import GameRecord
+    from alphablokus.games.blokusduo.jax.harvest import HarvestedGame
     from alphablokus.selfplay.episode import ProcessedExample
 
 #: Compiled actor/search/env artefacts, keyed by everything that affects shapes
@@ -36,11 +36,11 @@ _ARTEFACT_CACHE: dict[tuple, dict[str, Any]] = {}
 
 def _artefacts(config: RunConfig) -> dict[str, Any]:
     from alphablokus.core.game_factory import instantiate_game
-    from alphablokus.core.jaxplay.actors import make_actor
-    from alphablokus.core.jaxplay.harvest import TraceHarvester
-    from alphablokus.games.blokusduo.jaxenv.kernels import make_kernels
-    from alphablokus.games.blokusduo.jaxenv.search import SearchConfig, make_search
-    from alphablokus.games.blokusduo.jaxenv.tables import build_jax_tables
+    from alphablokus.games.blokusduo.jax.actors import make_actor
+    from alphablokus.games.blokusduo.jax.harvest import TraceHarvester
+    from alphablokus.games.blokusduo.jax.kernels import make_kernels
+    from alphablokus.games.blokusduo.jax.search import SearchConfig, make_search
+    from alphablokus.games.blokusduo.jax.tables import build_jax_tables
 
     if config.game != "blokusduo":
         raise ValueError(
@@ -90,7 +90,7 @@ def _artefacts(config: RunConfig) -> dict[str, Any]:
     return _ARTEFACT_CACHE[key]
 
 
-def _stats_for(record: GameRecord, num_sims: int, seconds_per_move: float) -> MCTSEpisodeStats:
+def _stats_for(record: HarvestedGame, num_sims: int, seconds_per_move: float) -> MCTSEpisodeStats:
     total_sims = record.num_moves * num_sims
     return MCTSEpisodeStats(
         num_moves=record.num_moves,
@@ -123,7 +123,7 @@ def generate_self_play_games(
 
     import jax
 
-    from alphablokus.games.blokusduo.jaxenv.checkpoint import convert_torch_checkpoint, params_to_device
+    from alphablokus.games.blokusduo.jax.checkpoint import convert_torch_checkpoint, params_to_device
 
     artefacts = _artefacts(config)
     params = params_to_device(
@@ -138,7 +138,7 @@ def generate_self_play_games(
     harvester = artefacts["make_harvester"]()
     run_wave = artefacts["run_wave"]
 
-    records: list[GameRecord] = []
+    records: list[HarvestedGame] = []
     wave_seconds = 0.0
     total_moves = 0
     with tqdm(total=config.num_eps, desc=f"Self-play gen {generation} (jax)") as progress:

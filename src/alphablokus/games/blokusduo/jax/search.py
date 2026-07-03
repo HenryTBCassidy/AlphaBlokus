@@ -39,12 +39,12 @@ import jax
 import jax.numpy as jnp
 import mctx
 
-from alphablokus.games.blokusduo.jaxenv.net import encode_states, forward
+from alphablokus.games.blokusduo.jax.net import encode_states, forward
 
 if TYPE_CHECKING:
     from collections.abc import Callable
 
-    from alphablokus.games.blokusduo.jaxenv.kernels import GameState, JaxKernels
+    from alphablokus.games.blokusduo.jax.kernels import GameState, JaxKernels
 
 #: Selection score for illegal/padded compact slots — beneath any real Q ∈ [-1, 1].
 _ILLEGAL_SCORE = -1e9

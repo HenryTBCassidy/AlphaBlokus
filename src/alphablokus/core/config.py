@@ -186,8 +186,8 @@ class RunConfig:
 
     # Which engine generates self-play games. ``"python"`` is the original
     # CPU-worker path (serial or ``num_parallel_workers``-way parallel);
-    # ``"jax"`` is the GPU-native batched pipeline (games/blokusduo/jaxenv +
-    # core/jaxplay — Blokus only, requires the ``jax``/``jax-cuda`` extra).
+    # ``"jax"`` is the GPU-native batched pipeline (games/blokusduo/jax +
+    # games/blokusduo/jax — Blokus only, requires the ``jax``/``jax-cuda`` extra).
     # Arena/Elo/Pentobi evaluation always uses the python path regardless.
     # Plan: docs/plans/archive/jax-selfplay-pipeline.md.
     selfplay_backend: Literal["python", "jax"] = "python"

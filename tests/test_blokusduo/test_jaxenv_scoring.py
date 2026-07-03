@@ -19,8 +19,8 @@ jax = pytest.importorskip("jax")
 
 import jax.numpy as jnp  # noqa: E402
 
-from alphablokus.games.blokusduo.jaxenv.kernels import make_kernels  # noqa: E402
-from alphablokus.games.blokusduo.jaxenv.tables import build_jax_tables  # noqa: E402
+from alphablokus.games.blokusduo.jax.kernels import make_kernels  # noqa: E402
+from alphablokus.games.blokusduo.jax.tables import build_jax_tables  # noqa: E402
 
 
 @pytest.fixture(scope="module")
