@@ -49,7 +49,7 @@ class RandomPlayer:
 class NetworkPlayer:
     """Player backed by a neural network + MCTS.
 
-    Owns an :class:`core.mcts.MCTS` instance configured with the given
+    Owns an :class:`alphablokus.search.mcts.MCTS` instance configured with the given
     network wrapper and search depth. The default ``temp=0`` gives
     deterministic best-move play; ``temp=1`` samples by visit count for
     self-play-style behaviour.
@@ -81,7 +81,7 @@ class NetworkPlayer:
                 ``opening_temp`` applies before reverting to ``temp``.
         """
         # Local import to avoid a cycle (mcts imports from core.interfaces).
-        from alphablokus.core.mcts import MCTS
+        from alphablokus.search.mcts import MCTS
 
         self._game = game
         self._nnet = nnet
@@ -128,7 +128,7 @@ class NetworkPlayer:
         Called by :class:`core.arena.Arena` between games when present (via
         the existing ``startGame`` hook on the player).
         """
-        from alphablokus.core.mcts import MCTS
+        from alphablokus.search.mcts import MCTS
 
         self._mcts = MCTS(self._game, self._nnet, self._mcts_config)
 

@@ -2,9 +2,9 @@ import numpy as np
 import pytest
 
 from alphablokus.core.config import MCTSConfig, RunConfig
-from alphablokus.core.mcts import MCTS
 from alphablokus.games.tictactoe.game import TicTacToeGame
 from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
+from alphablokus.search.mcts import MCTS
 
 
 @pytest.fixture

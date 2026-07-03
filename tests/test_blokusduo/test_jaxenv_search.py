@@ -4,7 +4,7 @@ Two layers:
 
 1. Structural invariants that must hold exactly (visits only on legal actions,
    distributions normalised, terminal roots resolve to pass, noise stays legal).
-2. Agreement with ``core.mcts.MCTS`` on mid-game dev-cache positions using the
+2. Agreement with ``alphablokus.search.mcts.MCTS`` on mid-game dev-cache positions using the
    *same* (converted) small random net, no noise, same sims: top-1 move match
    rate and visit-distribution overlap. Bounds are set from the measured
    python-vs-python noise floor (K=1 vs K=16 virtual-loss batching — the same
@@ -34,12 +34,12 @@ torch = pytest.importorskip("torch")
 import jax.numpy as jnp  # noqa: E402
 
 from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig  # noqa: E402
-from alphablokus.core.mcts import MCTS  # noqa: E402
 from alphablokus.games.blokusduo.jaxenv.bridge import numpy_state_from_board  # noqa: E402
 from alphablokus.games.blokusduo.jaxenv.checkpoint import convert_state_dict, params_to_device  # noqa: E402
 from alphablokus.games.blokusduo.jaxenv.kernels import GameState, make_kernels  # noqa: E402
 from alphablokus.games.blokusduo.jaxenv.search import SearchConfig, dense_policy, make_search  # noqa: E402
 from alphablokus.games.blokusduo.jaxenv.tables import build_jax_tables  # noqa: E402
+from alphablokus.search.mcts import MCTS  # noqa: E402
 
 N_POSITIONS = 20
 SIMS = 60

@@ -20,7 +20,7 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R6 | 1 | Move `core/`, `games/`, `reporting/` → `src/alphablokus/`; add `[build-system]`; repo-wide import rewrite (src, tests, scripts) | MECH | 2.5 h | High | ✅ |
 | R7 | 1 | `main.py` → `alphablokus/cli.py` + `[project.scripts]` console entry; delete root `main.py`; update every documented command | MECH | 45 min | High | ✅ |
 | R8 | 1 | Single `pieces.json` accessor via `importlib.resources`; kill the four divergent load paths | MECH | 1 h | High | ✅ |
-| R9 | 2 | `search/`: move `mcts.py`; extract profiling dataclasses to `search/stats.py` | MECH | 1 h | High | |
+| R9 | 2 | `search/`: move `mcts.py`; extract profiling dataclasses to `search/stats.py` | MECH | 1 h | High | ✅ |
 | R10 | 2 | `storage/`: split `storage.py` → `metrics.py` + `selfplay_store.py`; move `sparse_policy.py`; single `ProcessedExample` home | MECH | 1.5 h | High | |
 | R11 | 2 | `evaluation/`: move `arena.py`, `players.py`, `acceptance.py`, `symmetry_diagnostic.py`→`symmetry.py`; dedupe `Player` alias; fix stale docstring + no-op ternary | MECH | 1 h | High | |
 | R12 | 2 | `parallel/`: `parallel_self_play.py`→`pool.py`; move `inference_server.py`/`inference_channel.py`; co-locate server lifecycle helpers | MECH | 1.5 h | High | |

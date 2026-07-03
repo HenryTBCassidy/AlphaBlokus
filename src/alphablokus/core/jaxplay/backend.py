@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, Any
 from loguru import logger
 from tqdm import tqdm
 
-from alphablokus.core.mcts import MCTSEpisodeStats
+from alphablokus.search.stats import MCTSEpisodeStats
 
 if TYPE_CHECKING:
     from alphablokus.core.config import RunConfig

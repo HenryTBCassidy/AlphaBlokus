@@ -25,7 +25,7 @@ import plotly.graph_objects as go
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from alphablokus.core.mcts import MCTSEpisodeStats
+    from alphablokus.search.stats import MCTSEpisodeStats
 
 
 @dataclass(frozen=True)

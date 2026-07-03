@@ -5,7 +5,7 @@
 batched mctx search, samples an action per slot under the python backend's
 temperature semantics (sample from the visit distribution before
 ``temp_threshold`` plies, argmax with random tie-break after —
-``core/self_play.py:73`` / ``core/mcts.py:253-264``), steps the env, and
+``core/self_play.py`` (temperature block) / ``search/mcts.py`` (``get_action_prob``)), steps the env, and
 resets any finished slot to a fresh game in place. Each step emits one
 fixed-shape trace row; the host (:mod:`core.jaxplay.harvest`) assembles rows
 into completed games between waves.

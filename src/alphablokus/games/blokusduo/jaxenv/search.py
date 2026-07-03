@@ -9,7 +9,7 @@ noise is applied to the full legal distribution **before** top-K selection so
 noise can promote low-prior moves into the searched set (matching the spirit
 of ``mcts.py::_apply_root_dirichlet_noise``, which mixes over legal moves).
 
-PUCT parity with ``core/mcts.py`` (see the plan's fidelity contract):
+PUCT parity with ``search/mcts.py`` (see the plan's fidelity contract):
 
 - ``pb_c_init = cpuct`` and ``pb_c_base = 1e9`` make mctx's
   ``pb_c = pb_c_init + log((N + pb_c_base + 1)/pb_c_base)`` ≈ ``cpuct``;

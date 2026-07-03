@@ -18,7 +18,7 @@ from alphablokus.core.sparse_policy import sparsify
 
 if TYPE_CHECKING:
     from alphablokus.core.interfaces import IGame
-    from alphablokus.core.mcts import MCTS
+    from alphablokus.search.mcts import MCTS
 
 # (compact_board, sparse_policy, value) — the shape Coach passes to
 # ``nnet.train`` after a generation of self-play. The board is stored

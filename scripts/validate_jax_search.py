@@ -60,7 +60,6 @@ def main() -> None:
     import jax
 
     from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
-    from alphablokus.core.mcts import MCTS
     from alphablokus.games.blokusduo.game import BlokusDuoGame
     from alphablokus.games.blokusduo.jaxenv.bridge import numpy_state_from_board
     from alphablokus.games.blokusduo.jaxenv.checkpoint import convert_torch_checkpoint, params_to_device
@@ -68,6 +67,7 @@ def main() -> None:
     from alphablokus.games.blokusduo.jaxenv.search import SearchConfig, dense_policy, make_search
     from alphablokus.games.blokusduo.jaxenv.tables import build_jax_tables
     from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.search.mcts import MCTS
     from tests.fixtures.blokus_positions import iter_cached_positions
 
     game = BlokusDuoGame(pieces_config_path=PIECES_PATH)

@@ -35,9 +35,10 @@ import pandas as pd
 from alphablokus.core.arena import Arena
 from alphablokus.core.config import RunConfig, load_args
 from alphablokus.core.game_factory import instantiate_game_and_network
-from alphablokus.core.mcts import MCTS, MCTSEpisodeStats
 from alphablokus.core.players import NetworkPlayer
 from alphablokus.reporting.mcts_profiling import PhaseResult, build_multi_phase_report
+from alphablokus.search.mcts import MCTS
+from alphablokus.search.stats import MCTSEpisodeStats
 
 if TYPE_CHECKING:
     from alphablokus.core.interfaces import IGame, INeuralNetWrapper

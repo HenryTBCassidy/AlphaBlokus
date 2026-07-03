@@ -17,7 +17,6 @@ from tqdm import tqdm
 from alphablokus.core.arena import Arena
 from alphablokus.core.config import RunConfig
 from alphablokus.core.interfaces import IBoard, IGame, INeuralNetWrapper
-from alphablokus.core.mcts import MCTS
 from alphablokus.core.players import NetworkPlayer
 from alphablokus.core.sparse_policy import as_dense
 from alphablokus.core.storage import (
@@ -27,6 +26,7 @@ from alphablokus.core.storage import (
     ProcessedExample,
     SelfPlayStore,
 )
+from alphablokus.search.mcts import MCTS
 
 
 def _compute_elo(wins: int, losses: int, draws: int) -> tuple[float, float]:

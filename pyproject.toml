@@ -94,7 +94,7 @@ module = [
     "alphablokus.core.coach",
     "alphablokus.core.inference_channel",
     "alphablokus.core.jaxplay.backend",
-    "alphablokus.core.mcts",
+    "alphablokus.search.mcts",
     "alphablokus.core.parallel_self_play",
     "alphablokus.core.self_play",
     "alphablokus.core.storage",

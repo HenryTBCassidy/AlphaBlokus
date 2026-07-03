@@ -30,9 +30,9 @@ import torch
 
 from alphablokus.core.config import load_args
 from alphablokus.core.game_factory import instantiate_game_and_network
-from alphablokus.core.mcts import MCTS
+from alphablokus.search.mcts import MCTS
 
-# The seven dicts that make up the MCTS tree (core/mcts.py).
+# The seven dicts that make up the MCTS tree (alphablokus/search/mcts.py).
 _TREE_DICTS = (
     "q_values", "visit_counts", "state_visits", "policy_priors",
     "game_ended_cache", "valid_moves_cache", "virtual_visits",

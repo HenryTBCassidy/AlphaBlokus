@@ -51,14 +51,14 @@ from alphablokus.core.inference_channel import (
     SharedMemoryRequestSource,
 )
 from alphablokus.core.inference_server import FlushPolicy, InferenceServer
-from alphablokus.core.mcts import MCTS
 from alphablokus.core.players import NetworkPlayer
+from alphablokus.search.mcts import MCTS
 
 if TYPE_CHECKING:
     from alphablokus.core.config import RunConfig
     from alphablokus.core.interfaces import IGame, INeuralNetWrapper
-    from alphablokus.core.mcts import MCTSEpisodeStats
     from alphablokus.core.self_play import ProcessedExample
+    from alphablokus.search.stats import MCTSEpisodeStats
 
 
 # Module-level state populated inside each worker process by the pool
