@@ -57,8 +57,8 @@ from alphablokus.search.mcts import MCTS
 if TYPE_CHECKING:
     from alphablokus.core.config import RunConfig
     from alphablokus.core.interfaces import IGame, INeuralNetWrapper
-    from alphablokus.core.self_play import ProcessedExample
     from alphablokus.search.stats import MCTSEpisodeStats
+    from alphablokus.selfplay.episode import ProcessedExample
 
 
 # Module-level state populated inside each worker process by the pool
@@ -311,7 +311,7 @@ def _worker_play_self_play_episode(
     Returns:
         ``(training_examples, mcts_episode_stats)``.
     """
-    from alphablokus.core.self_play import play_self_play_episode
+    from alphablokus.selfplay.episode import play_self_play_episode
 
     assert _WORKER_CONFIG is not None, "_worker_init_self_play must run before this task"
     assert _WORKER_GAME is not None

@@ -4,6 +4,7 @@ import os
 import time
 from collections import deque
 from dataclasses import dataclass
+from functools import partial
 from random import shuffle
 from typing import TypeAlias
 
@@ -12,14 +13,14 @@ import psutil
 import torch
 from loguru import logger
 from numpy.typing import NDArray
-from tqdm import tqdm
 
 from alphablokus.core.config import RunConfig
 from alphablokus.core.interfaces import IBoard, IGame, INeuralNetWrapper
-from alphablokus.core.self_play import ProcessedExample
 from alphablokus.evaluation.arena import Arena
 from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.search.mcts import MCTS
+from alphablokus.selfplay.episode import GameExamples, ProcessedExample
+from alphablokus.selfplay.generate import generate_games
 from alphablokus.storage.metrics import (
     CycleStage,
     EvalSet,
@@ -47,7 +48,6 @@ def _compute_elo(wins: int, losses: int, draws: int) -> tuple[float, float]:
 # Type aliases for improved readability
 TrainingExample: TypeAlias = tuple[IBoard, int, NDArray, float | None]  # (board, player, policy, value)
 # One game's worth of positions; the rolling replay buffer is a deque of these.
-GameExamples: TypeAlias = list[ProcessedExample]
 
 # Resume marker: written atomically at the end of every completed generation and
 # read by ``alphablokus --resume`` to continue a crashed run in place. Lives in the
@@ -158,7 +158,6 @@ class Coach:
         self.nnet = nnet
         self.pnet = self.nnet.__class__(self.game, config)  # Previous best network
         self.config = config
-        self.mcts = MCTS(self.game, self.nnet, self.config.mcts_config)
 
         # Training state: a single rolling replay buffer holding the last
         # ``replay_buffer_games`` games' worth of positions (one inner list per
@@ -201,21 +200,6 @@ class Coach:
         else:
             self.elo_baseline_net = None
 
-    def execute_episode(self) -> list[ProcessedExample]:
-        """Execute one complete self-play game to generate training data.
-
-        Thin wrapper around :func:`core.self_play.play_self_play_episode`,
-        which is the single source of truth for the episode loop. Both
-        this serial entry point and the parallel worker module in
-        :mod:`alphablokus.parallel.pool` call into that function — keeping
-        them bit-for-bit equivalent at the same seed, which is what the
-        parallel/serial determinism test relies on.
-        """
-        from alphablokus.core.self_play import play_self_play_episode
-        return play_self_play_episode(
-            self.game, self.mcts, self.config.temp_threshold,
-        )
-
     def learn(self, start_generation: int = 1) -> None:
         """
         Execute the main training loop for a specified number of generations.
@@ -256,12 +240,10 @@ class Coach:
                 logger.info(f'Starting Self-Play For Generation #{generation} ...')
                 self_play_start = time.perf_counter()
 
-                if self.config.selfplay_backend == "jax":
-                    fresh_games = self._run_self_play_jax(generation)
-                elif self.config.num_parallel_workers > 1:
-                    fresh_games = self._run_self_play_parallel(generation)
-                else:
-                    fresh_games = self._run_self_play_serial(generation)
+                fresh_games = generate_games(
+                    self.config, self.game, self.nnet, generation,
+                    log_stats=partial(self._log_self_play_stats, generation),
+                )
 
                 self_play_end = time.perf_counter()
                 self.metrics.log_timing(generation, CycleStage.SELF_PLAY, self_play_end - self_play_start)
@@ -441,75 +423,6 @@ class Coach:
             num_valid_moves_calls=stats.num_valid_moves_calls,
             num_game_ended_calls=stats.num_game_ended_calls,
         )
-
-    def _run_self_play_serial(self, generation: int) -> list[GameExamples]:
-        """Sequential self-play loop: same MCTS instance lifecycle, same
-        per-episode logging, same tqdm. The parallel codepath is opt-in
-        via ``config.num_parallel_workers > 1``.
-
-        Returns one list of positions per game (game boundaries preserved so the
-        games-sized buffer can evict whole games).
-        """
-        fresh_games: list[GameExamples] = []
-        for episode_idx in tqdm(range(self.config.num_eps), desc="Self Play"):
-            self.mcts = MCTS(self.game, self.nnet, self.config.mcts_config)
-            fresh_games.append(self.execute_episode())
-            self._log_self_play_stats(generation, episode_idx, self.mcts.get_episode_stats())
-        return fresh_games
-
-    def _run_self_play_jax(self, generation: int) -> list[GameExamples]:
-        """GPU-native batched self-play (``selfplay_backend: "jax"``).
-
-        Mirrors ``_run_self_play_parallel``'s contract: saves the current net to
-        a checkpoint the backend loads, returns one list of positions per game,
-        and logs per-game stats through the shared schema. The jax import is
-        deferred so python-backend runs never require the ``jax`` extra.
-        """
-        from alphablokus.core.jaxplay.backend import generate_self_play_games
-
-        worker_init_checkpoint = "parallel_worker_init.pth.tar"
-        self.nnet.save_checkpoint(filename=worker_init_checkpoint)
-
-        per_game_examples, per_game_stats = generate_self_play_games(
-            config=self.config,
-            generation=generation,
-            checkpoint_path=worker_init_checkpoint,
-        )
-
-        fresh_games: list[GameExamples] = []
-        for episode_idx, (examples, stats) in enumerate(zip(per_game_examples, per_game_stats, strict=True)):
-            fresh_games.append(examples)
-            self._log_self_play_stats(generation, episode_idx, stats)
-        return fresh_games
-
-    def _run_self_play_parallel(self, generation: int) -> list[GameExamples]:
-        """Parallel self-play across a process pool.
-
-        Saves the current ``self.nnet`` to a fixed checkpoint workers
-        load at pool startup, dispatches ``num_eps`` per-episode tasks,
-        then returns one list of positions per game in submission order
-        (game boundaries preserved for games-sized eviction). Per-episode MCTS
-        stats are logged via ``metrics.log_self_play_profiling`` to match the
-        serial codepath's schema — downstream reports don't care which path
-        produced the data.
-        """
-        from alphablokus.parallel.pool import run_self_play_episodes_parallel
-
-        worker_init_checkpoint = "parallel_worker_init.pth.tar"
-        self.nnet.save_checkpoint(filename=worker_init_checkpoint)
-
-        per_ep_examples, per_ep_stats = run_self_play_episodes_parallel(
-            config=self.config,
-            generation=generation,
-            checkpoint_path=worker_init_checkpoint,
-            num_workers=self.config.num_parallel_workers,
-        )
-
-        fresh_games: list[GameExamples] = []
-        for episode_idx, (examples, stats) in enumerate(zip(per_ep_examples, per_ep_stats, strict=False)):
-            fresh_games.append(examples)
-            self._log_self_play_stats(generation, episode_idx, stats)
-        return fresh_games
 
     def _run_arena_serial(
         self, top_k_to_record: int,

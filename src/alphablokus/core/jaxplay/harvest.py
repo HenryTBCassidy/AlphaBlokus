@@ -2,7 +2,7 @@
 
 Consumes :class:`core.jaxplay.actors.WaveTrace` rows (as numpy) and produces
 ``list[ProcessedExample]`` per completed game in the **exact** representation
-``core/self_play.py::play_self_play_episode`` stores:
+``selfplay/episode.py::play_self_play_episode`` stores:
 
 - board: canonical compact int8 ``(14, 14)`` placement board — current
   player's pieces positive (``get_canonical_form(board, p).to_compact()``
@@ -30,8 +30,8 @@ from alphablokus.storage.sparse_policy import sparsify
 
 if TYPE_CHECKING:
     from alphablokus.core.jaxplay.actors import WaveTrace
-    from alphablokus.core.self_play import ProcessedExample
     from alphablokus.games.blokusduo.game import BlokusDuoGame
+    from alphablokus.selfplay.episode import ProcessedExample
 
 #: Board side (Blokus Duo); kept in sync with BlokusDuoBoard.N via the tests.
 _BOARD_SIZE = 14

@@ -1,8 +1,7 @@
 """Free-function self-play episode runner shared by Coach and parallel workers.
 
-Extracted from ``Coach.execute_episode`` so the serial training loop and
-the worker pool in ``parallel/pool.py`` use the **same code
-path**. That equivalence is the basis of the determinism test in
+The serial loop in ``selfplay/generate.py`` and the worker pool in
+``parallel/pool.py`` use this **same code path**. That equivalence is the basis of the determinism test in
 ``tests/test_core/test_parallel_self_play.py`` — if both call sites
 invoke this function with the same seed + same MCTS instance, they
 produce identical training examples regardless of which process runs
@@ -31,6 +30,10 @@ if TYPE_CHECKING:
 # value is a float ∈ [-1, 1]).
 ProcessedExample = tuple[np.ndarray, tuple[np.ndarray, np.ndarray], float]
 
+# One self-play game's positions, boundaries preserved so the games-sized
+# replay buffer can evict whole games.
+GameExamples = list[ProcessedExample]
+
 
 def play_self_play_episode(
     game: IGame, mcts: MCTS, temp_threshold: int,
@@ -40,10 +43,10 @@ def play_self_play_episode(
     The single source of truth for the self-play episode loop. Called
     from:
 
-    - ``Coach.execute_episode`` — when self-play runs sequentially in the
-      training process.
-    - ``alphablokus.parallel.pool._worker_play_episode`` — when self-play
-      runs in worker processes.
+    - ``alphablokus.selfplay.generate`` — when self-play runs sequentially
+      in the training process.
+    - ``alphablokus.parallel.pool._worker_play_self_play_episode`` — when
+      self-play runs in worker processes.
 
     Args:
         game: Game implementation providing rules and mechanics.

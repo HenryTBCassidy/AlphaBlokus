@@ -96,7 +96,7 @@ module = [
     "alphablokus.core.jaxplay.backend",
     "alphablokus.search.mcts",
     "alphablokus.parallel.pool",
-    "alphablokus.core.self_play",
+    "alphablokus.selfplay.episode",
     "alphablokus.storage.metrics",
     "alphablokus.storage.selfplay_store",
     "alphablokus.games.base_wrapper",

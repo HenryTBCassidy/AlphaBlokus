@@ -27,7 +27,7 @@ from alphablokus.search.stats import MCTSEpisodeStats
 if TYPE_CHECKING:
     from alphablokus.core.config import RunConfig
     from alphablokus.core.jaxplay.harvest import GameRecord
-    from alphablokus.core.self_play import ProcessedExample
+    from alphablokus.selfplay.episode import ProcessedExample
 
 #: Compiled actor/search/env artefacts, keyed by everything that affects shapes
 #: or compiled constants. Persist across generations (and Coach instances).

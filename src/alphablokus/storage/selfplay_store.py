@@ -19,7 +19,7 @@ from loguru import logger
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from alphablokus.core.self_play import ProcessedExample
+    from alphablokus.selfplay.episode import ProcessedExample
 
 
 
