@@ -1,6 +1,6 @@
 {
   "game": "tictactoe",
-  "run_name": "smoke_test",
+  "run_name": "pipeline_check",
   "num_generations": 3,
   "num_eps": 15,
   "replay_buffer_games": 75,

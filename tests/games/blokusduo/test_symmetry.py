@@ -491,7 +491,7 @@ def test_html_snapshot_renders_both_panels(
     miss (coordinate-convention conflicts at the renderer boundary, etc.).
 
     For an actual visual review, run
-    ``uv run python -m scripts.render_symmetry_snapshot``.
+    ``uv run python -m scripts.profiling.render_symmetry_snapshot``.
     """
     from alphablokus.reporting.display_blokusduo import render_board_html
 

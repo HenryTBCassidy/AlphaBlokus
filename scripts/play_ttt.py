@@ -89,7 +89,7 @@ def main() -> None:
     parser.add_argument("--checkpoint", required=True, help="Path to a .pth.tar checkpoint")
     parser.add_argument(
         "--config",
-        default="run_configurations/smoke_test.json",
+        default="run_configurations/pipeline_check.json",
         help="RunConfig JSON whose net architecture matches the checkpoint.",
     )
     parser.add_argument(

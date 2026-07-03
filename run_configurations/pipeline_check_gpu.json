@@ -1,6 +1,6 @@
 {
   "game": "tictactoe",
-  "run_name": "smoke_test_gpu",
+  "run_name": "pipeline_check_gpu",
   "num_generations": 3,
   "num_eps": 15,
   "replay_buffer_games": 75,

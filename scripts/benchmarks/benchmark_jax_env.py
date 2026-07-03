@@ -17,11 +17,11 @@ timed region:
 
 Usage::
 
-    uv run python -m scripts.benchmark_jax_env            # CPU dev box
-    uv run python -m scripts.benchmark_jax_env --net      # + J6 net loop
-    uv run python -m scripts.benchmark_jax_env --out temp/benchmarks/jax_env.html
+    uv run python -m scripts.benchmarks.benchmark_jax_env            # CPU dev box
+    uv run python -m scripts.benchmarks.benchmark_jax_env --net      # + J6 net loop
+    uv run python -m scripts.benchmarks.benchmark_jax_env --out temp/benchmarks/jax_env.html
 
-Writes an HTML report (charts inlined base64, ``scripts/benchmark.py``
+Writes an HTML report (charts inlined base64, ``scripts/benchmarks/benchmark.py``
 conventions) and logs a summary table.
 """
 

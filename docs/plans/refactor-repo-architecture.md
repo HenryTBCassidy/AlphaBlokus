@@ -43,8 +43,8 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R29 | 5 | Adopt `ruff format` in one dedicated commit; enable format check in CI | MECH | 45 min | Medium | ✅ |
 | R30 | 5 | Comment-noise pass: delete restating comments, keep rationale; deduplicate docstrings | JUDGE | 2 h | Medium | ✅ |
 | R31 | 5 | Dead-code removals + fix `INeuralNetWrapper.train` protocol drift | MECH | 1 h | Medium | ✅ |
-| R32 | 6 | Reorganise `scripts/` into operational / `benchmarks/` / `profiling/`; delete the two superseded baked-data report scripts; drop `PYTHONPATH` incantations | JUDGE | 1.5 h | Medium | |
-| R33 | 6 | Sort `run_configurations/` into current vs `archive/`; sweep references | MECH | 45 min | Low | |
+| R32 | 6 | Reorganise `scripts/` into operational / `benchmarks/` / `profiling/`; delete the two superseded baked-data report scripts; drop `PYTHONPATH` incantations | JUDGE | 1.5 h | Medium | ✅ |
+| R33 | 6 | Sort `run_configurations/` into current vs `archive/`; sweep references | MECH | 45 min | Low | ✅ |
 | R34 | 7 | Mechanical docs path sweep for the new layout (README tree, CLAUDE/AGENTS, 02/03/04/06/07, AI-CONTEXT) | MECH | 1.5 h | High | |
 | R35 | 7 | README rewrite: status, JAX/Gumbel backend, CI badge, new layout tree | JUDGE | 2 h | High | |
 | R36 | 7 | Make AGENTS.md canonical with CLAUDE.md as symlink; refresh Critical path, gotchas, doc tree | JUDGE | 1.5 h | High | |
@@ -418,11 +418,11 @@ Target: a reader opening `scripts/` sees operational tools, not 26 undifferentia
 - **`scripts/benchmarks/`:** `benchmark.py`, `benchmark_phases.py`, `benchmark_jax_env.py`, `benchmark_selfplay_backends.py`, `benchmark_movegen.py`, `benchmark_predict_batch.py`, `benchmark_inference_server.py`, `bench_parallel.py`.
 - **`scripts/profiling/`:** `mcts_profiling.py`, `profile_mcts_memory.py`, `profile_self_play.py`, `move_count_analysis.py`, `count_onboard_placements.py`, `diagnose_pentobi_losses.py`, `render_symmetry_snapshot.py`.
 - **Delete** `profile_report.py` and `optimisation_progress_report.py`: both render reports from numbers hard-coded at measurement time (2026-06-05 baselines; parquets "no longer exist locally" per their own docstrings). Their outputs' story lives in `docs/plans/archive/full-cycle-optimisation.md` and `docs/research/profiling-report.md`; git history keeps the scripts.
-- With the package installed (R6), delete every `PYTHONPATH=$PWD` / `PYTHONPATH=.` incantation from script docstrings — plain `uv run python scripts/benchmarks/benchmark.py` now works from anywhere in the repo. Fix the scratch-checkpoint writers (`benchmark_phases.py`, `bench_parallel.py`, `benchmark_inference_server.py`) to write into `temp/` instead of CWD while touching them.
+- With the package installed (R6), delete every `PYTHONPATH=$PWD` / `PYTHONPATH=.` incantation from script docstrings — plain `uv run python scripts/benchmarks/benchmark.py` now works from anywhere in the repo. *(Execution note: the "scratch checkpoints in CWD" finding was wrong — `save_checkpoint(filename=...)` resolves into the run's `Nets/` directory via config; no change needed.)*
 
 ## R33. run_configurations/ sort
 
-Create `run_configurations/archive/` and move the superseded configs: the Windows/WSL-era (`blokus_pc_first/second`, `blokus_run1_taper`, `blokus_run2_bignet*`), the settled-experiment set (`bench_workers_*`, `profile_baseline*`, `blokus_linux_15`, `blokus_linux16_15`), and finished A/B arms (`ab_python_10` — keep `ab_jax_10`/`ab_gumbel_10` only if still referenced by docs, else archive all three). Keep current: `test_run`, `blokus_quicktest`, `blokus_mac_test`, `smoke_test*` (rename to `pipeline_check*`? — optional, per the no-"smoke-test" convention), `blokus_3gen`, `blokus_validation`, `blokus_scaled*`, `blokus_run3_overnight`, `blokus_jax_gumbel_30`, `blokus_gumbel_overnight`, `full_run`, `ttt_*`. Sweep references: `run_benchmark.sh` default (`profile_baseline.json` → point at a live config or move the default), `cli.py` default, README/docs examples.
+Create `run_configurations/archive/` and move the superseded configs: the Windows/WSL-era (`blokus_pc_first/second`, `blokus_run1_taper`, `blokus_run2_bignet*`), the settled-experiment set (`bench_workers_*`, `profile_baseline*`, `blokus_linux_15`, `blokus_linux16_15`), and finished A/B arms (`ab_python_10` — keep `ab_jax_10`/`ab_gumbel_10` only if still referenced by docs, else archive all three). Keep current: `test_run`, `blokus_quicktest`, `blokus_mac_test`, `smoke_test*` (renamed to `pipeline_check*` per the no-"smoke-test" convention), `blokus_3gen`, `blokus_validation`, `blokus_scaled*`, `blokus_run3_overnight`, `blokus_jax_gumbel_30`, `blokus_gumbel_overnight`, `full_run`, `ttt_*`. Sweep references: `run_benchmark.sh` default (`profile_baseline.json` → point at a live config or move the default), `cli.py` default, README/docs examples.
 
 ## R34. Docs path sweep
 

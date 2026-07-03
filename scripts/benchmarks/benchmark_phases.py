@@ -8,13 +8,13 @@ per-game MCTS profiling stats, and produces an HTML report with:
 1. Wall-clock per phase + bar chart (the headline parallelism number).
 2. Run-time estimator: predicts how long a full run of arbitrary scale
    takes given the measured per-game numbers.
-3. The same per-move drill-down ``scripts/mcts_profiling.py`` produces,
+3. The same per-move drill-down ``scripts/profiling/mcts_profiling.py`` produces,
    but one section per phase — so we can see whether move-gen, inference,
    or "other" shifts after each optimisation.
 
 Usage::
 
-    uv run python -m scripts.benchmark_phases \\
+    uv run python -m scripts.benchmarks.benchmark_phases \\
         --config run_configurations/profile_baseline.json
 
 Output lands at ``temp/benchmarks/<run_name>_benchmark/``.

@@ -2,7 +2,7 @@
 
 Implements :class:`~reporting.display.IBoardRenderer` for Blokus Duo via the
 :class:`BlokusDuoRenderer` class, plus exposes the older free-function API
-kept around for the ``scripts/move_count_analysis.py`` script.
+kept around for the ``scripts/profiling/move_count_analysis.py`` script.
 """
 
 from __future__ import annotations

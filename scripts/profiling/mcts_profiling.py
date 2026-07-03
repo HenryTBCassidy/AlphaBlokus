@@ -5,9 +5,9 @@ showing where time is spent: neural net inference, move generation, game-ended
 checks, and UCB selection.
 
 Usage:
-    uv run python -m scripts.mcts_profiling [--num-games 5] [--num-sims 50]
-    uv run python -m scripts.mcts_profiling --checkpoint temp/some_run/Nets/best.pth.tar
-    uv run python -m scripts.mcts_profiling --game tictactoe --num-sims 25
+    uv run python -m scripts.profiling.mcts_profiling [--num-games 5] [--num-sims 50]
+    uv run python -m scripts.profiling.mcts_profiling --checkpoint temp/some_run/Nets/best.pth.tar
+    uv run python -m scripts.profiling.mcts_profiling --game tictactoe --num-sims 25
 """
 
 from __future__ import annotations

@@ -9,7 +9,7 @@ configuration (N workers, all-GPU, K=16 leaf batching); the jax backend sweeps
 
 Usage (box)::
 
-    PYTHONPATH=$PWD uv run python -m scripts.benchmark_selfplay_backends \
+    uv run python -m scripts.benchmarks.benchmark_selfplay_backends \
         --checkpoint temp/runs/blokus/blokus_run3_overnight/Nets/accepted_82.pth.tar \
         --filters 128 --blocks 8 --sims 400 \
         --python-episodes 64 --python-workers 16 \

@@ -5,7 +5,7 @@ produces an HTML report with charts, summary statistics, and interactive
 game replays with board visualisation.
 
 Usage:
-    uv run python -m scripts.move_count_analysis [--num-games 100] [--replay-games 3]
+    uv run python -m scripts.profiling.move_count_analysis [--num-games 100] [--replay-games 3]
 """
 
 from __future__ import annotations

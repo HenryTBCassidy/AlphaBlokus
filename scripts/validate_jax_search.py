@@ -14,7 +14,7 @@ yardstick's agreement with the reference.
 
 Usage (box)::
 
-    PYTHONPATH=$PWD uv run python -m scripts.validate_jax_search \
+    uv run python -m scripts.validate_jax_search \
         --checkpoint temp/runs/blokus/blokus_run3_overnight/Nets/accepted_82.pth.tar \
         --filters 128 --blocks 8 --sims 400 --positions 200 --top-k 64 128 256
 """

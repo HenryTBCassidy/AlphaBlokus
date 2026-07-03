@@ -7,7 +7,7 @@ the noise of a full training-pipeline benchmark.
 
 Usage::
 
-    uv run python -m scripts.benchmark_movegen
+    uv run python -m scripts.benchmarks.benchmark_movegen
 
 Output: per-implementation total time, mean/p50/p95 per-call time, and
 the speedup factor. Validates that both implementations agree on every

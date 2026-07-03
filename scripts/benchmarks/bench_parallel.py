@@ -6,7 +6,7 @@ reuses one saved checkpoint, so every checkpoint/code version plays the *same*
 games — the games/s ratio is pure code speed, not net-init noise.
 
 Usage:
-    PYTHONPATH=. python scripts/bench_parallel.py --config <cfg> --workers 16 --eps 80
+    python scripts/benchmarks/bench_parallel.py --config <cfg> --workers 16 --eps 80
 """
 
 from __future__ import annotations

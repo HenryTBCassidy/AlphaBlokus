@@ -7,7 +7,7 @@ of the placement grid.
 
 Usage::
 
-    uv run python -m scripts.render_symmetry_snapshot
+    uv run python -m scripts.profiling.render_symmetry_snapshot
 
 Writes ``temp/symmetry_snapshot.html`` (a self-contained file safe to
 open with ``open temp/symmetry_snapshot.html``). Pairs with the

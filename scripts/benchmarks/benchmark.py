@@ -12,9 +12,9 @@ Suite:
 
 Usage::
 
-    uv run python -m scripts.benchmark                       # default config
-    uv run python -m scripts.benchmark --config <cfg.json>
-    uv run python -m scripts.benchmark --out temp/benchmarks/my_report.html
+    uv run python -m scripts.benchmarks.benchmark                       # default config
+    uv run python -m scripts.benchmarks.benchmark --config <cfg.json>
+    uv run python -m scripts.benchmarks.benchmark --out temp/benchmarks/my_report.html
 
 Reuses the live code paths (``play_self_play_episode``,
 ``run_self_play_episodes_parallel``, ``nnet.train``) so the numbers reflect production.
@@ -46,7 +46,7 @@ TIMING_GAMES = 5
 WORKER_COUNTS = (1, 2, 4, 8, 16)
 SWEEP_GAMES_PER_WORKER = 4  # sweep num_eps = this * N (>= one full batch each)
 TRAIN_RAMP_EXAMPLES = (50_000, 150_000, 250_000, 350_000)
-DEFAULT_CONFIG = "run_configurations/bench_workers_gpu8.json"
+DEFAULT_CONFIG = "run_configurations/archive/bench_workers_gpu8.json"
 
 # cProfile category buckets, matched by (filename substring, name predicate).
 _MOVEGEN_NAMES = (
@@ -175,7 +175,7 @@ def measure_train_ramp(config_path: str, sizes) -> dict:
                 "run",
                 "python",
                 "-m",
-                "scripts.profile_self_play",
+                "scripts.profiling.profile_self_play",
                 "--config",
                 config_path,
                 "--mode",

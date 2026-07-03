@@ -22,7 +22,7 @@ Possible reasons for a mismatch:
 
 Usage::
 
-    uv run python -m scripts.count_onboard_placements
+    uv run python -m scripts.profiling.count_onboard_placements
 
 Exits with status 0 if the count matches 13,729, status 1 with a diff
 report otherwise. The diff report classifies mismatches per (piece, x-row,

@@ -80,7 +80,7 @@ class BlokusDuoGame(IGame[BlokusDuoBoard]):
 
         Triggered by ``RunConfig.use_optimised_movegen`` in the
         production codepath (see ``parallel/pool.py``'s
-        worker init and ``scripts/benchmark_phases.py``'s setup).
+        worker init and ``scripts/benchmarks/benchmark_phases.py``'s setup).
         """
         from alphablokus.games.blokusduo.movegen.runtime import get_default_generator
 

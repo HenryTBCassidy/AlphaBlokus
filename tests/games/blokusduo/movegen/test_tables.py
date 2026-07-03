@@ -45,7 +45,7 @@ def tables():
 
 
 def test_move_count_matches_pentobi(tables) -> None:
-    """Headline check: same count as scripts/count_onboard_placements.py."""
+    """Headline check: same count as scripts/profiling/count_onboard_placements.py."""
     assert tables.num_moves == PENTOBI_DUO_MOVE_COUNT, (
         f"Expected {PENTOBI_DUO_MOVE_COUNT:,} moves, got {tables.num_moves:,}. Did pieces.json change?"
     )

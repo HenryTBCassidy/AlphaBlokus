@@ -23,7 +23,7 @@ Many ``(piece, orientation, anchor)`` triples in the 17,836-slot action
 space would extend off the board — e.g. a piece with a 5-row footprint
 anchored at row 11 would have cells on rows 11..15, but rows 14..15
 don't exist. Those triples are dropped. The remaining count is **13,729
-for Blokus Duo**, verified by ``scripts/count_onboard_placements.py``
+for Blokus Duo**, verified by ``scripts/profiling/count_onboard_placements.py``
 against Pentobi's hard-coded constant.
 
 The bidirectional ``action_id ↔ move_id`` mapping
@@ -146,7 +146,7 @@ class MoveTables:
 
     #: Total count of legal placements. Should equal 13,729 for Duo —
     #: verified at construction time against
-    #: ``scripts/count_onboard_placements.py``'s independent count.
+    #: ``scripts/profiling/count_onboard_placements.py``'s independent count.
     num_moves: int
 
     #: ``piece[move_id]`` = piece id (1..21).

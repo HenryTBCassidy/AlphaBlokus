@@ -10,15 +10,15 @@ Examples::
 
     # Trained model vs random baseline.
     uv run python -m scripts.arena_run \
-        --config run_configurations/smoke_test.json \
-        --player1 temp/smoke_test/Nets/best.pth.tar \
+        --config run_configurations/pipeline_check.json \
+        --player1 temp/pipeline_check/Nets/best.pth.tar \
         --player2 random \
         --num-games 50
 
     # Trained model vs perfect minimax (TTT only).
     uv run python -m scripts.arena_run \
-        --config run_configurations/smoke_test.json \
-        --player1 temp/smoke_test/Nets/accepted_3.pth.tar \
+        --config run_configurations/pipeline_check.json \
+        --player1 temp/pipeline_check/Nets/accepted_3.pth.tar \
         --player2 minimax \
         --num-games 20
 

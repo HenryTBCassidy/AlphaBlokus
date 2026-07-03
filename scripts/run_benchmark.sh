@@ -1,5 +1,5 @@
 #!/bin/bash
-# Launch wrapper for scripts/benchmark_phases.py.
+# Launch wrapper for scripts/benchmarks/benchmark_phases.py.
 #
 # Why this exists:
 # - Detached runs under systemd-run/nohup/etc default to block-buffered
@@ -63,4 +63,4 @@ export PYTHONUNBUFFERED=1
 # stdbuf on Linux forces line buffering for child processes too — harmless
 # on macOS (won't be found, falls through). The pipe to tee on its own is
 # fine because Python is line-buffered via the script + env var.
-exec uv run python -m scripts.benchmark_phases "$@" 2>&1 | tee "$LOG_PATH"
+exec uv run python -m scripts.benchmarks.benchmark_phases "$@" 2>&1 | tee "$LOG_PATH"

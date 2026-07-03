@@ -1,6 +1,6 @@
 """Benchmark self-play wall-clock + GPU utilisation, server-off vs server-on.
 
-Run on the PC (CUDA), repo root:  uv run python -m scripts.benchmark_inference_server
+Run on the PC (CUDA), repo root:  uv run python -m scripts.benchmarks.benchmark_inference_server
 
 Times ``run_self_play_episodes_parallel`` at production settings (8 workers, 300
 sims, K=16) with the cross-worker inference server off (per-worker batching) then

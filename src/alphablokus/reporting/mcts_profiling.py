@@ -1,7 +1,7 @@
 """Reusable MCTS-profiling report builder.
 
-The original :mod:`scripts.mcts_profiling` script had its HTML report
-inline. The benchmark phase script (:mod:`scripts.benchmark_phases`)
+The original :mod:`scripts.profiling.mcts_profiling` script had its HTML report
+inline. The benchmark phase script (:mod:`scripts.benchmarks.benchmark_phases`)
 wants the same per-move drill-down across multiple game phases
 (self-play / arena / Elo), so the rendering pieces live here and both
 callers reuse them.
@@ -352,7 +352,7 @@ def build_single_phase_report(
 ) -> Path:
     """Render the single-phase report and write it to ``output_dir/report.html``.
 
-    Used by :mod:`scripts.mcts_profiling`. Also dumps per-move and per-episode
+    Used by :mod:`scripts.profiling.mcts_profiling`. Also dumps per-move and per-episode
     CSVs alongside the HTML for ad-hoc inspection.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -402,7 +402,7 @@ def build_multi_phase_report(
     1. **Wall-clock summary** — per-phase total time + games + sims/sec, side
        by side, so the "before vs after" comparison is obvious at a glance.
     2. **Run-time estimate table** — optional; passed in as HTML by the
-       caller (the estimator lives in :mod:`scripts.benchmark_phases`).
+       caller (the estimator lives in :mod:`scripts.benchmarks.benchmark_phases`).
     3. **Per-phase drill-down** — the original mcts_profiling-style detail
        for each phase, in the same document.
     """
@@ -492,7 +492,7 @@ def build_multi_phase_report(
 
 <h2>Per-phase drill-down</h2>
 <p class="subtitle">Each phase below uses the same template as
-<code>scripts/mcts_profiling.py</code>: KPIs, component pie, per-move
+<code>scripts/profiling/mcts_profiling.py</code>: KPIs, component pie, per-move
 timing curves, and search characteristics.</p>
 {"".join(drilldown_blocks)}
 </body>

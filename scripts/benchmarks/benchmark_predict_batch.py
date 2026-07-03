@@ -2,7 +2,7 @@
 
 Isolates the *pure GPU-side* batching speedup from all MCTS / worker-contention
 overhead — the clean counterpart to the end-to-end phase benchmark
-(`scripts/benchmark_phases.py`), which under 8-worker contention is noisy.
+(`scripts/benchmarks/benchmark_phases.py`), which under 8-worker contention is noisy.
 
 For each batch size K it times evaluating K leaf positions two ways:
   - one ``predict_batch(K boards)`` call, vs
@@ -11,9 +11,9 @@ both producing the same K (policy, value) results. Reports per-leaf latency and
 the batched-vs-serial speedup. Run on the *idle* GPU for a clean number.
 
 Usage:
-    uv run python -m scripts.benchmark_predict_batch                 # default sweep
-    uv run python -m scripts.benchmark_predict_batch --cuda --iters 50
-    uv run python -m scripts.benchmark_predict_batch --ks 1,8,16,32
+    uv run python -m scripts.benchmarks.benchmark_predict_batch                 # default sweep
+    uv run python -m scripts.benchmarks.benchmark_predict_batch --cuda --iters 50
+    uv run python -m scripts.benchmarks.benchmark_predict_batch --ks 1,8,16,32
 """
 
 from __future__ import annotations

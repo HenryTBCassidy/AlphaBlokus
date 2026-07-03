@@ -8,9 +8,9 @@ Wilson interval.
 
 Usage (box)::
 
-    PYTHONPATH=$PWD uv run python -m scripts.arena_two_checkpoints \
-        --net-a temp/runs/blokus/ab_jax_10/Nets/best.pth.tar --label-a jax \
-        --net-b temp/runs/blokus/ab_python_10/Nets/best.pth.tar --label-b python \
+    uv run python -m scripts.arena_two_checkpoints \
+        --net-a temp/runs/blokus/<run>/Nets/best.pth.tar --label-a jax \
+        --net-b temp/runs/blokus/<other-run>/Nets/best.pth.tar --label-b python \
         --games 100 --sims 400
 """
 
