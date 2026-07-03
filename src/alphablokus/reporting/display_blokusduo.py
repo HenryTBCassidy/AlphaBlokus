@@ -8,7 +8,8 @@ from __future__ import annotations
 
 from collections import defaultdict
 
-from alphablokus.games.blokusduo.board import Action, BlokusDuoBoard, CoordinateIndexDecoder, PlayerSide
+from alphablokus.games.blokusduo.board import BlokusDuoBoard, PlayerSide
+from alphablokus.games.blokusduo.codec import Action, CoordinateIndexDecoder
 from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.pieces import Orientation, default_pieces_path
 

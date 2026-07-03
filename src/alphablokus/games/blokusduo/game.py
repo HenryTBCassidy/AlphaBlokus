@@ -5,14 +5,16 @@ import numpy as np
 from numpy.typing import NDArray
 
 from alphablokus.games.blokusduo.board import (
-    Action,
-    ActionCodec,
     ActionDict,
     BlokusDuoBoard,
     BoardArray,
-    CoordinateIndexDecoder,
     PlayerSide,
     encode_planes_from_placement,
+)
+from alphablokus.games.blokusduo.codec import (
+    Action,
+    ActionCodec,
+    CoordinateIndexDecoder,
 )
 from alphablokus.games.blokusduo.pieces import Orientation, PieceManager, pieces_loader
 from alphablokus.interfaces import IGame

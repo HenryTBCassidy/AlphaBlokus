@@ -1,6 +1,6 @@
 import pytest
 
-from alphablokus.games.blokusduo.board import Action, ActionCodec
+from alphablokus.games.blokusduo.codec import Action, ActionCodec
 from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.pieces import PieceManager
 

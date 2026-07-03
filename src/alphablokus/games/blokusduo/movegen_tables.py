@@ -76,7 +76,7 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
-from alphablokus.games.blokusduo.board import ActionCodec, CoordinateIndexDecoder
+from alphablokus.games.blokusduo.codec import ActionCodec, CoordinateIndexDecoder
 from alphablokus.games.blokusduo.pieces import default_pieces_path, pieces_loader
 
 if TYPE_CHECKING:
@@ -627,32 +627,6 @@ def _print_per_piece_counts(tables: MoveTables) -> None:
 
 # ---------------------------------------------------------------------------
 # Patch the ActionCodec with the helper we need
-# ---------------------------------------------------------------------------
-# The existing ActionCodec.encode takes an ``Action`` dataclass. Building the
-# Action requires an Orientation enum, which we already decoded. To avoid
-# the round-trip, we add a low-level encode helper.
-
-def _encode_from_components(
-    self: ActionCodec, *, piece_id: int, orientation_id: int, x: int, y: int,
-) -> int:
-    """Encode from primitive components without constructing an Action.
-
-    Equivalent to ``self.encode(Action(piece_id, orientation, x, y))`` but
-    skips the ``Action`` construction and the piece→orientation_id lookup
-    (we already have the id).
-    """
-    del piece_id  # used only for symmetry of the call site
-    return (
-        y * (self._board_size * self._num_orientations)
-        + x * self._num_orientations
-        + orientation_id
-    )
-
-
-# Monkey-patch on import — this is a hot helper for table building.
-ActionCodec.encode_from_components = _encode_from_components  # type: ignore[attr-defined]
-
-
 # ---------------------------------------------------------------------------
 # CLI entry point for inspection / one-off building
 # ---------------------------------------------------------------------------

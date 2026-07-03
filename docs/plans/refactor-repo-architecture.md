@@ -30,7 +30,7 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R16 | 2 | `training/`: move `coach.py`; extract `replay_buffer.py` + `diagnostics.py` (memory snapshots) | JUDGE | 2 h | High | ✅ |
 | R17 | 2 | Extract `training/eval_set.py`, `evaluation/elo.py`; TTT-specific eval → `games/tictactoe/oracle.py` | JUDGE | 2 h | High | ✅ |
 | R18 | 2 | Delete emptied `core/`; final import sweep; green-suite checkpoint | MECH | 30 min | High | ✅ |
-| R19 | 3 | Extract `games/blokusduo/codec.py` from `board.py`; absorb the `ActionCodec.encode_from_components` monkey-patch | JUDGE | 1.5 h | High | |
+| R19 | 3 | Extract `games/blokusduo/codec.py` from `board.py`; absorb the `ActionCodec.encode_from_components` monkey-patch | JUDGE | 1.5 h | High | ✅ |
 | R20 | 3 | `games/blokusduo/movegen/` subpackage (`runtime.py`, `tables.py`, table-build CLI) | MECH | 45 min | Medium | |
 | R21 | 3 | `games/blokusduo/pentobi/` subpackage (`gtp.py`, `player.py`, `translation.py`) | MECH | 30 min | Medium | |
 | R22 | 3 | Rename `neuralnets/` → `nn/` in both games | MECH | 20 min | Low | |

@@ -13,7 +13,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from alphablokus.games.blokusduo.board import Action, CoordinateIndexDecoder
+from alphablokus.games.blokusduo.codec import Action, CoordinateIndexDecoder
 from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.pentobi_translation import PASS, PentobiMoveTranslator
 from alphablokus.games.blokusduo.pieces import default_pieces_path

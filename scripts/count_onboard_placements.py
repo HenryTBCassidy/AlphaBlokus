@@ -33,7 +33,7 @@ from __future__ import annotations
 import sys
 from collections import defaultdict
 
-from alphablokus.games.blokusduo.board import ActionCodec, CoordinateIndexDecoder
+from alphablokus.games.blokusduo.codec import ActionCodec, CoordinateIndexDecoder
 from alphablokus.games.blokusduo.pieces import default_pieces_path, pieces_loader
 
 # Pentobi's hard-coded Duo move count, from libpentobi_base/Move.h:32.

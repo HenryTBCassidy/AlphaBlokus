@@ -20,7 +20,7 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from alphablokus.games.blokusduo.board import Action, CoordinateIndexDecoder
+from alphablokus.games.blokusduo.codec import Action, CoordinateIndexDecoder
 
 if TYPE_CHECKING:
     from alphablokus.games.blokusduo.board import BlokusDuoBoard

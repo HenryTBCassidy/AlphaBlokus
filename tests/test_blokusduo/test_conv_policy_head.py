@@ -24,7 +24,7 @@ import pytest
 import torch
 
 from alphablokus.config import MCTSConfig, NetConfig, RunConfig
-from alphablokus.games.blokusduo.board import Action, ActionCodec, CoordinateIndexDecoder
+from alphablokus.games.blokusduo.codec import Action, ActionCodec, CoordinateIndexDecoder
 from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.neuralnets.net import ConvPolicyHead, build_action_permutation
 from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper

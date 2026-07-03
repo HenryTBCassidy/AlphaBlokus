@@ -12,7 +12,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from alphablokus.games.blokusduo.board import Action, BlokusDuoBoard
+from alphablokus.games.blokusduo.board import BlokusDuoBoard
+from alphablokus.games.blokusduo.codec import Action
 from alphablokus.games.blokusduo.pieces import Orientation, PieceManager
 
 if TYPE_CHECKING:
