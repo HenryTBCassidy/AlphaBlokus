@@ -67,6 +67,11 @@ def get_memory_snapshot() -> MemorySnapshot:
 
     peak = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
     peak_bytes = peak if sys.platform == "darwin" else peak * 1024
+    # ``ru_maxrss`` and psutil's RSS come from different subsystems sampled a
+    # moment apart, and ``ru_maxrss`` is KB-quantised on Linux — so the recorded
+    # peak can read fractionally below the current RSS. Clamp: the peak-so-far
+    # is by definition at least the current RSS.
+    peak_bytes = max(peak_bytes, rss)
 
     gpu_mem: float | None = None
     if torch.cuda.is_available():
