@@ -23,10 +23,10 @@ if TYPE_CHECKING:
     from alphablokus.interfaces import IGame, INeuralNetWrapper
     from alphablokus.selfplay.episode import ProcessedExample
 
-# Fallback when self-play measurement is skipped: mean positions per Blokus
-# Duo self-play game (≈57 plies shared between two players' perspectives),
-# consistent with the jax A/B measurements (docs/research/jax-pipeline-ab.md).
-DEFAULT_POSITIONS_PER_GAME = 29.0
+# Fallback when self-play measurement is skipped: mean TRAINING EXAMPLES one
+# Blokus Duo self-play game contributes — ~28 moves × 2 symmetry augmentation.
+# Measured 56.5 on the 3060 Ti calibration run (2026-07-04).
+DEFAULT_POSITIONS_PER_GAME = 56.5
 
 
 @dataclass(frozen=True)

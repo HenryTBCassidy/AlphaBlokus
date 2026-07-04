@@ -50,7 +50,7 @@ docker build -t alphablokus .
 ## 3. Calibrate before committing the budget (~£1)
 
 ```bash
-docker run --gpus all -v alphablokus-runs:/app/temp \
+docker run --gpus all --shm-size=2g -v alphablokus-runs:/app/temp \
   --entrypoint python alphablokus \
   -m scripts.benchmarks.cloud_calibration \
   --config run_configurations/blokus_cloud_calibration.json \
@@ -65,7 +65,7 @@ against the recommendation doc's §3 table; pick the preset accordingly (edit
 ## 4. Launch the run
 
 ```bash
-docker run -d --name blokus --gpus all \
+docker run -d --name blokus --gpus all --shm-size=2g \
   -v alphablokus-runs:/app/temp \
   -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e WANDB_API_KEY \
   alphablokus --config run_configurations/blokus_cloud.json
@@ -81,7 +81,7 @@ Every completed generation syncs checkpoints + parquet metrics + the resume mark
 On the same box, or a **brand-new** one (steps 1–2 again):
 
 ```bash
-docker run -d --name blokus --gpus all \
+docker run -d --name blokus --gpus all --shm-size=2g \
   -v alphablokus-runs:/app/temp \
   -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e WANDB_API_KEY \
   alphablokus --config run_configurations/blokus_cloud.json --resume
@@ -140,3 +140,6 @@ EOF
   training continues. Set `"compile": false` in `net_config.perf` to silence it.
 - **GPU idle during the training phase** — raise `net_config.perf.dataloader_workers` toward the
   box's core count and check `pin_memory: true`.
+- **`unable to allocate shared memory (shm)` during training** — DataLoader workers pass batches
+  through `/dev/shm`, and Docker's default is only 64 MB. Run with `--shm-size=2g` (all commands
+  above include it) or set `dataloader_workers: 0`.

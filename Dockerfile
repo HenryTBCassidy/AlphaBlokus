@@ -11,7 +11,7 @@
 # CPU-only variant (e.g. to verify the image on a laptop):
 #   docker build -t alphablokus:cpu --build-arg EXTRAS="--extra jax --extra s3" .
 # Run (mount a volume over /app/temp so run artefacts survive the container):
-#   docker run --gpus all -v alphablokus-runs:/app/temp \
+#   docker run --gpus all --shm-size=2g -v alphablokus-runs:/app/temp \
 #     alphablokus --config run_configurations/blokus_cloud.json
 
 FROM python:3.11-slim-bookworm
