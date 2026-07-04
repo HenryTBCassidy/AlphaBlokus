@@ -14,10 +14,20 @@ Usage::
 
     uv run python -m scripts.pentobi_benchmark --config <run.json> --net best.pth.tar --level 5 --games 100
     uv run python -m scripts.pentobi_benchmark --config <run.json> --net best.pth.tar --sweep --games 100
+    uv run python -m scripts.pentobi_benchmark --config <run.json> --net best.pth.tar --levels 1-3 --games 40
     uv run python -m scripts.pentobi_benchmark --config <run.json> --level 1 --games 4   # no --net = fresh net
 
 ``--config`` supplies the net architecture + game + checkpoint directory; ``--net`` is the
 checkpoint filename within that run's ``net_directory`` (omit to benchmark a fresh net).
+
+Ladder tracking (cloud-scale C11): every benchmark also drops a JSON summary into the
+run's ``PentobiLadder/`` directory, which the training report renders as a "Pentobi
+Ladder" section (regenerate with ``alphablokus --config <cfg> --report-only``). To ladder
+several saved checkpoints, loop the script over them::
+
+    for net in accepted_10.pth.tar accepted_20.pth.tar best.pth.tar; do
+        uv run python -m scripts.pentobi_benchmark --config <run.json> --net $net --levels 1-3 --games 40
+    done
 """
 
 from __future__ import annotations
@@ -34,6 +44,7 @@ from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.games.blokusduo.pentobi.gtp import find_pentobi_gtp
 from alphablokus.games.blokusduo.pentobi.player import PentobiPlayer
 from alphablokus.registry import instantiate_game_and_network
+from alphablokus.reporting.pentobi_ladder import parse_levels, write_ladder_result
 
 EVAL_SIMS_DEFAULT = 400
 REPLAYS_PER_LEVEL = 4  # games embedded per level in the report (keeps it readable)
@@ -184,6 +195,7 @@ def main() -> None:
     group = ap.add_mutually_exclusive_group()
     group.add_argument("--level", type=int, help="Single Pentobi level (1-9)")
     group.add_argument("--sweep", action="store_true", help="Sweep all levels 1-9")
+    group.add_argument("--levels", type=str, help="Level subset, e.g. '1-5' or '1,3,9'")
     ap.add_argument("--games", type=int, default=20, help="Games per level (split half/half by colour)")
     ap.add_argument("--sims", type=int, default=EVAL_SIMS_DEFAULT, help="Eval MCTS simulations")
     ap.add_argument("--seed", type=int, default=1, help="Pentobi engine base seed (per-game reseed)")
@@ -248,7 +260,12 @@ def main() -> None:
         opening_temp=args.opening_temp,
         opening_moves=args.opening_moves,
     )
-    levels = list(range(1, 10)) if args.sweep else [args.level if args.level else 1]
+    if args.sweep:
+        levels = list(range(1, 10))
+    elif args.levels:
+        levels = parse_levels(args.levels)
+    else:
+        levels = [args.level if args.level else 1]
 
     per_level = []
     for level in levels:
@@ -267,6 +284,17 @@ def main() -> None:
         f"Score={metrics['score']:.3f} Weighted={metrics['weighted_score']:.3f}",
         flush=True,
     )
+
+    # Persist the ladder summary where the training report picks it up.
+    ladder_path = write_ladder_result(
+        config.pentobi_ladder_directory,
+        net=args.net or "freshnet",
+        sims=args.sims,
+        games_per_level=args.games,
+        per_level=per_level,
+        metrics=metrics,
+    )
+    print(f"[benchmark] ladder JSON → {ladder_path} (rendered by --report-only)", flush=True)
 
     out = Path(args.out or f"temp/benchmarks/pentobi_{args.net or 'freshnet'}.html")
     build_report(

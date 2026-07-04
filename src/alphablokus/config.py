@@ -12,6 +12,22 @@ from dataclass_wizard import fromdict
 # temp/runs/tictactoe/…) rather than a flat pile. Unknown games → "other".
 _GAME_GROUPS: dict[str, str] = {"blokusduo": "blokus", "tictactoe": "tictactoe"}
 
+# Named net-size recipes: the budget-vs-strength knob for cloud runs
+# (docs/plans/cloud-scale-training.md C5). A JSON ``net_config`` may say
+# ``"preset": "large"`` instead of spelling out filters/blocks; explicit
+# ``num_filters``/``num_residual_blocks`` keys always win over the preset.
+# VRAM is not the constraint for this workload (44×14×14 activations are
+# tiny) — the ceiling is what the run budget can train to usefulness.
+#   small  = today's production net; medium = run3's "bignet";
+#   large/xl = cloud-scale candidates (xl ≈ AlphaGo Zero's 256 filters at
+#   14×14 depth-scaled). Throughput per size: scripts/benchmarks/cloud_calibration.py.
+NET_PRESETS: dict[str, dict[str, int]] = {
+    "small": {"num_filters": 64, "num_residual_blocks": 4},
+    "medium": {"num_filters": 128, "num_residual_blocks": 8},
+    "large": {"num_filters": 192, "num_residual_blocks": 12},
+    "xl": {"num_filters": 256, "num_residual_blocks": 16},
+}
+
 
 @dataclass(frozen=True)
 class MCTSConfig:
@@ -88,6 +104,65 @@ class JaxSelfPlayConfig:
     dtype: str = "bfloat16"  # net inference dtype: "bfloat16" or "float32"
     wave_plies: int = 32  # scan horizon between host-side harvests
 
+    # Fraction of VRAM XLA may claim (XLA_PYTHON_CLIENT_MEM_FRACTION). 0.4
+    # suits an 8 GB card shared with torch (the box); raise on bigger cloud
+    # cards so jax search isn't needlessly capped. An explicit env var always
+    # wins over this value; torch/jax coexistence (PREALLOCATE=false) is
+    # unaffected. Applied at the backend entry point, before the process's
+    # first ``import jax``.
+    xla_mem_fraction: float = 0.4
+
+
+@dataclass(frozen=True)
+class TrainingPerfConfig:
+    """Opt-in performance knobs for the torch **training** loop.
+
+    Everything here defaults to "off" = today's behaviour, so existing configs
+    (and the Mac CPU dev path) are bit-identical unless a run opts in. CUDA-only
+    knobs are inert on CPU — setting them in a CPU config is harmless. Sized for
+    a single fast cloud GPU where the unmodernised fp32 single-threaded loop
+    would leave the card starved (docs/plans/cloud-scale-training.md C2/C3).
+    """
+
+    # Mixed-precision autocast for the training forward+loss. "bf16" is the
+    # right choice on Ampere+ (no GradScaler needed, fp32-like dynamic range);
+    # "fp16" is the fallback for older cards and runs under a GradScaler.
+    # "off" (default) trains in fp32 exactly as before. CUDA only.
+    autocast_dtype: Literal["off", "bf16", "fp16"] = "off"
+
+    # TF32 matmul/conv (torch.set_float32_matmul_precision("high") +
+    # cudnn.allow_tf32). Free ~2x matmul throughput on Ampere+ at negligible
+    # precision cost for this workload. CUDA only.
+    tf32: bool = False
+
+    # cudnn autotuner. Safe and profitable here: conv shapes are fixed
+    # (44×14×14 boards, fixed batch size). CUDA only.
+    cudnn_benchmark: bool = False
+
+    # channels_last memory format for the conv net + training batches —
+    # enables tensor-core-friendly NHWC kernels. CUDA only.
+    channels_last: bool = False
+
+    # torch.compile on the net. Guarded: compile failure logs a warning and
+    # falls back to eager, and checkpoints are always saved from the original
+    # (uncompiled) module so they stay interchangeable.
+    compile: bool = False
+
+    # DataLoader parallelism. 0 (default) loads in-process exactly as before.
+    # >0 moves the per-item work — densifying 17,837-length policies and encoding
+    # compact boards to (44, 14, 14) planes — into worker processes, which is
+    # what keeps a fast GPU fed. Portable (CPU or CUDA).
+    dataloader_workers: int = 0
+    pin_memory: bool = False  # page-locked host buffers (enables true async H2D copies)
+    persistent_workers: bool = False  # keep workers alive across epochs (skip respawn cost)
+    prefetch_factor: int = 2  # batches each worker keeps ready (used only when workers > 0)
+
+    # Per-batch metric cadence. 1 (default) = today's behaviour: a CUDA sync
+    # (.item()) and a metrics row every batch. N>1 accumulates losses on-device
+    # and syncs/logs once every N batches (the logged row carries the mean of
+    # the window), keeping the hot loop free of forced syncs.
+    log_every_batches: int = 1
+
 
 @dataclass(frozen=True)
 class NetConfig:
@@ -124,6 +199,37 @@ class NetConfig:
     # Set "fc" to restore the original fully-connected head (e.g. to load an
     # old FC checkpoint — the two head state_dicts are incompatible).
     policy_head: Literal["fc", "conv"] = "conv"
+
+    # Opt-in training-loop performance knobs (autocast, TF32, channels_last,
+    # torch.compile, DataLoader workers, metric-sync cadence). Every field
+    # defaults to "off" = current behaviour; see ``TrainingPerfConfig``.
+    perf: TrainingPerfConfig = field(default_factory=TrainingPerfConfig)
+
+    # Record of the ``NET_PRESETS`` name this config was built from, if any.
+    # Resolution happens in ``load_args`` (the preset fills
+    # ``num_filters``/``num_residual_blocks`` unless the JSON sets them
+    # explicitly); this field is informational so run artefacts show intent.
+    preset: str | None = None
+
+
+@dataclass(frozen=True)
+class ObjectStoreConfig:
+    """S3-compatible object storage for run artefacts (opt-in).
+
+    When present on ``RunConfig``, checkpoints/metrics/reports sync to the
+    bucket after every completed generation and ``--resume`` can rebuild the
+    local run directory from it — so a terminated cloud instance loses at most
+    its in-flight generation. Absent (the default) means pure local-FS
+    behaviour. Works against any S3-compatible endpoint (AWS S3, Cloudflare
+    R2, MinIO, a neocloud's store); credentials come from the standard
+    ``AWS_ACCESS_KEY_ID``/``AWS_SECRET_ACCESS_KEY`` env chain, never from run
+    JSON. Requires the ``s3`` extra (``uv sync --extra s3``).
+    """
+
+    bucket: str  # bucket name
+    prefix: str | None = None  # key prefix; None = mirror the local layout (runs/<group>/<run_name>)
+    endpoint_url: str | None = None  # None = AWS S3; else any S3-compatible endpoint URL
+    region: str | None = None  # region name, where the endpoint needs one
 
 
 @dataclass(frozen=True)
@@ -203,6 +309,10 @@ class RunConfig:
 
     # Optional reporting backends
     wandb: WandbConfig | None = None  # If set, mirror metrics to Weights & Biases
+
+    # Optional S3-compatible artefact sync + remote resume; None (default) =
+    # local filesystem only. See ``ObjectStoreConfig``.
+    object_store: ObjectStoreConfig | None = None
 
     # Elo evaluation: number of games per generation to play vs the frozen
     # gen-0 baseline. 0 disables Elo tracking entirely. The default of 50 is
@@ -412,6 +522,15 @@ class RunConfig:
         return self.run_directory / "ArenaReplays"
 
     @property
+    def pentobi_ladder_directory(self) -> Path:
+        """Directory for Pentobi ladder benchmark results (JSON per benchmark run).
+
+        Written by ``scripts/pentobi_benchmark.py``; rendered as the report's
+        "Pentobi Ladder" section. Empty/absent = section omitted.
+        """
+        return self.run_directory / "PentobiLadder"
+
+    @property
     def symmetry_diagnostic_directory(self) -> Path:
         """Directory for per-generation policy-symmetry diagnostic results.
 
@@ -437,4 +556,23 @@ def load_args(config_path: str | Path) -> RunConfig:
     with open(config_path) as f:
         args_json = json.load(f)
 
+    _resolve_net_preset(args_json)
     return fromdict(RunConfig, args_json)
+
+
+def _resolve_net_preset(args_json: dict) -> None:
+    """Fill ``net_config`` size fields from a named preset, in place.
+
+    Explicit ``num_filters``/``num_residual_blocks`` keys in the JSON win over
+    the preset's values, so a preset is a starting point, not a straitjacket.
+    """
+    net_json = args_json.get("net_config")
+    if not isinstance(net_json, dict):
+        return
+    preset_name = net_json.get("preset")
+    if preset_name is None:
+        return
+    if preset_name not in NET_PRESETS:
+        raise ValueError(f"Unknown net preset {preset_name!r}. Expected one of {sorted(NET_PRESETS)}.")
+    for key, value in NET_PRESETS[preset_name].items():
+        net_json.setdefault(key, value)

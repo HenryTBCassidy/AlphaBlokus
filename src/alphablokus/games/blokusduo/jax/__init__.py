@@ -22,11 +22,32 @@ import os
 # jax entry point in the repo, so this runs before the first ``import jax``.
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
 
-# Cap jax's on-demand growth so it can never fragment torch off the shared
-# 8 GB card (grow-on-demand alone still expands until the card is full). 0.4
-# leaves the majority for torch's caching allocator (training step + CUDA eval
-# workers). The jax side's per-wave working set scales with
+# Cap jax's on-demand growth so it can never fragment torch off a shared card
+# (grow-on-demand alone still expands until the card is full). The default 0.4
+# suits an 8 GB card sharing with torch's caching allocator (training step +
+# CUDA eval workers); bigger cloud cards can raise it via
+# ``jax_selfplay.xla_mem_fraction`` (the backend calls
+# ``configure_xla_mem_fraction`` with the config value before its first
+# ``import jax``) or the env var directly. Precedence: explicit env var >
+# config > this default. The jax side's per-wave working set scales with
 # ``batch_size × num_mcts_sims × top_k`` — not with ``num_eps`` — so raising
-# games/gen stays safe under this cap; revisit the fraction only if
-# batch/sims/top_k grow. setdefault so an explicit env var still wins.
-os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.4")
+# games/gen stays safe under any given cap.
+_MEM_FRACTION_ENV = "XLA_PYTHON_CLIENT_MEM_FRACTION"
+_env_set_mem_fraction = _MEM_FRACTION_ENV in os.environ
+
+DEFAULT_XLA_MEM_FRACTION = 0.4
+
+
+def configure_xla_mem_fraction(fraction: float) -> None:
+    """Set the XLA VRAM cap, unless an explicit env var already pinned it.
+
+    Only effective if called before the first ``import jax`` in the process
+    (XLA reads the env var once at backend init) — the jax self-play backend
+    calls this with ``jax_selfplay.xla_mem_fraction`` at its entry point,
+    which precedes every jax import in a training run.
+    """
+    if not _env_set_mem_fraction:
+        os.environ[_MEM_FRACTION_ENV] = str(fraction)
+
+
+configure_xla_mem_fraction(DEFAULT_XLA_MEM_FRACTION)

@@ -1,14 +1,57 @@
 from __future__ import annotations
 
 import argparse
+import json
 import time
+from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from alphablokus.config import load_args
 from alphablokus.registry import instantiate_game_and_network
 from alphablokus.reporting import create_html_report
-from alphablokus.training.coach import Coach, read_progress_marker
+from alphablokus.storage.object_store import create_object_store, sync_up_guarded
+from alphablokus.training.coach import PROGRESS_MARKER_FILENAME, Coach, read_progress_marker
+
+if TYPE_CHECKING:
+    from alphablokus.config import RunConfig
+
+
+def restore_run_from_object_store(config: RunConfig, client: Any | None = None) -> None:
+    """Rebuild the local run directory from the bucket when it's behind.
+
+    Called on ``--resume`` when an object store is configured. Compares the
+    remote progress marker with the local one: local missing or older →
+    force-download the whole run prefix (force, because a stale checkpoint has
+    the same byte size as the current one); local up to date → no-op. Failures
+    propagate — resuming from silently-stale state would corrupt the run.
+    """
+    store = create_object_store(config, client)
+    if store is None:
+        return
+    marker_relative = (config.log_directory / PROGRESS_MARKER_FILENAME).relative_to(config.run_directory).as_posix()
+    remote_marker_path = config.log_directory / "progress.remote.json"
+    if not store.download_file(marker_relative, remote_marker_path):
+        logger.info("Object store: no remote progress marker — resuming from local state only.")
+        return
+    remote_generation = int(json.loads(remote_marker_path.read_text(encoding="utf-8"))["last_completed_generation"])
+    remote_marker_path.unlink()
+    local_marker = read_progress_marker(config)
+    local_generation = int(local_marker["last_completed_generation"]) if local_marker else -1
+    if local_generation >= remote_generation:
+        logger.info(
+            "Object store: local run is up to date (gen {} >= remote gen {}) — no restore needed.",
+            local_generation,
+            remote_generation,
+        )
+        return
+    logger.info(
+        "Object store: local gen {} behind remote gen {} — restoring run directory from bucket...",
+        local_generation,
+        remote_generation,
+    )
+    downloaded = store.sync_down(config.run_directory, force=True)
+    logger.info("Object store: restored {} file(s).", downloaded)
 
 
 def main() -> None:
@@ -50,6 +93,9 @@ def main() -> None:
     game, nnet = instantiate_game_and_network(args)
 
     if cli_args.resume:
+        # With an object store configured, an interrupted cloud run resumes on
+        # a fresh machine: pull the run directory down before reading markers.
+        restore_run_from_object_store(args)
         marker = read_progress_marker(args)
         if marker is None:
             raise SystemExit(
@@ -87,6 +133,11 @@ def main() -> None:
         logger.exception(
             "Report generation failed, but training data is intact. Regenerate with: --report-only.",
         )
+
+    # Final mirror so the rendered report (and anything else since the last
+    # per-generation sync) reaches the bucket. Reuses the Coach's store so the
+    # sync stays incremental. Best-effort, like the report itself.
+    sync_up_guarded(c.object_store, args.run_directory, "final")
 
     end = time.perf_counter()
     logger.info(f"Total time elapsed: {end - start}")

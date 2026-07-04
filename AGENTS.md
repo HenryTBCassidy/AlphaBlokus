@@ -12,7 +12,7 @@ AlphaZero implementation for Blokus Duo. Self-play reinforcement learning on a 1
 
 ## Current focus
 
-In-flight work lives in `docs/plans/` (top-level = in-flight, `archive/` = done). Nothing is currently in flight: [`oom-hardening.md`](docs/plans/archive/oom-hardening.md) (sparse on-disk policies + OOM guardrails; lifts the old `num_eps ≤ 8000` mitigation) landed 2026-07-04 — RAM verification at scale is pending the next box run. Next: long Gumbel-backend runs at 10k+ games/generation and the Pentobi ladder. Candidate ideas queue in `docs/IDEAS.md`.
+In-flight work lives in `docs/plans/` (top-level = in-flight, `archive/` = done). In flight: [`cloud-scale-training.md`](docs/plans/cloud-scale-training.md) — single rented-GPU runs at a ~£100 budget (uv CUDA container, S3-compatible sync + remote `--resume`, opt-in training-perf knobs, net-size presets, cost-calibration tool, Pentobi ladder in the report; recommendation in [`docs/research/cloud-training-recommendation.md`](docs/research/cloud-training-recommendation.md)). Recently landed: [`oom-hardening.md`](docs/plans/archive/oom-hardening.md) (2026-07-04) — RAM verification at scale is pending the next box run. Candidate ideas queue in `docs/IDEAS.md`.
 
 ## Commands
 
