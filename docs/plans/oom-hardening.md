@@ -30,7 +30,7 @@ This plan fixes the recurring out-of-memory crashes on the 32 GB box (most recen
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| O1 | Store self-play **policy sparse** on disk; drop the densify in `save_self_play_history`; add `policy_kind` marker | 2-3 h | High | |
+| O1 | Store self-play **policy sparse** on disk; drop the densify in `save_self_play_history`; add `policy_kind` marker | 2-3 h | High | ✅ |
 | O2 | Sparse read + resume: `load`/`load_recent_games` return sparse (match live buffer); drop `to_pandas`/`iterrows` | 2-3 h | High | |
 | O3 | Stream the parquet write in row-group chunks (`ParquetWriter`) — no whole-generation table in RAM | 1-1.5 h | Medium | |
 | O4 | Sparsify JAX harvester policy at append (kill per-position dense 17,837 + `np.zeros` churn) | 1-1.5 h | Medium | |

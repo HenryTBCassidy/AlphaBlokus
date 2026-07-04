@@ -50,7 +50,7 @@ All parquet I/O lives in `alphablokus/storage/` (`selfplay_store.py` + `metrics.
 
 | System | Directories | Partitioning | Read pattern |
 |--------|-------------|-------------|--------------|
-| **`SelfPlayStore`** | `SelfPlayHistory/` | Flat numbered files | `store.load()` / `store.load_window()` |
+| **`SelfPlayStore`** | `SelfPlayHistory/` | Flat numbered files | `store.load()` / `store.load_games()` / `store.load_recent_games()` |
 | **`MetricsCollector`** | All other hive-partitioned directories (TrainingData, ArenaData, Timings, profiling, resources, throughput, entropy, accuracy, calibration, Elo, minimax, symmetry, arena replays) | Hive-partitioned (`generation=N/`) | `pd.read_parquet(directory)` |
 
 The split exists because self-play data contains numpy arrays serialised as raw bytes (opaque binary blobs), which need a custom deserialiser to reconstruct. The metrics tables are all plain tabular data. Coach retains thin wrapper methods that delegate to `SelfPlayStore`. (`EvalSet/` is written directly by `Coach` as `.npy`, not by either class.)
@@ -69,7 +69,8 @@ The split exists because self-play data contains numpy arrays serialised as raw 
 | Column | Type | Description |
 |--------|------|-------------|
 | `board` | `bytes` | Flattened numpy array of the **compact** board (`IBoard.to_compact()`) |
-| `policy` | `bytes` | Flattened numpy array of the MCTS-improved policy vector |
+| `policy_indices` | `bytes` | `int32` action ids of the MCTS-improved policy's nonzero entries (**sparse**, see `storage/sparse_policy.py`) |
+| `policy_values` | `bytes` | `float32` probabilities at those action ids, aligned with `policy_indices` |
 | `value` | `float` | Game outcome from this position's perspective (+1 win, -1 loss) |
 
 ### File-Level Metadata
@@ -79,21 +80,22 @@ Shape and dtype information is stored in the parquet file's schema metadata (not
 | Key | Example Value | Description |
 |-----|---------------|-------------|
 | `board_kind` | `"compact_v1"` | Storage-format marker. Its **absence** means a legacy file holding the dense `(C,N,N)` encoding — `load()` refuses these rather than misreading the bytes. |
+| `policy_kind` | `"sparse_v1"` | Storage-format marker. Its **absence** means a legacy file holding one dense full-action-space `policy` blob per row — `load()` refuses these too. |
 | `board_shape` | `"14,14"` (Blokus) / `"3,3"` (TicTacToe) | Comma-separated dimensions of the compact board |
 | `board_dtype` | `"int8"` | Numpy dtype string (compact placement board is int8) |
-| `policy_size` | `"17837"` (Blokus) / `"10"` (TicTacToe) | Length of the policy vector |
-| `policy_dtype` | `"float32"` | Numpy dtype string (policy cast to float32 in self-play to halve buffer footprint) |
+| `policy_size` | `"17837"` (Blokus) / `"10"` (TicTacToe) | Length of the dense action space the sparse policies index into (for on-demand densify) |
 | `game_sizes` | `"61,57,…"` | Per-game position counts (in row order). Lets `load_games()` split the flat rows back into per-game lists so the games-sized replay buffer can be reconstructed on resume. |
 
 ### Notes
 
 - One file per generation, holding that generation's **fresh** games only (not the whole buffer). All episodes within a generation are concatenated, in game order, with boundaries recorded in `game_sizes`.
 - Boards are stored compact (e.g. Blokus's 196-byte int8 placement board) and re-encoded to the dense `(C,N,N)` network input lazily at batch time via `IGame.encode_compact` — ~175× less buffer RAM than storing the dense planes.
+- Policies are stored sparse (`(indices, values)` — the same form the live buffer holds), so save and resume never materialise a dense policy vector; densification happens per training batch in `_LazyPolicyDataset`. On-disk size is ~40× smaller than the old dense format (~1–2 KB vs ~71 KB per Blokus position).
 - Data includes symmetry-augmented positions (rotations/reflections added by `IGame.get_symmetries()`).
 - The rolling replay buffer keeps the last `replay_buffer_games` games in memory (oldest auto-evict); parquet files on disk are never deleted. On resume, `SelfPlayStore.load_recent_games()` refills the buffer newest-first.
 - Cannot be read with a plain `pd.read_parquet()` — use `SelfPlayStore.load()` / `load_games()` / `load_recent_games()` from `alphablokus.storage.selfplay_store`.
 - **Backend-agnostic:** the JAX self-play backend's harvester (`games/blokusduo/jax/harvest.py`) assembles its examples in the *exact* representation the python episode loop produces (compact canonical boards, sparse policies, same draw-sign convention), so jax-generated generations write, load, and resume through this same format with no marker or schema difference.
-- **Legacy dense files** (pre-`compact_v1`, e.g. run2's parquets) cannot be loaded into the compact buffer; resume such runs from their checkpoints before this refactor.
+- **Legacy files** are refused loudly, never misread: pre-`compact_v1` files (dense board encodings, e.g. run2's parquets) and pre-`sparse_v1` files (dense policy blobs, all runs before oom-hardening O1) both fail `load()` with an explanatory error. Resume such runs from their checkpoints instead.
 
 ---
 

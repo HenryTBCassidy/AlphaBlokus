@@ -1,4 +1,4 @@
-"""Tests for self-play parquet I/O via :class:`core.storage.SelfPlayStore`.
+"""Tests for self-play parquet I/O via :class:`alphablokus.storage.SelfPlayStore`.
 
 Most tests exercise the store directly (no Coach needed).
 One integration test at the end verifies the Coach thin wrappers still work.
@@ -13,17 +13,35 @@ import pytest
 from alphablokus.config import RunConfig
 from alphablokus.selfplay.episode import ProcessedExample
 from alphablokus.storage.selfplay_store import SelfPlayStore
+from alphablokus.storage.sparse_policy import sparsify
+
+# Dense action-space size the dummy sparse policies index into.
+DUMMY_POLICY_SIZE = 10
 
 
 def _make_dummy_examples(n: int = 5) -> deque[ProcessedExample]:
-    """Create dummy (board, policy, value) examples for testing."""
+    """Create dummy (board, sparse_policy, value) examples for testing.
+
+    Policies are sparse ``(indices, values)`` pairs — the live-buffer (and
+    on-disk) representation.
+    """
     examples: deque[ProcessedExample] = deque()
     for _ in range(n):
         board = np.random.rand(3, 3).astype(np.float64)
-        policy = np.random.dirichlet(np.ones(10)).astype(np.float64)
+        policy = sparsify(np.random.dirichlet(np.ones(DUMMY_POLICY_SIZE)).astype(np.float32))
         value = np.random.choice([-1.0, 1.0])
         examples.append((board, policy, value))
     return examples
+
+
+def _assert_examples_equal(actual: ProcessedExample, expected: ProcessedExample) -> None:
+    """One example equals another: board, sparse policy pair, and value."""
+    actual_board, (actual_indices, actual_values), actual_value = actual
+    expected_board, (expected_indices, expected_values), expected_value = expected
+    np.testing.assert_array_almost_equal(actual_board, expected_board)
+    np.testing.assert_array_equal(actual_indices, expected_indices)
+    np.testing.assert_array_almost_equal(actual_values, expected_values)
+    assert pytest.approx(actual_value) == expected_value
 
 
 @pytest.fixture
@@ -40,43 +58,43 @@ def store(test_config: RunConfig) -> SelfPlayStore:
 def test_save_creates_parquet_file(store: SelfPlayStore, test_config: RunConfig):
     """save should create a .parquet file."""
     examples = _make_dummy_examples()
-    store.save(examples, generation=0)
+    store.save(examples, generation=0, policy_size=DUMMY_POLICY_SIZE)
 
     filepath = test_config.self_play_history_directory / "self_play_0.parquet"
     assert filepath.exists()
 
 
 def test_save_load_roundtrip_values(store: SelfPlayStore):
-    """Board arrays, policy vectors, and values should survive serialisation."""
+    """Board arrays, sparse policy pairs, and values should survive serialisation."""
     original = _make_dummy_examples(3)
-    store.save(original, generation=0)
+    store.save(original, generation=0, policy_size=DUMMY_POLICY_SIZE)
 
     loaded = store.load(generation=0)
     assert loaded is not None
     assert len(loaded) == 3
 
-    for (orig_b, orig_p, orig_v), (load_b, load_p, load_v) in zip(original, loaded, strict=True):
-        np.testing.assert_array_almost_equal(load_b, orig_b)
-        np.testing.assert_array_almost_equal(load_p, orig_p)
-        assert pytest.approx(load_v) == orig_v
+    for orig, load in zip(original, loaded, strict=True):
+        _assert_examples_equal(load, orig)
 
 
 def test_save_load_roundtrip_shapes(store: SelfPlayStore):
     """Reconstructed arrays should have correct shapes and dtypes."""
-    store.save(_make_dummy_examples(), generation=0)
+    store.save(_make_dummy_examples(), generation=0, policy_size=DUMMY_POLICY_SIZE)
 
     loaded = store.load(generation=0)
     assert loaded is not None
 
-    board, policy, value = loaded[0]
+    board, (indices, values), value = loaded[0]
     assert board.shape == (3, 3)
-    assert policy.shape == (10,)
+    assert indices.dtype == np.int32
+    assert values.dtype == np.float32
+    assert indices.shape == values.shape
     assert isinstance(value, float)
 
 
 def test_metadata_contains_shapes(store: SelfPlayStore, test_config: RunConfig):
-    """Parquet file metadata should contain board_shape, board_dtype, policy_size, policy_dtype."""
-    store.save(_make_dummy_examples(), generation=0)
+    """Parquet file metadata should carry board shape/dtype and policy size."""
+    store.save(_make_dummy_examples(), generation=0, policy_size=DUMMY_POLICY_SIZE)
 
     filepath = test_config.self_play_history_directory / "self_play_0.parquet"
     table = pq.read_table(filepath)
@@ -85,10 +103,9 @@ def test_metadata_contains_shapes(store: SelfPlayStore, test_config: RunConfig):
     assert "board_shape" in metadata
     assert "board_dtype" in metadata
     assert "policy_size" in metadata
-    assert "policy_dtype" in metadata
 
     assert metadata["board_shape"] == "3,3"
-    assert metadata["policy_size"] == "10"
+    assert metadata["policy_size"] == str(DUMMY_POLICY_SIZE)
 
 
 def test_load_missing_file_returns_none(store: SelfPlayStore):
@@ -97,18 +114,19 @@ def test_load_missing_file_returns_none(store: SelfPlayStore):
     assert result is None
 
 
-def test_save_writes_board_kind_marker(store: SelfPlayStore, test_config: RunConfig):
-    """save should stamp the compact-board schema marker."""
-    store.save(_make_dummy_examples(), generation=0)
+def test_save_writes_format_markers(store: SelfPlayStore, test_config: RunConfig):
+    """save should stamp both the compact-board and sparse-policy schema markers."""
+    store.save(_make_dummy_examples(), generation=0, policy_size=DUMMY_POLICY_SIZE)
 
     filepath = test_config.self_play_history_directory / "self_play_0.parquet"
     table = pq.read_table(filepath)
     metadata = {k.decode(): v.decode() for k, v in table.schema.metadata.items()}
     assert metadata["board_kind"] == SelfPlayStore.BOARD_KIND
+    assert metadata["policy_kind"] == SelfPlayStore.POLICY_KIND
 
 
-def test_load_refuses_legacy_dense_file(store: SelfPlayStore, test_config: RunConfig):
-    """A file without the board_kind marker (legacy dense) must be refused."""
+def test_load_refuses_legacy_dense_board_file(store: SelfPlayStore, test_config: RunConfig):
+    """A file without the board_kind marker (legacy dense boards) must be refused."""
     import pandas as pd
     import pyarrow as pa
 
@@ -128,6 +146,28 @@ def test_load_refuses_legacy_dense_file(store: SelfPlayStore, test_config: RunCo
         store.load(generation=0)
 
 
+def test_load_refuses_legacy_dense_policy_file(store: SelfPlayStore, test_config: RunConfig):
+    """A compact-board file without policy_kind (legacy dense policies) must be refused."""
+    import pandas as pd
+    import pyarrow as pa
+
+    store._directory.mkdir(parents=True, exist_ok=True)
+    df = pd.DataFrame({"board": [b""], "policy": [b""], "value": [0.0]})
+    table = pa.Table.from_pandas(df).replace_schema_metadata(
+        {
+            b"board_kind": SelfPlayStore.BOARD_KIND.encode(),
+            b"board_shape": b"3,3",
+            b"board_dtype": b"int8",
+            b"policy_size": b"10",
+            b"policy_dtype": b"float32",
+        }
+    )
+    pq.write_table(table, store._directory / "self_play_0.parquet")
+
+    with pytest.raises(ValueError, match="policy_kind"):
+        store.load(generation=0)
+
+
 def test_compact_board_roundtrip_reencodes(blokus_game, test_config: RunConfig):
     """A real compact Blokus board survives save→load and re-encodes exactly."""
     store = SelfPlayStore(test_config.self_play_history_directory)
@@ -138,9 +178,10 @@ def test_compact_board_roundtrip_reencodes(blokus_game, test_config: RunConfig):
         int(np.where(blokus_game.valid_move_masking(board, 1))[0][0]),
     )
     compact = board.to_compact()
-    policy = np.zeros(blokus_game.get_action_size(), dtype=np.float64)
+    action_size = blokus_game.get_action_size()
+    policy = np.zeros(action_size, dtype=np.float32)
     policy[0] = 1.0
-    store.save(deque([(compact, policy, 1.0)]), generation=0)
+    store.save(deque([(compact, sparsify(policy), 1.0)]), generation=0, policy_size=action_size)
 
     loaded = store.load(generation=0)
     assert loaded is not None
@@ -156,7 +197,7 @@ def test_load_games_splits_by_game_sizes(store: SelfPlayStore):
     """load_games should restore per-game boundaries from game_sizes metadata."""
     # One generation: 3 games of sizes 2, 1, 3 (flat in game order).
     flat = _make_dummy_examples(6)
-    store.save(flat, generation=0, game_sizes=[2, 1, 3])
+    store.save(flat, generation=0, policy_size=DUMMY_POLICY_SIZE, game_sizes=[2, 1, 3])
 
     games = store.load_games(generation=0)
     assert games is not None
@@ -165,7 +206,7 @@ def test_load_games_splits_by_game_sizes(store: SelfPlayStore):
 
 def test_load_games_without_sizes_returns_one_game(store: SelfPlayStore):
     """A file saved without game_sizes is treated as a single game."""
-    store.save(_make_dummy_examples(4), generation=0)
+    store.save(_make_dummy_examples(4), generation=0, policy_size=DUMMY_POLICY_SIZE)
     games = store.load_games(generation=0)
     assert games is not None
     assert len(games) == 1
@@ -176,7 +217,7 @@ def test_load_recent_games_keeps_newest_n(store: SelfPlayStore):
     """load_recent_games should return the newest ``num_games`` games across files."""
     # Three generation files, 2 games each (sizes 1 each) → 6 games total.
     for gen in range(3):
-        store.save(_make_dummy_examples(2), generation=gen, game_sizes=[1, 1])
+        store.save(_make_dummy_examples(2), generation=gen, policy_size=DUMMY_POLICY_SIZE, game_sizes=[1, 1])
 
     buffer = store.load_recent_games(last_file_index=2, num_games=3)
     assert len(buffer) == 3  # capped at num_games, newest kept
@@ -207,7 +248,5 @@ def test_coach_save_load_roundtrip(ttt_game, test_config: RunConfig):
     loaded = coach.replay_buffer[0]
     assert len(loaded) == 3
 
-    for (orig_b, orig_p, orig_v), (load_b, load_p, load_v) in zip(original, loaded, strict=True):
-        np.testing.assert_array_almost_equal(load_b, orig_b)
-        np.testing.assert_array_almost_equal(load_p, orig_p)
-        assert pytest.approx(load_v) == orig_v
+    for orig, load in zip(original, loaded, strict=True):
+        _assert_examples_equal(load, orig)

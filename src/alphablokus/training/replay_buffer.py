@@ -2,8 +2,9 @@
 
 Extracted from ``Coach`` so the buffer's mechanics (eviction, flattening,
 save/load/resume round-trips through :class:`SelfPlayStore`) live in one
-place. This is also where the continuous-generations work (IDEAS I4 lineage)
-and the sparse-on-disk format (``docs/plans/oom-hardening.md`` O1–O3) land.
+place. Examples hold sparse policies end-to-end — live buffer, save, and
+resume all speak ``ProcessedExample`` (``docs/plans/oom-hardening.md`` O1–O2);
+this is also where the continuous-generations work (IDEAS I4 lineage) lands.
 """
 
 from __future__ import annotations
@@ -13,7 +14,6 @@ from random import shuffle
 from typing import TYPE_CHECKING
 
 from alphablokus.storage.selfplay_store import SelfPlayStore
-from alphablokus.storage.sparse_policy import as_dense
 
 if TYPE_CHECKING:
     from alphablokus.config import RunConfig
@@ -78,12 +78,15 @@ class ReplayBuffer:
         flat = [example for game in self._fresh_games for example in game]
         if not flat:
             return
-        # In-RAM examples hold sparse policies (indices, values); the on-disk
-        # store keeps dense, so densify a transient copy here. By this point the
-        # self-play worker pool is torn down, so the memory is free.
-        action_size = self._game.get_action_size()
-        dense = deque((board, as_dense(pi, action_size), value) for board, pi, value in flat)
-        self._store.save(dense, file_index, game_sizes=game_sizes)
+        # Examples are persisted exactly as the live buffer holds them — sparse
+        # policies included. No densify: the whole-generation dense copy this
+        # step used to build (~25 GB at 10k games) is what OOM-killed the box.
+        self._store.save(
+            flat,
+            file_index,
+            policy_size=self._game.get_action_size(),
+            game_sizes=game_sizes,
+        )
 
     def load_recent(self, up_to_generation: int) -> None:
         """Refill the rolling buffer from parquet files on disk.
@@ -93,9 +96,9 @@ class ReplayBuffer:
         Used by the ``--load_model`` warm-start path. Delegates to
         :meth:`SelfPlayStore.load_recent_games`.
         """
-        # Loaded games hold DENSE policies (the on-disk format) while live
-        # self-play appends sparse ones — tracked by oom-hardening O2.
-        self.games = self._store.load_recent_games(  # type: ignore[assignment]
+        # Loaded games hold the same sparse policies live self-play appends —
+        # a resumed buffer's RAM equals the live buffer's.
+        self.games = self._store.load_recent_games(
             up_to_generation,
             self._config.replay_buffer_games,
         )

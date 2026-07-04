@@ -60,11 +60,11 @@ def densify(indices: NDArray, values: NDArray, action_size: int) -> NDArray[np.f
 def as_dense(policy: object, action_size: int) -> NDArray[np.float32]:
     """Normalise a stored policy to dense, accepting either encoding.
 
-    Self-play emits sparse ``(indices, values)`` policies (the RAM win), but an
-    already-dense vector may reach a consumer too — e.g. examples loaded back
-    from the on-disk store (which keeps dense), or hand-built test fixtures. This
-    accepts both and always returns the dense vector the network needs, so every
-    consumer (training, eval-set build, save) handles either uniformly.
+    Self-play emits sparse ``(indices, values)`` policies (the RAM win), and the
+    on-disk store round-trips that same form — but an already-dense vector may
+    reach a consumer too, e.g. hand-built test fixtures. This accepts both and
+    always returns the dense vector the network needs, so every consumer
+    (training, eval-set build) handles either uniformly.
     """
     if isinstance(policy, tuple):
         indices, values = policy
