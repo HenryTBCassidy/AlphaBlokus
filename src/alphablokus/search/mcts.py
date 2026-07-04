@@ -202,16 +202,17 @@ class MCTS:
         # Extract visit counts for all actions — the dense root distribution.
         # Same integer values as the old ``visit_counts.get((s, a), 0)`` probe
         # over the whole action space, but scattered from the root node's arrays
-        # (no per-action dict lookup); ``.tolist()`` restores the plain-int list
-        # the temperature/entropy code below expects.
-        counts = self.root_visit_counts(canonical_board).tolist()
+        # (no per-action dict lookup). Kept as an ndarray — the per-move
+        # full-action-space Python list (~0.5 MB of boxed ints, ~99% zeros) is
+        # built only where a list is actually returned (oom-hardening O9).
+        counts = self.root_visit_counts(canonical_board)
 
         # Record search-confidence entropy on the *raw* visit distribution
         # (before temperature sampling). Temperature controls how we *sample*
         # from this distribution; the distribution itself is what MCTS settled on.
-        raw_total = float(sum(counts))
+        raw_total = float(counts.sum())
         if raw_total > 0:
-            raw_probs = np.array(counts, dtype=float) / raw_total
+            raw_probs = counts / raw_total
             nonzero = raw_probs[raw_probs > 0]
             self._policy_entropies.append(float(-np.sum(nonzero * np.log(nonzero))))
 
@@ -241,12 +242,13 @@ class MCTS:
             probs[best_action] = 1.0
             return probs
 
-        # Apply temperature and normalise to get probabilities
-        counts = [x ** (1.0 / temp) for x in counts]
-        counts_sum = float(sum(counts))
-        return [x / counts_sum for x in counts]
+        # Apply temperature and normalise to get probabilities. The list is
+        # built once here (it's the return contract); arithmetic is unchanged.
+        scaled = [x ** (1.0 / temp) for x in counts.tolist()]
+        scaled_sum = float(sum(scaled))
+        return [x / scaled_sum for x in scaled]
 
-    def root_visit_counts(self, board: IBoard) -> NDArray[np.int64]:
+    def root_visit_counts(self, board: IBoard) -> NDArray[np.int32]:
         """Dense visit-count vector over the full action space for ``board``'s root.
 
         ``counts[a]`` is the MCTS visit count of action ``a`` at this root — 0 for
@@ -254,8 +256,10 @@ class MCTS:
         of the raw visit distribution, shared by :meth:`get_action_prob` and
         :class:`alphablokus.evaluation.players.NetworkPlayer`; replaces the old
         ``[visit_counts.get((s, a), 0) for a in range(action_size)]`` probe.
+        ``int32`` matches the per-edge ``_Node.n`` dtype and halves the per-move
+        143 KB transient (oom-hardening O9).
         """
-        counts = np.zeros(self.game.get_action_size(), dtype=np.int64)
+        counts = np.zeros(self.game.get_action_size(), dtype=np.int32)
         root = self.nodes.get(self.game.state_key(board))
         if root is not None:
             counts[root.acts] = root.n

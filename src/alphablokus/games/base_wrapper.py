@@ -19,6 +19,12 @@ from tqdm import tqdm
 from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper
 from alphablokus.storage.sparse_policy import as_dense
 
+# Ceiling on the eval set the per-epoch diagnostics accept. The eval set holds
+# DENSE boards and policies — fine at the pinned ~200 positions (~14 MB for
+# Blokus's (n, 17837) targets) but it would OOM if someone scaled it toward
+# buffer size, so the bound is enforced, not assumed (oom-hardening O9).
+MAX_EVAL_SET_POSITIONS = 2_000
+
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
@@ -305,6 +311,11 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
           mapping to mean(actual outcome) per bucket. Returned as three
           aligned arrays (centers, means, counts).
         """
+        assert len(eval_set) <= MAX_EVAL_SET_POSITIONS, (
+            f"eval set of {len(eval_set)} positions exceeds MAX_EVAL_SET_POSITIONS="
+            f"{MAX_EVAL_SET_POSITIONS} — it is held dense (boards + full-action-space "
+            "policies), so keep it a small pinned sample, never buffer-scale."
+        )
         self.nnet.eval()
         per_position_entropies: list[float] = []
         top1_hits = 0

@@ -121,6 +121,9 @@ class Coach:
         # Frozen held-out positions for per-epoch network diagnostics (policy
         # entropy, top-K accuracy, value calibration). Built lazily from gen
         # 1's self-play examples; saved to disk so resumed runs use the same set.
+        # Deliberately small and pinned: the eval set is held DENSE, so it must
+        # never scale with the buffer (bounded by
+        # ``base_wrapper.MAX_EVAL_SET_POSITIONS``).
         self._eval_set: EvalSet | None = None
         self._eval_set_size: int = 200
 

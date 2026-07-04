@@ -38,7 +38,7 @@ This plan fixes the recurring out-of-memory crashes on the 32 GB box (most recen
 | O6 | Stream completed games into the buffer instead of accumulating the whole generation | 2-3 h | Medium | ✅ |
 | O7 | Partition-filtered ArenaReplays reads (report + `scripts/replay.py`) | 1-1.5 h | Medium | ✅ |
 | O8 | Guardrails: startup RAM-budget check + peak-RSS logging at phase transitions + regression test | 2 h | High | ✅ |
-| O9 | Minor trims: eval-set cap assert, MCTS `int32`/list transients | 45 m | Low | |
+| O9 | Minor trims: eval-set cap assert, MCTS `int32`/list transients | 45 m | Low | ✅ |
 
 > **O6 note:** implemented as a per-game `sink` callback (`generate_games(..., sink=replay_buffer.add_game)`) rather than a generator. Game order is unchanged in all three backends — the pool path streams off `pool.map`'s submission-order iterator (no as-completed reordering), so the determinism tests pass verbatim; the jax path streams examples per harvested game but still returns its stats at the end (their timing apportionment needs the generation's total wall clock).
 
