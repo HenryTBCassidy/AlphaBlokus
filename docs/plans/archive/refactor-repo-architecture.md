@@ -52,7 +52,7 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R38 | 7 | Freshness fixes to numbered docs: 02, 03, 06, 07, 08, 09 | JUDGE | 2 h | Medium | ✅ |
 | R39 | 7 | Guides + IDEAS refresh: STYLE-GUIDE (layout/tooling section), REMOTE-TRAINING (new commands), IDEAS.md (I1/I3 partially shipped), broken-link sweep | JUDGE | 1.5 h | Medium | ✅ |
 | R40 | 8 | Full verification: complete suite incl. `slow` + jax extra; end-to-end `test_run.json` and a jax CPU config; render both reports; load a pre-refactor checkpoint | MECH | 1 h | High | ✅ |
-| R41 | 8 | Box validation: quick GPU run (python + jax gumbel), `pentobi_benchmark` sanity, `fetch_run_reports.sh` | MECH | 1 h | High | Deferred |
+| R41 | 8 | Box validation: quick GPU run (python + jax gumbel), `pentobi_benchmark` sanity, `fetch_run_reports.sh` | MECH | 1 h | High | ✅ |
 | R42 | 8 | Archive this plan | MECH | 10 min | High | ✅ |
 
 > **Execution note (R6/R8):** R8 landed inside the R6 commit rather than separately — the move itself broke ~25 divergent `pieces.json` path resolutions (repo-root- and CWD-relative), so committing the move without the accessor would have produced a red commit. The accessor is `alphablokus.games.blokusduo.pieces.default_pieces_path()`.
@@ -482,7 +482,14 @@ On the Mac: `uv run pytest` (full, incl. slow) with base extras, then with `--ex
 
 ## R41. Box validation
 
-> **Deferred (box unavailable throughout execution — same constraint that deferred oom-hardening).** Run this checklist the moment the box is back, BEFORE the next real training run:
+> **Executed 2026-07-04 (box back), on the `fix/oom-sparse-selfplay` tip.** Results:
+>
+> - `blokus_quicktest` (python backend, CUDA, 8 workers, 3 gens): completed, reports fetched. One run exited 1 *after* writing everything (no traceback, W&B synced, artifacts intact); an identical rerun exited 0 — unreproduced teardown flake, logged here for the record.
+> - jax gumbel (2 gens × 200 games, trimmed `blokus_jax_gumbel_30`): exit 0 in 192s; peak RSS 3.3 GB with a **flat Save stage** (the OOM plan's target); XLA mem-fraction cap active.
+> - Pentobi sanity: the binary is on the **Mac**, not the box (the original runbook assumption was wrong) — run locally instead: fresh net 0–4 vs level 1 through the full harness + HTML report. Equivalent coverage (the harness is CPU/subprocess only).
+> - `fetch_run_reports.sh` verified for both runs (note: arg order is `<run> <group>`).
+>
+> Original runbook, for reference:
 >
 > 1. `git pull && uv sync --extra jax-cuda`
 > 2. `uv run alphablokus --config run_configurations/blokus_quicktest.json` (python backend, CUDA)

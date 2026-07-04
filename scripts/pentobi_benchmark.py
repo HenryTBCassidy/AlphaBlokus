@@ -218,7 +218,7 @@ def main() -> None:
 
     if find_pentobi_gtp() is None:
         raise SystemExit(
-            "pentobi-gtp not found — build it (docs/plans/pentobi-harness.md H2) or set $PENTOBI_GTP_PATH.",
+            "pentobi-gtp not found — build it (docs/plans/archive/pentobi-harness.md H2) or set $PENTOBI_GTP_PATH.",
         )
 
     if args.mps:
