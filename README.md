@@ -235,4 +235,4 @@ Top-level plans are in-flight; `docs/plans/archive/` is the historical record of
 
 ## License
 
-TBD
+Released under the [MIT License](LICENSE) — free to use, modify, and build on.
