@@ -928,7 +928,7 @@ def make_resource_usage_plot(resource_data: pd.DataFrame) -> go.Figure:
         df["gpu_mb"] = df["gpu_memory_bytes"] / (1024**2)
 
     fig = go.Figure()
-    for stage in ["SelfPlay", "Training", "Arena"]:
+    for stage in ["SelfPlay", "Save", "Training", "Arena"]:
         stage_df = df[df["cycle_stage"] == stage]
         if stage_df.empty:
             continue

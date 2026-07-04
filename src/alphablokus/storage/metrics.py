@@ -34,9 +34,10 @@ if TYPE_CHECKING:
 
 
 class CycleStage(StrEnum):
-    """Stages of the training cycle, used for timing records."""
+    """Stages of the training cycle, used for timing and resource records."""
 
     SELF_PLAY = "SelfPlay"
+    SAVE = "Save"  # self-play history persistence (resource snapshots only)
     TRAINING = "Training"
     ARENA = "Arena"
     WHOLE_CYCLE = "WholeCycle"
@@ -492,20 +493,38 @@ class MetricsCollector:
         cycle_stage: CycleStage,
         process_rss_bytes: int,
         gpu_memory_bytes: float | None = None,
+        peak_rss_bytes: int | None = None,
     ) -> None:
-        """Record a memory usage snapshot at a point in the training cycle."""
+        """Record a memory usage snapshot at a point in the training cycle.
+
+        ``peak_rss_bytes`` is the process's high-water RSS (``ru_maxrss``) —
+        the number the OOM killer acts on, which point-in-time RSS reads can
+        miss. Logged to console as well as parquet/W&B so a memory spike is
+        visible in the run, not just post-mortem (oom-hardening O8).
+        """
         self._resource_usage_records.append(
             {
                 "generation": generation,
                 "cycle_stage": cycle_stage,
                 "process_rss_bytes": process_rss_bytes,
                 "gpu_memory_bytes": gpu_memory_bytes,
+                "peak_rss_bytes": peak_rss_bytes,
             }
+        )
+        logger.info(
+            "Memory after {} (gen {}): RSS {:.2f} GB, peak RSS {} GB, GPU {}",
+            cycle_stage.value,
+            generation,
+            process_rss_bytes / (1024**3),
+            f"{peak_rss_bytes / (1024**3):.2f}" if peak_rss_bytes is not None else "n/a",
+            f"{gpu_memory_bytes / (1024**3):.2f} GB" if gpu_memory_bytes is not None else "n/a",
         )
         payload: dict[str, Any] = {
             f"resources/{cycle_stage.value}_rss_mb": process_rss_bytes / (1024**2),
             "generation": generation,
         }
+        if peak_rss_bytes is not None:
+            payload[f"resources/{cycle_stage.value}_peak_rss_mb"] = peak_rss_bytes / (1024**2)
         if gpu_memory_bytes is not None:
             payload[f"resources/{cycle_stage.value}_gpu_mb"] = gpu_memory_bytes / (1024**2)
         self._publish(payload)

@@ -223,6 +223,37 @@ def test_load_recent_games_keeps_newest_n(store: SelfPlayStore):
     assert len(buffer) == 3  # capped at num_games, newest kept
 
 
+def test_save_load_roundtrip_never_densifies(ttt_game, test_config: RunConfig, monkeypatch):
+    """O8 regression lock-in for O1/O2: persisting and reloading a generation
+    must never materialise a dense policy vector.
+
+    Poisons ``sparse_policy.densify``/``as_dense`` at module level (any
+    call-time lookup or function-level import hits the patched attribute) and
+    drives the full ReplayBuffer save→load round trip through them.
+    """
+    from alphablokus.storage import sparse_policy
+    from alphablokus.training.replay_buffer import ReplayBuffer
+
+    def _fail_densify(*_args: object, **_kwargs: object) -> None:
+        raise AssertionError("dense policy materialised during save/load round-trip")
+
+    monkeypatch.setattr(sparse_policy, "densify", _fail_densify)
+    monkeypatch.setattr(sparse_policy, "as_dense", _fail_densify)
+
+    buffer = ReplayBuffer(test_config, ttt_game)
+    original = list(_make_dummy_examples(4))
+    buffer.add_generation([original[:2], original[2:]])
+    buffer.save_fresh(file_index=0)
+
+    buffer.games.clear()
+    buffer.load_recent(up_to_generation=0)
+
+    assert len(buffer) == 2
+    loaded = [example for game in buffer.games for example in game]
+    for orig, load in zip(original, loaded, strict=True):
+        _assert_examples_equal(load, orig)
+
+
 # ---------------------------------------------------------------------------
 # Coach integration test (verifies thin wrappers still work end-to-end)
 # ---------------------------------------------------------------------------

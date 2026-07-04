@@ -23,7 +23,7 @@ from alphablokus.storage.metrics import (
     EvalSet,
     MetricsCollector,
 )
-from alphablokus.training.diagnostics import get_memory_snapshot
+from alphablokus.training.diagnostics import check_ram_budget, get_memory_snapshot
 from alphablokus.training.eval_set import build_or_load_eval_set
 from alphablokus.training.replay_buffer import ReplayBuffer
 
@@ -110,6 +110,10 @@ class Coach:
         self.pnet = self.nnet.__class__(self.game, config)  # type: ignore[call-arg]
         self.config = config
 
+        # Pre-flight guard: refuse configs whose estimated peak RAM cannot fit
+        # this machine, instead of OOM-killing the box hours in (O8).
+        check_ram_budget(config)
+
         self.replay_buffer = ReplayBuffer(config, game)
         self._oracle = resolve_oracle(config, game)
         self.metrics = MetricsCollector(config=config, resume_wandb_run_id=resume_wandb_run_id)
@@ -189,16 +193,14 @@ class Coach:
             self_play_end = time.perf_counter()
             self.metrics.log_timing(generation, CycleStage.SELF_PLAY, self_play_end - self_play_start)
 
-            snapshot = get_memory_snapshot()
-            self.metrics.log_resource_usage(
-                generation,
-                CycleStage.SELF_PLAY,
-                snapshot.process_rss_bytes,
-                snapshot.gpu_bytes,
-            )
+            self._log_memory_snapshot(generation, CycleStage.SELF_PLAY)
 
             # Persist this generation's fresh games (file index = generation - 1).
             self.save_self_play_history(generation - 1)
+
+            # The save used to be the peak-RSS moment (whole-generation densify);
+            # snapshot it so any regression shows up in the run, not post-mortem.
+            self._log_memory_snapshot(generation, CycleStage.SAVE)
 
             train_examples = self.replay_buffer.flat_shuffled_examples()
 
@@ -227,13 +229,7 @@ class Coach:
             self.metrics.log_timing(generation, CycleStage.TRAINING, training_end - training_start)
 
             # Memory snapshot after training phase
-            snapshot = get_memory_snapshot()
-            self.metrics.log_resource_usage(
-                generation,
-                CycleStage.TRAINING,
-                snapshot.process_rss_bytes,
-                snapshot.gpu_bytes,
-            )
+            self._log_memory_snapshot(generation, CycleStage.TRAINING)
 
             # Arena: accept or reject the newly trained network.
             logger.info(f"Evaluating Against Previous Version For Generation #{generation} ...")
@@ -276,13 +272,7 @@ class Coach:
                 )
 
             # Memory snapshot after arena phase
-            snapshot = get_memory_snapshot()
-            self.metrics.log_resource_usage(
-                generation,
-                CycleStage.ARENA,
-                snapshot.process_rss_bytes,
-                snapshot.gpu_bytes,
-            )
+            self._log_memory_snapshot(generation, CycleStage.ARENA)
 
             # Accept or reject new network
             logger.info(f"NEW/PREV WINS : {nwins}/{pwins}; DRAWS : {draws}")
@@ -310,6 +300,22 @@ class Coach:
             # its data is on disk, so `--resume` always restarts from a clean
             # boundary (never a half-finished generation).
             self._write_progress_marker(generation)
+
+    def _log_memory_snapshot(self, generation: int, stage: CycleStage) -> None:
+        """Snapshot RSS / peak-RSS / GPU memory after ``stage`` → console + metrics.
+
+        Peak RSS is the high-water mark the OOM killer acts on; logging it at
+        every phase transition makes a memory spike visible in the run rather
+        than post-mortem (oom-hardening O8).
+        """
+        snapshot = get_memory_snapshot()
+        self.metrics.log_resource_usage(
+            generation,
+            stage,
+            snapshot.process_rss_bytes,
+            snapshot.gpu_bytes,
+            peak_rss_bytes=snapshot.process_peak_rss_bytes,
+        )
 
     def _write_progress_marker(self, generation: int) -> None:
         """Persist the carried-forward net + record the last completed generation.
