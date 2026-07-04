@@ -142,20 +142,30 @@ class SelfPlayStore:
         if not filepath.exists():
             return None
 
-        table = pq.read_table(filepath)
-        metadata = {k.decode(): v.decode() for k, v in table.schema.metadata.items()}
+        parquet_file = pq.ParquetFile(filepath)
+        metadata = {k.decode(): v.decode() for k, v in (parquet_file.schema_arrow.metadata or {}).items()}
         self._refuse_legacy_formats(filepath.name, metadata)
 
         board_shape = tuple(int(d) for d in metadata["board_shape"].split(","))
         board_dtype = np.dtype(metadata["board_dtype"])
 
-        df = table.to_pandas()
+        # Stream row-group batches straight off the Arrow reader — no
+        # ``to_pandas``/``iterrows`` (which held Arrow + pandas + deque copies of
+        # the whole file at once and walked 800k rows pathologically slowly).
+        # Only one batch of raw bytes is resident beyond the growing deque.
         examples: deque[ProcessedExample] = deque()
-        for _, row in df.iterrows():
-            board = np.frombuffer(row["board"], dtype=board_dtype).reshape(board_shape).copy()
-            indices = np.frombuffer(row["policy_indices"], dtype=np.int32).copy()
-            values = np.frombuffer(row["policy_values"], dtype=np.float32).copy()
-            examples.append((board, (indices, values), float(row["value"])))
+        for batch in parquet_file.iter_batches():
+            for board_bytes, indices_bytes, values_bytes, value in zip(
+                batch.column("board").to_pylist(),
+                batch.column("policy_indices").to_pylist(),
+                batch.column("policy_values").to_pylist(),
+                batch.column("value").to_pylist(),
+                strict=True,
+            ):
+                board = np.frombuffer(board_bytes, dtype=board_dtype).reshape(board_shape).copy()
+                indices = np.frombuffer(indices_bytes, dtype=np.int32).copy()
+                values = np.frombuffer(values_bytes, dtype=np.float32).copy()
+                examples.append((board, (indices, values), float(value)))
 
         logger.info(f"Loaded {len(examples)} examples from {filepath.name}")
         return examples
