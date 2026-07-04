@@ -109,6 +109,49 @@ class _LazyPolicyDataset(Dataset):
         return board, pi, self._values[idx]
 
 
+class _LossWindow:
+    """On-device loss accumulator for the training hot loop.
+
+    Sums detached per-batch losses on the training device so the loop runs
+    free of forced host syncs; a single ``.item()`` trio happens per flush
+    (every ``log_every_batches`` batches). Window size 1 reproduces the
+    original per-batch behaviour exactly.
+    """
+
+    def __init__(self, device: torch.device) -> None:
+        self._device = device
+        self.batches = 0
+        self.examples = 0
+        self._pi = torch.zeros((), device=device)
+        self._v = torch.zeros((), device=device)
+        self._total = torch.zeros((), device=device)
+
+    def add(self, l_pi: Tensor, l_v: Tensor, total: Tensor, num_examples: int) -> None:
+        """Accumulate one batch's losses (detached — no graph retention)."""
+        self._pi += l_pi.detach().float()
+        self._v += l_v.detach().float()
+        self._total += total.detach().float()
+        self.batches += 1
+        self.examples += num_examples
+
+    def drain(self) -> tuple[float, float, float, int] | None:
+        """Sync + reset: ``(mean_pi, mean_v, mean_total, examples)``, or None if empty."""
+        if self.batches == 0:
+            return None
+        result = (
+            self._pi.item() / self.batches,
+            self._v.item() / self.batches,
+            self._total.item() / self.batches,
+            self.examples,
+        )
+        self.batches = 0
+        self.examples = 0
+        self._pi = torch.zeros((), device=self._device)
+        self._v = torch.zeros((), device=self._device)
+        self._total = torch.zeros((), device=self._device)
+        return result
+
+
 class BaseNNetWrapper(INeuralNetWrapper, ABC):
     """
     Base neural network wrapper implementing all shared training, prediction,
@@ -128,9 +171,60 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
 
         self._device = self._resolve_device()
         self.nnet.to(self._device)
+        self._apply_cuda_perf_settings()
+        # Forward passes (train + inference) go through this alias; it is the
+        # torch.compile-wrapped view of ``self.nnet`` when ``perf.compile`` is
+        # set, else ``self.nnet`` itself. ``self.nnet`` stays the module of
+        # record — state_dicts keep their normal (un-prefixed) keys, so
+        # checkpoints are interchangeable between compiled and eager runs.
+        self._forward_net: nn.Module = self._maybe_compile()
 
         self.optimizer = optim.Adam(self.nnet.parameters(), lr=self.net_config.learning_rate)
         self.scheduler: LRScheduler | None = self._create_scheduler()
+
+    def _maybe_compile(self) -> nn.Module:
+        """torch.compile the net when ``perf.compile`` is set, falling back to eager.
+
+        Guarded twice: a failure in ``torch.compile`` itself logs and returns the
+        eager module, and ``dynamo.suppress_errors`` turns any *runtime*
+        compilation failure (which only surfaces at the first forward) into a
+        per-graph eager fallback instead of a crashed (paid) run.
+        """
+        if not self.net_config.perf.compile:
+            return self.nnet
+        try:
+            import torch._dynamo
+
+            torch._dynamo.config.suppress_errors = True
+            compiled = torch.compile(self.nnet)
+        except Exception as err:
+            logger.warning("torch.compile failed ({}); continuing with the eager net.", err)
+            return self.nnet
+        logger.info("torch.compile enabled for the net's forward pass")
+        return cast("nn.Module", compiled)
+
+    def _apply_cuda_perf_settings(self) -> None:
+        """One-time opt-in CUDA perf toggles (``net_config.perf``); inert on CPU/MPS.
+
+        Guarded on the resolved device so a config with these knobs set is still
+        safe to load on the Mac — the defaults-off contract only has to hold in
+        one direction (defaults never change behaviour; explicit knobs never
+        break CPU runs).
+        """
+        perf = self.net_config.perf
+        if self._device.type != "cuda":
+            return
+        if perf.tf32:
+            # TF32 matmul/conv: ~2x tensor-core throughput on Ampere+ at
+            # negligible precision cost for a policy/value ResNet.
+            torch.set_float32_matmul_precision("high")
+            torch.backends.cudnn.allow_tf32 = True
+        if perf.cudnn_benchmark:
+            # Safe here: conv shapes are fixed (C×14×14 boards, fixed batch).
+            torch.backends.cudnn.benchmark = True
+        if perf.channels_last:
+            # torch's Module.to stubs miss the memory_format-only overload.
+            self.nnet.to(memory_format=torch.channels_last)  # type: ignore[call-overload]
 
     def _resolve_device(self) -> torch.device:
         """Pick the compute device.
@@ -165,6 +259,41 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
     def _create_network(self) -> nn.Module:
         """Create and return the game-specific neural network."""
         ...
+
+    @staticmethod
+    def _flush_loss_window(
+        window: _LossWindow,
+        pi_losses: AverageMeter,
+        v_losses: AverageMeter,
+        progress: tqdm,
+        metrics: MetricsCollector | None,
+        generation: int,
+        epoch: int,
+        batch_number: int,
+    ) -> None:
+        """Drain the on-device loss window into the meters/metrics/progress bar.
+
+        With the default window of 1 this runs every batch and reproduces the
+        original per-batch ``.item()`` + ``log_training`` behaviour exactly;
+        larger windows log the window mean under the window's last batch number
+        (same metrics schema, fewer rows and fewer forced GPU syncs).
+        """
+        drained = window.drain()
+        if drained is None:
+            return
+        mean_pi, mean_v, mean_total, num_examples = drained
+        pi_losses.update(mean_pi, num_examples)
+        v_losses.update(mean_v, num_examples)
+        progress.set_postfix(Loss_pi=pi_losses, Loss_v=v_losses)
+        if metrics:
+            metrics.log_training(
+                generation=generation,
+                epoch=epoch,
+                batch_number=batch_number,
+                pi_loss=mean_pi,
+                v_loss=mean_v,
+                total_loss=mean_total,
+            )
 
     def train(
         self,
@@ -220,6 +349,51 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         assert -1.0 <= sample_v <= 1.0, f"Value {sample_v} outside [-1, 1]"
         dataset = _LazyPolicyDataset(boards_np, raw_pis, vs_np, action_size, encode_fn)
 
+        # Opt-in training-perf knobs (net_config.perf). Everything defaults to
+        # off = the original fp32, in-process, per-batch-sync loop; CUDA-only
+        # knobs are inert on CPU so perf-enabled configs still load on the Mac.
+        perf = self.net_config.perf
+        on_cuda = self._device.type == "cuda"
+        use_autocast = on_cuda and perf.autocast_dtype != "off"
+        autocast_dtype = torch.bfloat16 if perf.autocast_dtype == "bf16" else torch.float16
+
+        def train_autocast() -> AbstractContextManager:
+            """Autocast context for the training forward+loss, or a no-op off CUDA."""
+            if use_autocast:
+                return torch.autocast(device_type="cuda", dtype=autocast_dtype)
+            return nullcontext()
+
+        # Loss scaling is only needed for fp16 (bf16 has fp32-like range).
+        scaler = torch.amp.GradScaler("cuda", enabled=use_autocast and perf.autocast_dtype == "fp16")
+        pin_memory = perf.pin_memory and on_cuda
+        # non_blocking copies only overlap with compute from pinned buffers.
+        non_blocking = pin_memory
+        worker_kwargs: dict[str, Any] = {}
+        if perf.dataloader_workers > 0:
+            # Worker processes take over the per-item hot path — densifying the
+            # full-action-space policy and encoding the compact board — which
+            # otherwise runs single-threaded on the main process and starves a
+            # fast GPU.
+            worker_kwargs = {
+                "num_workers": perf.dataloader_workers,
+                "persistent_workers": perf.persistent_workers,
+                "prefetch_factor": perf.prefetch_factor,
+            }
+        # Built once so persistent workers survive across epochs; iterating a
+        # shuffle=True loader reshuffles each epoch exactly as the old
+        # loader-per-epoch construction did.
+        loader = DataLoader(
+            dataset,
+            batch_size=self.net_config.batch_size,
+            shuffle=True,
+            pin_memory=pin_memory,
+            **worker_kwargs,
+        )
+        # Metric-sync cadence: 1 = the original per-batch .item() behaviour;
+        # N > 1 accumulates losses on-device and forces a sync only every N
+        # batches, logging the window mean (same metrics schema, fewer rows).
+        log_window = max(perf.log_every_batches, 1)
+
         # Full-pass training: every position in the buffer is trained on exactly
         # ``epochs`` times this generation (use all the data). Reuse over a
         # position's life is the emergent ``epochs × (B / num_eps)``, logged by
@@ -231,37 +405,36 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             pi_losses = AverageMeter()
             v_losses = AverageMeter()
 
-            loader = DataLoader(dataset, batch_size=self.net_config.batch_size, shuffle=True)
+            window = _LossWindow(self._device)
             t = tqdm(loader, desc="Training Net")
             for batch_number, (boards, target_pis, target_vs) in enumerate(t):
-                boards, target_pis, target_vs = (
-                    boards.to(self._device),
-                    target_pis.to(self._device),
-                    target_vs.to(self._device),
-                )
+                boards = boards.to(self._device, non_blocking=non_blocking)
+                target_pis = target_pis.to(self._device, non_blocking=non_blocking)
+                target_vs = target_vs.to(self._device, non_blocking=non_blocking)
+                if on_cuda and perf.channels_last:
+                    boards = boards.to(memory_format=torch.channels_last)
 
-                out_pi, out_v = self.nnet(boards)
-                l_pi = self.loss_pi(target_pis, out_pi)
-                l_v = self.loss_v(target_vs, out_v)
-                total_loss = l_pi + l_v
+                with train_autocast():
+                    out_pi, out_v = self._forward_net(boards)
+                    l_pi = self.loss_pi(target_pis, out_pi)
+                    l_v = self.loss_v(target_vs, out_v)
+                    total_loss = l_pi + l_v
 
-                pi_losses.update(l_pi.item(), boards.size(0))
-                v_losses.update(l_v.item(), boards.size(0))
-                t.set_postfix(Loss_pi=pi_losses, Loss_v=v_losses)
-
-                if metrics:
-                    metrics.log_training(
-                        generation=generation,
-                        epoch=epoch,
-                        batch_number=batch_number,
-                        pi_loss=l_pi.item(),
-                        v_loss=l_v.item(),
-                        total_loss=total_loss.item(),
-                    )
+                window.add(l_pi, l_v, total_loss, boards.size(0))
+                if window.batches >= log_window:
+                    self._flush_loss_window(window, pi_losses, v_losses, t, metrics, generation, epoch, batch_number)
 
                 self.optimizer.zero_grad()
-                total_loss.backward()
-                self.optimizer.step()
+                if scaler.is_enabled():
+                    scaler.scale(total_loss).backward()
+                    scaler.step(self.optimizer)
+                    scaler.update()
+                else:
+                    total_loss.backward()
+                    self.optimizer.step()
+
+            # Partial window at epoch end (only reachable when log_window > 1).
+            self._flush_loss_window(window, pi_losses, v_losses, t, metrics, generation, epoch, len(loader) - 1)
 
             if self.scheduler is not None:
                 self.scheduler.step()
@@ -337,7 +510,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 boards_chunk = eval_set.boards[chunk_start:end]
                 tensor = torch.tensor(boards_chunk, dtype=torch.float32)
                 tensor = tensor.to(self._device)
-                log_pi, v = self.nnet(tensor)
+                log_pi, v = self._forward_net(tensor)
                 pi = torch.exp(log_pi)
 
                 # Entropy per row.
@@ -421,7 +594,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         tensor = tensor.to(self._device)
         self.nnet.eval()
         with torch.no_grad(), self._inference_autocast():
-            log_pi, v = self.nnet(tensor)
+            log_pi, v = self._forward_net(tensor)
 
         # .float() casts back from fp16 (if autocast was active) so downstream
         # code always sees float32; a no-op when inference ran in float32.
