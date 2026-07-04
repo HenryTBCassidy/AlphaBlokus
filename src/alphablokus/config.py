@@ -213,6 +213,26 @@ class NetConfig:
 
 
 @dataclass(frozen=True)
+class ObjectStoreConfig:
+    """S3-compatible object storage for run artefacts (opt-in).
+
+    When present on ``RunConfig``, checkpoints/metrics/reports sync to the
+    bucket after every completed generation and ``--resume`` can rebuild the
+    local run directory from it — so a terminated cloud instance loses at most
+    its in-flight generation. Absent (the default) means pure local-FS
+    behaviour. Works against any S3-compatible endpoint (AWS S3, Cloudflare
+    R2, MinIO, a neocloud's store); credentials come from the standard
+    ``AWS_ACCESS_KEY_ID``/``AWS_SECRET_ACCESS_KEY`` env chain, never from run
+    JSON. Requires the ``s3`` extra (``uv sync --extra s3``).
+    """
+
+    bucket: str  # bucket name
+    prefix: str | None = None  # key prefix; None = mirror the local layout (runs/<group>/<run_name>)
+    endpoint_url: str | None = None  # None = AWS S3; else any S3-compatible endpoint URL
+    region: str | None = None  # region name, where the endpoint needs one
+
+
+@dataclass(frozen=True)
 class WandbConfig:
     """Configuration parameters for Weights & Biases logging.
 
@@ -289,6 +309,10 @@ class RunConfig:
 
     # Optional reporting backends
     wandb: WandbConfig | None = None  # If set, mirror metrics to Weights & Biases
+
+    # Optional S3-compatible artefact sync + remote resume; None (default) =
+    # local filesystem only. See ``ObjectStoreConfig``.
+    object_store: ObjectStoreConfig | None = None
 
     # Elo evaluation: number of games per generation to play vs the frozen
     # gen-0 baseline. 0 disables Elo tracking entirely. The default of 50 is
