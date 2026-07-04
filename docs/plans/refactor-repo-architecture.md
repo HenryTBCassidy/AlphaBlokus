@@ -51,8 +51,8 @@ This plan restructures the whole repository into a modern, installable `src/alph
 | R37 | 7 | Rewrite `docs/guides/AI-CONTEXT.md` (five factually wrong claims) | JUDGE | 1 h | High | ✅ |
 | R38 | 7 | Freshness fixes to numbered docs: 02, 03, 06, 07, 08, 09 | JUDGE | 2 h | Medium | ✅ |
 | R39 | 7 | Guides + IDEAS refresh: STYLE-GUIDE (layout/tooling section), REMOTE-TRAINING (new commands), IDEAS.md (I1/I3 partially shipped), broken-link sweep | JUDGE | 1.5 h | Medium | ✅ |
-| R40 | 8 | Full verification: complete suite incl. `slow` + jax extra; end-to-end `test_run.json` and a jax CPU config; render both reports; load a pre-refactor checkpoint | MECH | 1 h | High | |
-| R41 | 8 | Box validation: quick GPU run (python + jax gumbel), `pentobi_benchmark` sanity, `fetch_run_reports.sh` | MECH | 1 h | High | |
+| R40 | 8 | Full verification: complete suite incl. `slow` + jax extra; end-to-end `test_run.json` and a jax CPU config; render both reports; load a pre-refactor checkpoint | MECH | 1 h | High | ✅ |
+| R41 | 8 | Box validation: quick GPU run (python + jax gumbel), `pentobi_benchmark` sanity, `fetch_run_reports.sh` | MECH | 1 h | High | Deferred |
 | R42 | 8 | Archive this plan | MECH | 10 min | High | |
 
 > **Execution note (R6/R8):** R8 landed inside the R6 commit rather than separately — the move itself broke ~25 divergent `pieces.json` path resolutions (repo-root- and CWD-relative), so committing the move without the accessor would have produced a red commit. The accessor is `alphablokus.games.blokusduo.pieces.default_pieces_path()`.
@@ -60,6 +60,17 @@ This plan restructures the whole repository into a modern, installable `src/alph
 **Phase boundaries (suite green, PR merged):** Phase 0 = safety net on the old layout · 1 = the package exists · 2 = `core/` fully dissolved · 3 = games/reporting internal shape · 4 = tests mirror source · 5 = typing/style complete · 6 = scripts/configs · 7 = docs · 8 = verification + close.
 
 ---
+
+## Scope additions (work done beyond the original rows)
+
+- **Ruff 0.15 lint debt (R4):** standing up CI surfaced 66 pre-existing violations (TYPE_CHECKING imports, unused imports/vars, zip-strict, line length); all fixed so lint could gate from day one.
+- **`IPolicyValuePredictor` protocol (R28):** the strict ratchet exposed that MCTS and the inference-server client only need the inference surface; the new protocol types server-mode workers honestly and slims MCTS's dependency.
+- **`IOracle` protocol + `registry.resolve_oracle` (R17):** the TTT-specific eval extraction needed a seam; oracle capability is now a first-class optional per-game interface.
+- **Generic `IBoardRenderer[TBoard_contra]` (R28):** same narrowing fix as `IGame`, discovered when renderers gained explicit protocol subclassing.
+- **`pipeline_check` rename (R33):** `smoke_test*` configs and run names renamed per house terminology.
+- **Deprecated `render_top_k_moves_html` deleted in R28** (planned for R31) — explicit Protocol subclassing made the unimplemented TTT variant a hard error.
+- **Branch cleanup finding (R2):** `feat/pentobi-harness` kept locally — it carries one unmerged commit (Pentobi eval decorrelation via opening temperature + per-game reseed) worth reviewing separately.
+- **Checkpoint-filename finding (R32):** the audit's "benchmark scripts write scratch checkpoints into CWD" was wrong — `save_checkpoint(filename=...)` resolves into the run's `Nets/` directory; no change made.
 
 ## Design decisions
 
@@ -465,9 +476,21 @@ Five audited falsehoods to purge: "no parallel MCTS yet" (F1 shipped), "move gen
 
 On the Mac: `uv run pytest` (full, incl. slow) with base extras, then with `--extra jax`; `uv run alphablokus --config run_configurations/test_run.json` end-to-end; a short jax CPU config (e.g. a 1-gen variant of `ab_jax_10`) end-to-end; `--report-only` against an **existing pre-refactor run directory** in `temp/` (proves parquet + report compatibility); load a pre-refactor checkpoint through `load_checkpoint` (proves checkpoint compatibility). Record results in the PR description.
 
+> **R40 results (2026-07-04, Mac):** full suite incl. slow + jax extra — **341 passed, 1 skipped**; `test_run.json` and `pipeline_check.json` end-to-end via `uv run alphablokus`; 1-gen jax CPU config end-to-end (self-play → train → arena → Elo → report, 46s); `--report-only` rendered from the pre-refactor `blokus_linux_15` run directory; its June CUDA checkpoint loads and predicts on CPU through the refactored package.
+>
+> **Finding (pre-existing, NOT a regression):** a degenerate config (16 MCTS sims, tiny net, 16 CPU arena workers) trips `Arena`'s invalid-move assertion in the parallel arena. Reproduced **identically on pre-refactor `main`** in a worktree, so it predates this work. Serial arena with the same net is fine. Worth its own investigation before any run that drops sims that low.
+
 ## R41. Box validation
 
-On gpu-linux: pull, `uv sync --extra jax-cuda`, quick GPU configs — one python-backend (`blokus_quicktest`) and one jax gumbel (`blokus_jax_gumbel_30` trimmed) — then `scripts/pentobi_benchmark.py` at a low level for a handful of games (the binary lives on the box), and `scripts/fetch_run_reports.sh` to confirm the operational loop end-to-end. This is the only place the CUDA path and Pentobi integration are truly exercised.
+> **Deferred (box unavailable throughout execution — same constraint that deferred oom-hardening).** Run this checklist the moment the box is back, BEFORE the next real training run:
+>
+> 1. `git pull && uv sync --extra jax-cuda`
+> 2. `uv run alphablokus --config run_configurations/blokus_quicktest.json` (python backend, CUDA)
+> 3. A 2–3 gen trim of `run_configurations/blokus_jax_gumbel_30.json` (jax gumbel, CUDA)
+> 4. `uv run python -m scripts.pentobi_benchmark --level 1` for a handful of games (binary lives on the box)
+> 5. `scripts/fetch_run_reports.sh` for the runs above
+>
+> This is the only place the CUDA path and Pentobi integration are truly exercised; everything else was verified on the Mac (CPU + jax-CPU, incl. parity suites) and in CI.
 
 ## R42. Archive this plan
 
