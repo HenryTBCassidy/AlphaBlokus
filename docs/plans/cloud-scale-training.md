@@ -34,7 +34,7 @@ bit-identically unless a flag opts in; JAX/torch CUDA coexistence preserved; CI 
 | C9 | `docs/guides/CLOUD-TRAINING.md` runbook (rent box → pull image → mount → launch → resume → fetch) | 1.5 h | High | |
 | C10 | Calibration tool `scripts/benchmarks/cloud_calibration.py` (net size → games/s, s/gen, £/gen, budget fit) | 3 h | High | ✅ |
 | C11 | Pentobi ladder instrumentation: checkpoint-ladder mode + JSON results + ladder section in the HTML report | 2.5 h | Medium | ✅ |
-| C12 | Cloud run-config family: `blokus_cloud.json` + `blokus_cloud_calibration.json` | 1 h | High | |
+| C12 | Cloud run-config family: `blokus_cloud.json` + `blokus_cloud_calibration.json` | 1 h | High | ✅ |
 | C13 | Recommendation doc: card class, net size, full config for ~£100, staged ladder plan, cost beyond £100 | 2 h | High | |
 | C14 | Verify defaults unchanged (Mac CPU test run), full CI gates, open PR | 1.5 h | High | |
 
