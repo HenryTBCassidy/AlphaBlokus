@@ -11,19 +11,25 @@ OOM-killed 10k-game generations; see ``docs/plans/oom-hardening.md`` O1/O2).
 from __future__ import annotations
 
 from collections import deque
+from itertools import islice
 from typing import TYPE_CHECKING
 
 import numpy as np
-import pandas as pd
 import pyarrow as pa
 import pyarrow.parquet as pq
 from loguru import logger
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Iterable
     from pathlib import Path
 
     from alphablokus.selfplay.episode import ProcessedExample
+
+# Rows per parquet row-group written by :meth:`SelfPlayStore.save`. Chunked so
+# only one row-group of serialised bytes is ever in RAM (a whole 10k-game
+# generation as one table was a ~1.5–2 GB transient). At ~1–2 KB per sparse
+# row this is ~50–100 MB per chunk.
+_SAVE_ROW_GROUP_SIZE = 50_000
 
 
 class SelfPlayStore:
@@ -64,17 +70,22 @@ class SelfPlayStore:
 
     def save(
         self,
-        examples: Sequence[ProcessedExample],
+        examples: Iterable[ProcessedExample],
         generation: int,
         policy_size: int,
         game_sizes: list[int] | None = None,
     ) -> None:
         """Save one generation's self-play examples to a parquet file.
 
+        The write is streamed in row-group chunks of ``_SAVE_ROW_GROUP_SIZE``
+        positions via :class:`pyarrow.parquet.ParquetWriter`, so only one
+        chunk's serialised bytes are ever in RAM — never a whole-generation
+        table.
+
         Args:
             examples: The generation's training examples (flat, in game order),
                 with sparse ``(indices, values)`` policies — persisted as-is,
-                never densified.
+                never densified. Consumed lazily; any iterable works.
             generation: Generation number (used in the filename).
             policy_size: Length of the dense action space the sparse policies
                 index into. Stored in the schema metadata so consumers can
@@ -85,25 +96,14 @@ class SelfPlayStore:
                 games-sized replay buffer can be reconstructed on resume. When
                 ``None``, game boundaries are not recorded.
         """
-        if not examples:
+        iterator = iter(examples)
+        first_chunk = list(islice(iterator, _SAVE_ROW_GROUP_SIZE))
+        if not first_chunk:
             return
 
         self._directory.mkdir(parents=True, exist_ok=True)
 
-        df = pd.DataFrame(
-            {
-                "board": [board.tobytes() for board, _pi, _value in examples],
-                "policy_indices": [
-                    np.ascontiguousarray(indices, dtype=np.int32).tobytes() for _b, (indices, _v), _value in examples
-                ],
-                "policy_values": [
-                    np.ascontiguousarray(values, dtype=np.float32).tobytes() for _b, (_i, values), _value in examples
-                ],
-                "value": [float(value) for _b, _pi, value in examples],
-            }
-        )
-
-        sample_board = examples[0][0]
+        sample_board = first_chunk[0][0]
         metadata = {
             "board_kind": self.BOARD_KIND,
             "board_shape": ",".join(str(d) for d in sample_board.shape),
@@ -114,16 +114,25 @@ class SelfPlayStore:
         if game_sizes is not None:
             metadata["game_sizes"] = ",".join(str(s) for s in game_sizes)
 
-        table = pa.Table.from_pandas(df)
-        merged_metadata = {
-            **(table.schema.metadata or {}),
-            **{k.encode(): v.encode() for k, v in metadata.items()},
-        }
-        table = table.replace_schema_metadata(merged_metadata)
+        schema = pa.schema(
+            [
+                pa.field("board", pa.binary()),
+                pa.field("policy_indices", pa.binary()),
+                pa.field("policy_values", pa.binary()),
+                pa.field("value", pa.float64()),
+            ],
+            metadata={k.encode(): v.encode() for k, v in metadata.items()},
+        )
 
         filepath = self._directory / self._filename(generation)
-        pq.write_table(table, filepath)
-        logger.info(f"Saved {len(df)} self-play examples to {filepath.name}")
+        num_rows = 0
+        with pq.ParquetWriter(filepath, schema) as writer:
+            chunk = first_chunk
+            while chunk:
+                writer.write_table(self._chunk_table(chunk, schema))
+                num_rows += len(chunk)
+                chunk = list(islice(iterator, _SAVE_ROW_GROUP_SIZE))
+        logger.info(f"Saved {num_rows} self-play examples to {filepath.name}")
 
     def load(self, generation: int) -> deque[ProcessedExample] | None:
         """Load a single generation's self-play examples from a parquet file.
@@ -243,6 +252,23 @@ class SelfPlayStore:
             last_file_index,
         )
         return buffer
+
+    @staticmethod
+    def _chunk_table(chunk: list[ProcessedExample], schema: pa.Schema) -> pa.Table:
+        """Serialise one row-group chunk of examples to an Arrow table."""
+        return pa.Table.from_pydict(
+            {
+                "board": [board.tobytes() for board, _pi, _value in chunk],
+                "policy_indices": [
+                    np.ascontiguousarray(indices, dtype=np.int32).tobytes() for _b, (indices, _v), _value in chunk
+                ],
+                "policy_values": [
+                    np.ascontiguousarray(values, dtype=np.float32).tobytes() for _b, (_i, values), _value in chunk
+                ],
+                "value": [float(value) for _b, _pi, value in chunk],
+            },
+            schema=schema,
+        )
 
     def _refuse_legacy_formats(self, filename: str, metadata: dict[str, str]) -> None:
         """Refuse legacy on-disk formats explicitly rather than misreading bytes.
