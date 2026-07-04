@@ -215,11 +215,29 @@ class MCTS:
             nonzero = raw_probs[raw_probs > 0]
             self._policy_entropies.append(float(-np.sum(nonzero * np.log(nonzero))))
 
-        # Handle temperature=0 case (deterministic best action)
+        # Degenerate budget guard: when num_mcts_sims <= mcts_batch_size, the
+        # entire budget is consumed by the root-expansion batch (descents from
+        # an unexpanded root have empty paths, so no edge is ever visited) and
+        # ``counts`` is all-zero. Selecting over the raw vector would then tie
+        # across the FULL action space — illegal actions included. Restrict to
+        # the root's legal actions so the move is always legal (uniform-random
+        # play is the honest behaviour when search produced no signal).
+        if raw_total == 0:
+            legal = self._root_legal_actions(canonical_board)
+            probs: list[float] = [0.0] * len(counts)
+            if temp == 0:
+                probs[int(np.random.choice(legal))] = 1.0
+            else:
+                for action in legal:
+                    probs[int(action)] = 1.0 / len(legal)
+            return probs
+
+        # Handle temperature=0 case (deterministic best action). Ties can only
+        # occur between visited (hence legal) actions because raw_total > 0.
         if temp == 0:
             best_actions = np.array(np.argwhere(counts == np.max(counts))).flatten()
             best_action = np.random.choice(best_actions)
-            probs: list[float] = [0.0] * len(counts)
+            probs = [0.0] * len(counts)
             probs[best_action] = 1.0
             return probs
 
@@ -242,6 +260,14 @@ class MCTS:
         if root is not None:
             counts[root.acts] = root.n
         return counts
+
+    def _root_legal_actions(self, canonical_board: IBoard) -> NDArray[np.int32]:
+        """Legal action ids at the root, from the expanded node when available."""
+        node = self.nodes.get(self.game.state_key(canonical_board))
+        if node is not None:
+            return node.acts
+        valids = self.game.valid_move_masking(canonical_board, 1)
+        return np.flatnonzero(valids).astype(np.int32)
 
     def num_states(self) -> int:
         """Number of expanded states in the search tree (old ``len(state_visits)``)."""

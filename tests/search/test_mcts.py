@@ -90,3 +90,40 @@ def test_mcts_tree_grows(
 
     assert mcts_instance.num_states() > 0
     assert all(node.priors.size > 0 for node in mcts_instance.nodes.values())
+
+
+def test_zero_visit_root_still_plays_legal_moves(ttt_game, net_config):
+    """Regression: num_mcts_sims <= mcts_batch_size leaves the root with zero
+    edge visits (the whole budget is consumed expanding the root), which used
+    to make temperature selection tie across the FULL action space — illegal
+    actions included (the arena invalid-move crash). The distribution must
+    stay inside the legal actions even when search produced no signal."""
+    from alphablokus.config import MCTSConfig, RunConfig
+    from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
+
+    config = RunConfig(
+        game="tictactoe",
+        run_name="zero_visit_root",
+        num_generations=1,
+        num_eps=1,
+        temp_threshold=5,
+        update_threshold=0.55,
+        num_arena_matches=2,
+        root_directory="./temp/",
+        load_model=False,
+        mcts_config=MCTSConfig(num_mcts_sims=16, cpuct=2.5, mcts_batch_size=16),
+        net_config=net_config,
+    )
+    nnet = NNetWrapper(ttt_game, config)
+    board = ttt_game.initialise_board().canonical(1)
+    legal = set(np.flatnonzero(ttt_game.valid_move_masking(board, 1)))
+
+    for temp in (0.0, 1.0):
+        mcts = MCTS(ttt_game, nnet, config.mcts_config)
+        probs = np.asarray(mcts.get_action_prob(board, temp=temp))
+        root = mcts.nodes[ttt_game.state_key(board)]
+        assert root.n.sum() == 0, "degenerate budget should leave zero root visits"
+        support = set(np.flatnonzero(probs))
+        assert support, "distribution must not be empty"
+        assert support <= legal, f"probability mass on illegal actions: {support - legal}"
+        assert probs.sum() == pytest.approx(1.0)
