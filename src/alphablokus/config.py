@@ -98,6 +98,57 @@ class JaxSelfPlayConfig:
 
 
 @dataclass(frozen=True)
+class TrainingPerfConfig:
+    """Opt-in performance knobs for the torch **training** loop.
+
+    Everything here defaults to "off" = today's behaviour, so existing configs
+    (and the Mac CPU dev path) are bit-identical unless a run opts in. CUDA-only
+    knobs are inert on CPU — setting them in a CPU config is harmless. Sized for
+    a single fast cloud GPU where the unmodernised fp32 single-threaded loop
+    would leave the card starved (docs/plans/cloud-scale-training.md C2/C3).
+    """
+
+    # Mixed-precision autocast for the training forward+loss. "bf16" is the
+    # right choice on Ampere+ (no GradScaler needed, fp32-like dynamic range);
+    # "fp16" is the fallback for older cards and runs under a GradScaler.
+    # "off" (default) trains in fp32 exactly as before. CUDA only.
+    autocast_dtype: Literal["off", "bf16", "fp16"] = "off"
+
+    # TF32 matmul/conv (torch.set_float32_matmul_precision("high") +
+    # cudnn.allow_tf32). Free ~2x matmul throughput on Ampere+ at negligible
+    # precision cost for this workload. CUDA only.
+    tf32: bool = False
+
+    # cudnn autotuner. Safe and profitable here: conv shapes are fixed
+    # (44×14×14 boards, fixed batch size). CUDA only.
+    cudnn_benchmark: bool = False
+
+    # channels_last memory format for the conv net + training batches —
+    # enables tensor-core-friendly NHWC kernels. CUDA only.
+    channels_last: bool = False
+
+    # torch.compile on the net. Guarded: compile failure logs a warning and
+    # falls back to eager, and checkpoints are always saved from the original
+    # (uncompiled) module so they stay interchangeable.
+    compile: bool = False
+
+    # DataLoader parallelism. 0 (default) loads in-process exactly as before.
+    # >0 moves the per-item work — densifying 17,837-length policies and encoding
+    # compact boards to (44, 14, 14) planes — into worker processes, which is
+    # what keeps a fast GPU fed. Portable (CPU or CUDA).
+    dataloader_workers: int = 0
+    pin_memory: bool = False  # page-locked host buffers (enables true async H2D copies)
+    persistent_workers: bool = False  # keep workers alive across epochs (skip respawn cost)
+    prefetch_factor: int = 2  # batches each worker keeps ready (used only when workers > 0)
+
+    # Per-batch metric cadence. 1 (default) = today's behaviour: a CUDA sync
+    # (.item()) and a metrics row every batch. N>1 accumulates losses on-device
+    # and syncs/logs once every N batches (the logged row carries the mean of
+    # the window), keeping the hot loop free of forced syncs.
+    log_every_batches: int = 1
+
+
+@dataclass(frozen=True)
 class NetConfig:
     """Configuration parameters for the neural network.
 
@@ -132,6 +183,11 @@ class NetConfig:
     # Set "fc" to restore the original fully-connected head (e.g. to load an
     # old FC checkpoint — the two head state_dicts are incompatible).
     policy_head: Literal["fc", "conv"] = "conv"
+
+    # Opt-in training-loop performance knobs (autocast, TF32, channels_last,
+    # torch.compile, DataLoader workers, metric-sync cadence). Every field
+    # defaults to "off" = current behaviour; see ``TrainingPerfConfig``.
+    perf: TrainingPerfConfig = field(default_factory=TrainingPerfConfig)
 
 
 @dataclass(frozen=True)
