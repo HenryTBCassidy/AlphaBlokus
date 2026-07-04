@@ -28,8 +28,8 @@ bit-identically unless a flag opts in; JAX/torch CUDA coexistence preserved; CI 
 | C3 | Modernize `train()`: autocast bf16/fp16 + GradScaler, TF32, cudnn.benchmark, channels_last, DataLoader workers/pin_memory/prefetch, non_blocking copies, on-device loss accumulation | 3 h | High | ✅ |
 | C4 | `torch.compile` on the net, guarded with fallback on failure | 1 h | High | ✅ |
 | C5 | Net-size presets (named filters×blocks recipes) + param-count helper + scaling tests | 1.5 h | High | ✅ |
-| C6 | S3-compatible object store client + `ObjectStoreConfig` (opt-in, local FS default) | 3 h | High | |
-| C7 | Wire sync into the run loop (per-generation + final) and `--resume` from object storage | 2 h | High | |
+| C6 | S3-compatible object store client + `ObjectStoreConfig` (opt-in, local FS default) | 3 h | High | ✅ |
+| C7 | Wire sync into the run loop (per-generation + final) and `--resume` from object storage | 2 h | High | ✅ |
 | C8 | CUDA Dockerfile on uv (`jax-cuda` + torch CUDA), entrypoint, .dockerignore; verify build + `test_run.json` end-to-end | 2.5 h | High | |
 | C9 | `docs/guides/CLOUD-TRAINING.md` runbook (rent box → pull image → mount → launch → resume → fetch) | 1.5 h | High | |
 | C10 | Calibration tool `scripts/benchmarks/cloud_calibration.py` (net size → games/s, s/gen, £/gen, budget fit) | 3 h | High | |

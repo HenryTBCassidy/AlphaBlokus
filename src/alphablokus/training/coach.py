@@ -23,6 +23,7 @@ from alphablokus.storage.metrics import (
     EvalSet,
     MetricsCollector,
 )
+from alphablokus.storage.object_store import create_object_store, sync_up_guarded
 from alphablokus.training.diagnostics import check_ram_budget, get_memory_snapshot
 from alphablokus.training.eval_set import build_or_load_eval_set
 from alphablokus.training.replay_buffer import ReplayBuffer
@@ -117,6 +118,13 @@ class Coach:
         self.replay_buffer = ReplayBuffer(config, game)
         self._oracle = resolve_oracle(config, game)
         self.metrics = MetricsCollector(config=config, resume_wandb_run_id=resume_wandb_run_id)
+
+        # Optional S3-compatible mirror of the run directory; None (default)
+        # keeps pure local-FS behaviour. Synced after every completed
+        # generation (see ``_write_progress_marker``) so a killed cloud
+        # instance loses at most its in-flight generation. Public so the CLI
+        # can reuse the same (incremental) store for the final post-report sync.
+        self.object_store = create_object_store(config)
 
         # Frozen held-out positions for per-epoch network diagnostics (policy
         # entropy, top-K accuracy, value calibration). Built lazily from gen
@@ -342,6 +350,11 @@ class Coach:
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload), encoding="utf-8")
         os.replace(tmp, path)
+
+        # Everything this generation produced (checkpoints, parquet, the marker
+        # itself) is now on local disk — mirror it. Best-effort by design:
+        # object-storage trouble never kills training.
+        sync_up_guarded(self.object_store, self.config.run_directory, f"generation {generation}")
 
     def load_self_play_history_for_resume(self, last_completed_generation: int) -> None:
         """Refill the rolling replay buffer to resume training at ``last + 1``."""
