@@ -42,12 +42,19 @@ _DRAW_VALUE = 1e-4
 
 @dataclass
 class _OpenGame:
-    """Positions of a not-yet-finished game in one actor slot."""
+    """Positions of a not-yet-finished game in one actor slot.
+
+    Policies are buffered as the trace's raw top-K ``(action_ids, weights)``
+    pairs (≤ ``top_k`` nonzeros, ~1 KB) rather than dense 17,837-float vectors
+    (~71 KB): with ``batch_size`` slots each holding a whole game's positions,
+    dense buffering cost ~760 MB resident at batch 256 plus one
+    ``np.zeros(17837)`` per ply×slot of alloc churn. Densification happens
+    transiently per position in ``TraceHarvester._finish_game``.
+    """
 
     boards: list[np.ndarray] = field(default_factory=list)  # canonical (14,14) int8
     players: list[int] = field(default_factory=list)
-    policies: list[np.ndarray] = field(default_factory=list)  # dense float32 (A,)
-    entropies: list[float] = field(default_factory=list)
+    policies: list[tuple[np.ndarray, np.ndarray]] = field(default_factory=list)  # (top-K ids, float32 weights)
 
 
 @dataclass
@@ -95,14 +102,12 @@ class TraceHarvester:
                 assert move_count[t, b] == len(slot.boards), (
                     f"slot {b} trace desync: move_count {move_count[t, b]} vs buffered {len(slot.boards)}"
                 )
-                dense = np.zeros(self._action_size, dtype=np.float32)
-                np.add.at(dense, topk_ids[t, b], weights[t, b])
                 canonical = (ppb[t, b].astype(np.int8) * mover).reshape(_BOARD_SIZE, _BOARD_SIZE)
                 slot.boards.append(canonical)
                 slot.players.append(mover)
-                slot.policies.append(dense)
-                nonzero = dense[dense > 0]
-                slot.entropies.append(float(-(nonzero * np.log(nonzero)).sum()))
+                # Keep the raw top-K pair; ``.copy()`` detaches from the wave
+                # trace arrays so they can be freed once the harvest returns.
+                slot.policies.append((topk_ids[t, b].copy(), weights[t, b].copy()))
                 if terminated[t, b]:
                     completed.append(self._finish_game(slot, float(result_white[t, b]), int(end_player[t, b])))
                     self._slots[b] = _OpenGame()
@@ -110,12 +115,21 @@ class TraceHarvester:
 
     def _finish_game(self, slot: _OpenGame, result_white: float, end_player: int) -> HarvestedGame:
         examples: list[ProcessedExample] = []
+        entropies: list[float] = []
         is_draw = abs(result_white) < 0.5  # results are ±1.0 or the ~1e-4 draw sentinel (float32)
-        for board, mover, dense in zip(slot.boards, slot.players, slot.policies, strict=True):
+        for board, mover, (action_ids, action_weights) in zip(slot.boards, slot.players, slot.policies, strict=True):
             if is_draw:
                 value = _DRAW_VALUE if mover == end_player else -_DRAW_VALUE
             else:
                 value = float(np.sign(result_white)) if mover == 1 else -float(np.sign(result_white))
+            # Densify transiently — one position at a time — where the entropy
+            # and transpose permutation need the full vector. ``np.add.at``
+            # accumulates any duplicate ids exactly as the append-time scatter
+            # used to.
+            dense = np.zeros(self._action_size, dtype=np.float32)
+            np.add.at(dense, action_ids, action_weights)
+            nonzero = dense[dense > 0]
+            entropies.append(float(-(nonzero * np.log(nonzero)).sum()))
             transposed_board = board.T.copy()
             transposed_pi = dense[self._transpose_perm]
             examples.append((board, sparsify(dense), float(value)))
@@ -123,7 +137,7 @@ class TraceHarvester:
         return HarvestedGame(
             examples=examples,
             num_moves=len(slot.boards),
-            mean_policy_entropy=float(np.mean(slot.entropies)) if slot.entropies else 0.0,
+            mean_policy_entropy=float(np.mean(entropies)) if entropies else 0.0,
         )
 
     def finalize(self) -> None:

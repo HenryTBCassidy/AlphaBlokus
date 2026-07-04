@@ -33,7 +33,7 @@ This plan fixes the recurring out-of-memory crashes on the 32 GB box (most recen
 | O1 | Store self-play **policy sparse** on disk; drop the densify in `save_self_play_history`; add `policy_kind` marker | 2-3 h | High | ✅ |
 | O2 | Sparse read + resume: `load`/`load_recent_games` return sparse (match live buffer); drop `to_pandas`/`iterrows` | 2-3 h | High | ✅ |
 | O3 | Stream the parquet write in row-group chunks (`ParquetWriter`) — no whole-generation table in RAM | 1-1.5 h | Medium | ✅ |
-| O4 | Sparsify JAX harvester policy at append (kill per-position dense 17,837 + `np.zeros` churn) | 1-1.5 h | Medium | |
+| O4 | Sparsify JAX harvester policy at append (kill per-position dense 17,837 + `np.zeros` churn) | 1-1.5 h | Medium | ✅ |
 | O5 | Cap JAX VRAM via `XLA_PYTHON_CLIENT_MEM_FRACTION` on the shared 8 GB card | 30-45 m | Medium | |
 | O6 | Stream completed games into the buffer instead of accumulating the whole generation | 2-3 h | Medium | |
 | O7 | Partition-filtered ArenaReplays reads (report + `scripts/replay.py`) | 1-1.5 h | Medium | |
