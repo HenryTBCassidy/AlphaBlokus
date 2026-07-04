@@ -33,6 +33,11 @@ if TYPE_CHECKING:
     from alphablokus.storage.metrics import EvalSet, MetricsCollector
 
 
+def count_parameters(net: nn.Module) -> int:
+    """Total trainable parameter count — the net-size number quoted in docs/reports."""
+    return sum(p.numel() for p in net.parameters() if p.requires_grad)
+
+
 class AverageMeter:
     """
     Computes and stores the average and current value.

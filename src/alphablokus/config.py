@@ -12,6 +12,22 @@ from dataclass_wizard import fromdict
 # temp/runs/tictactoe/…) rather than a flat pile. Unknown games → "other".
 _GAME_GROUPS: dict[str, str] = {"blokusduo": "blokus", "tictactoe": "tictactoe"}
 
+# Named net-size recipes: the budget-vs-strength knob for cloud runs
+# (docs/plans/cloud-scale-training.md C5). A JSON ``net_config`` may say
+# ``"preset": "large"`` instead of spelling out filters/blocks; explicit
+# ``num_filters``/``num_residual_blocks`` keys always win over the preset.
+# VRAM is not the constraint for this workload (44×14×14 activations are
+# tiny) — the ceiling is what the run budget can train to usefulness.
+#   small  = today's production net; medium = run3's "bignet";
+#   large/xl = cloud-scale candidates (xl ≈ AlphaGo Zero's 256 filters at
+#   14×14 depth-scaled). Throughput per size: scripts/benchmarks/cloud_calibration.py.
+NET_PRESETS: dict[str, dict[str, int]] = {
+    "small": {"num_filters": 64, "num_residual_blocks": 4},
+    "medium": {"num_filters": 128, "num_residual_blocks": 8},
+    "large": {"num_filters": 192, "num_residual_blocks": 12},
+    "xl": {"num_filters": 256, "num_residual_blocks": 16},
+}
+
 
 @dataclass(frozen=True)
 class MCTSConfig:
@@ -188,6 +204,12 @@ class NetConfig:
     # torch.compile, DataLoader workers, metric-sync cadence). Every field
     # defaults to "off" = current behaviour; see ``TrainingPerfConfig``.
     perf: TrainingPerfConfig = field(default_factory=TrainingPerfConfig)
+
+    # Record of the ``NET_PRESETS`` name this config was built from, if any.
+    # Resolution happens in ``load_args`` (the preset fills
+    # ``num_filters``/``num_residual_blocks`` unless the JSON sets them
+    # explicitly); this field is informational so run artefacts show intent.
+    preset: str | None = None
 
 
 @dataclass(frozen=True)
@@ -501,4 +523,23 @@ def load_args(config_path: str | Path) -> RunConfig:
     with open(config_path) as f:
         args_json = json.load(f)
 
+    _resolve_net_preset(args_json)
     return fromdict(RunConfig, args_json)
+
+
+def _resolve_net_preset(args_json: dict) -> None:
+    """Fill ``net_config`` size fields from a named preset, in place.
+
+    Explicit ``num_filters``/``num_residual_blocks`` keys in the JSON win over
+    the preset's values, so a preset is a starting point, not a straitjacket.
+    """
+    net_json = args_json.get("net_config")
+    if not isinstance(net_json, dict):
+        return
+    preset_name = net_json.get("preset")
+    if preset_name is None:
+        return
+    if preset_name not in NET_PRESETS:
+        raise ValueError(f"Unknown net preset {preset_name!r}. Expected one of {sorted(NET_PRESETS)}.")
+    for key, value in NET_PRESETS[preset_name].items():
+        net_json.setdefault(key, value)

@@ -57,6 +57,43 @@ def test_net_config_fields():
     assert config.net_config.num_residual_blocks == 1
 
 
+def _write_config_with_net(tmp_path, net_config: dict):
+    """test_run.json with its net-size keys dropped and ``net_config`` merged in."""
+    raw = json.loads(Path("run_configurations/test_run.json").read_text())
+    base = {k: v for k, v in raw["net_config"].items() if k not in ("num_filters", "num_residual_blocks")}
+    raw["net_config"] = {**base, **net_config}
+    path = tmp_path / "cfg.json"
+    path.write_text(json.dumps(raw))
+    return path
+
+
+def test_net_preset_fills_size_fields(tmp_path):
+    """ "preset": "large" supplies num_filters/num_residual_blocks."""
+    raw = json.loads(Path("run_configurations/test_run.json").read_text())
+    del raw["net_config"]["num_filters"]
+    del raw["net_config"]["num_residual_blocks"]
+    raw["net_config"]["preset"] = "large"
+    path = tmp_path / "cfg.json"
+    path.write_text(json.dumps(raw))
+    config = load_args(path)
+    assert config.net_config.preset == "large"
+    assert config.net_config.num_filters == 192
+    assert config.net_config.num_residual_blocks == 12
+
+
+def test_explicit_size_keys_win_over_preset(tmp_path):
+    path = _write_config_with_net(tmp_path, {"preset": "large", "num_filters": 96})
+    config = load_args(path)
+    assert config.net_config.num_filters == 96  # explicit key wins
+    assert config.net_config.num_residual_blocks == 12  # preset fills the rest
+
+
+def test_unknown_preset_raises(tmp_path):
+    path = _write_config_with_net(tmp_path, {"preset": "gigantic"})
+    with pytest.raises(ValueError, match="Unknown net preset"):
+        load_args(path)
+
+
 def test_training_perf_defaults_are_off():
     """Configs that don't mention perf get the all-off TrainingPerfConfig — current behaviour."""
     config = load_args("run_configurations/test_run.json")
