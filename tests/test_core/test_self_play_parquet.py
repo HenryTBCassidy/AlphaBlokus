@@ -10,8 +10,8 @@ import numpy as np
 import pyarrow.parquet as pq
 import pytest
 
-from core.config import RunConfig
-from core.storage import ProcessedExample, SelfPlayStore
+from alphablokus.core.config import RunConfig
+from alphablokus.core.storage import ProcessedExample, SelfPlayStore
 
 
 def _make_dummy_examples(n: int = 5) -> deque[ProcessedExample]:
@@ -216,8 +216,8 @@ def test_load_recent_games_keeps_newest_n(store: SelfPlayStore):
 
 def test_coach_save_load_roundtrip(ttt_game, test_config: RunConfig):
     """Coach thin wrappers should delegate to SelfPlayStore correctly."""
-    from core.coach import Coach
-    from games.tictactoe.neuralnets.wrapper import NNetWrapper
+    from alphablokus.core.coach import Coach
+    from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
 
     nnet = NNetWrapper(ttt_game, test_config)
     coach = Coach(ttt_game, nnet, test_config)

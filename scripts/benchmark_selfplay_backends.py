@@ -28,8 +28,10 @@ from pathlib import Path
 
 from loguru import logger
 
+from alphablokus.games.blokusduo.pieces import default_pieces_path
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PIECES_PATH = REPO_ROOT / "games" / "blokusduo" / "pieces.json"
+PIECES_PATH = default_pieces_path()
 
 
 def _gpu_memory_mib() -> int | None:
@@ -44,7 +46,7 @@ def _gpu_memory_mib() -> int | None:
 
 
 def _base_config(args, *, num_eps: int, workers: int, backend: str, jax_selfplay=None):
-    from core.config import JaxSelfPlayConfig, MCTSConfig, NetConfig, RunConfig
+    from alphablokus.core.config import JaxSelfPlayConfig, MCTSConfig, NetConfig, RunConfig
 
     return RunConfig(
         game="blokusduo", run_name="bench_backends", num_generations=1, num_eps=num_eps,
@@ -100,16 +102,16 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
-    from core.config import JaxSelfPlayConfig
-    from core.jaxplay.backend import generate_self_play_games
-    from games.blokusduo.game import BlokusDuoGame
-    from games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.core.config import JaxSelfPlayConfig
+    from alphablokus.core.jaxplay.backend import generate_self_play_games
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
 
     checkpoint = args.checkpoint.resolve()
     results = []
 
     if not args.skip_python:
-        from core.parallel_self_play import run_self_play_episodes_parallel
+        from alphablokus.core.parallel_self_play import run_self_play_episodes_parallel
 
         config = _base_config(args, num_eps=args.python_episodes, workers=args.python_workers,
                               backend="python")

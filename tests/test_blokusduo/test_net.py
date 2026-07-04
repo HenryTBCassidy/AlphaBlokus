@@ -2,10 +2,10 @@ import numpy as np
 import pytest
 import torch
 
-from core.config import NetConfig
-from games.blokusduo.board import BlokusDuoBoard
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.neuralnets.net import AlphaBlokusDuo
+from alphablokus.core.config import NetConfig
+from alphablokus.games.blokusduo.board import BlokusDuoBoard
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.neuralnets.net import AlphaBlokusDuo
 
 
 @pytest.fixture

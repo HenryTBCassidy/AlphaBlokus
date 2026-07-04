@@ -26,11 +26,11 @@ import threading
 
 import numpy as np
 
-from core.config import load_args
-from core.game_factory import instantiate_game_and_network
-from core.inference_channel import ChannelSpec, SharedInferenceChannel, SharedMemoryRequestSource
-from core.inference_server import FlushPolicy, InferenceServer
-from core.parallel_self_play import run_self_play_episodes_parallel
+from alphablokus.core.config import load_args
+from alphablokus.core.game_factory import instantiate_game_and_network
+from alphablokus.core.inference_channel import ChannelSpec, SharedInferenceChannel, SharedMemoryRequestSource
+from alphablokus.core.inference_server import FlushPolicy, InferenceServer
+from alphablokus.core.parallel_self_play import run_self_play_episodes_parallel
 
 _CONFIG = "run_configurations/blokus_quicktest.json"
 

@@ -23,16 +23,17 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from core.config import MCTSConfig, NetConfig, RunConfig
-from core.mcts import MCTS, _Node
-from games.blokusduo.game import BlokusDuoGame
-from games.tictactoe.game import TicTacToeGame
+from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
+from alphablokus.core.mcts import MCTS, _Node
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.pieces import default_pieces_path
+from alphablokus.games.tictactoe.game import TicTacToeGame
 from tests.fixtures.blokus_positions import load_cache, replay_to_board_and_player
 
 if TYPE_CHECKING:
-    from games.base_wrapper import BaseNNetWrapper
+    from alphablokus.games.base_wrapper import BaseNNetWrapper
 
-_PIECES_PATH = Path(__file__).resolve().parent.parent.parent / "games" / "blokusduo" / "pieces.json"
+_PIECES_PATH = default_pieces_path()
 _DEV_CACHE = Path(__file__).resolve().parent.parent / "fixtures" / "blokus_duo_positions" / "dev_5000.npz"
 
 
@@ -42,7 +43,7 @@ _DEV_CACHE = Path(__file__).resolve().parent.parent / "fixtures" / "blokus_duo_p
 # ---------------------------------------------------------------------------
 
 def _ttt_wrapper(tmp_path: Path) -> tuple[TicTacToeGame, BaseNNetWrapper]:
-    from games.tictactoe.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
 
     game = TicTacToeGame()
     config = _run_config(tmp_path, game="tictactoe", num_filters=32, blocks=1)
@@ -50,7 +51,7 @@ def _ttt_wrapper(tmp_path: Path) -> tuple[TicTacToeGame, BaseNNetWrapper]:
 
 
 def _blokus_wrapper(tmp_path: Path) -> tuple[BlokusDuoGame, BaseNNetWrapper]:
-    from games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
 
     game = BlokusDuoGame(pieces_config_path=_PIECES_PATH)
     config = _run_config(tmp_path, game="blokusduo", num_filters=16, blocks=1)
@@ -274,7 +275,7 @@ def _scalar_select_action(node: _Node, cpuct: float) -> int:
     """
     import math
 
-    from core.mcts import EPS
+    from alphablokus.core.mcts import EPS
 
     state_visits = node.n_total
     cur_best = -float("inf")
@@ -439,7 +440,7 @@ def test_fp16_inference_flag_noop_on_cpu(tmp_path: Path) -> None:
             root_directory=tmp_path, load_model=False,
             mcts_config=MCTSConfig(num_mcts_sims=2, cpuct=1.0), net_config=net_config,
         )
-        from games.tictactoe.neuralnets.wrapper import NNetWrapper
+        from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
         return NNetWrapper(game, run_config).predict(board)
 
     pol_off, val_off = predict_with(False)

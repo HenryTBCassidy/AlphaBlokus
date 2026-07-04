@@ -34,11 +34,11 @@ from pathlib import Path
 
 import numpy as np
 
-from core.config import RunConfig, load_args
-from core.game_factory import instantiate_game_and_network
-from core.mcts import MCTS
-from core.parallel_self_play import run_self_play_episodes_parallel
-from core.self_play import play_self_play_episode
+from alphablokus.core.config import RunConfig, load_args
+from alphablokus.core.game_factory import instantiate_game_and_network
+from alphablokus.core.mcts import MCTS
+from alphablokus.core.parallel_self_play import run_self_play_episodes_parallel
+from alphablokus.core.self_play import play_self_play_episode
 
 # -- Suite parameters (edit here, not via ad-hoc args) -----------------------------
 TIMING_GAMES = 5

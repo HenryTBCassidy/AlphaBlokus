@@ -12,11 +12,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from games.blokusduo.board import Action, BlokusDuoBoard
-from games.blokusduo.pieces import Orientation, PieceManager
+from alphablokus.games.blokusduo.board import Action, BlokusDuoBoard
+from alphablokus.games.blokusduo.pieces import Orientation, PieceManager
 
 if TYPE_CHECKING:
-    from games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
 
 # ── S1: orientation transpose lookup ────────────────────────────────────────
 
@@ -499,7 +499,7 @@ def test_html_snapshot_renders_both_panels(
     For an actual visual review, run
     ``uv run python -m scripts.render_symmetry_snapshot``.
     """
-    from reporting.display_blokusduo import render_board_html
+    from alphablokus.reporting.display_blokusduo import render_board_html
 
     original_html = render_board_html(
         board=mid_game_board, game=blokus_game, current_player=1, turn=-1,

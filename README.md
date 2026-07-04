@@ -96,7 +96,7 @@ AlphaBlokus/
 ├── run_configurations/         # JSON run configs (TTT + Blokus, test → scaled)
 ├── tests/                      # Unit + integration tests (core, blokusduo, tictactoe)
 ├── docs/                       # Reference docs, guides, and plans (see below)
-└── main.py                     # Entry point
+└── src/alphablokus/            # The installable package (core framework, games, reporting)
 ```
 
 ---
@@ -120,16 +120,16 @@ uv run pytest -m "not slow"   # skip integration tests
 ### Run training
 ```bash
 # Quick pipeline check (CPU, no W&B, seconds)
-uv run python main.py --config run_configurations/test_run.json
+uv run alphablokus --config run_configurations/test_run.json
 
 # Tic-Tac-Toe demo on a Mac (CPU, ~10 min)
-uv run python main.py --config run_configurations/ttt_mac_demo.json
+uv run alphablokus --config run_configurations/ttt_mac_demo.json
 
 # Strong Tic-Tac-Toe run on the home GPU (CUDA)
-uv run python main.py --config run_configurations/ttt_pc_strong.json
+uv run alphablokus --config run_configurations/ttt_pc_strong.json
 
 # Small Blokus run
-uv run python main.py --config run_configurations/blokus_3gen.json
+uv run alphablokus --config run_configurations/blokus_3gen.json
 ```
 
 On the Mac set `"cuda": false`; on the home PC set `"cuda": true`. After a run, the interactive report is at `temp/<run_name>/Reporting/report.html`. Regenerate it from existing data without retraining via `--report-only`. See [`docs/guides/REMOTE-TRAINING.md`](docs/guides/REMOTE-TRAINING.md) for the home-GPU workflow.

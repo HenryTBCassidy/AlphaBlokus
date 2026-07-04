@@ -27,12 +27,12 @@ from dataclasses import replace
 from datetime import UTC, datetime
 from pathlib import Path
 
-from core.arena import Arena
-from core.config import RunConfig, load_args
-from core.game_factory import instantiate_game_and_network
-from core.players import NetworkPlayer
-from games.blokusduo.pentobi_gtp import find_pentobi_gtp
-from games.blokusduo.pentobi_player import PentobiPlayer
+from alphablokus.core.arena import Arena
+from alphablokus.core.config import RunConfig, load_args
+from alphablokus.core.game_factory import instantiate_game_and_network
+from alphablokus.core.players import NetworkPlayer
+from alphablokus.games.blokusduo.pentobi_gtp import find_pentobi_gtp
+from alphablokus.games.blokusduo.pentobi_player import PentobiPlayer
 
 EVAL_SIMS_DEFAULT = 400
 REPLAYS_PER_LEVEL = 4  # games embedded per level in the report (keeps it readable)
@@ -115,7 +115,7 @@ def compute_headline_metrics(per_level: list[dict]) -> dict:
 
 
 def build_report(game, per_level: list[dict], metrics: dict, header: dict, out_path: Path) -> None:
-    from reporting.display_blokusduo import BOARD_CSS, build_game_replay_html
+    from alphablokus.reporting.display_blokusduo import BOARD_CSS, build_game_replay_html
 
     rows = "".join(
         f"<tr><td>{r['level']}</td><td>{r['games']}</td>"

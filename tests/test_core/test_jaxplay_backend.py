@@ -23,13 +23,13 @@ pytest.importorskip("jax")
 pytest.importorskip("mctx")
 pytest.importorskip("torch")
 
-from core.config import JaxSelfPlayConfig, MCTSConfig, NetConfig, RunConfig  # noqa: E402
-from core.jaxplay.backend import generate_self_play_games  # noqa: E402
-from core.mcts import MCTSEpisodeStats  # noqa: E402
-from core.sparse_policy import densify  # noqa: E402
-from games.blokusduo.game import BlokusDuoGame  # noqa: E402
+from alphablokus.core.config import JaxSelfPlayConfig, MCTSConfig, NetConfig, RunConfig  # noqa: E402
+from alphablokus.core.jaxplay.backend import generate_self_play_games  # noqa: E402
+from alphablokus.core.mcts import MCTSEpisodeStats  # noqa: E402
+from alphablokus.core.sparse_policy import densify  # noqa: E402
+from alphablokus.games.blokusduo.game import BlokusDuoGame  # noqa: E402
+from alphablokus.games.blokusduo.pieces import default_pieces_path
 
-PIECES_PATH_PARTS = ("games", "blokusduo", "pieces.json")
 NUM_EPS = 3
 SIMS = 8
 
@@ -53,16 +53,15 @@ def _config(tmp_path: Path) -> RunConfig:
 @pytest.fixture(scope="module")
 def generated(tmp_path_factory):
     """One backend invocation shared by all assertions (it's the slow part)."""
-    from pathlib import Path
 
     import torch
 
-    from games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
 
     torch.manual_seed(11)
     tmp_path = tmp_path_factory.mktemp("jaxplay")
     config = _config(tmp_path)
-    game = BlokusDuoGame(pieces_config_path=Path(*PIECES_PATH_PARTS))
+    game = BlokusDuoGame(pieces_config_path=default_pieces_path())
     nnet = NNetWrapper(game, config)
     nnet.save_checkpoint(filename="init.pth.tar")
 
@@ -106,8 +105,8 @@ def test_policies_are_legal_on_their_boards(generated) -> None:
     """
     import jax.numpy as jnp
 
-    from games.blokusduo.jaxenv.kernels import GameState, make_kernels
-    from games.blokusduo.jaxenv.tables import build_jax_tables
+    from alphablokus.games.blokusduo.jaxenv.kernels import GameState, make_kernels
+    from alphablokus.games.blokusduo.jaxenv.tables import build_jax_tables
 
     _config_, game, games, _stats = generated
     kernels = make_kernels(build_jax_tables(game))

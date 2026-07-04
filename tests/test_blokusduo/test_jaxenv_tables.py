@@ -10,13 +10,13 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from games.blokusduo.board import Action
-from games.blokusduo.jaxenv.tables import JaxTables, build_jax_tables
-from games.blokusduo.movegen_tables import build_move_tables
-from games.blokusduo.pieces import Orientation
+from alphablokus.games.blokusduo.board import Action
+from alphablokus.games.blokusduo.jaxenv.tables import JaxTables, build_jax_tables
+from alphablokus.games.blokusduo.movegen_tables import build_move_tables
+from alphablokus.games.blokusduo.pieces import Orientation
 
 if TYPE_CHECKING:
-    from games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
 
 # Pentobi's hard-coded placement count for the Duo variant.
 EXPECTED_NUM_MOVES = 13_729

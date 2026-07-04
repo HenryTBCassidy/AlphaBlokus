@@ -19,11 +19,12 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
-from games.blokusduo.game import BlokusDuoGame
-from reporting.display_blokusduo import BOARD_CSS, build_game_replay_html
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.pieces import default_pieces_path
+from alphablokus.reporting.display_blokusduo import BOARD_CSS, build_game_replay_html
 
 OUTPUT_DIR = Path("temp/analysis/move_count_analysis")
-PIECES_PATH = Path("games/blokusduo/pieces.json")
+PIECES_PATH = default_pieces_path()
 
 
 # -- Data collection -----------------------------------------------------------

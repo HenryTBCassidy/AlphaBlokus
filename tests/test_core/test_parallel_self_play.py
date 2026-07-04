@@ -22,9 +22,9 @@ from typing import TYPE_CHECKING
 
 import pytest
 
-from core.config import MCTSConfig, NetConfig, RunConfig
-from core.game_factory import instantiate_game_and_network
-from core.parallel_self_play import (
+from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
+from alphablokus.core.game_factory import instantiate_game_and_network
+from alphablokus.core.parallel_self_play import (
     PHASE_ARENA,
     derive_episode_seed,
     run_self_play_episodes_parallel,

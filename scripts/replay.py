@@ -22,14 +22,16 @@ from pathlib import Path
 
 import pandas as pd
 
+from alphablokus.games.blokusduo.pieces import default_pieces_path
+
 
 def _instantiate_game(game_name: str):
     if game_name == "tictactoe":
-        from games.tictactoe.game import TicTacToeGame
+        from alphablokus.games.tictactoe.game import TicTacToeGame
         return TicTacToeGame()
     if game_name == "blokusduo":
-        from games.blokusduo.game import BlokusDuoGame
-        return BlokusDuoGame(Path("games/blokusduo/pieces.json"))
+        from alphablokus.games.blokusduo.game import BlokusDuoGame
+        return BlokusDuoGame(default_pieces_path())
     raise ValueError(f"Unknown game: {game_name}")
 
 

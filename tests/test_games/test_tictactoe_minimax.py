@@ -11,9 +11,9 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from core.arena import Arena
-from games.tictactoe.game import TicTacToeGame
-from games.tictactoe.minimax import MinimaxTicTacToePlayer
+from alphablokus.core.arena import Arena
+from alphablokus.games.tictactoe.game import TicTacToeGame
+from alphablokus.games.tictactoe.minimax import MinimaxTicTacToePlayer
 
 
 class _RandomPlayer:

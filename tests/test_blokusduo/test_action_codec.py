@@ -1,8 +1,8 @@
 import pytest
 
-from games.blokusduo.board import Action, ActionCodec
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.pieces import PieceManager
+from alphablokus.games.blokusduo.board import Action, ActionCodec
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.pieces import PieceManager
 
 
 @pytest.fixture(scope="session")

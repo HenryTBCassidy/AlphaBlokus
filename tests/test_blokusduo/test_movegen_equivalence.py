@@ -30,7 +30,8 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
-from games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.pieces import default_pieces_path
 from tests.fixtures.blokus_positions import (
     PAD_ACTION,
     load_cache,
@@ -40,7 +41,7 @@ from tests.fixtures.blokus_positions import (
 if TYPE_CHECKING:
     from numpy.typing import NDArray
 
-    from games.blokusduo.board import BlokusDuoBoard
+    from alphablokus.games.blokusduo.board import BlokusDuoBoard
 
 
 # ---------------------------------------------------------------------------
@@ -69,7 +70,7 @@ def new_valid_moves(game: BlokusDuoGame, board: BlokusDuoBoard, player: int) -> 
     one on every position in the cache. When it fails, the helper
     :func:`_describe_mismatch` formats the discrepancy.
     """
-    from games.blokusduo.movegen_runtime import get_default_generator
+    from alphablokus.games.blokusduo.movegen_runtime import get_default_generator
     mask_bool = get_default_generator().valid_move_mask(game, board, player)
     # Coerce to numerical mask matching the current impl's output dtype
     # (game.valid_move_masking returns float for historical reasons).
@@ -114,10 +115,7 @@ def _describe_mismatch(
 @pytest.fixture(scope="module")
 def blokus_game_module() -> BlokusDuoGame:
     """Module-scoped game instance — pieces.json parsing isn't free."""
-    return BlokusDuoGame(
-        pieces_config_path=Path(__file__).resolve().parent.parent.parent
-        / "games" / "blokusduo" / "pieces.json",
-    )
+    return BlokusDuoGame(pieces_config_path=default_pieces_path())
 
 
 def test_dev_cache_exists() -> None:
@@ -125,9 +123,9 @@ def test_dev_cache_exists() -> None:
 
     Regenerate via:
         uv run python -c "from pathlib import Path; \\
-            from games.blokusduo.game import BlokusDuoGame; \\
+            from alphablokus.games.blokusduo.game import BlokusDuoGame; \\
             from tests.fixtures.blokus_positions import build_cache; \\
-            build_cache(BlokusDuoGame(pieces_config_path=Path('games/blokusduo/pieces.json')), \\
+            build_cache(BlokusDuoGame(pieces_config_path=default_pieces_path()), \\
                         n=5_000, seed=42, label='dev_5000')"
     """
     assert DEV_CACHE.exists(), (
@@ -215,7 +213,7 @@ def test_has_any_move_equivalence_dev_cache(blokus_game_module: BlokusDuoGame) -
     on "does this player have any legal move?" for every position — checked here for
     both players across the dev cache.
     """
-    from games.blokusduo.movegen_runtime import get_default_generator
+    from alphablokus.games.blokusduo.movegen_runtime import get_default_generator
 
     f2 = get_default_generator()
     actions_array, n_moves_array = load_cache(DEV_CACHE)
@@ -253,9 +251,9 @@ def test_movegen_equivalence_gauntlet(blokus_game_module: BlokusDuoGame) -> None
     build, run::
 
         uv run python -c "from pathlib import Path; \\
-            from games.blokusduo.game import BlokusDuoGame; \\
+            from alphablokus.games.blokusduo.game import BlokusDuoGame; \\
             from tests.fixtures.blokus_positions import build_cache; \\
-            build_cache(BlokusDuoGame(pieces_config_path=Path('games/blokusduo/pieces.json')), \\
+            build_cache(BlokusDuoGame(pieces_config_path=default_pieces_path()), \\
                         n=50_000, seed=42, label='gauntlet_50000')"
 
     Expected build wall-clock: ~20 min.

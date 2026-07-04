@@ -8,7 +8,7 @@ from pathlib import Path
 
 from dataclass_wizard import fromdict
 
-from core.config import RunConfig, load_args
+from alphablokus.core.config import RunConfig, load_args
 
 
 def test_default_backend_is_python(test_config: RunConfig) -> None:

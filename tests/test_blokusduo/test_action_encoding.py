@@ -1,4 +1,4 @@
-from games.blokusduo.pieces import PieceManager
+from alphablokus.games.blokusduo.pieces import PieceManager
 
 
 def test_encode_decode_roundtrip(piece_manager: PieceManager):

@@ -20,13 +20,13 @@ import pytest
 from tests.test_blokusduo.conftest import DEV_CACHE_PATH
 
 if TYPE_CHECKING:
-    from games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
 
 jax = pytest.importorskip("jax")
 
-from games.blokusduo.jaxenv.bridge import numpy_state_from_board  # noqa: E402
-from games.blokusduo.jaxenv.kernels import GameState, make_kernels  # noqa: E402
-from games.blokusduo.jaxenv.tables import build_jax_tables  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.bridge import numpy_state_from_board  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.kernels import GameState, make_kernels  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.tables import build_jax_tables  # noqa: E402
 
 # Every Nth sequence also compares get_game_ended after every single ply.
 PER_PLY_GAME_ENDED_STRIDE = 25

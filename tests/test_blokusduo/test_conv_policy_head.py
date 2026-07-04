@@ -23,17 +23,18 @@ import numpy as np
 import pytest
 import torch
 
-from core.config import MCTSConfig, NetConfig, RunConfig
-from games.blokusduo.board import Action, ActionCodec, CoordinateIndexDecoder
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.neuralnets.net import ConvPolicyHead, build_action_permutation
-from games.blokusduo.neuralnets.wrapper import NNetWrapper
+from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
+from alphablokus.games.blokusduo.board import Action, ActionCodec, CoordinateIndexDecoder
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.neuralnets.net import ConvPolicyHead, build_action_permutation
+from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
+from alphablokus.games.blokusduo.pieces import default_pieces_path
 from tests.fixtures.blokus_positions import load_cache, replay_to_board_and_player
 
 if TYPE_CHECKING:
-    from games.blokusduo.pieces import PieceManager
+    from alphablokus.games.blokusduo.pieces import PieceManager
 
-_PIECES = Path(__file__).resolve().parent.parent.parent / "games" / "blokusduo" / "pieces.json"
+_PIECES = default_pieces_path()
 _DEV_CACHE = Path(__file__).resolve().parent.parent / "fixtures" / "blokus_duo_positions" / "dev_5000.npz"
 _N = 14  # Blokus Duo board size
 

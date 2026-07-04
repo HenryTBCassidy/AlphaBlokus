@@ -8,7 +8,7 @@ from __future__ import annotations
 
 import pytest
 
-from games.blokusduo.pentobi_gtp import GtpError, PentobiGtp, find_pentobi_gtp
+from alphablokus.games.blokusduo.pentobi_gtp import GtpError, PentobiGtp, find_pentobi_gtp
 
 pytestmark = pytest.mark.skipif(
     find_pentobi_gtp() is None,

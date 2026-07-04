@@ -23,8 +23,10 @@ from pathlib import Path
 
 from loguru import logger
 
+from alphablokus.games.blokusduo.pieces import default_pieces_path
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PIECES_PATH = REPO_ROOT / "games" / "blokusduo" / "pieces.json"
+PIECES_PATH = default_pieces_path()
 
 
 def _wilson(wins: float, games: int, z: float = 1.96) -> tuple[float, float]:
@@ -53,11 +55,11 @@ def main() -> None:
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
 
-    from core.arena import Arena
-    from core.config import MCTSConfig, NetConfig, RunConfig
-    from core.players import NetworkPlayer
-    from games.blokusduo.game import BlokusDuoGame
-    from games.blokusduo.neuralnets.wrapper import NNetWrapper
+    from alphablokus.core.arena import Arena
+    from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
+    from alphablokus.core.players import NetworkPlayer
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
 
     game = BlokusDuoGame(pieces_config_path=PIECES_PATH)
     game.enable_optimised_movegen()

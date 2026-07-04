@@ -22,17 +22,17 @@ import pytest
 from tests.test_blokusduo.conftest import DEV_CACHE_PATH
 
 if TYPE_CHECKING:
-    from games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
 
 jax = pytest.importorskip("jax")
 torch = pytest.importorskip("torch")
 
 import jax.numpy as jnp  # noqa: E402
 
-from core.config import NetConfig  # noqa: E402
-from games.blokusduo.jaxenv.checkpoint import convert_state_dict, params_to_device  # noqa: E402
-from games.blokusduo.jaxenv.net import forward_jit  # noqa: E402
-from games.blokusduo.neuralnets.net import AlphaBlokusDuo  # noqa: E402
+from alphablokus.core.config import NetConfig  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.checkpoint import convert_state_dict, params_to_device  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.net import forward_jit  # noqa: E402
+from alphablokus.games.blokusduo.neuralnets.net import AlphaBlokusDuo  # noqa: E402
 
 N_POSITIONS = 200
 
@@ -112,7 +112,7 @@ def test_matches_wrapper_predict_encoded(
     checkpoint_path = tmp_path / "ckpt.pth.tar"
     torch.save({"state_dict": net.state_dict()}, checkpoint_path)
 
-    from games.blokusduo.jaxenv.checkpoint import convert_torch_checkpoint
+    from alphablokus.games.blokusduo.jaxenv.checkpoint import convert_torch_checkpoint
 
     params = params_to_device(convert_torch_checkpoint(checkpoint_path, num_residual_blocks=2))
     jax_log_pi, jax_value = forward_jit(params, jnp.asarray(encoded_positions))

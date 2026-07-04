@@ -13,14 +13,14 @@ import numpy as np
 import pytest
 
 if TYPE_CHECKING:
-    from games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
 
 jax = pytest.importorskip("jax")
 
 import jax.numpy as jnp  # noqa: E402
 
-from games.blokusduo.jaxenv.kernels import make_kernels  # noqa: E402
-from games.blokusduo.jaxenv.tables import build_jax_tables  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.kernels import make_kernels  # noqa: E402
+from alphablokus.games.blokusduo.jaxenv.tables import build_jax_tables  # noqa: E402
 
 
 @pytest.fixture(scope="module")

@@ -28,9 +28,9 @@ from pathlib import Path
 import numpy as np
 import torch
 
-from core.config import load_args
-from core.game_factory import instantiate_game_and_network
-from core.mcts import MCTS
+from alphablokus.core.config import load_args
+from alphablokus.core.game_factory import instantiate_game_and_network
+from alphablokus.core.mcts import MCTS
 
 # The seven dicts that make up the MCTS tree (core/mcts.py).
 _TREE_DICTS = (

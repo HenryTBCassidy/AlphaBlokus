@@ -1,8 +1,8 @@
 import numpy as np
 import pytest
 
-from games.tictactoe.board import Board
-from games.tictactoe.game import TicTacToeGame
+from alphablokus.games.tictactoe.board import Board
+from alphablokus.games.tictactoe.game import TicTacToeGame
 
 
 def test_initial_board_is_empty(ttt_game: TicTacToeGame):

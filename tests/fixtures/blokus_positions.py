@@ -60,8 +60,8 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-    from games.blokusduo.board import BlokusDuoBoard
-    from games.blokusduo.game import BlokusDuoGame
+    from alphablokus.games.blokusduo.board import BlokusDuoBoard
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
 
 
 # ---------------------------------------------------------------------------

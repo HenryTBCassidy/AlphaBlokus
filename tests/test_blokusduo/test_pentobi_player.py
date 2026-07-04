@@ -10,17 +10,16 @@ Skips when the binary isn't built (build per docs/plans/pentobi-harness.md H2).
 """
 from __future__ import annotations
 
-from pathlib import Path
-
 import pytest
 
-from core.arena import Arena
-from core.players import RandomPlayer
-from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.pentobi_gtp import find_pentobi_gtp
-from games.blokusduo.pentobi_player import PentobiPlayer
+from alphablokus.core.arena import Arena
+from alphablokus.core.players import RandomPlayer
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.pentobi_gtp import find_pentobi_gtp
+from alphablokus.games.blokusduo.pentobi_player import PentobiPlayer
+from alphablokus.games.blokusduo.pieces import default_pieces_path
 
-_PIECES = Path(__file__).resolve().parent.parent.parent / "games" / "blokusduo" / "pieces.json"
+_PIECES = default_pieces_path()
 
 pytestmark = pytest.mark.skipif(
     find_pentobi_gtp() is None,
