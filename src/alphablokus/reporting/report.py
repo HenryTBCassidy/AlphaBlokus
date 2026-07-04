@@ -33,6 +33,7 @@ from alphablokus.reporting.charts import (
     make_timing_plot,
     make_value_calibration_plot,
 )
+from alphablokus.reporting.pentobi_ladder import build_pentobi_ladder_section
 
 
 def _load_metrics(directory: Path) -> pd.DataFrame:
@@ -320,6 +321,8 @@ def create_html_report(config: RunConfig) -> None:
     )
     config_html = _make_config_table(config)
 
+    pentobi_ladder_html = build_pentobi_ladder_section(config.pentobi_ladder_directory)
+
     strength_html = ""
     if fig_elo is not None or fig_minimax is not None:
         parts = [
@@ -428,6 +431,8 @@ def create_html_report(config: RunConfig) -> None:
 </section>
 
 {strength_html}
+
+{pentobi_ladder_html}
 
 {arena_replays_html}
 

@@ -522,6 +522,15 @@ class RunConfig:
         return self.run_directory / "ArenaReplays"
 
     @property
+    def pentobi_ladder_directory(self) -> Path:
+        """Directory for Pentobi ladder benchmark results (JSON per benchmark run).
+
+        Written by ``scripts/pentobi_benchmark.py``; rendered as the report's
+        "Pentobi Ladder" section. Empty/absent = section omitted.
+        """
+        return self.run_directory / "PentobiLadder"
+
+    @property
     def symmetry_diagnostic_directory(self) -> Path:
         """Directory for per-generation policy-symmetry diagnostic results.
 
