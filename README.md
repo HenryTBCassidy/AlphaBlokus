@@ -74,13 +74,13 @@ A/B validated over three 10-generation training arms ([`docs/research/jax-pipeli
 The Pentobi GTP harness also landed in this phase (`games/blokusduo/pentobi/` + `scripts/pentobi_benchmark.py`): subprocess GTP client, move translation in both directions, and a benchmark runner across difficulty levels.
 
 ### 🔧 Phase 8 — Scale up and climb the Pentobi ladder (in progress)
-With generation ~12× cheaper, the constraint moves to memory and run length. Two plans are in flight (`docs/plans/`):
+With generation ~12× cheaper, the constraint moves to memory and run length. Two enabling plans landed here (both archived):
 
-- [`oom-hardening.md`](docs/plans/oom-hardening.md) — the on-disk self-play format still stores policies **dense** (~71 KB/position), which OOM-killed a 10k-games/gen overnight run at the save/resume boundaries. Storing them sparse (as they already are in RAM) lifts the ceiling. Execution deferred until the box is free; interim mitigation `num_eps ≤ 8000`.
-- [`refactor-repo-architecture.md`](docs/plans/archive/refactor-repo-architecture.md) — the repo-wide restructure into the installable `src/alphablokus` package (final phases).
+- [`oom-hardening.md`](docs/plans/archive/oom-hardening.md) — the on-disk self-play format used to store policies **dense** (~71 KB/position), which OOM-killed a 10k-games/gen overnight run at the save/resume boundaries. Policies are now sparse end-to-end (as they already were in RAM) with streamed parquet I/O, plus guardrails: a startup RAM-budget check and peak-RSS logging at phase transitions. The interim `num_eps ≤ 8000` mitigation is lifted; RAM verification at scale awaits the next box run.
+- [`refactor-repo-architecture.md`](docs/plans/archive/refactor-repo-architecture.md) — the repo-wide restructure into the installable `src/alphablokus` package.
 
 ### ⏭ What's next
-1. Land OOM hardening, then run **long Gumbel-backend training runs** at 10k+ games/generation.
+1. Run **long Gumbel-backend training runs** at 10k+ games/generation.
 2. **Benchmark against Pentobi levels 1–9** after each run with the built harness; scale net size / games as the ladder demands.
 3. If the home GPU tops out, move up the cloud cost/throughput ladder ([`docs/09-COMPUTE-OPTIONS.md`](docs/09-COMPUTE-OPTIONS.md)).
 
@@ -197,7 +197,7 @@ Two players, 14×14 board, 21 polyomino pieces each (sizes 1–5). The first mov
 `STYLE-GUIDE.md` (code conventions + project layout), `PLAN-FORMAT.md` (how plans are written), `REMOTE-TRAINING.md` (home-GPU runbook), `AI-CONTEXT.md` (extended context for AI assistants).
 
 ### Plans (`docs/plans/`)
-Top-level plans are in-flight; `docs/plans/archive/` is the historical record of completed work — the optimisation stack ([`full-cycle-optimisation.md`](docs/plans/archive/full-cycle-optimisation.md)), the JAX pipeline ([`jax-selfplay-pipeline.md`](docs/plans/archive/jax-selfplay-pipeline.md)), the Pentobi harness ([`pentobi-harness.md`](docs/plans/archive/pentobi-harness.md)), the replay-buffer refactor ([`replay-buffer-refactor.md`](docs/plans/archive/replay-buffer-refactor.md)), and ~40 more. Currently in flight: [`oom-hardening.md`](docs/plans/oom-hardening.md) (execution deferred until the box is free) and [`refactor-repo-architecture.md`](docs/plans/archive/refactor-repo-architecture.md) (final phases). Candidate-but-uncommitted ideas live in [`docs/IDEAS.md`](docs/IDEAS.md); deep investigations in `docs/research/`.
+Top-level plans are in-flight; `docs/plans/archive/` is the historical record of completed work — the optimisation stack ([`full-cycle-optimisation.md`](docs/plans/archive/full-cycle-optimisation.md)), the JAX pipeline ([`jax-selfplay-pipeline.md`](docs/plans/archive/jax-selfplay-pipeline.md)), the Pentobi harness ([`pentobi-harness.md`](docs/plans/archive/pentobi-harness.md)), the replay-buffer refactor ([`replay-buffer-refactor.md`](docs/plans/archive/replay-buffer-refactor.md)), and ~40 more, most recently [`refactor-repo-architecture.md`](docs/plans/archive/refactor-repo-architecture.md) and [`oom-hardening.md`](docs/plans/archive/oom-hardening.md) (sparse on-disk policies + OOM guardrails). Nothing is currently in flight. Candidate-but-uncommitted ideas live in [`docs/IDEAS.md`](docs/IDEAS.md); deep investigations in `docs/research/`.
 
 ---
 
@@ -215,7 +215,7 @@ Top-level plans are in-flight; `docs/plans/archive/` is the historical record of
 - [x] Resumable runs + first scaled Blokus training runs on the home GPU
 - [x] JAX GPU-native self-play backend + Gumbel search (~12× at production net size)
 - [x] Pentobi GTP adapter + benchmark harness
-- [ ] On-disk sparse policy storage ([`oom-hardening`](docs/plans/oom-hardening.md) — in flight)
+- [x] On-disk sparse policy storage + OOM guardrails ([`oom-hardening`](docs/plans/archive/oom-hardening.md))
 - [ ] Long production runs (10k+ games/generation) up the Pentobi ladder
 - [ ] Beat Pentobi level 9
 

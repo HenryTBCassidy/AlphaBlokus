@@ -1,14 +1,14 @@
 # OOM Hardening — Kill the Dense-Policy Materializations
 
-> **Status (2026-07-03): in flight, execution deferred.** The box is unavailable for the verification this plan needs (peak-RSS at scale), so [refactor-repo-architecture](archive/refactor-repo-architecture.md) runs first; that plan's R18 re-maps the file/line citations below onto the post-refactor layout, and its R31 performs the `load_window` deletion mentioned under O2. Until O1–O2 land, keep the interim mitigation: `num_eps ≤ 8000`.
+> **Status (2026-07-04): execution complete** — O1–O9 all landed on `fix/oom-sparse-selfplay` (one commit per row). RAM verification at scale (peak-RSS on a 10k-games/gen run) is **pending the next box run**; the O8 peak-RSS phase logging is in place to capture it. Prerequisite [refactor-repo-architecture](refactor-repo-architecture.md) ran first; its R18 re-mapped the file/line citations below onto the post-refactor layout, and its R31 performed the `load_window` deletion mentioned under O2. ~~Until O1–O2 land, keep the interim mitigation: `num_eps ≤ 8000`.~~ (Lifted: O1–O2 landed, 10k+ games/gen is safe.)
 
 This plan fixes the recurring out-of-memory crashes on the 32 GB box (most recently `blokus_gumbel_overnight_20260703`, which OOM-killed the whole box at the gen-1 self-play→train transition and lost the night). It is the output of a full-codebase memory-materialization audit (four parallel sweeps: self-play/buffer/persistence, JAX backend, training/inference/MCTS, eval/arena/reporting/scripts).
 
 **Root cause (single fact):** the on-disk self-play format stores the **policy densely** (17,837-dim float32 ≈ 71 KB per position). Boards are *already* compact on disk (`BOARD_KIND = "compact_v1"`, 196 B). So every save densifies a whole generation of policies, and every resume rehydrates a whole buffer of them. At 10k games/gen that's ~25 GB on save (≈57 GB with symmetry doubling); a 50k-game resume is ~125–285 GB. Storing the policy **sparse** on disk (it is *already sparse in the live buffer*) eliminates the top four CRITICAL findings at once.
 
-**Interim mitigation (already communicated):** keep `num_eps ≤ 8000` until O1–O2 land. After O1–O2, 10k+ games/gen is safe on the box.
+~~**Interim mitigation (already communicated):** keep `num_eps ≤ 8000` until O1–O2 land.~~ O1–O2 landed — 10k+ games/gen is safe on the box.
 
-**Companion docs:** [PLAN-FORMAT](../guides/PLAN-FORMAT.md), [STYLE-GUIDE](../guides/STYLE-GUIDE.md). Suggested branch: `fix/oom-sparse-selfplay`.
+**Companion docs:** [PLAN-FORMAT](../../guides/PLAN-FORMAT.md), [STYLE-GUIDE](../../guides/STYLE-GUIDE.md). Branch: `fix/oom-sparse-selfplay`.
 
 **Audit map (severity → step):**
 

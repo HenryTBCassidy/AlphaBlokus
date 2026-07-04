@@ -1,6 +1,6 @@
 """Process-level resource diagnostics and pre-flight guards.
 
-Two halves of the same OOM story (``docs/plans/oom-hardening.md`` O8):
+Two halves of the same OOM story (``docs/plans/archive/oom-hardening.md`` O8):
 :func:`get_memory_snapshot` makes memory visible *during* a run (RSS + peak
 RSS at phase transitions), and :func:`check_ram_budget` refuses configs whose
 estimated peak cannot fit the machine *before* a run starts — turning a 3 a.m.
@@ -120,5 +120,5 @@ def check_ram_budget(config: RunConfig) -> None:
             f"{_RAM_BUDGET_FRACTION:.0%} budget of this machine's {total_bytes / 1024**3:.1f} GB "
             f"({budget_bytes / 1024**3:.1f} GB). Lower replay_buffer_games "
             f"(={config.replay_buffer_games}) and/or num_eps (={config.num_eps}), or run on a "
-            "bigger box. See docs/plans/oom-hardening.md O8."
+            "bigger box. See docs/plans/archive/oom-hardening.md O8."
         )

@@ -4,7 +4,7 @@
 (``selfplay_backend: "jax"``), the process pool (``num_parallel_workers > 1``),
 or the in-process serial loop — and **streams** each completed game to the
 caller's ``sink`` from all three, so a whole generation is never accumulated
-here (``docs/plans/oom-hardening.md`` O6). The Coach never cares which backend
+here (``docs/plans/archive/oom-hardening.md`` O6). The Coach never cares which backend
 produced the data.
 """
 

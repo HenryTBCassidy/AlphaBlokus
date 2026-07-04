@@ -12,7 +12,7 @@ AlphaZero implementation for Blokus Duo. Self-play reinforcement learning on a 1
 
 ## Current focus
 
-In-flight work lives in `docs/plans/` (top-level = in-flight, `archive/` = done). Right now: [`oom-hardening.md`](docs/plans/oom-hardening.md) (sparse on-disk policy storage; execution deferred until the box is free — keep `num_eps ≤ 8000` meanwhile) and [`refactor-repo-architecture.md`](docs/plans/archive/refactor-repo-architecture.md) (final phases). After those: long Gumbel-backend runs and the Pentobi ladder. Candidate ideas queue in `docs/IDEAS.md`.
+In-flight work lives in `docs/plans/` (top-level = in-flight, `archive/` = done). Nothing is currently in flight: [`oom-hardening.md`](docs/plans/archive/oom-hardening.md) (sparse on-disk policies + OOM guardrails; lifts the old `num_eps ≤ 8000` mitigation) landed 2026-07-04 — RAM verification at scale is pending the next box run. Next: long Gumbel-backend runs at 10k+ games/generation and the Pentobi ladder. Candidate ideas queue in `docs/IDEAS.md`.
 
 ## Commands
 
@@ -115,10 +115,10 @@ docs/
 │   ├── REMOTE-TRAINING.md   # Runbook for running training on the home box over SSH
 │   └── AI-CONTEXT.md        # Extended context, architecture rationale, gotchas
 ├── research/                # Deep investigations (jax A/B, profiling, Pentobi internals, …)
-└── plans/                   # Top-level = in-flight; archive/ = completed, kept for context
-    ├── oom-hardening.md               # Sparse on-disk policies (in flight, execution deferred)
-    ├── refactor-repo-architecture.md  # src/ package restructure (final phases)
+└── plans/                   # Top-level = in-flight (none currently); archive/ = completed, kept for context
     └── archive/                       # ~40 completed plans — the project's full history, e.g.:
+        ├── oom-hardening.md           #   Sparse on-disk policies + OOM guardrails (O1–O9)
+        ├── refactor-repo-architecture.md #  src/ package restructure
         ├── full-cycle-optimisation.md #   Master optimisation tracker (F1–F5; ~14× vs serial)
         ├── jax-selfplay-pipeline.md   #   GPU-native self-play backend + Gumbel search
         ├── replay-buffer-refactor.md  #   Rolling game-sized buffer + compact board storage

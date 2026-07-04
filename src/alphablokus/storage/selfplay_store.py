@@ -5,7 +5,7 @@ in the parquet schema. Boards are stored compact (``IBoard.to_compact``) and
 policies are stored **sparse** as ``(indices, values)`` byte pairs — the same
 ``ProcessedExample`` form the live replay buffer holds — so neither save nor
 load ever materialises a dense policy vector (the dense-on-disk format
-OOM-killed 10k-game generations; see ``docs/plans/oom-hardening.md`` O1/O2).
+OOM-killed 10k-game generations; see ``docs/plans/archive/oom-hardening.md`` O1/O2).
 """
 
 from __future__ import annotations
@@ -293,7 +293,7 @@ class SelfPlayStore:
                 f"{self.POLICY_KIND!r}. Legacy dense-policy self-play files "
                 "cannot be loaded into the sparse replay buffer — resume such "
                 "runs from their checkpoints instead (see "
-                "docs/plans/oom-hardening.md O1).",
+                "docs/plans/archive/oom-hardening.md O1).",
             )
 
     def _read_game_sizes(self, generation: int) -> list[int] | None:

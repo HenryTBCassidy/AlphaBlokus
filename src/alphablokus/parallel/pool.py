@@ -453,7 +453,7 @@ def run_self_play_episodes_parallel(
             When provided, nothing is accumulated here (the returned lists
             are empty) — the caller owns the data, so a whole generation
             never piles up in this orchestrator alongside the replay
-            buffer (``docs/plans/oom-hardening.md`` O6).
+            buffer (``docs/plans/archive/oom-hardening.md`` O6).
 
     Returns:
         ``(per_episode_examples, per_episode_stats)`` — outer list is

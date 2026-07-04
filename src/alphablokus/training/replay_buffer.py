@@ -3,7 +3,7 @@
 Extracted from ``Coach`` so the buffer's mechanics (eviction, flattening,
 save/load/resume round-trips through :class:`SelfPlayStore`) live in one
 place. Examples hold sparse policies end-to-end — live buffer, save, and
-resume all speak ``ProcessedExample`` (``docs/plans/oom-hardening.md`` O1–O2);
+resume all speak ``ProcessedExample`` (``docs/plans/archive/oom-hardening.md`` O1–O2);
 this is also where the continuous-generations work (IDEAS I4 lineage) lands.
 """
 

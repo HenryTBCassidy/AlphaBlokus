@@ -220,7 +220,7 @@ def valid_placement(board: NDArray, piece: Piece, row: int, col: int) -> bool:
 - Don't state the obvious. `i += 1  # increment i` is noise.
 - **Do** explain *why*, not *what*: `# Multiply by player to get canonical form (my pieces = +1, opponent = -1)`
 - **Do** flag non-obvious correctness constraints: `# Must check >= 0, not > 0 (row 0 is a valid neighbour)`
-- Use `# TODO:` for known work items. Include a ticket/doc reference when possible: `# TODO: see docs/plans/oom-hardening.md O4`
+- Use `# TODO:` for known work items. Include a ticket/doc reference when possible: `# TODO: see docs/plans/archive/oom-hardening.md O4`
 
 ---
 
