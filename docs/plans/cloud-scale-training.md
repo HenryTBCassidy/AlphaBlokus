@@ -36,7 +36,7 @@ bit-identically unless a flag opts in; JAX/torch CUDA coexistence preserved; CI 
 | C11 | Pentobi ladder instrumentation: checkpoint-ladder mode + JSON results + ladder section in the HTML report | 2.5 h | Medium | ✅ |
 | C12 | Cloud run-config family: `blokus_cloud.json` + `blokus_cloud_calibration.json` | 1 h | High | ✅ |
 | C13 | Recommendation doc: card class, net size, full config for ~£100, staged ladder plan, cost beyond £100 | 2 h | High | ✅ |
-| C14 | Verify defaults unchanged (Mac CPU test run), full CI gates, open PR | 1.5 h | High | |
+| C14 | Verify defaults unchanged (Mac CPU test run), full CI gates, open PR | 1.5 h | High | ✅ |
 
 > **Set aside (stretch, deliberately unnumbered):** a multi-GPU DDP/FSDP training path. Single-GPU
 > is the primary target; DDP only makes sense after the single-GPU loop is measured (C10) and would
@@ -201,3 +201,31 @@ Hard bound honoured: no empirical multi-net training sweeps — reasoning + the 
 - Docker build + containerized `test_run.json` run (C8 evidence).
 - Open PR: what changed, how to launch a single-GPU cloud run, how to benchmark vs the Pentobi
   ladder. Capture any extras in a "Scope additions" section here.
+
+**Verification evidence (2026-07-04):** full suite 397 passed / 1 skipped (incl. slow); ruff +
+format + mypy clean; defaults proven bit-identical to main by a seeded weight-hash + logged-rows
+comparison against a `main` worktree; `test_run.json` ran end-to-end on the Mac (CPU) and inside
+the container on the box (exit 0), with `--gpus all` giving torch *and* jax the 3060 Ti.
+
+---
+
+## Scope additions
+
+Work that emerged beyond the original checklist, recorded so the archived plan tells the full story:
+
+1. **The home box became the container test rig.** Installed `docker.io` + `nvidia-container-toolkit`
+   (NVIDIA apt repo) on gpu-linux and verified the image there — both the CPU fallback path and
+   `--gpus all` (torch + jax each see the card in-container).
+2. **Real calibration executed on the 3060 Ti** (in-container): small 12.2 / medium 6.2 /
+   large 2.7 / xl 1.3 self-play games/s, ~56.5 training examples per game, training
+   0.44–0.78 ms/position. Folded into the recommendation doc, replacing extrapolations.
+3. **Field-found fixes from that run:** `--shm-size=2g` needed for DataLoader workers in Docker
+   (runbook + troubleshooting); calibration tool now survives a per-size failure (xl training
+   OOM'd on the 8 GB card — jax VRAM share + big torch batch) instead of losing the whole sweep;
+   `gcc/g++` added to the image because inductor needs a host C compiler even for GPU graphs;
+   Dockerfile split into a cached dependency layer + source layer.
+4. **Calibration burst sizing fix:** bursts smaller than the jax batch undercount games/s (waves
+   compute `batch_size` slots regardless); default burst is now 2× batch, and positions/game
+   counts training examples (symmetry included), not raw moves.
+5. **AGENTS.md "Current focus"** updated to point at this plan (it previously said nothing was in
+   flight).

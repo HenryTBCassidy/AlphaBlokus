@@ -20,10 +20,11 @@ that's what the calibration tool + staged plan replace.
   throughput + memory bandwidth per £.
 - **Train the `large` preset (192f×12b, ~8M params)** with `run_configurations/blokus_cloud.json`:
   jax+Gumbel self-play, 10,000 games/gen, 40k-game buffer, all C3 perf knobs on.
-- £100 buys **far more** than any run to date: the Gumbel backend made generation cheap, so the
-  binding constraint is **learning dynamics at scale, not compute**. Hence the staged plan below —
-  spend ~£15 proving the recipe, then extend the same run with `--resume` while the Elo/ladder
-  curves still climb, stepping up to `xl` only if calibration and the curves justify it.
+- £100 buys **far more** than any run to date (~10× run3's games at 3.4× its net, with room to
+  triple the run length): at `large` the binding constraint is **learning dynamics at scale, not
+  compute** — though the budget does genuinely bind one step up at `xl` (§3). Hence the staged
+  plan below — spend ~£27 proving the recipe, then extend the same run with `--resume` while the
+  Elo/ladder curves still climb.
 - Expected outcome, stated honestly: the current 64f×4b net loses ~75% vs Pentobi **level 1**
   [measured]. This plan should convincingly beat L1–L2 and plausibly reach L3–L5
   **[extrapolated — wide error bars]**. Beating **L9** within £100 is unlikely and is *not*
@@ -47,49 +48,61 @@ config knob (C1), and batch/net sizes are config. `--gpus all` on any CUDA-12 ho
 
 ## 2. Where the time goes — what we know
 
-From the 3060 Ti **[measured]** (128f×8b = `medium`, Gumbel n=64, K=64, bf16):
+The calibration tool itself was run end-to-end on the 3060 Ti, inside the training container
+(2026-07-04, `blokus_cloud_calibration.json` search settings: Gumbel n=64, K=64, B=1024, bf16;
+2,048-game bursts after a jit warmup; training measured over 8,192 synthetic buffer positions with
+the C3 perf knobs on, torch in eager — inductor was unavailable in that first image):
 
-- Self-play: **~11.4 games/s** at B=1024 (327 moves/s ÷ 28.6 moves/game); 13.5 games/s at 64f×4b.
-- At n=64, wall time is ≈50% net forward / ≈50% mctx tree machinery — so *net size scales only
-  half the cost* until the net dominates.
-- The torch training loop was CPU-feed-bound (single-threaded dense-encoding of 17,837-length
-  policies); C3's DataLoader workers + bf16 + channels_last exist precisely so a fast card isn't
-  starved. **[calibrate: training ms/position with perf knobs on]**
+| Preset | Self-play games/s **[measured]** | Training ms/position **[measured]** |
+|---|---|---|
+| small 64f×4b | 12.22 | 0.775* |
+| medium 128f×8b | 6.24 | 0.444 |
+| large 192f×12b | 2.71 | 0.728 |
+| xl 256f×16b | 1.30 | — (OOM, see below) |
+
+Caveats: an image rebuild ran concurrently during the medium/large bursts (CPU contention →
+treat those as mild *underestimates*); small's training number carries first-size warmup, medium's
+0.444 is the cleanest small-net figure. **One measured position per game ≈ 56.5 training
+examples** (~28 moves × 2 symmetry augmentation) — the buffer cost model below uses this. The xl
+*training* measurement OOM'd on the 8 GB card (jax's 0.6 VRAM share + a batch-1024 xl training
+step) — a real coexistence limit on small cards, a non-issue at 24 GB+; the tool now skips a
+failed size instead of dying **[calibrate xl on the rented card]**.
 
 ## 3. Net size — the cost model
 
 Per-position net cost scales ∝ blocks × filters² (3×3 convs on a fixed 14×14 board):
 
-| Preset | Size | Params | Relative net FLOPs |
-|---|---|---|---|
-| small (today's prod) | 64f×4b | ~1M | 0.125× |
-| medium (run3) | 128f×8b | ~3.7M | 1× |
-| **large (recommended)** | **192f×12b** | **~8M** | 3.4× |
-| xl (stretch) | 256f×16b | ~19M | 8× |
+| Preset | Size | Params | Relative net FLOPs | Measured games/s ratio |
+|---|---|---|---|---|
+| small (today's prod) | 64f×4b | ~1M | 0.125× | 1.96× medium |
+| medium (run3) | 128f×8b | ~3.7M | 1× | 1× |
+| **large (recommended)** | **192f×12b** | **~8M** | 3.4× | 0.43× |
+| xl (stretch) | 256f×16b | ~19M | 8× | 0.21× |
 
-Self-play games/s model **[extrapolated]**: `t_game = t_tree + t_net`, with the measured medium
-split (50/50 on the 3060 Ti) and a 5090 speedup of ~3× on net forward, ~2× on tree machinery:
+Projected to a 5090 (~3× net forward, ~2× tree machinery vs the 3060 Ti **[extrapolated]**), at
+10k games/gen with a 40k-game buffer (= 40k × 56.5 ≈ **2.26M positions** trained per generation
+at epochs 1):
 
-| Preset | 3060 Ti games/s | 5090 games/s (est.) | 10k games/gen | train/gen (1.16M-position buffer) | ~min/gen* |
+| Preset | 5090 games/s (est.) | self-play/gen | train/gen | ~min/gen* | £/gen @ £0.70/h |
 |---|---|---|---|---|---|
-| medium | 11.4 [measured] | ~27 | ~6 min | ~1 min | **~9** |
-| large | ~5.2 [extrapolated] | ~14 | ~12 min | ~3 min | **~19** |
-| xl | ~2.5 [extrapolated] | ~7 | ~23 min | ~7 min | **~38** |
+| medium | ~16 | ~10 min | ~6 min | **~20** | £0.23 |
+| large | ~7.5 | ~22 min | ~9 min | **~39** | £0.45 |
+| xl | ~3.6 | ~46 min | ~17 min | **~79** | £0.92 |
 
 \* incl. ~25% overhead for arena/Elo/report — the python-backend eval phases get *slower* as nets
 grow and are the least-well-modelled part **[calibrate]**; if calibration shows eval eating >30%
 of a generation, cut `num_arena_matches`/`elo_games_per_gen` before cutting games/gen.
 
-At ~£0.70/h, `large` costs **~£0.22/generation**; the 60-gen headline run is **~£14**. Even `xl`
-fits ~150 generations in £100. The budget is not the wall — knowing *when to stop pushing a stale
-recipe* is. That's what the stages are for.
+So at ~£0.70/h: `large` ≈ **£0.45/generation** → the 60-gen headline run is **~£27**, and ~200
+generations fit £90. `xl` ≈ £0.92/gen → 60 gens ≈ £55 and 100+ gens overruns the budget — **the
+budget genuinely binds at xl**, which is exactly why it's the stretch, not the plan.
 
 **Why `large`, not `xl`, as the committed run:** capacity only pays when enough games/generations
 feed it (deepmind-run-configs.md §5: bigger nets learn slower per gen but raise the ceiling — judge
 late). `large` is 3.4× run3's proven net at a per-gen price that lets us run 3–5× run3's
-generations *and* 5× its games/gen inside a third of the budget. `xl` triples the per-gen price and
-sits furthest from validated territory (checkpoint bridging, eval wall-clock). Step up to it with
-evidence, not hope.
+generations *and* 5× its games/gen inside a third of the budget. `xl` doubles the per-gen price
+again, can't fit a long run in £100, and sits furthest from validated territory (checkpoint
+bridging, eval wall-clock, the small-card VRAM coexistence limit above).
 
 ## 4. The recommended run (`run_configurations/blokus_cloud.json`)
 
@@ -107,9 +120,9 @@ show training loss oscillating at batch 1024, drop to 512 rather than tuning LR 
 | Stage | What | Cost (est.) | Gate to continue |
 |---|---|---|---|
 | 0 | Rent card → `docker run` calibration config + `cloud_calibration.py --rate-gbp-per-hour <r>` | ~£1 | Table roughly matches §3; pick final preset (`large` unless it says otherwise) |
-| 1 | `blokus_cloud.json`, 60 gens | ~£15 [extrapolated] | Internal Elo still climbing; arena accept rate healthy |
+| 1 | `blokus_cloud.json`, 60 gens | ~£27 [extrapolated from measured 3060 Ti throughput] | Internal Elo still climbing; arena accept rate healthy |
 | 2 | Pentobi ladder: `pentobi_benchmark --levels 1-5 --games 40` on `best.pth.tar` (+ a mid-run checkpoint) | ~£1–2 | Beats L1 at >50% → continue; else diagnose before spending more |
-| 3 | Extend: bump `num_generations`, `--resume` (same buffer, same Elo baseline). Repeat ladder every ~40 gens; climb `--levels` as levels fall | ~£30–60 | Stop when Elo/ladder plateaus across two consecutive benchmarks |
+| 3 | Extend: bump `num_generations`, `--resume` (same buffer, same Elo baseline). Repeat ladder every ~40 gens; climb `--levels` as levels fall | ~£50–65 (another 100–140 gens) | Stop when Elo/ladder plateaus across two consecutive benchmarks |
 | 4 (optional) | If still climbing at plateau-free ~£70 spent: restart at `xl` seeded by... no — continue `large`; an `xl` restart is a *new* budget decision (§7) | — | — |
 
 Everything in stages 2–3 is push-button: the ladder JSONs land in `PentobiLadder/` and render in
@@ -133,8 +146,8 @@ Recorded plainly, per the plan's brief:
 If stage 3 plateaus below the target level, the next levers, in rough £-efficiency order
 **[extrapolated]**:
 
-1. **More of the same** (extend `large`): ~£15 per further 60 gens. Cheap while curves climb.
-2. **`xl` restart** (fresh run, 150+ gens × 10k games): ~£60–100 — worthwhile if `large` plateaus
+1. **More of the same** (extend `large`): ~£27 per further 60 gens. Cheap while curves climb.
+2. **`xl` restart** (fresh run, 150+ gens × 10k games): ~£140–180 — worthwhile if `large` plateaus
    with healthy training diagnostics (capacity-limited, not data-limited).
 3. **Stronger eval search at benchmark time** (more sims vs Pentobi) is free strength at play time
    — always max this before buying more training.

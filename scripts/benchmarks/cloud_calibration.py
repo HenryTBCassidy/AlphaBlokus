@@ -79,16 +79,27 @@ def main() -> None:
         game, wrapper = instantiate_game_and_network(config)
         config.net_directory.mkdir(parents=True, exist_ok=True)
 
-        games_per_s: float | None = None
-        positions_per_game = None
-        if not args.skip_selfplay:
-            games_per_s, positions_per_game = measure_selfplay_games_per_second(
-                config, wrapper, num_games=args.selfplay_games
-            )
-            logger.info("  self-play: {:.2f} games/s ({:.1f} positions/game)", games_per_s, positions_per_game)
+        # A failed size (typically CUDA OOM on the biggest net — e.g. the jax
+        # VRAM share plus a large torch batch on a small card) must not sink
+        # the sizes already measured: log, skip, and keep the partial table.
+        try:
+            games_per_s: float | None = None
+            positions_per_game = None
+            if not args.skip_selfplay:
+                games_per_s, positions_per_game = measure_selfplay_games_per_second(
+                    config, wrapper, num_games=args.selfplay_games
+                )
+                logger.info("  self-play: {:.2f} games/s ({:.1f} positions/game)", games_per_s, positions_per_game)
 
-        train_s_per_position = measure_train_seconds_per_position(wrapper, game, args.train_positions)
-        logger.info("  training: {:.3f} ms/position", train_s_per_position * 1e3)
+            train_s_per_position = measure_train_seconds_per_position(wrapper, game, args.train_positions)
+            logger.info("  training: {:.3f} ms/position", train_s_per_position * 1e3)
+        except RuntimeError:
+            logger.exception(
+                "Measurement failed for {} — skipping this size (try a smaller batch_size "
+                "or lower jax_selfplay.xla_mem_fraction and rerun just this size).",
+                name,
+            )
+            continue
 
         measurements.append(
             NetSizeMeasurement(
@@ -101,6 +112,9 @@ def main() -> None:
                 positions_per_game=positions_per_game or DEFAULT_POSITIONS_PER_GAME,
             )
         )
+
+    if not measurements:
+        raise SystemExit("Every size failed to measure — see the log above.")
 
     estimates = estimate_costs(
         measurements,
