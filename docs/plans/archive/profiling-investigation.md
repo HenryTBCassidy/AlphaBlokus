@@ -6,7 +6,7 @@
 
 **Decision: RUN NOW.** The 15-gen run fits comfortably overnight (~5.3 h), so optimisation is *optional*. Training is ~1% of the cycle — not worth touching. The self-play levers are ranked below for when we want tighter iteration. No optimisation branch was spawned — that happens only if/when we decide tighter iteration is worth the effort.
 
-**Companion:** technique menu + Amdahl detail in [`../../research/self-play-speed-investigation.md`](../../research/self-play-speed-investigation.md). Harness: [`../../../scripts/profile_self_play.py`](../../../scripts/profile_self_play.py); report generator: [`../../../scripts/profile_report.py`](../../../scripts/profile_report.py).
+**Companion:** technique menu + Amdahl detail in [`../../research/self-play-speed-investigation.md`](../../research/self-play-speed-investigation.md). Harness: [`../../../scripts/profile_self_play.py`](../../../scripts/profiling/profile_self_play.py); report generator: `scripts/profile_report.py` (since deleted in the scripts reorg — see git history).
 
 ---
 

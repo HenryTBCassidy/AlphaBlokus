@@ -2,7 +2,7 @@
 
 Pit any two players (network checkpoints, random, perfect-play minimax) against
 each other and print the win/loss/draw breakdown. Used internally by the
-:meth:`core.coach.Coach._evaluate_strength_vs_baselines` flow and exposed here
+:meth:`alphablokus.training.coach.Coach._evaluate_strength_vs_baselines` flow and exposed here
 as a CLI for ad-hoc evaluation: "is gen 11 actually stronger than gen 5?",
 "how does our trained model fare against random?", etc.
 
@@ -10,15 +10,15 @@ Examples::
 
     # Trained model vs random baseline.
     uv run python -m scripts.arena_run \
-        --config run_configurations/smoke_test.json \
-        --player1 temp/smoke_test/Nets/best.pth.tar \
+        --config run_configurations/pipeline_check.json \
+        --player1 temp/pipeline_check/Nets/best.pth.tar \
         --player2 random \
         --num-games 50
 
     # Trained model vs perfect minimax (TTT only).
     uv run python -m scripts.arena_run \
-        --config run_configurations/smoke_test.json \
-        --player1 temp/smoke_test/Nets/accepted_3.pth.tar \
+        --config run_configurations/pipeline_check.json \
+        --player1 temp/pipeline_check/Nets/accepted_3.pth.tar \
         --player2 minimax \
         --num-games 20
 
@@ -33,6 +33,7 @@ The ``--config`` flag points at the JSON whose net architecture matches the
 checkpoints; you can't load a checkpoint into a wrapper with a different
 ``num_filters`` / ``num_residual_blocks`` setup.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -41,30 +42,34 @@ from typing import TYPE_CHECKING
 
 import torch
 
-from alphablokus.core.arena import Arena
-from alphablokus.core.config import RunConfig, load_args
-from alphablokus.core.players import NetworkPlayer, Player, RandomPlayer
+from alphablokus.config import RunConfig, load_args
+from alphablokus.evaluation.arena import Arena
+from alphablokus.evaluation.players import NetworkPlayer, Player, RandomPlayer
 
 if TYPE_CHECKING:
-    from alphablokus.core.interfaces import IGame, INeuralNetWrapper
+    from alphablokus.interfaces import IGame, INeuralNetWrapper
 
 
 def _get_game(game_name: str) -> IGame:
     if game_name == "tictactoe":
         from alphablokus.games.tictactoe.game import TicTacToeGame
+
         return TicTacToeGame()
     if game_name == "blokusduo":
         from alphablokus.games.blokusduo.game import BlokusDuoGame
+
         return BlokusDuoGame()
     raise ValueError(f"Unknown game: {game_name!r}")
 
 
 def _get_nnet_class(game_name: str) -> type[INeuralNetWrapper]:
     if game_name == "tictactoe":
-        from alphablokus.games.tictactoe.neuralnets.wrapper import NNetWrapper
+        from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
+
         return NNetWrapper
     if game_name == "blokusduo":
-        from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
+        from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
+
         return NNetWrapper
     raise ValueError(f"Unknown game: {game_name!r}")
 
@@ -98,11 +103,9 @@ def build_player(spec: str, game: IGame, config: RunConfig) -> Player:
         return RandomPlayer(game)
     if spec == "minimax":
         if config.game != "tictactoe":
-            raise ValueError(
-                "Minimax player is only available for TicTacToe; "
-                f"current config game is {config.game!r}"
-            )
+            raise ValueError(f"Minimax player is only available for TicTacToe; current config game is {config.game!r}")
         from alphablokus.games.tictactoe.minimax import MinimaxTicTacToePlayer
+
         return MinimaxTicTacToePlayer(game)
 
     path = Path(spec)
@@ -118,17 +121,21 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Pit two players in head-to-head games.")
     parser.add_argument("--config", required=True, help="Path to a RunConfig JSON.")
     parser.add_argument(
-        "--player1", required=True,
+        "--player1",
+        required=True,
         help="Checkpoint path, or one of: random, minimax (TTT only).",
     )
     parser.add_argument(
-        "--player2", required=True,
+        "--player2",
+        required=True,
         help="Checkpoint path, or one of: random, minimax (TTT only).",
     )
     parser.add_argument(
-        "--num-games", type=int, default=20,
+        "--num-games",
+        type=int,
+        default=20,
         help="Number of games (rounded down to nearest even number; "
-             "players alternate starting positions). Default: 20.",
+        "players alternate starting positions). Default: 20.",
     )
     args = parser.parse_args()
 

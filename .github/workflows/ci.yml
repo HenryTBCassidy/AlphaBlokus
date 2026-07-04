@@ -15,6 +15,7 @@ jobs:
           enable-cache: true
       - run: uv sync --extra dev
       - run: uv run ruff check .
+      - run: uv run ruff format --check src tests scripts
 
   typecheck:
     runs-on: ubuntu-latest
@@ -44,4 +45,4 @@ jobs:
         with:
           enable-cache: true
       - run: uv sync --extra dev --extra jax
-      - run: uv run pytest -m "not slow" tests/test_blokusduo tests/test_core
+      - run: uv run pytest -m "not slow"

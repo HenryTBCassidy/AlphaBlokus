@@ -1,0 +1,35 @@
+{
+  "game": "tictactoe",
+  "run_name": "pipeline_check",
+  "num_generations": 3,
+  "num_eps": 15,
+  "replay_buffer_games": 75,
+  "temp_threshold": 10,
+  "update_threshold": 0.55,
+  "num_arena_matches": 6,
+  "root_directory": "./temp/",
+  "load_model": false,
+  "mcts_config": {
+    "num_mcts_sims": 25,
+    "cpuct": 1
+  },
+  "net_config": {
+    "learning_rate": 0.001,
+    "dropout": 0.3,
+    "epochs": 5,
+    "batch_size": 32,
+    "cuda": false,
+    "num_filters": 64,
+    "num_residual_blocks": 2
+  },
+  "wandb": {
+    "project": "alphablokus-poc",
+    "entity": null,
+    "tags": [
+      "smoke",
+      "ttt",
+      "cpu"
+    ],
+    "mode": "online"
+  }
+}

@@ -1,7 +1,7 @@
 # Report Redesign
 
 Ground-up redesign of the HTML training report. The current report (from the
-[report-modernization](archive/report-modernization.md) plan) has the right data and charts but
+[report-modernization](report-modernization.md) plan) has the right data and charts but
 the presentation layer — layout, hierarchy, styling, context — needs a rethink.
 
 This plan is informed by:

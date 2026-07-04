@@ -3,7 +3,7 @@
 Durable write-up of the self-play throughput investigation done on native Linux,
 the companion to [self-play-speed-investigation.md](self-play-speed-investigation.md)
 and the evidence behind **P3** in
-[../plans/self-play-throughput.md](../plans/self-play-throughput.md). Everything here
+[../plans/self-play-throughput.md](../plans/archive/self-play-throughput.md). Everything here
 was measured on the box (RTX 3060 Ti 8 GB; i5-13600KF 14C/20T; 32 GB) at commit
 `6cfa88e`, 150-episode self-play, production net (64f×4b, 300 sims), random-init
 weights, fixed `seed=42`. Timed via `run_self_play_episodes_parallel` (the exact

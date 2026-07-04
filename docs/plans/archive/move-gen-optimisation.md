@@ -5,10 +5,10 @@ Sub-plan for the second optimisation in [`full-cycle-optimisation.md`](full-cycl
 Expected wall-clock impact at production net + 4 workers: **~1.5× on per-game cost.** That speedup is bounded by Amdahl — move generation is ~43% of MCTS search time on the current implementation, the rest is GPU inference + tree bookkeeping which F2 doesn't touch.
 
 Companion docs:
-- [`docs/research/bitboards.md`](../research/bitboards.md) — generic bitboard concept (background only; we are *not* using bitboards here).
-- [`docs/research/pentobi/move-generation.md`](../research/pentobi/move-generation.md) — Pentobi's actual move-gen design, citation by citation. **Required reading** before implementing anything in this plan.
-- [`docs/research/pentobi/python-port-gotchas.md`](../research/pentobi/python-port-gotchas.md) — C++ → Python translation notes, where Pentobi's tricks don't carry over and what to do instead.
-- [`docs/research/pentobi/architecture.md`](../research/pentobi/architecture.md) — Pentobi's code layout, for context.
+- [`docs/research/bitboards.md`](../../research/bitboards.md) — generic bitboard concept (background only; we are *not* using bitboards here).
+- [`docs/research/pentobi/move-generation.md`](../../research/pentobi/move-generation.md) — Pentobi's actual move-gen design, citation by citation. **Required reading** before implementing anything in this plan.
+- [`docs/research/pentobi/python-port-gotchas.md`](../../research/pentobi/python-port-gotchas.md) — C++ → Python translation notes, where Pentobi's tricks don't carry over and what to do instead.
+- [`docs/research/pentobi/architecture.md`](../../research/pentobi/architecture.md) — Pentobi's code layout, for context.
 - [`docs/plans/full-cycle-optimisation.md`](full-cycle-optimisation.md) — master plan and the F2 row this sub-plan implements.
 
 ---
@@ -263,7 +263,7 @@ This is the headline data structure — Pentobi's `PrecompMoves::m_moves_range` 
 For every `(anchor=0..195, adj_status=0..63, piece=0..20)` combination, precompute the list of move IDs that:
 1. Use this `piece`,
 2. Are anchored at this `anchor`,
-3. Do *not* occupy any cell flagged as forbidden by `adj_status`. The `adj_status` is the 6-bit pack of "is this neighbour cell forbidden?" for the 6 specific cells around the anchor — see [`pentobi/move-generation.md`](../research/pentobi/move-generation.md) §4f for the diagram of which 6 cells and in what bit order.
+3. Do *not* occupy any cell flagged as forbidden by `adj_status`. The `adj_status` is the 6-bit pack of "is this neighbour cell forbidden?" for the 6 specific cells around the anchor — see [`pentobi/move-generation.md`](../../research/pentobi/move-generation.md) §4f for the diagram of which 6 cells and in what bit order.
 
 Storage: two numpy arrays:
 
@@ -501,6 +501,6 @@ Landed during implementation, not in the original P0-P10 row table:
 - **Don't rely on bit operations for any of this.** The whole point of choosing Option 1 is that the runtime path is byte-array reads. If you find yourself reaching for `int.bit_count()` or packing bits in inventive ways during P6, you've drifted from the design.
 - **`pieces.json` is the source of truth for piece geometry.** Read shapes from there at build time; don't hardcode them. Pentobi's piece definitions are slightly different (they handle multiple variants); we have a single fixed pieces.json.
 - **Watch the move-ID space.** Pentobi uses 0..13,728 for Duo (13,729 move IDs). Our action space is 0..17,836 (17,837 actions) because it's a clean `14×14 × 91 + 1` cartesian product. These are different numbering schemes. P5's `_move_to_action_id()` converts between them. Get this conversion right or every legal move gets pointed at the wrong policy slot.
-- **The `adj_status` bit ordering** is documented in [`pentobi/move-generation.md`](../research/pentobi/move-generation.md) §4f. Match it byte-for-byte (N=0, W=1, E=2, S=3, NW=4, SE=5). The exact same bit ordering is what makes the precomputed table coherent — a mismatch between table-build and table-read would silently corrupt move generation.
+- **The `adj_status` bit ordering** is documented in [`pentobi/move-generation.md`](../../research/pentobi/move-generation.md) §4f. Match it byte-for-byte (N=0, W=1, E=2, S=3, NW=4, SE=5). The exact same bit ordering is what makes the precomputed table coherent — a mismatch between table-build and table-read would silently corrupt move generation.
 - **Don't skip the disk caching (P6).** First-build time on a slow machine could be 30-60s. With 4-8 spawn-based workers each rebuilding it, that's 4-8 minutes of pure setup before the first game starts. The cache turns that into milliseconds.
 - **You will write a bug somewhere.** The bit ordering, the move-ID conversion, the adj_status computation, the NULL_CELL sentinel — one of them. The equivalence test on 10,000 positions exists to catch your bugs cheaply. Don't relax that to 100 positions to make tests fast; the bugs hide in the long tail.

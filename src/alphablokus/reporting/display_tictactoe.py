@@ -7,12 +7,11 @@ Stylistic convention follows the Blokus Duo renderer:
 - Row/column labels at the table edges, never inside cells
 - Same monospace, light-grey grid lines, small-cap labels above the board
 """
+
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from alphablokus.games.tictactoe.board import Board
+from alphablokus.games.tictactoe.board import Board
+from alphablokus.reporting.display import IBoardRenderer
 
 # Matched to the Blokus palette so both games look like they belong in the
 # same report. Slight transparency on the "last-move" highlight so the colour
@@ -26,7 +25,7 @@ _CELL_SIZE_PX = 56
 _BOARD_CLASS = "ttt-board"
 
 
-class TicTacToeRenderer:
+class TicTacToeRenderer(IBoardRenderer[Board]):
     """Renders a 3×3 TTT board as an HTML table.
 
     Two render modes:
@@ -46,10 +45,7 @@ class TicTacToeRenderer:
         last_action: int | None = None,
         annotation: str = "",
     ) -> str:
-        cells = [
-            _actual_cell_html(int(board.as_2d[divmod(a, 3)]), a == last_action)
-            for a in range(9)
-        ]
+        cells = [_actual_cell_html(int(board.as_2d[divmod(a, 3)]), a == last_action) for a in range(9)]
         return _wrap_table(cells, annotation)
 
     def render_policy_html(
@@ -148,9 +144,7 @@ def _wrap_table(cells: list[str], annotation: str) -> str:
     small labels on the table edges, nothing inside the playing cells beyond
     the glyph / probability text.
     """
-    col_headers = "".join(
-        f"<th>{c}</th>" for c in range(3)
-    )
+    col_headers = "".join(f"<th>{c}</th>" for c in range(3))
     header_row = f'<tr><th class="corner"></th>{col_headers}</tr>'
 
     rows_html = []
@@ -159,12 +153,7 @@ def _wrap_table(cells: list[str], annotation: str) -> str:
         # we step through cols 0..2 picking cell at action = col*3 + r.
         row_cells = "".join(cells[col * 3 + row] for col in range(3))
         rows_html.append(f'<tr><th class="row-label">{row}</th>{row_cells}</tr>')
-    table_html = (
-        '<table class="ttt-grid">'
-        f'<thead>{header_row}</thead>'
-        f'<tbody>{"".join(rows_html)}</tbody>'
-        '</table>'
-    )
+    table_html = f'<table class="ttt-grid"><thead>{header_row}</thead><tbody>{"".join(rows_html)}</tbody></table>'
 
     annotation_html = f'<div class="board-annotation">{annotation}</div>' if annotation else ""
 

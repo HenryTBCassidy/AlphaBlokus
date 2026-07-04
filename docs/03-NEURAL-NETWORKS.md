@@ -21,7 +21,7 @@ AlphaBlokus uses two neural network architectures: a simple **4-layer CNN** for 
 | Dropout | Yes (configurable rate) | No |
 | Policy head | FC trunk → `FC(512→10)` | **Fully-convolutional** (1×1 conv → per-orientation planes + pass head); legacy FC head selectable |
 | Parameters (illustrative, 512ch) | ~8.1M | ~19M (4 blocks, conv head) |
-| Source file | `tictactoe/neuralnets/net.py` | `blokusduo/neuralnets/net.py` |
+| Source file | `games/tictactoe/nn/net.py` | `games/blokusduo/nn/net.py` |
 
 > The illustrative parameter counts use 512 channels for comparison with AlphaZero. Production Blokus runs use much smaller nets (e.g. 64 filters × 4 blocks) — see the run configs.
 
@@ -336,7 +336,7 @@ Implemented as `F.kl_div(outputs, targets, reduction='batchmean')`, where `outpu
 L_v = 1/N × Σ (v_target - v_predicted)²
 ```
 
-Mean squared error between the target value (actual game outcome: +1, -1, or 1e-4 for draws) and the network's value prediction.
+Mean squared error between the target value (actual game outcome: `+1`, `−1`, or `±1e-4` ≈ 0 for draws — `1e-4` is the draw sentinel because `get_game_ended` reserves exactly `0` for "game still running"; see [02-ALGORITHMS.md](02-ALGORITHMS.md)) and the network's value prediction.
 
 ### Total Loss
 
@@ -407,6 +407,10 @@ return torch.exp(pi).float().cpu().numpy()[0], v.float().cpu().numpy()[0]
 - **Load:** `torch.load(filepath, map_location=...)` with automatic CPU fallback when CUDA unavailable; restores optimiser/scheduler state if present in the file
 - **Directory structure:** `{run_directory}/Nets/{filename}`
 - **Naming convention:** `best.pth.tar` (current best), `temp.pth.tar` (candidate's pre-arena snapshot), `accepted_{gen}` / `rejected_{gen}` (per-generation outcomes), `elo_baseline.pth.tar` (frozen gen-0 anchor)
+
+### The inference-only jnp net (JAX self-play backend)
+
+When a run uses `selfplay_backend: "jax"`, there is still exactly **one** network and one training path: at the start of each generation the torch checkpoint's `state_dict` is bridged into a pure-jnp forward pass (`games/blokusduo/jax/checkpoint.py` + `net.py`, bf16 inference by default) that the GPU-native search evaluates leaves with. Nothing about the architecture, losses, or checkpoint format above changes — the jnp copy is read-only and rebuilt from the torch weights every generation, and only `state_dict` keys cross the bridge (optimiser/scheduler state stays torch-side). See [02-ALGORITHMS.md](02-ALGORITHMS.md) for the backend itself.
 
 ---
 

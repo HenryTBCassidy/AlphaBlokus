@@ -14,7 +14,7 @@ yardstick's agreement with the reference.
 
 Usage (box)::
 
-    PYTHONPATH=$PWD uv run python -m scripts.validate_jax_search \
+    uv run python -m scripts.validate_jax_search \
         --checkpoint temp/runs/blokus/blokus_run3_overnight/Nets/accepted_82.pth.tar \
         --filters 128 --blocks 8 --sims 400 --positions 200 --top-k 64 128 256
 """
@@ -59,28 +59,38 @@ def main() -> None:
 
     import jax
 
-    from alphablokus.core.config import MCTSConfig, NetConfig, RunConfig
-    from alphablokus.core.mcts import MCTS
+    from alphablokus.config import MCTSConfig, NetConfig, RunConfig
     from alphablokus.games.blokusduo.game import BlokusDuoGame
-    from alphablokus.games.blokusduo.jaxenv.bridge import numpy_state_from_board
-    from alphablokus.games.blokusduo.jaxenv.checkpoint import convert_torch_checkpoint, params_to_device
-    from alphablokus.games.blokusduo.jaxenv.kernels import GameState, make_kernels
-    from alphablokus.games.blokusduo.jaxenv.search import SearchConfig, dense_policy, make_search
-    from alphablokus.games.blokusduo.jaxenv.tables import build_jax_tables
-    from alphablokus.games.blokusduo.neuralnets.wrapper import NNetWrapper
-    from tests.fixtures.blokus_positions import iter_cached_positions
+    from alphablokus.games.blokusduo.jax.bridge import numpy_state_from_board
+    from alphablokus.games.blokusduo.jax.checkpoint import convert_torch_checkpoint, params_to_device
+    from alphablokus.games.blokusduo.jax.kernels import GameState, make_kernels
+    from alphablokus.games.blokusduo.jax.search import SearchConfig, dense_policy, make_search
+    from alphablokus.games.blokusduo.jax.tables import build_jax_tables
+    from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
+    from alphablokus.search.mcts import MCTS
+    from alphablokus.testing.positions import iter_cached_positions
 
     game = BlokusDuoGame(pieces_config_path=PIECES_PATH)
     game.enable_optimised_movegen()
     run_config = RunConfig(
-        game="blokusduo", run_name="validate_jax_search", num_generations=1, num_eps=1,
-        temp_threshold=12, update_threshold=0.55, num_arena_matches=2,
-        root_directory=REPO_ROOT / "temp", load_model=False,
+        game="blokusduo",
+        run_name="validate_jax_search",
+        num_generations=1,
+        num_eps=1,
+        temp_threshold=12,
+        update_threshold=0.55,
+        num_arena_matches=2,
+        root_directory=REPO_ROOT / "temp",
+        load_model=False,
         mcts_config=MCTSConfig(num_mcts_sims=args.sims, cpuct=args.cpuct),
         net_config=NetConfig(
-            learning_rate=1e-3, dropout=0.0, epochs=1, batch_size=8,
+            learning_rate=1e-3,
+            dropout=0.0,
+            epochs=1,
+            batch_size=8,
             cuda=False,  # python reference runs CPU; jax uses the GPU
-            num_filters=args.filters, num_residual_blocks=args.blocks,
+            num_filters=args.filters,
+            num_residual_blocks=args.blocks,
         ),
     )
     nnet = NNetWrapper(game, run_config)
@@ -116,17 +126,22 @@ def main() -> None:
     logger.info("python K={} done in {:.1f}s", yardstick_k, k16_seconds)
 
     kernels = make_kernels(build_jax_tables(game))
-    states = GameState(*(
-        np.stack(rows) for rows in zip(
-            *(numpy_state_from_board(b, p) for b, p in zip(boards, players, strict=True)), strict=True
+    states = GameState(
+        *(
+            np.stack(rows)
+            for rows in zip(*(numpy_state_from_board(b, p) for b, p in zip(boards, players, strict=True)), strict=True)
         )
-    ))
+    )
     params = params_to_device(
-        convert_torch_checkpoint(args.checkpoint.resolve(), args.blocks), dtype=args.dtype,
+        convert_torch_checkpoint(args.checkpoint.resolve(), args.blocks),
+        dtype=args.dtype,
     )
 
     report = {
-        "sims": args.sims, "positions": len(boards), "cpuct": args.cpuct, "dtype": args.dtype,
+        "sims": args.sims,
+        "positions": len(boards),
+        "cpuct": args.cpuct,
+        "dtype": args.dtype,
         "checkpoint": str(args.checkpoint),
         "yardstick_k": yardstick_k,
         "yardstick_k16_vs_k1": {"top1": _top1(k16, k1), "overlap": _overlap(k16, k1)},
@@ -135,13 +150,20 @@ def main() -> None:
     }
     logger.info(
         "yardstick python K=16 vs K=1: top1 {:.3f}, overlap {:.3f}",
-        report["yardstick_k16_vs_k1"]["top1"], report["yardstick_k16_vs_k1"]["overlap"],
+        report["yardstick_k16_vs_k1"]["top1"],
+        report["yardstick_k16_vs_k1"]["overlap"],
     )
 
     for top_k in args.top_k:
-        search = make_search(kernels, SearchConfig(
-            num_simulations=args.sims, top_k=top_k, cpuct=args.cpuct, dtype=args.dtype,
-        ))
+        search = make_search(
+            kernels,
+            SearchConfig(
+                num_simulations=args.sims,
+                top_k=top_k,
+                cpuct=args.cpuct,
+                dtype=args.dtype,
+            ),
+        )
         result = search(params, jax.random.PRNGKey(0), states)  # compile
         jax.block_until_ready(result.action_weights)
         start = time.perf_counter()
@@ -150,8 +172,10 @@ def main() -> None:
         seconds = time.perf_counter() - start
         dense = np.asarray(dense_policy(result.action_weights, result.topk_ids, kernels.action_size))
         entry = {
-            "top1_vs_k1": _top1(dense, k1), "overlap_vs_k1": _overlap(dense, k1),
-            "top1_vs_k16": _top1(dense, k16), "overlap_vs_k16": _overlap(dense, k16),
+            "top1_vs_k1": _top1(dense, k1),
+            "overlap_vs_k1": _overlap(dense, k1),
+            "top1_vs_k16": _top1(dense, k16),
+            "overlap_vs_k16": _overlap(dense, k16),
             "seconds": seconds,
             "sims_per_second": len(boards) * args.sims / seconds,
         }
@@ -159,8 +183,13 @@ def main() -> None:
         logger.info(
             "jax K={:>3}: vs-K1 top1 {:.3f} overlap {:.3f} | vs-K16 top1 {:.3f} | "
             "{:.1f}s ({:,.0f} sims/s incl. batch-of-{} search)",
-            top_k, entry["top1_vs_k1"], entry["overlap_vs_k1"], entry["top1_vs_k16"],
-            seconds, entry["sims_per_second"], len(boards),
+            top_k,
+            entry["top1_vs_k1"],
+            entry["overlap_vs_k1"],
+            entry["top1_vs_k16"],
+            seconds,
+            entry["sims_per_second"],
+            len(boards),
         )
 
     out = args.out or REPO_ROOT / "temp" / "benchmarks" / "validate_jax_search.json"

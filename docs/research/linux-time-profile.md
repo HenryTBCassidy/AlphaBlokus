@@ -1,7 +1,7 @@
 # Linux Time Profile — Self-Play (2026-06-18)
 
 Where self-play spends its time on the Linux box, re-measured at the current config
-and two larger-net candidates. Part of [linux-performance-profiling.md](../plans/linux-performance-profiling.md)
+and two larger-net candidates. Part of [linux-performance-profiling.md](../plans/archive/linux-performance-profiling.md)
 (Step 2). Companion: [linux-memory-profile.md](linux-memory-profile.md). Headline +
 recommendations: [linux-performance-findings.md](linux-performance-findings.md).
 

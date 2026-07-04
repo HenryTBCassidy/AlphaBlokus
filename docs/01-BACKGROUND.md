@@ -198,7 +198,7 @@ Several factors make Blokus a challenging target for AlphaZero, explaining why n
 
 The network outputs and masks over a fixed **17,837**-dimensional policy — 3.8× the output space of Chess and 49× that of Go. That number is the clean cartesian product `14×14 grid × 91 piece-orientations + 1 pass` (see [Key Decisions Log](#key-decisions-log)). Only **13,729** of those placements ever fit entirely on the board; the rest extend off the edge and are permanently illegal. Of the on-board placements, only a few hundred are legal at any single position, and the network must learn to concentrate probability on them.
 
-The *legal* branching factor is highest in the opening and collapses as the board fills. Both players' first move is a fixed set of **414** placements covering their starting square. Averaged over 5 random-play games (every second ply shown; data from `scripts/move_count_analysis.py`):
+The *legal* branching factor is highest in the opening and collapses as the board fills. Both players' first move is a fixed set of **414** placements covering their starting square. Averaged over 5 random-play games (every second ply shown; data from `scripts/profiling/move_count_analysis.py`):
 
 ```
 turn   mean legal moves

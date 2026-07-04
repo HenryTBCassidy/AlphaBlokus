@@ -1,12 +1,17 @@
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
 import numpy as np
-from numpy.typing import NDArray
 
-from alphablokus.core.interfaces import IGame
 from alphablokus.games.tictactoe.board import Board
+from alphablokus.interfaces import IGame
+
+if TYPE_CHECKING:
+    from numpy.typing import NDArray
 
 
-class TicTacToeGame(IGame):
-
+class TicTacToeGame(IGame[Board]):
     def __init__(self) -> None:
         super().__init__()
         self.N: int = Board.N
@@ -110,7 +115,7 @@ class TicTacToeGame(IGame):
         return np.stack([compact == 1, compact == -1]).astype(np.float32)
 
     def get_symmetries(self, board: Board, pi: NDArray) -> list[tuple[Board, NDArray]]:
-        assert len(pi) == self.N ** 2 + 1  # 1 for pass
+        assert len(pi) == self.N**2 + 1  # 1 for pass
         pi_board = np.reshape(pi[:-1], (self.N, self.N))
         board_array = board.as_2d
         symmetries: list[tuple[Board, NDArray]] = []

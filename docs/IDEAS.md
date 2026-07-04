@@ -11,9 +11,9 @@ Status legend: **Idea** (raw, unexamined) · **Researching** (actively being inv
 
 | # | Avenue | Status | One-liner |
 |---|--------|--------|-----------|
-| I1 | [Adaptive simulation budget](#i1-adaptive-simulation-budget) | Idea | Scale `num_mcts_sims` with branching factor / moves-left instead of a flat 300 — mostly to stop wasting sims in the low-branching endgame |
+| I1 | [Adaptive simulation budget](#i1-adaptive-simulation-budget) | Promoted (partially shipped) | Scale `num_mcts_sims` with branching factor instead of a flat 300 — the taper landed as `MCTSConfig.sim_schedule: "branching"` + `sims_min` ([`plans/archive/adaptive-sim-budget.md`](plans/archive/adaptive-sim-budget.md)) |
 | I2 | [Evaluation-time search tuning](#i2-evaluation-time-search-tuning) | Idea | Use a stronger/exact search at eval than at train (e.g. K=1 and/or more sims) since eval cares about strength, not throughput |
-| I3 | [Shared-state self-play workers](#i3-shared-state-self-play-workers) | Idea | Cut the ~2.5 GB-per-worker framework duplication so we can use all 20 cores (only 8 used now) — the highest-ceiling speed lever (self-play ≈ 86% of the cycle) |
+| I3 | [Shared-state self-play workers](#i3-shared-state-self-play-workers) | Promoted (partially shipped) | Cut the ~2.5 GB-per-worker framework duplication — CPU workers (`worker_cuda: false`) + forkserver landed; the "vectorise on-device" endgame shipped as the jax backend |
 | I4 | [Continuous (non-gated) training](#i4-continuous-non-gated-training) | Promoted | First step (rolling game-sized replay buffer + compact storage, full-pass training) promoted to [`plans/archive/replay-buffer-refactor.md`](plans/archive/replay-buffer-refactor.md); full async actor/learner stays parked |
 
 > Ideas already captured elsewhere (not duplicated here): the conv policy head (F4) and the cross-worker inference server (F5) are done — see the [optimisation menu](plans/archive/full-cycle-optimisation.md#optimisation-menu); MCTS tree reuse, Cython move-gen and cached-valid-moves are in that plan's [Considered and set aside](plans/archive/full-cycle-optimisation.md#considered-and-set-aside) section; mixed-precision / fp16 inference is in its Out-of-scope list. Dirichlet root noise is **implemented** (`dirichlet_epsilon`/`dirichlet_alpha` in `MCTSConfig`, default-off).
@@ -44,6 +44,8 @@ So a flat 300 is simultaneously *thin* in the opening and *wasteful* in the endg
 - **Subtlety:** varying sims per position changes how "sharp" each move's visit-count training target is, position to position. Not necessarily bad, but it makes targets less uniform across the game — be deliberate, and measure Elo impact rather than assume.
 
 **If promoted:** likely a small plan — a branching-aware (or pieces-left-aware) sim schedule, defaulting to today's flat 300 so it's opt-in, validated by an Elo-vs-flat-300 comparison. Composes with everything else (it's orthogonal to F1/F2/F3/F4).
+
+**Update (2026-07-04) — partially shipped.** Exactly the "taper down, don't scale up" version above landed via [`plans/archive/adaptive-sim-budget.md`](plans/archive/adaptive-sim-budget.md): `MCTSConfig.sim_schedule: "branching"` scales the per-move budget with the root's legal-move count, clamped to `[sims_min, num_mcts_sims]` via `sim_branching_scale` — opt-in, with `"flat"` (bit-identical to old behaviour) as the default. **Remaining:** scaling sims *up* in the opening stays deliberately unimplemented (worst-ROI, per the analysis above), and the jax/Gumbel backend sidesteps the question on the production path (fixed n≈64 with Sequential Halving).
 
 **Related:** Dirichlet root noise (implemented — the complementary fix for thin early coverage), `docs/02-ALGORITHMS.md` (MCTS), `temp/move_count_analysis/` (the branching data).
 
@@ -77,6 +79,8 @@ So a flat 300 is simultaneously *thin* in the opening and *wasteful* in the endg
 **What doesn't help:** putting the net/tables in shared memory saves little — the 2.5 GB is the **CUDA context + framework libraries**, not the (tiny) net or tables, and CUDA contexts are per-process. The fix has to be "one GPU/framework owner" (1–2), "one process, many threads" (3), or "no processes, vectorise on-device" (4).
 
 **If promoted:** start with the free-threading **spike** (cheap, decides the whole approach) and/or the CPU-only-workers experiment (quick win on 3.12). Sequenced after the first real training run delivers results.
+
+**Update (2026-07-04) — largely shipped, by two different routes.** Fix 1 landed as the `worker_cuda` flag (now **default `false`** — pool workers run the net on CPU, ~0.5 GB each) via [`plans/archive/lean-self-play-workers.md`](plans/archive/lean-self-play-workers.md), plus `forkserver` start-method on Linux; the throughput question it opened was settled in [`plans/archive/self-play-throughput.md`](plans/archive/self-play-throughput.md) (production = 16 all-GPU workers + K=16 batching; cores, not VRAM, are the python-path cap). Fix 4 — the "rewrite the engine" option — actually shipped as the **jax self-play backend** ([`plans/archive/jax-selfplay-pipeline.md`](plans/archive/jax-selfplay-pipeline.md), mctx exactly as sketched), which removes worker processes from the production path entirely. **Remaining parked:** free-threaded Python (fix 3) — moot unless the python engine becomes the bottleneck again.
 
 **Related:** [`research/self-play-speed-investigation.md`](research/self-play-speed-investigation.md) (B5 + Amdahl), [`plans/archive/cross-worker-inference-server.md`](plans/archive/cross-worker-inference-server.md) (F5), [profiling report](research/profiling-report.md).
 

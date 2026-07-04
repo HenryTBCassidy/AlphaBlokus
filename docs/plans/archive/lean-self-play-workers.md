@@ -1,5 +1,3 @@
-
-
 # Lean Self-Play Workers — CPU workers + central GPU (S1)
 
 > **Status: DONE / SUPERSEDED — archived 2026-06-15.** The concrete deliverables

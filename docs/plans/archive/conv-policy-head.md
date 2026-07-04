@@ -2,7 +2,7 @@
 
 Sub-plan for F4 in [`full-cycle-optimisation.md`](full-cycle-optimisation.md). Replaces the fully-connected policy head (a single `Linear(392 → 17,837)` that is **~95% of the net's ~7.3M params**) with a fully-convolutional head that emits a `(91, 14, 14)` logit map plus a pass logit. Speeds inference (compounds with F3) and training, shrinks the model ~20×, and gives the correct board-game inductive bias.
 
-The reasoning for *why* is fully worked out in the research note [`../research/policy-head-architecture.md`](../research/policy-head-architecture.md) — read it first. This plan is the *how*.
+The reasoning for *why* is fully worked out in the research note [`../research/policy-head-architecture.md`](../../research/policy-head-architecture.md) — read it first. This plan is the *how*.
 
 **The one hard part:** the conv output is laid out as `(orientation_channel, array_row, array_col)`, but the action space is indexed `index = y·(N·91) + x·91 + orientation_id` in **board** coordinates (bottom-left origin), whereas the conv spatial axes are **array** coordinates (top-left origin). Getting that permutation exactly right — and proving it — is the bulk of the risk. Everything else is small.
 

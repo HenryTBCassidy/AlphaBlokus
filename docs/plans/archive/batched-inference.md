@@ -5,7 +5,7 @@ Sub-plan for the third F-step in [`full-cycle-optimisation.md`](full-cycle-optim
 Expected wall-clock impact: **~1.5-2× on top of F1+F2-8w**, mainly by recovering the GPU-contention loss F2 surfaced. Post-F2 measurement showed inference at **77.5%** of per-process time at 8 workers — that's the headroom F3 is going after.
 
 Companion docs:
-- [`docs/research/pentobi/move-generation.md`](../research/pentobi/move-generation.md) — Pentobi's actual MCTS doesn't batch (their `Search::play_in_tree` runs one sim at a time), so F3 isn't a Pentobi-port. It's the AlphaZero-paper approach.
+- [`docs/research/pentobi/move-generation.md`](../../research/pentobi/move-generation.md) — Pentobi's actual MCTS doesn't batch (their `Search::play_in_tree` runs one sim at a time), so F3 isn't a Pentobi-port. It's the AlphaZero-paper approach.
 - AlphaGo Zero (Silver et al. 2017) Methods §3 — describes virtual loss exactly. Worth reading before P3.
 - [`docs/plans/full-cycle-optimisation.md`](full-cycle-optimisation.md) — master plan + F3 row this implements.
 
@@ -202,7 +202,7 @@ Landed 2026-06-01. F3 (within-worker batching, Option A) is implemented, tested,
 - `docs/IDEAS.md` — new ideas register (adaptive sim budget, Dirichlet noise, eval-time search tuning), spun out of the discussion during this work.
 
 **Deferred:**
-- **Strength validation (K=1 vs K=16 head-to-head).** Needs a net good enough that search quality matters; a throwaway short training gives too weak a net for the K-difference to show. **Folded into the first real Blokus training run** — run a K=1-vs-K=16 arena on a real checkpoint there before trusting K>1 for production training. Until then, the conservative default is K=1 at evaluation (exact search) per [`IDEAS.md` I3](../IDEAS.md#i3-evaluation-time-search-tuning).
+- **Strength validation (K=1 vs K=16 head-to-head).** Needs a net good enough that search quality matters; a throwaway short training gives too weak a net for the K-difference to show. **Folded into the first real Blokus training run** — run a K=1-vs-K=16 arena on a real checkpoint there before trusting K>1 for production training. Until then, the conservative default is K=1 at evaluation (exact search) per [`IDEAS.md` I2](../../IDEAS.md#i2-evaluation-time-search-tuning).
 - **WSL detached-execution gotcha.** `systemd-run --user` + linger is *not* sufficient for detached PC runs — WSL idle-terminates the whole distro once no session is attached, killing the unit. Worked around by holding an SSH session open for the run's duration. Noted in `docs/guides/REMOTE-TRAINING.md`.
 
 ---

@@ -16,18 +16,20 @@ Three facts shape the choice of compute:
 
 The implication: optimal shape is **many CPU cores AND a decent GPU** (not "lots of CPU + cheapest GPU" as the older bottleneck claim implied). Inference is genuinely half the work at production net size. This still rules in commodity 24 GB cloud cards (RTX 3090 / 4090 / A6000) over H100s — the GPU just needs to keep pace with batched MCTS inference, which a 4090 does easily — but it argues against under-provisioning the GPU side.
 
+> **2026-07 update — the JAX backend changes the workload shape.** Production Blokus configs now run self-play generation GPU-native (`selfplay_backend: "jax"` + Gumbel search — see [`research/jax-pipeline-ab.md`](research/jax-pipeline-ab.md)). On the jax path, **CPU cores are no longer the self-play cap**: rules, search, and inference all live on the card (the box's 16 cores sit essentially free during generation), so the compute-shape question becomes "one good GPU + modest CPU" rather than "many cores + a GPU". The many-cores framing above still applies to the python engine — which drives all arena/Elo/Pentobi evaluation and TicTacToe — and to any run with `selfplay_backend: "python"`.
+
 ---
 
 ## Local options
 
 | Machine | GPU | VRAM | What it's good for | Validated? |
 |---------|-----|------|---------------------|------------|
-| **MacBook (Apple Silicon)** | MPS, but used in CPU mode | shared | Smoke tests, HTML report rendering, development iteration | ✅ |
-| **Personal PC** | RTX 3060 Ti | 8 GB | TicTacToe runs, early Blokus iteration | ✅ |
+| **MacBook (Apple Silicon)** | MPS, but used in CPU mode | shared | Pipeline checks, HTML report rendering, development iteration | ✅ |
+| **Personal PC** | RTX 3060 Ti | 8 GB | All Blokus training runs (python + jax backends), TicTacToe runs | ✅ |
 
-Both are zero marginal cost (electricity aside). The PC is **~1.7× slower per simulation than the Mac on a tiny profiling net** (where inference is negligible and WSL2 + slower CPU dominate), but **faster than the Mac at production net size** (64f×4b and up) where inference is half the work and the GPU pays for itself. Use the PC for Blokus training; the Mac is fine for code iteration and TTT-scale runs.
+Both are zero marginal cost (electricity aside). The PC was **~1.7× slower per simulation than the Mac on a tiny profiling net** (where inference is negligible and the then-WSL2 stack + slower CPU dominated), but is **faster than the Mac at production net size** (64f×4b and up) where inference is half the work and the GPU pays for itself — and the jax backend is GPU-only, so it doesn't exist on the Mac beyond CPU-mode tests. Use the PC for Blokus training; the Mac is fine for code iteration and TTT-scale runs.
 
-**Remote training on the PC** is set up over Tailscale + WSL2 + systemd-user; see [`docs/guides/REMOTE-TRAINING.md`](guides/REMOTE-TRAINING.md) for the runbook.
+**The PC now runs native Ubuntu 24.04** (dual-boot since 2026-06-12) — remote training is plain SSH + `tmux`, and detached runs survive; the old Tailscale + WSL2 stack applies only when the box is booted into Windows. See [`docs/guides/REMOTE-TRAINING.md`](guides/REMOTE-TRAINING.md) for the runbook.
 
 ---
 
@@ -97,7 +99,7 @@ Ladder rungs 3 and 4 want a bigger cluster than 8× cards for wall-clock reasons
 ## Recommended phasing
 
 1. **TicTacToe iteration (done):** MacBook for test runs, personal PC for full runs. No cloud needed.
-2. **Blokus algorithm iteration (now):** Personal PC for the Single-PC reference / stretch configs. Multi-day runs over Tailscale + systemd-user. F1/F2/F3/F4 have landed here; remaining work is full Blokus training runs and re-benchmarking the realised speedups.
+2. **Blokus algorithm iteration (now):** Personal PC (native Ubuntu) for scaled runs — jax/Gumbel self-play made generation ~12× cheaper on the same card, so the single 3060 Ti carries configs that this doc originally priced as cloud territory. Multi-day runs detach cleanly in `tmux`.
 3. **First cloud touch:** Run **Ladder rung 1** (10K games, ~$30) on RunPod Community 4090 to validate the cloud pipeline end-to-end. Treat this as a pipeline test, not an attempt to beat Pentobi.
 4. **First serious Pentobi attempt:** **Ladder rung 2** (100K games, ~$310). Evaluate the checkpoint against Pentobi 1/3/5/7/9. If it beats 9 — we're done, sooner than expected. If it beats 5 or 7 — climb to rung 3.
 5. **Pentobi-9-targeted run:** **Ladder rung 3** (1M games, ~$3,100). My honest expectation is this is where the agent crosses level 9. If not, climb to rung 4.

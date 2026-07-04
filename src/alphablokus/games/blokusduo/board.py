@@ -1,115 +1,27 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypeAlias
 
 import numpy as np
 from numpy.typing import NDArray
 
-from alphablokus.core.interfaces import IBoard
+from alphablokus.interfaces import IBoard
 
 if TYPE_CHECKING:
-    from alphablokus.games.blokusduo.pieces import Orientation, PieceManager
+    from alphablokus.games.blokusduo.pieces import PieceManager
+
+from alphablokus.games.blokusduo.codec import (
+    Action,
+    Coordinate,
+    CoordinateIndexDecoder,
+    Index,
+)
 
 # Type aliases for improved readability
 BoardArray: TypeAlias = NDArray[np.int8]  # Game board as numpy array
 PlayerSide: TypeAlias = int  # 1 for White, -1 for Black
-Coordinate: TypeAlias = tuple[int, int]  # (x, y) coordinate pair
-Index: TypeAlias = tuple[int, int]  # (length_idx, width_idx) pair
-ActionDict: TypeAlias = dict[int, list['Action']]  # Maps player side to list of valid actions
-PlacementDict: TypeAlias = dict[Coordinate, dict[int, 'Action']]  # Maps coordinates to piece actions
-
-
-class CoordinateIndexDecoder:
-    """
-    Converts between board coordinates and array indices.
-
-    The game uses two coordinate systems:
-    1. Board coordinates (x, y): Origin at bottom-left, x increases right, y increases up
-    2. Array indices (length_idx, width_idx): Origin at top-left, length_idx increases down, width_idx increases right
-    """
-
-    def __init__(self, board_size: int) -> None:
-        self.board_size = board_size
-
-    def to_idx(self, coordinate: Coordinate) -> Index:
-        """Convert board coordinates to array indices."""
-        length_idx = self.board_size - 1 - coordinate[1]
-        width_idx = coordinate[0]
-        return length_idx, width_idx
-
-    def to_coordinate(self, idx: Index) -> Coordinate:
-        """Convert array indices to board coordinates."""
-        x = idx[1]
-        y = self.board_size - 1 - idx[0]
-        return x, y
-
-
-@dataclass(frozen=True)
-class Action:
-    """
-    Represents a move in the game.
-
-    An action consists of:
-    - piece_id: Identifier of the piece to place (1-21)
-    - orientation: How the piece should be oriented
-    - x_coordinate: X coordinate of the placement (bottom-left origin)
-    - y_coordinate: Y coordinate of the placement (bottom-left origin)
-    """
-    piece_id: int
-    orientation: Orientation
-    x_coordinate: int
-    y_coordinate: int
-
-
-class ActionCodec:
-    """
-    Encodes Action instances to flat integer indices (0–17,836) and back.
-
-    Encoding scheme:
-        index = y * (board_size * num_orientations) + x * num_orientations + orientation_id
-
-    Where x, y are board coordinates (bottom-left origin) and orientation_id
-    is the 0-based contiguous ID from OrientationCodec. The pass action occupies
-    the last index (board_size² × num_orientations).
-    """
-
-    def __init__(self, board_size: int, piece_manager: PieceManager) -> None:
-        self._board_size = board_size
-        self._num_orientations = piece_manager.num_entries
-        self._piece_manager = piece_manager
-        self.pass_action_index = board_size * board_size * self._num_orientations
-        self.action_size = self.pass_action_index + 1
-
-    def encode(self, action: Action) -> int:
-        """Convert an Action to a flat action index."""
-        orientation_id = self._piece_manager.get_piece_orientation_id(
-            (action.piece_id, action.orientation)
-        )
-        return (
-            action.y_coordinate * (self._board_size * self._num_orientations)
-            + action.x_coordinate * self._num_orientations
-            + orientation_id
-        )
-
-    def decode(self, index: int) -> Action:
-        """Convert a flat action index to an Action.
-
-        Raises:
-            ValueError: If index is the pass action (use is_pass() to check first).
-        """
-        if index == self.pass_action_index:
-            raise ValueError("Cannot decode pass action index to an Action.")
-        orientation_id = index % self._num_orientations
-        remaining = index // self._num_orientations
-        x = remaining % self._board_size
-        y = remaining // self._board_size
-        piece_id, orientation = self._piece_manager.get_piece_orientation(orientation_id)
-        return Action(piece_id, orientation, x, y)
-
-    def is_pass(self, index: int) -> bool:
-        """Check if an action index represents the pass action."""
-        return index == self.pass_action_index
+ActionDict: TypeAlias = dict[int, list[Action]]  # Maps player side to list of valid actions
+PlacementDict: TypeAlias = dict[Coordinate, dict[int, Action]]  # Maps coordinates to piece actions
 
 
 def encode_planes_from_placement(ppb: NDArray) -> NDArray:
@@ -129,10 +41,10 @@ def encode_planes_from_placement(ppb: NDArray) -> NDArray:
     """
     rep = np.zeros((44, BlokusDuoBoard.N, BlokusDuoBoard.N), dtype=np.float32)
     for piece_id in range(1, 22):
-        rep[piece_id - 1] = (ppb == piece_id)
-        rep[21 + piece_id - 1] = (ppb == -piece_id)
-    rep[42] = ppb > 0   # Aggregate: current player
-    rep[43] = ppb < 0   # Aggregate: opponent
+        rep[piece_id - 1] = ppb == piece_id
+        rep[21 + piece_id - 1] = ppb == -piece_id
+    rep[42] = ppb > 0  # Aggregate: current player
+    rep[43] = ppb < 0  # Aggregate: opponent
     return rep
 
 
@@ -185,6 +97,14 @@ class BlokusDuoBoard(IBoard):
         self._coordinate_index_decoder = coordinate_index_decoder
 
     # -- IBoard protocol (public) -----------------------------------------------
+
+    @property
+    def placement_grid(self) -> BoardArray:
+        """Read-only signed placement board (+piece_id = current player's piece,
+        -piece_id = opponent's, 0 = empty)."""
+        view = self._piece_placement_board.view()
+        view.flags.writeable = False
+        return view
 
     @property
     def as_2d(self) -> NDArray:
@@ -269,10 +189,10 @@ class BlokusDuoBoard(IBoard):
             IndexError: If the piece doesn't fit on the board.
             RuntimeError: If trying to place on an occupied square.
         """
-        piece_orientation = self._piece_manager.get_piece_orientation_array(
-            action.piece_id, action.orientation)
+        piece_orientation = self._piece_manager.get_piece_orientation_array(action.piece_id, action.orientation)
         length_idx, width_idx = self._coordinate_index_decoder.to_idx(
-            coordinate=(action.x_coordinate, action.y_coordinate))
+            coordinate=(action.x_coordinate, action.y_coordinate)
+        )
 
         # Create new placement board with piece applied
         new_ppb = self._piece_placement_board.copy()
@@ -284,22 +204,24 @@ class BlokusDuoBoard(IBoard):
                     ri, ci = length_idx + i, width_idx + j
                     if ri >= self.N or ci >= self.N:
                         detail = self._piece_insertion_error_message(
-                            piece_orientation, action.x_coordinate, action.y_coordinate)
+                            piece_orientation, action.x_coordinate, action.y_coordinate
+                        )
                         raise IndexError(
-                            f"Piece cannot be inserted at this index, it does not fit on the board! \n{detail}")
+                            f"Piece cannot be inserted at this index, it does not fit on the board! \n{detail}"
+                        )
                     if new_ppb[ri, ci] != 0:
                         detail = self._piece_insertion_error_message(
-                            piece_orientation, action.x_coordinate, action.y_coordinate)
-                        raise RuntimeError(
-                            f"Trying to insert piece into board over existing piece! \n{detail}")
+                            piece_orientation, action.x_coordinate, action.y_coordinate
+                        )
+                        raise RuntimeError(f"Trying to insert piece into board over existing piece! \n{detail}")
                     new_ppb[ri, ci] = np.int8(action.piece_id * player_side)
 
         # Update remaining pieces
         if player_side == 1:
             new_white_remaining = self._white_piece_ids_remaining - {action.piece_id}
             new_black_remaining = self._black_piece_ids_remaining
-            new_white_last = action.piece_id
-            new_black_last = self._black_last_piece_played
+            new_white_last: int | None = action.piece_id
+            new_black_last: int | None = self._black_last_piece_played
         else:
             new_white_remaining = self._white_piece_ids_remaining
             new_black_remaining = self._black_piece_ids_remaining - {action.piece_id}
@@ -311,9 +233,11 @@ class BlokusDuoBoard(IBoard):
         new_black_points: PlacementDict = dict(self._black_placement_points)
         board_2d = np.sign(new_ppb).astype(np.int8)
         BlokusDuoBoard._update_placement_points(
-            new_white_points, 1, (length_idx, width_idx), piece_orientation, board_2d)
+            new_white_points, 1, (length_idx, width_idx), piece_orientation, board_2d
+        )
         BlokusDuoBoard._update_placement_points(
-            new_black_points, -1, (length_idx, width_idx), piece_orientation, board_2d)
+            new_black_points, -1, (length_idx, width_idx), piece_orientation, board_2d
+        )
 
         # Side-danger only grows for the player who just moved (it's "adjacent to
         # a *friendly* piece"), so the opponent's zone is carried over unchanged by
@@ -364,7 +288,7 @@ class BlokusDuoBoard(IBoard):
         placement-point caches, side-danger masks — gets transposed or
         carried through as appropriate. See
         ``docs/plans/archive/blokus-symmetries.md`` for the derivation and
-        the test suite in ``tests/test_blokusduo/test_symmetry.py`` for the
+        the test suite in ``tests/games/blokusduo/test_symmetry.py`` for the
         layered correctness checks.
         """
         new_ppb = np.transpose(self._piece_placement_board).astype(np.int8)
@@ -372,12 +296,8 @@ class BlokusDuoBoard(IBoard):
         # indices, so we transpose by swapping the two components of each
         # key. Inner dicts are currently empty (move-generation cache slot);
         # an empty-dict copy is fine.
-        new_white_points: PlacementDict = {
-            (j, i): {} for (i, j) in self._white_placement_points
-        }
-        new_black_points: PlacementDict = {
-            (j, i): {} for (i, j) in self._black_placement_points
-        }
+        new_white_points: PlacementDict = {(j, i): {} for (i, j) in self._white_placement_points}
+        new_black_points: PlacementDict = {(j, i): {} for (i, j) in self._black_placement_points}
         return BlokusDuoBoard._from_state(
             piece_placement_board=new_ppb,
             white_remaining=self._white_piece_ids_remaining,
@@ -464,10 +384,10 @@ class BlokusDuoBoard(IBoard):
         instead of recomputing the whole board (bit-identical).
         """
         danger = np.zeros_like(friendly)
-        danger[1:, :] |= friendly[:-1, :]   # piece above
-        danger[:-1, :] |= friendly[1:, :]   # piece below
-        danger[:, 1:] |= friendly[:, :-1]   # piece left
-        danger[:, :-1] |= friendly[:, 1:]   # piece right
+        danger[1:, :] |= friendly[:-1, :]  # piece above
+        danger[:-1, :] |= friendly[1:, :]  # piece below
+        danger[:, 1:] |= friendly[:, :-1]  # piece left
+        danger[:, :-1] |= friendly[:, 1:]  # piece right
         return danger
 
     @classmethod
@@ -508,8 +428,7 @@ class BlokusDuoBoard(IBoard):
         """Check if a square can be validly placed on (empty + corner rule + no-sides rule)."""
         if board[i, j] != 0:
             return False
-        return (cls._at_least_one_corner(i, j, side, board)
-                and cls._no_sides(i, j, side, board))
+        return cls._at_least_one_corner(i, j, side, board) and cls._no_sides(i, j, side, board)
 
     @classmethod
     def _update_placement_points(
@@ -545,7 +464,4 @@ class BlokusDuoBoard(IBoard):
         x_coordinate: int,
         y_coordinate: int,
     ) -> str:
-        return (f"Board: \n {self.as_2d}, \n "
-                f"Piece: \n {piece_orientation}, \n"
-                f"At ({x_coordinate}, {y_coordinate})")
-
+        return f"Board: \n {self.as_2d}, \n Piece: \n {piece_orientation}, \nAt ({x_coordinate}, {y_coordinate})"

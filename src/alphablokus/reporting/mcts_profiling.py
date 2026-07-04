@@ -1,7 +1,7 @@
 """Reusable MCTS-profiling report builder.
 
-The original :mod:`scripts.mcts_profiling` script had its HTML report
-inline. The benchmark phase script (:mod:`scripts.benchmark_phases`)
+The original :mod:`scripts.profiling.mcts_profiling` script had its HTML report
+inline. The benchmark phase script (:mod:`scripts.benchmarks.benchmark_phases`)
 wants the same per-move drill-down across multiple game phases
 (self-play / arena / Elo), so the rendering pieces live here and both
 callers reuse them.
@@ -13,6 +13,7 @@ Two entry points:
 - :func:`build_multi_phase_report` — many phases in one document, with
   a wall-clock summary at the top and a per-phase drill-down below.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -25,7 +26,7 @@ import plotly.graph_objects as go
 if TYPE_CHECKING:
     from pathlib import Path
 
-    from alphablokus.core.mcts import MCTSEpisodeStats
+    from alphablokus.search.stats import MCTSEpisodeStats
 
 
 @dataclass(frozen=True)
@@ -50,17 +51,19 @@ def _move_stats_to_df(all_stats: list[MCTSEpisodeStats]) -> pd.DataFrame:
     records = []
     for game_id, episode in enumerate(all_stats):
         for ms in episode.move_stats:
-            records.append({
-                "game_id": game_id,
-                "move_number": ms.move_number,
-                "num_sims": ms.num_sims,
-                "search_time_s": ms.search_time_s,
-                "inference_time_s": ms.inference_time_s,
-                "valid_moves_time_s": ms.valid_moves_time_s,
-                "game_ended_time_s": ms.game_ended_time_s,
-                "num_leaf_expansions": ms.num_leaf_expansions,
-                "num_valid_moves": ms.num_valid_moves,
-            })
+            records.append(
+                {
+                    "game_id": game_id,
+                    "move_number": ms.move_number,
+                    "num_sims": ms.num_sims,
+                    "search_time_s": ms.search_time_s,
+                    "inference_time_s": ms.inference_time_s,
+                    "valid_moves_time_s": ms.valid_moves_time_s,
+                    "game_ended_time_s": ms.game_ended_time_s,
+                    "num_leaf_expansions": ms.num_leaf_expansions,
+                    "num_valid_moves": ms.num_valid_moves,
+                }
+            )
     return pd.DataFrame(records)
 
 
@@ -68,20 +71,22 @@ def _episode_stats_to_df(all_stats: list[MCTSEpisodeStats]) -> pd.DataFrame:
     """Flatten episode-level stats into a DataFrame."""
     records = []
     for game_id, s in enumerate(all_stats):
-        records.append({
-            "game_id": game_id,
-            "num_moves": s.num_moves,
-            "total_sims": s.total_sims,
-            "total_search_time_s": s.total_search_time_s,
-            "total_inference_time_s": s.total_inference_time_s,
-            "total_valid_moves_time_s": s.total_valid_moves_time_s,
-            "total_game_ended_time_s": s.total_game_ended_time_s,
-            "num_leaf_expansions": s.num_leaf_expansions,
-            "num_valid_moves_calls": s.num_valid_moves_calls,
-            "num_game_ended_calls": s.num_game_ended_calls,
-            "tree_size": s.tree_size,
-            "tree_memory_bytes": s.tree_memory_bytes,
-        })
+        records.append(
+            {
+                "game_id": game_id,
+                "num_moves": s.num_moves,
+                "total_sims": s.total_sims,
+                "total_search_time_s": s.total_search_time_s,
+                "total_inference_time_s": s.total_inference_time_s,
+                "total_valid_moves_time_s": s.total_valid_moves_time_s,
+                "total_game_ended_time_s": s.total_game_ended_time_s,
+                "num_leaf_expansions": s.num_leaf_expansions,
+                "num_valid_moves_calls": s.num_valid_moves_calls,
+                "num_game_ended_calls": s.num_game_ended_calls,
+                "tree_size": s.tree_size,
+                "tree_memory_bytes": s.tree_memory_bytes,
+            }
+        )
     return pd.DataFrame(records)
 
 
@@ -121,10 +126,7 @@ def _kpi_cards_html(kpis: dict[str, str]) -> str:
     parts = []
     for label, value in kpis.items():
         parts.append(
-            f'<div class="kpi-card">'
-            f'<div class="kpi-value">{value}</div>'
-            f'<div class="kpi-label">{label}</div>'
-            f"</div>"
+            f'<div class="kpi-card"><div class="kpi-value">{value}</div><div class="kpi-label">{label}</div></div>'
         )
     return f'<div class="kpi-grid">{"".join(parts)}</div>'
 
@@ -140,87 +142,141 @@ def _build_phase_charts(
     total_search = float(episode_df["total_search_time_s"].sum())
     total_other = max(0.0, total_search - total_inference - total_valid_moves - total_game_ended)
 
-    fig_pie = go.Figure(data=[go.Pie(
-        labels=["Neural Net Inference", "Move Generation", "Game-Ended Checks", "Other (UCB, tree ops)"],
-        values=[total_inference, total_valid_moves, total_game_ended, total_other],
-        marker_colors=["#636efa", "#00cc96", "#ef553b", "#ffa15a"],
-        textinfo="label+percent", hole=0.35,
-    )])
+    fig_pie = go.Figure(
+        data=[
+            go.Pie(
+                labels=["Neural Net Inference", "Move Generation", "Game-Ended Checks", "Other (UCB, tree ops)"],
+                values=[total_inference, total_valid_moves, total_game_ended, total_other],
+                marker_colors=["#636efa", "#00cc96", "#ef553b", "#ffa15a"],
+                textinfo="label+percent",
+                hole=0.35,
+            )
+        ]
+    )
     fig_pie.update_layout(title="Time Breakdown (All Games)", height=450, template="plotly_white")
 
-    turn_stats = move_df.groupby("move_number").agg(
-        mean_search=("search_time_s", "mean"),
-        mean_inference=("inference_time_s", "mean"),
-        mean_valid_moves=("valid_moves_time_s", "mean"),
-        mean_game_ended=("game_ended_time_s", "mean"),
-        mean_num_valid=("num_valid_moves", "mean"),
-        mean_leaf=("num_leaf_expansions", "mean"),
-    ).reset_index() if not move_df.empty else pd.DataFrame()
+    turn_stats = (
+        move_df.groupby("move_number")
+        .agg(
+            mean_search=("search_time_s", "mean"),
+            mean_inference=("inference_time_s", "mean"),
+            mean_valid_moves=("valid_moves_time_s", "mean"),
+            mean_game_ended=("game_ended_time_s", "mean"),
+            mean_num_valid=("num_valid_moves", "mean"),
+            mean_leaf=("num_leaf_expansions", "mean"),
+        )
+        .reset_index()
+        if not move_df.empty
+        else pd.DataFrame()
+    )
 
     fig_timing = go.Figure()
     fig_search = go.Figure()
     fig_valid = go.Figure()
     fig_leaf = go.Figure()
     if not turn_stats.empty:
-        fig_timing.add_trace(go.Scatter(
-            x=turn_stats["move_number"], y=turn_stats["mean_inference"] * 1000,
-            mode="lines", name="Inference", line=dict(color="#636efa", width=2),
-        ))
-        fig_timing.add_trace(go.Scatter(
-            x=turn_stats["move_number"], y=turn_stats["mean_valid_moves"] * 1000,
-            mode="lines", name="Move Generation", line=dict(color="#00cc96", width=2),
-        ))
-        fig_timing.add_trace(go.Scatter(
-            x=turn_stats["move_number"], y=turn_stats["mean_game_ended"] * 1000,
-            mode="lines", name="Game-Ended", line=dict(color="#ef553b", width=2),
-        ))
-        fig_search.add_trace(go.Scatter(
-            x=turn_stats["move_number"], y=turn_stats["mean_search"] * 1000,
-            mode="lines", name="Total Search", line=dict(color="#ab63fa", width=2),
-        ))
-        fig_valid.add_trace(go.Scatter(
-            x=turn_stats["move_number"], y=turn_stats["mean_num_valid"],
-            mode="lines", line=dict(color="#636efa", width=2),
-        ))
-        fig_leaf.add_trace(go.Scatter(
-            x=turn_stats["move_number"], y=turn_stats["mean_leaf"],
-            mode="lines", line=dict(color="#ffa15a", width=2),
-        ))
+        fig_timing.add_trace(
+            go.Scatter(
+                x=turn_stats["move_number"],
+                y=turn_stats["mean_inference"] * 1000,
+                mode="lines",
+                name="Inference",
+                line=dict(color="#636efa", width=2),
+            )
+        )
+        fig_timing.add_trace(
+            go.Scatter(
+                x=turn_stats["move_number"],
+                y=turn_stats["mean_valid_moves"] * 1000,
+                mode="lines",
+                name="Move Generation",
+                line=dict(color="#00cc96", width=2),
+            )
+        )
+        fig_timing.add_trace(
+            go.Scatter(
+                x=turn_stats["move_number"],
+                y=turn_stats["mean_game_ended"] * 1000,
+                mode="lines",
+                name="Game-Ended",
+                line=dict(color="#ef553b", width=2),
+            )
+        )
+        fig_search.add_trace(
+            go.Scatter(
+                x=turn_stats["move_number"],
+                y=turn_stats["mean_search"] * 1000,
+                mode="lines",
+                name="Total Search",
+                line=dict(color="#ab63fa", width=2),
+            )
+        )
+        fig_valid.add_trace(
+            go.Scatter(
+                x=turn_stats["move_number"],
+                y=turn_stats["mean_num_valid"],
+                mode="lines",
+                line=dict(color="#636efa", width=2),
+            )
+        )
+        fig_leaf.add_trace(
+            go.Scatter(
+                x=turn_stats["move_number"],
+                y=turn_stats["mean_leaf"],
+                mode="lines",
+                line=dict(color="#ffa15a", width=2),
+            )
+        )
     fig_timing.update_layout(
         title="Mean Time Per Move By Component",
-        xaxis_title="Move Number", yaxis_title="Time (ms)",
-        height=450, template="plotly_white",
+        xaxis_title="Move Number",
+        yaxis_title="Time (ms)",
+        height=450,
+        template="plotly_white",
     )
     fig_search.update_layout(
         title="Mean Total Search Time Per Move",
-        xaxis_title="Move Number", yaxis_title="Time (ms)",
-        height=450, template="plotly_white",
+        xaxis_title="Move Number",
+        yaxis_title="Time (ms)",
+        height=450,
+        template="plotly_white",
     )
     fig_valid.update_layout(
         title="Mean Legal Moves Per Turn (MCTS Perspective)",
-        xaxis_title="Move Number", yaxis_title="Number of Legal Moves",
-        height=450, template="plotly_white",
+        xaxis_title="Move Number",
+        yaxis_title="Number of Legal Moves",
+        height=450,
+        template="plotly_white",
     )
     fig_leaf.update_layout(
         title="Mean Leaf Expansions Per Move",
-        xaxis_title="Move Number", yaxis_title="Leaf Expansions",
-        height=450, template="plotly_white",
+        xaxis_title="Move Number",
+        yaxis_title="Leaf Expansions",
+        height=450,
+        template="plotly_white",
     )
 
     if not move_df.empty:
         fig_hist = px.histogram(
-            move_df, x="search_time_s", nbins=50,
+            move_df,
+            x="search_time_s",
+            nbins=50,
             title="Distribution of Search Time Per Move",
             labels={"search_time_s": "Search Time (s)"},
-            height=400, template="plotly_white",
+            height=400,
+            template="plotly_white",
         )
         fig_hist.update_layout(xaxis_title="Search Time (s)", yaxis_title="Count")
     else:
         fig_hist = go.Figure()
 
     return {
-        "pie": fig_pie, "timing": fig_timing, "search": fig_search,
-        "valid": fig_valid, "leaf": fig_leaf, "hist": fig_hist,
+        "pie": fig_pie,
+        "timing": fig_timing,
+        "search": fig_search,
+        "valid": fig_valid,
+        "leaf": fig_leaf,
+        "hist": fig_hist,
     }
 
 
@@ -296,7 +352,7 @@ def build_single_phase_report(
 ) -> Path:
     """Render the single-phase report and write it to ``output_dir/report.html``.
 
-    Used by :mod:`scripts.mcts_profiling`. Also dumps per-move and per-episode
+    Used by :mod:`scripts.profiling.mcts_profiling`. Also dumps per-move and per-episode
     CSVs alongside the HTML for ad-hoc inspection.
     """
     output_dir.mkdir(parents=True, exist_ok=True)
@@ -346,7 +402,7 @@ def build_multi_phase_report(
     1. **Wall-clock summary** — per-phase total time + games + sims/sec, side
        by side, so the "before vs after" comparison is obvious at a glance.
     2. **Run-time estimate table** — optional; passed in as HTML by the
-       caller (the estimator lives in :mod:`scripts.benchmark_phases`).
+       caller (the estimator lives in :mod:`scripts.benchmarks.benchmark_phases`).
     3. **Per-phase drill-down** — the original mcts_profiling-style detail
        for each phase, in the same document.
     """
@@ -355,41 +411,56 @@ def build_multi_phase_report(
     summary_rows = []
     for p in phases:
         if not p.stats:
-            summary_rows.append({
-                "Phase": p.name, "Games": 0, "Total wall-clock": "—",
-                "Mean / game": "—", "Sims/sec": "—",
-            })
+            summary_rows.append(
+                {
+                    "Phase": p.name,
+                    "Games": 0,
+                    "Total wall-clock": "—",
+                    "Mean / game": "—",
+                    "Sims/sec": "—",
+                }
+            )
             continue
         episode_df = _episode_stats_to_df(p.stats)
         n = len(p.stats)
         sum_sims = float(episode_df["total_sims"].sum())
         sum_search = float(episode_df["total_search_time_s"].sum())
         sims_per_sec = (sum_sims / sum_search) if sum_search > 0 else 0.0
-        summary_rows.append({
-            "Phase": p.name, "Games": n,
-            "Total wall-clock": f"{p.wall_clock_s:.1f}s",
-            "Mean / game": f"{p.wall_clock_s / n:.2f}s",
-            "Sims/sec": f"{sims_per_sec:.0f}",
-        })
+        summary_rows.append(
+            {
+                "Phase": p.name,
+                "Games": n,
+                "Total wall-clock": f"{p.wall_clock_s:.1f}s",
+                "Mean / game": f"{p.wall_clock_s / n:.2f}s",
+                "Sims/sec": f"{sims_per_sec:.0f}",
+            }
+        )
 
-    summary_table = "<table class=\"summary\"><thead><tr>" + "".join(
-        f"<th>{k}</th>" for k in summary_rows[0]
-    ) + "</tr></thead><tbody>"
+    summary_table = (
+        '<table class="summary"><thead><tr>'
+        + "".join(f"<th>{k}</th>" for k in summary_rows[0])
+        + "</tr></thead><tbody>"
+    )
     for row in summary_rows:
         summary_table += "<tr>" + "".join(f"<td>{v}</td>" for v in row.values()) + "</tr>"
     summary_table += "</tbody></table>"
 
-    fig_phase_bar = go.Figure(data=[go.Bar(
-        x=[p.name for p in phases],
-        y=[p.wall_clock_s for p in phases],
-        marker_color="#636efa",
-        text=[f"{p.wall_clock_s:.1f}s" for p in phases],
-        textposition="outside",
-    )])
+    fig_phase_bar = go.Figure(
+        data=[
+            go.Bar(
+                x=[p.name for p in phases],
+                y=[p.wall_clock_s for p in phases],
+                marker_color="#636efa",
+                text=[f"{p.wall_clock_s:.1f}s" for p in phases],
+                textposition="outside",
+            )
+        ]
+    )
     fig_phase_bar.update_layout(
         title="Wall-clock by Phase",
         yaxis_title="Seconds",
-        height=400, template="plotly_white",
+        height=400,
+        template="plotly_white",
         showlegend=False,
     )
 
@@ -421,7 +492,7 @@ def build_multi_phase_report(
 
 <h2>Per-phase drill-down</h2>
 <p class="subtitle">Each phase below uses the same template as
-<code>scripts/mcts_profiling.py</code>: KPIs, component pie, per-move
+<code>scripts/profiling/mcts_profiling.py</code>: KPIs, component pie, per-move
 timing curves, and search characteristics.</p>
 {"".join(drilldown_blocks)}
 </body>

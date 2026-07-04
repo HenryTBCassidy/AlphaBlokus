@@ -1,24 +1,34 @@
-from collections.abc import Generator
-from pathlib import Path
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
 
 import numpy as np
-from numpy.typing import NDArray
 
-from alphablokus.core.interfaces import IGame
 from alphablokus.games.blokusduo.board import (
-    Action,
-    ActionCodec,
     ActionDict,
     BlokusDuoBoard,
     BoardArray,
-    CoordinateIndexDecoder,
     PlayerSide,
     encode_planes_from_placement,
 )
+from alphablokus.games.blokusduo.codec import (
+    Action,
+    ActionCodec,
+    CoordinateIndexDecoder,
+)
 from alphablokus.games.blokusduo.pieces import Orientation, PieceManager, pieces_loader
+from alphablokus.interfaces import IGame
+
+if TYPE_CHECKING:
+    from collections.abc import Generator
+    from pathlib import Path
+
+    from numpy.typing import NDArray
+
+    from alphablokus.games.blokusduo.movegen.runtime import F2MoveGenerator
 
 
-class BlokusDuoGame(IGame):
+class BlokusDuoGame(IGame[BlokusDuoBoard]):
     """
     Rules engine and action space for Blokus Duo.
 
@@ -58,7 +68,7 @@ class BlokusDuoGame(IGame):
         # Optional optimised move generator. ``None`` until
         # ``enable_optimised_movegen()`` is called. When set,
         # ``valid_move_masking`` routes through it.
-        self._f2_generator = None
+        self._f2_generator: F2MoveGenerator | None = None
 
     def enable_optimised_movegen(self) -> None:
         """Enable the precomputed-move-list move generator.
@@ -69,10 +79,11 @@ class BlokusDuoGame(IGame):
         Produces bit-identical training trajectories at the same seed.
 
         Triggered by ``RunConfig.use_optimised_movegen`` in the
-        production codepath (see ``core/parallel_self_play.py``'s
-        worker init and ``scripts/benchmark_phases.py``'s setup).
+        production codepath (see ``parallel/pool.py``'s
+        worker init and ``scripts/benchmarks/benchmark_phases.py``'s setup).
         """
-        from alphablokus.games.blokusduo.movegen_runtime import get_default_generator
+        from alphablokus.games.blokusduo.movegen.runtime import get_default_generator
+
         self._f2_generator = get_default_generator()
 
     # -- Public methods (IGame protocol, in call order) -------------------------
@@ -91,13 +102,10 @@ class BlokusDuoGame(IGame):
         This includes all possible piece placements (board_size² × num_orientations)
         plus one pass action.
         """
-        return (self.board_size ** 2) * self.num_orientations + 1
+        return (self.board_size**2) * self.num_orientations + 1
 
     def get_next_state(
-        self,
-        board: BlokusDuoBoard,
-        player: PlayerSide,
-        action: int
+        self, board: BlokusDuoBoard, player: PlayerSide, action: int
     ) -> tuple[BlokusDuoBoard, PlayerSide]:
         """Apply an action to the current board state.
 
@@ -180,7 +188,9 @@ class BlokusDuoGame(IGame):
         return encode_planes_from_placement(compact)
 
     def get_symmetries(
-        self, board: BlokusDuoBoard, pi: NDArray,
+        self,
+        board: BlokusDuoBoard,
+        pi: NDArray,
     ) -> list[tuple[BlokusDuoBoard, NDArray]]:
         """Return all geometric symmetries of ``(board, pi)`` as (board, pi)
         pairs.
@@ -273,7 +283,8 @@ class BlokusDuoGame(IGame):
                 continue
 
             if (
-                board_2d is not None and side_danger is not None
+                board_2d is not None
+                and side_danger is not None
                 and not self._all_cells_valid(filled_cells, ins_i, ins_j, board_2d, side_danger)
             ):
                 continue
@@ -299,7 +310,8 @@ class BlokusDuoGame(IGame):
                 if self._all_cells_valid(
                     self.piece_manager.get_filled_cells(a.piece_id, a.orientation),
                     *self._coordinate_index_decoder.to_idx((a.x_coordinate, a.y_coordinate)),
-                    board_2d, side_danger,
+                    board_2d,
+                    side_danger,
                 ):
                     yield a
             return
@@ -309,13 +321,17 @@ class BlokusDuoGame(IGame):
         points = board.placement_points(player)
         remaining = board.remaining_piece_ids(player)
 
-        for (pi, pj) in points:
+        for pi, pj in points:
             for piece_id in remaining:
                 piece = self.piece_manager.pieces[piece_id]
                 for orientation in piece.basis_orientations:
                     yield from self._placements_at_point(
-                        piece_id, orientation, pi, pj,
-                        board_2d=board_2d, side_danger=side_danger,
+                        piece_id,
+                        orientation,
+                        pi,
+                        pj,
+                        board_2d=board_2d,
+                        side_danger=side_danger,
                     )
 
     # -- Symmetry helpers (public) ----------------------------------------------
@@ -396,6 +412,20 @@ class BlokusDuoGame(IGame):
             return self._f2_generator.has_any_move(self, board, player)
         return next(self._generate_valid_moves(board, player), None) is not None
 
+    @property
+    def coordinate_decoder(self) -> CoordinateIndexDecoder:
+        """Converter between board coordinates and array indices."""
+        return self._coordinate_index_decoder
+
+    def valid_actions(self, board: BlokusDuoBoard, player: PlayerSide) -> list[Action]:
+        """All legal placements for ``player`` as :class:`Action` objects (excludes pass).
+
+        The object-level companion to ``valid_move_masking`` — used by
+        reporting, replay tooling, and analysis scripts that need concrete
+        piece/orientation/coordinate details rather than a flat mask.
+        """
+        return self._valid_moves(board, player)
+
     def _valid_moves(self, board: BlokusDuoBoard, player: PlayerSide) -> list[Action]:
         """Generate all legal moves for a player (deduplicated)."""
         return list(set(self._generate_valid_moves(board, player)))
@@ -404,10 +434,8 @@ class BlokusDuoGame(IGame):
         """Calculate and cache all possible initial moves for both players."""
         start_moves: ActionDict = {1: [], -1: []}
         for piece_id, orientation in self.piece_manager.all_piece_id_basis_orientations():
-            start_moves[1].extend(
-                self._placements_at_point(piece_id, orientation, *self.white_start))
-            start_moves[-1].extend(
-                self._placements_at_point(piece_id, orientation, *self.black_start))
+            start_moves[1].extend(self._placements_at_point(piece_id, orientation, *self.white_start))
+            start_moves[-1].extend(self._placements_at_point(piece_id, orientation, *self.black_start))
         return start_moves
 
     def _calculate_score(self, board: BlokusDuoBoard, player: PlayerSide) -> int:
@@ -426,7 +454,5 @@ class BlokusDuoGame(IGame):
             if last_played == 1:  # Monomino
                 score += 5
         else:
-            score = -int(np.sum([
-                self.piece_manager.pieces[pid].identity.sum() for pid in remaining
-            ]))
+            score = -int(np.sum([self.piece_manager.pieces[pid].identity.sum() for pid in remaining]))
         return score

@@ -3,8 +3,8 @@ from __future__ import annotations
 import os
 import time
 from abc import ABC, abstractmethod
-from contextlib import nullcontext
-from typing import TYPE_CHECKING
+from contextlib import AbstractContextManager, nullcontext
+from typing import TYPE_CHECKING, Any, cast
 
 import numpy as np
 import torch
@@ -16,14 +16,21 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from alphablokus.core.interfaces import IBoard, IGame, INeuralNetWrapper
-from alphablokus.core.sparse_policy import as_dense
+from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper
+from alphablokus.storage.sparse_policy import as_dense
+
+# Ceiling on the eval set the per-epoch diagnostics accept. The eval set holds
+# DENSE boards and policies — fine at the pinned ~200 positions (~14 MB for
+# Blokus's (n, 17837) targets) but it would OOM if someone scaled it toward
+# buffer size, so the bound is enforced, not assumed (oom-hardening O9).
+MAX_EVAL_SET_POSITIONS = 2_000
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
 
-    from alphablokus.core.config import RunConfig
-    from alphablokus.core.storage import EvalSet, MetricsCollector
+    from alphablokus.config import RunConfig
+    from alphablokus.selfplay.episode import ProcessedExample
+    from alphablokus.storage.metrics import EvalSet, MetricsCollector
 
 
 class AverageMeter:
@@ -40,7 +47,7 @@ class AverageMeter:
         self.count: int = 0
 
     def __repr__(self) -> str:
-        return f'{self.avg:.2e}'
+        return f"{self.avg:.2e}"
 
     def update(self, val: float, n: int = 1) -> None:
         """
@@ -114,8 +121,10 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         self.config = config
         self.net_config = config.net_config
         self.nnet = self._create_network()
-        self.board_rows: int = self.nnet.board_rows
-        self.board_cols: int = self.nnet.board_cols
+        # torch stubs type attribute access on Module as Tensor | Module;
+        # these are plain ints on our net classes.
+        self.board_rows: int = cast("int", self.nnet.board_rows)
+        self.board_cols: int = cast("int", self.nnet.board_cols)
 
         self._device = self._resolve_device()
         self.nnet.to(self._device)
@@ -159,7 +168,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
 
     def train(
         self,
-        examples: list[tuple[np.ndarray, np.ndarray, float]],
+        examples: list[ProcessedExample],
         generation: int,
         metrics: MetricsCollector | None = None,
         eval_set: EvalSet | None = None,
@@ -205,11 +214,10 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         sample_v = vs_np[0]
         expected_board_shape = (sample_board.shape[0], self.board_rows, self.board_cols)
         assert sample_board.shape == expected_board_shape, (
-            f"Encoded board shape {sample_board.shape} != expected {expected_board_shape}")
-        assert abs(sample_pi.sum() - 1.0) < 0.01, (
-            f"Policy vector sums to {sample_pi.sum()}, expected ~1.0")
-        assert -1.0 <= sample_v <= 1.0, (
-            f"Value {sample_v} outside [-1, 1]")
+            f"Encoded board shape {sample_board.shape} != expected {expected_board_shape}"
+        )
+        assert abs(sample_pi.sum() - 1.0) < 0.01, f"Policy vector sums to {sample_pi.sum()}, expected ~1.0"
+        assert -1.0 <= sample_v <= 1.0, f"Value {sample_v} outside [-1, 1]"
         dataset = _LazyPolicyDataset(boards_np, raw_pis, vs_np, action_size, encode_fn)
 
         # Full-pass training: every position in the buffer is trained on exactly
@@ -224,11 +232,13 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             v_losses = AverageMeter()
 
             loader = DataLoader(dataset, batch_size=self.net_config.batch_size, shuffle=True)
-            t = tqdm(loader, desc='Training Net')
+            t = tqdm(loader, desc="Training Net")
             for batch_number, (boards, target_pis, target_vs) in enumerate(t):
-                boards, target_pis, target_vs = (boards.to(self._device),
-                                                 target_pis.to(self._device),
-                                                 target_vs.to(self._device))
+                boards, target_pis, target_vs = (
+                    boards.to(self._device),
+                    target_pis.to(self._device),
+                    target_vs.to(self._device),
+                )
 
                 out_pi, out_v = self.nnet(boards)
                 l_pi = self.loss_pi(target_pis, out_pi)
@@ -290,7 +300,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                     bucket_counts=diagnostics["calib_counts"],
                 )
 
-    def _compute_eval_set_diagnostics(self, eval_set: EvalSet) -> dict:
+    def _compute_eval_set_diagnostics(self, eval_set: EvalSet) -> dict[str, Any]:
         """Forward-pass the network over the eval set and compute three
         AlphaZero-style diagnostics in one shot:
 
@@ -301,6 +311,11 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
           mapping to mean(actual outcome) per bucket. Returned as three
           aligned arrays (centers, means, counts).
         """
+        assert len(eval_set) <= MAX_EVAL_SET_POSITIONS, (
+            f"eval set of {len(eval_set)} positions exceeds MAX_EVAL_SET_POSITIONS="
+            f"{MAX_EVAL_SET_POSITIONS} — it is held dense (boards + full-action-space "
+            "policies), so keep it a small pinned sample, never buffer-scale."
+        )
         self.nnet.eval()
         per_position_entropies: list[float] = []
         top1_hits = 0
@@ -351,7 +366,9 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         pred_v = np.asarray(predicted_values, dtype=float)
         bucket_edges = np.linspace(-1.0, 1.0, 11)
         bucket_idx = np.clip(
-            np.digitize(pred_v, bucket_edges) - 1, 0, len(bucket_edges) - 2,
+            np.digitize(pred_v, bucket_edges) - 1,
+            0,
+            len(bucket_edges) - 2,
         )
         bucket_centers = (bucket_edges[:-1] + bucket_edges[1:]) / 2.0
         bucket_means = np.full(10, np.nan, dtype=float)
@@ -372,7 +389,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             "calib_counts": bucket_counts,
         }
 
-    def _inference_autocast(self):
+    def _inference_autocast(self) -> AbstractContextManager:
         """fp16 autocast context for the forward pass, or a no-op.
 
         Active only when ``fp16_inference`` is set *and* we're on CUDA — autocast
@@ -438,7 +455,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
     @staticmethod
     def loss_pi(targets: Tensor, outputs: Tensor) -> Tensor:
         """Calculate the policy loss (KL divergence)."""
-        return F.kl_div(outputs, targets, reduction='batchmean')
+        return F.kl_div(outputs, targets, reduction="batchmean")
 
     @staticmethod
     def loss_v(targets: Tensor, outputs: Tensor) -> Tensor:
@@ -457,11 +474,11 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             logger.info("Checkpoint Directory exists!")
 
         checkpoint = {
-            'state_dict': self.nnet.state_dict(),
-            'optimizer_state_dict': self.optimizer.state_dict(),
+            "state_dict": self.nnet.state_dict(),
+            "optimizer_state_dict": self.optimizer.state_dict(),
         }
         if self.scheduler is not None:
-            checkpoint['scheduler_state_dict'] = self.scheduler.state_dict()
+            checkpoint["scheduler_state_dict"] = self.scheduler.state_dict()
         torch.save(checkpoint, filepath)
 
     def load_checkpoint(self, filename: str) -> None:
@@ -473,10 +490,10 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             logger.error(f"No model in path {filepath}")
             raise FileNotFoundError(f"No model in path {filepath}")
 
-        map_location = None if self.net_config.cuda else 'cpu'
+        map_location = None if self.net_config.cuda else "cpu"
         checkpoint = torch.load(filepath, map_location=map_location)
-        self.nnet.load_state_dict(checkpoint['state_dict'])
-        if 'optimizer_state_dict' in checkpoint:
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-        if self.scheduler is not None and 'scheduler_state_dict' in checkpoint:
-            self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        self.nnet.load_state_dict(checkpoint["state_dict"])
+        if "optimizer_state_dict" in checkpoint:
+            self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+        if self.scheduler is not None and "scheduler_state_dict" in checkpoint:
+            self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])

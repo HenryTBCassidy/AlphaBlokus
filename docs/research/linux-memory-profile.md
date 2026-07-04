@@ -1,7 +1,7 @@
 # Linux Memory Profile — Self-Play & Training (2026-06-18)
 
 Where memory goes, and **whether 10,000 games/generation fits in 32 GB**. Part of
-[linux-performance-profiling.md](../plans/linux-performance-profiling.md) (Step 3).
+[linux-performance-profiling.md](../plans/archive/linux-performance-profiling.md) (Step 3).
 Companion: [linux-time-profile.md](linux-time-profile.md). Headline + recommendations:
 [linux-performance-findings.md](linux-performance-findings.md).
 

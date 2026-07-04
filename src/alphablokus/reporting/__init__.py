@@ -1,9 +1,13 @@
-"""Reporting and visualisation utilities for AlphaBlokus.
+"""Reporting and visualisation: the training-run HTML report and renderers.
 
 Submodules:
-    training — HTML report generation for training runs
-    board    — Board state rendering (ASCII + HTML) for debugging and game replay
+    report        — report orchestrator (``create_html_report``) + metrics loading
+    charts        — plotly figure builders
+    arena_replays — interactive replay viewer (template + section builder)
+    display*      — per-game board renderers
+    mcts_profiling — MCTS profiling report builder
 """
-from alphablokus.reporting.training import create_html_report
+
+from alphablokus.reporting.report import create_html_report
 
 __all__ = ["create_html_report"]
