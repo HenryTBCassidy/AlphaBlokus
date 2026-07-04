@@ -21,3 +21,12 @@ import os
 # an explicit env var still wins. This package is the import gateway for every
 # jax entry point in the repo, so this runs before the first ``import jax``.
 os.environ.setdefault("XLA_PYTHON_CLIENT_PREALLOCATE", "false")
+
+# Cap jax's on-demand growth so it can never fragment torch off the shared
+# 8 GB card (grow-on-demand alone still expands until the card is full). 0.4
+# leaves the majority for torch's caching allocator (training step + CUDA eval
+# workers). The jax side's per-wave working set scales with
+# ``batch_size × num_mcts_sims × top_k`` — not with ``num_eps`` — so raising
+# games/gen stays safe under this cap; revisit the fraction only if
+# batch/sims/top_k grow. setdefault so an explicit env var still wins.
+os.environ.setdefault("XLA_PYTHON_CLIENT_MEM_FRACTION", "0.4")
