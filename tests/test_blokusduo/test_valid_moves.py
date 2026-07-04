@@ -5,12 +5,10 @@ opponent interactions, piece usage, pass action, masking consistency, multi-move
 progression, and edge cases.
 """
 import numpy as np
-import pytest
 
 from games.blokusduo.board import Action, BlokusDuoBoard, CoordinateIndexDecoder
 from games.blokusduo.game import BlokusDuoGame
-from games.blokusduo.pieces import Orientation, PieceManager
-
+from games.blokusduo.pieces import Orientation
 
 _decoder = CoordinateIndexDecoder(14)
 
@@ -150,10 +148,11 @@ def test_every_move_has_at_least_one_diagonal(blokus_game: BlokusDuoGame, blokus
         has_corner = False
         for di in range(p_len):
             for dj in range(p_wid):
-                if piece_array[di, dj] == 1:
-                    if BlokusDuoBoard._at_least_one_corner(ins_i + di, ins_j + dj, 1, board_2d):
-                        has_corner = True
-                        break
+                if piece_array[di, dj] == 1 and BlokusDuoBoard._at_least_one_corner(
+                    ins_i + di, ins_j + dj, 1, board_2d
+                ):
+                    has_corner = True
+                    break
             if has_corner:
                 break
 
@@ -188,7 +187,6 @@ def test_moves_can_be_side_adjacent_to_opponent(blokus_game: BlokusDuoGame, blok
     board = board.with_piece(_action_at_idx(1, Orientation.Identity, 7, 8), player_side=-1)
 
     moves = blokus_game._valid_moves(board, 1)
-    board_2d = board.as_2d
 
     # Some white moves should have cells adjacent to black at (7,8)
     has_opponent_adjacent = False
@@ -424,9 +422,8 @@ def test_i_pentomino_along_edge(blokus_game: BlokusDuoGame, blokus_board: Blokus
     moves = blokus_game._valid_moves(board, 1)
 
     # No move should have a cell at column < 0 (obviously can't, but verify all are in bounds)
-    n = BlokusDuoBoard.N
     for move in moves:
-        piece_array = blokus_game.piece_manager.get_piece_orientation_array(move.piece_id, move.orientation)
+        blokus_game.piece_manager.get_piece_orientation_array(move.piece_id, move.orientation)
         ins_i, ins_j = _decoder.to_idx((move.x_coordinate, move.y_coordinate))
         assert ins_j >= 0, f"Move {move} has negative column index"
 

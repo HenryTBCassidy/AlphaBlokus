@@ -30,7 +30,6 @@ from games.blokusduo.game import BlokusDuoGame
 from games.blokusduo.pieces import Orientation
 from reporting.display_blokusduo import BOARD_CSS, render_board_html
 
-
 # Pentobi-aligned starting squares (array indices). Kept here as a local
 # constant so the snapshot doesn't have to import them from game.py — keeps
 # this script readable as a standalone document.

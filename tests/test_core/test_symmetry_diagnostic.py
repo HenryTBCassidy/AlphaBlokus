@@ -7,16 +7,20 @@ that an artificially symmetric net produces zero divergence.
 """
 from __future__ import annotations
 
+from typing import TYPE_CHECKING
+
 import numpy as np
 
-from core.config import RunConfig
-from core.interfaces import IBoard, IGame
 from core.symmetry_diagnostic import (
     build_diagnostic_positions,
     compute_symmetry_diagnostic,
 )
-from games.tictactoe.game import TicTacToeGame
 from games.tictactoe.neuralnets.wrapper import NNetWrapper
+
+if TYPE_CHECKING:
+    from core.config import RunConfig
+    from core.interfaces import IBoard
+    from games.tictactoe.game import TicTacToeGame
 
 
 def test_build_diagnostic_positions_deterministic_and_sized(ttt_game: TicTacToeGame) -> None:

@@ -1,6 +1,6 @@
 import numpy as np
-import torch
 import pytest
+import torch
 
 from core.config import NetConfig
 from games.blokusduo.board import BlokusDuoBoard

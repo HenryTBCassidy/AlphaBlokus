@@ -11,9 +11,10 @@ game-specific symbols.
 """
 from __future__ import annotations
 
-from typing import Protocol
+from typing import TYPE_CHECKING, Protocol
 
-from core.interfaces import IBoard
+if TYPE_CHECKING:
+    from core.interfaces import IBoard
 
 
 class IBoardRenderer(Protocol):

@@ -1,5 +1,4 @@
 import numpy as np
-import pytest
 
 from core.arena import Arena
 from core.interfaces import IBoard

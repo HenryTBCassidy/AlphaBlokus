@@ -21,7 +21,6 @@ import argparse
 from pathlib import Path
 
 import pandas as pd
-from loguru import logger
 
 
 def _instantiate_game(game_name: str):

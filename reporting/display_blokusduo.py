@@ -212,14 +212,17 @@ def dump_board(
                 continue
             break
 
-    print(f"\n  Moves by placement point:")
+    print("\n  Moves by placement point:")
     for (pi, pj) in sorted(moves_by_point.keys()):
         point_moves = moves_by_point[(pi, pj)]
         print(f"\n  ({pi:2d}, {pj:2d}) — {len(point_moves)} moves:")
         display_moves = point_moves[:max_moves_per_point] if max_moves_per_point else point_moves
         for m in display_moves:
             piece_name = game.piece_manager.pieces[m.piece_id].name
-            print(f"    piece {m.piece_id:2d} ({piece_name:12s}) {str(m.orientation):8s} at ({m.x_coordinate}, {m.y_coordinate})")
+            print(
+                f"    piece {m.piece_id:2d} ({piece_name:12s}) {str(m.orientation):8s} "
+                f"at ({m.x_coordinate}, {m.y_coordinate})"
+            )
         if max_moves_per_point and len(point_moves) > max_moves_per_point:
             print(f"    ... and {len(point_moves) - max_moves_per_point} more")
 
@@ -397,7 +400,10 @@ def build_game_replay_html(game: BlokusDuoGame, actions: list[dict], game_id: in
             y_coordinate=action_data["y"],
         )
         piece_name = game.piece_manager.pieces[action.piece_id].name
-        action_desc = f"Piece {action.piece_id} ({piece_name}) {action.orientation.value} at ({action.x_coordinate},{action.y_coordinate})"
+        action_desc = (
+            f"Piece {action.piece_id} ({piece_name}) {action.orientation.value} "
+            f"at ({action.x_coordinate},{action.y_coordinate})"
+        )
 
         board = board.with_piece(action, player_side=player)
         wm = len(game._valid_moves(board, 1))
