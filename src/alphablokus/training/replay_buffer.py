@@ -49,10 +49,33 @@ class ReplayBuffer:
         """Maximum number of games the buffer holds before evicting."""
         return self._config.replay_buffer_games
 
+    def begin_generation(self) -> None:
+        """Reset fresh-game tracking before a generation's self-play starts.
+
+        Games streamed in via :meth:`add_game` after this call are what
+        :meth:`save_fresh` persists for the generation.
+        """
+        self._fresh_games = []
+
+    def add_game(self, game: GameExamples) -> None:
+        """Append one completed self-play game (oldest auto-evict via maxlen).
+
+        The streaming entry point: self-play backends hand each game over as it
+        finishes, so a whole generation is never accumulated outside the buffer.
+        Only a reference is tracked for :meth:`save_fresh` — no copy.
+        """
+        self._fresh_games.append(game)
+        self.games.append(game)
+
     def add_generation(self, fresh_games: list[GameExamples]) -> None:
-        """Push one generation's games into the buffer (oldest auto-evict)."""
-        self._fresh_games = fresh_games
-        self.games.extend(fresh_games)
+        """Push one generation's games into the buffer at once.
+
+        Convenience for already-materialised generations (tests, tools); the
+        Coach streams per game via :meth:`begin_generation` + :meth:`add_game`.
+        """
+        self.begin_generation()
+        for game in fresh_games:
+            self.add_game(game)
 
     def flat_shuffled_examples(self) -> list[ProcessedExample]:
         """Flatten the whole rolling buffer to a shuffled list of positions.

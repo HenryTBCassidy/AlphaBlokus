@@ -173,12 +173,17 @@ class Coach:
             logger.info(f"Starting Self-Play For Generation #{generation} ...")
             self_play_start = time.perf_counter()
 
-            fresh_games = generate_games(
+            # Each completed game streams straight into the rolling buffer
+            # (oldest auto-evict via maxlen) — the generation is never
+            # accumulated separately alongside the buffer (oom-hardening O6).
+            self.replay_buffer.begin_generation()
+            generate_games(
                 self.config,
                 self.game,
                 self.nnet,
                 generation,
                 log_stats=partial(self._log_self_play_stats, generation),
+                sink=self.replay_buffer.add_game,
             )
 
             self_play_end = time.perf_counter()
@@ -191,9 +196,6 @@ class Coach:
                 snapshot.process_rss_bytes,
                 snapshot.gpu_bytes,
             )
-
-            # Rolling buffer: oldest games auto-evict via maxlen.
-            self.replay_buffer.add_generation(fresh_games)
 
             # Persist this generation's fresh games (file index = generation - 1).
             self.save_self_play_history(generation - 1)

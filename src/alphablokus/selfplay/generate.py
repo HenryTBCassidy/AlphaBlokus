@@ -2,14 +2,16 @@
 
 ``generate_games`` dispatches on the run config — GPU-native jax
 (``selfplay_backend: "jax"``), the process pool (``num_parallel_workers > 1``),
-or the in-process serial loop — and returns the identical
-one-list-per-game contract from all three, so the Coach never cares which
-backend produced the data.
+or the in-process serial loop — and **streams** each completed game to the
+caller's ``sink`` from all three, so a whole generation is never accumulated
+here (``docs/plans/oom-hardening.md`` O6). The Coach never cares which backend
+produced the data.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
+from itertools import count
 from typing import TYPE_CHECKING
 
 from tqdm import tqdm
@@ -21,6 +23,7 @@ if TYPE_CHECKING:
     from alphablokus.config import RunConfig
     from alphablokus.interfaces import IGame, INeuralNetWrapper
     from alphablokus.search.stats import MCTSEpisodeStats
+    from alphablokus.selfplay.episode import ProcessedExample
 
 # Fixed checkpoint filename the pool / jax backends load the current net from.
 WORKER_INIT_CHECKPOINT = "parallel_worker_init.pth.tar"
@@ -28,8 +31,14 @@ WORKER_INIT_CHECKPOINT = "parallel_worker_init.pth.tar"
 # Per-episode profiling sink: (episode_idx, stats) -> None.
 StatsLogger = Callable[[int, "MCTSEpisodeStats"], None]
 
+# Per-game training-data sink: called once with each completed game's examples,
+# in the order games are handed over (episode order for the serial and pool
+# backends, completion order for jax).
+GameSink = Callable[[GameExamples], None]
+
 # The contract a GPU-native backend implements: (config, generation,
-# checkpoint_path) -> (one list of positions per game, per-game stats).
+# checkpoint_path, sink) -> (one list of positions per game — empty when a
+# sink consumed them — and per-game stats).
 SelfPlayBackendFn = Callable[..., "tuple[list[GameExamples], list[MCTSEpisodeStats]]"]
 
 
@@ -39,8 +48,13 @@ def generate_games(
     nnet: INeuralNetWrapper,
     generation: int,
     log_stats: StatsLogger,
-) -> list[GameExamples]:
+    sink: GameSink,
+) -> None:
     """Generate one generation of self-play games with the configured backend.
+
+    Every backend hands each completed game to ``sink`` as it finishes rather
+    than returning the whole generation at once — the multi-GB per-generation
+    accumulation used to coexist with the replay buffer it was about to enter.
 
     Args:
         config: Run configuration; ``selfplay_backend`` and
@@ -52,16 +66,16 @@ def generate_games(
         log_stats: Called once per completed game with
             ``(episode_idx, MCTSEpisodeStats)`` — the shared profiling
             schema across all backends.
-
-    Returns:
-        One list of positions per game, in episode order (game boundaries
-        preserved so the games-sized replay buffer can evict whole games).
+        sink: Called once per completed game with its examples, in episode
+            order (game boundaries preserved so the games-sized replay buffer
+            can evict whole games).
     """
     if config.selfplay_backend == "jax":
-        return _generate_jax(config, nnet, generation, log_stats)
-    if config.num_parallel_workers > 1:
-        return _generate_parallel(config, nnet, generation, log_stats)
-    return _generate_serial(config, game, nnet, log_stats)
+        _generate_jax(config, nnet, generation, log_stats, sink)
+    elif config.num_parallel_workers > 1:
+        _generate_parallel(config, nnet, generation, log_stats, sink)
+    else:
+        _generate_serial(config, game, nnet, log_stats, sink)
 
 
 def _generate_serial(
@@ -69,14 +83,13 @@ def _generate_serial(
     game: IGame,
     nnet: INeuralNetWrapper,
     log_stats: StatsLogger,
-) -> list[GameExamples]:
+    sink: GameSink,
+) -> None:
     """Sequential in-process loop: a fresh MCTS per episode."""
-    fresh_games: list[GameExamples] = []
     for episode_idx in tqdm(range(config.num_eps), desc="Self Play"):
         mcts = MCTS(game, nnet, config.mcts_config)
-        fresh_games.append(play_self_play_episode(game, mcts, config.temp_threshold))
+        sink(play_self_play_episode(game, mcts, config.temp_threshold))
         log_stats(episode_idx, mcts.get_episode_stats())
-    return fresh_games
 
 
 def _generate_parallel(
@@ -84,23 +97,31 @@ def _generate_parallel(
     nnet: INeuralNetWrapper,
     generation: int,
     log_stats: StatsLogger,
-) -> list[GameExamples]:
-    """Process-pool backend: workers load the net from a fixed checkpoint."""
+    sink: GameSink,
+) -> None:
+    """Process-pool backend: workers load the net from a fixed checkpoint.
+
+    Streams via the pool orchestrator's per-result sink — ``pool.map`` yields
+    results in submission order, so episode indices line up exactly as the
+    old accumulate-then-relist path did.
+    """
     from alphablokus.parallel.pool import run_self_play_episodes_parallel
 
     nnet.save_checkpoint(filename=WORKER_INIT_CHECKPOINT)
-    per_ep_examples, per_ep_stats = run_self_play_episodes_parallel(
+
+    episode_counter = count()
+
+    def _consume(examples: list[ProcessedExample], stats: MCTSEpisodeStats) -> None:
+        sink(examples)
+        log_stats(next(episode_counter), stats)
+
+    run_self_play_episodes_parallel(
         config=config,
         generation=generation,
         checkpoint_path=WORKER_INIT_CHECKPOINT,
         num_workers=config.num_parallel_workers,
+        sink=_consume,
     )
-
-    fresh_games: list[GameExamples] = []
-    for episode_idx, (examples, stats) in enumerate(zip(per_ep_examples, per_ep_stats, strict=False)):
-        fresh_games.append(examples)
-        log_stats(episode_idx, stats)
-    return fresh_games
 
 
 def _generate_jax(
@@ -108,21 +129,25 @@ def _generate_jax(
     nnet: INeuralNetWrapper,
     generation: int,
     log_stats: StatsLogger,
-) -> list[GameExamples]:
+    sink: GameSink,
+) -> None:
     """GPU-native batched backend, resolved per-game through the registry
-    (deferred import — python-backend runs never require the ``jax`` extra)."""
+    (deferred import — python-backend runs never require the ``jax`` extra).
+
+    Examples stream to ``sink`` per completed game during the wave loop; the
+    (tiny) per-game stats are returned at the end because their timing
+    apportionment needs the whole generation's wall clock.
+    """
     from alphablokus.registry import resolve_jax_selfplay_backend
 
     generate_self_play_games = resolve_jax_selfplay_backend(config)
     nnet.save_checkpoint(filename=WORKER_INIT_CHECKPOINT)
-    per_game_examples, per_game_stats = generate_self_play_games(
+    _empty, per_game_stats = generate_self_play_games(
         config=config,
         generation=generation,
         checkpoint_path=WORKER_INIT_CHECKPOINT,
+        sink=sink,
     )
 
-    fresh_games: list[GameExamples] = []
-    for episode_idx, (examples, stats) in enumerate(zip(per_game_examples, per_game_stats, strict=True)):
-        fresh_games.append(examples)
+    for episode_idx, stats in enumerate(per_game_stats):
         log_stats(episode_idx, stats)
-    return fresh_games

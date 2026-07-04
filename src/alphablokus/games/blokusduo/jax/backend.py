@@ -25,8 +25,9 @@ from tqdm import tqdm
 from alphablokus.search.stats import MCTSEpisodeStats
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from alphablokus.config import RunConfig
-    from alphablokus.games.blokusduo.jax.harvest import HarvestedGame
     from alphablokus.selfplay.episode import ProcessedExample
 
 #: Compiled actor/search/env artefacts, keyed by everything that affects shapes
@@ -103,16 +104,16 @@ def _artefacts(config: RunConfig) -> dict[str, Any]:
     return _ARTEFACT_CACHE[key]
 
 
-def _stats_for(record: HarvestedGame, num_sims: int, seconds_per_move: float) -> MCTSEpisodeStats:
-    total_sims = record.num_moves * num_sims
+def _stats_for(num_moves: int, mean_policy_entropy: float, num_sims: int, seconds_per_move: float) -> MCTSEpisodeStats:
+    total_sims = num_moves * num_sims
     return MCTSEpisodeStats(
-        num_moves=record.num_moves,
+        num_moves=num_moves,
         total_sims=total_sims,
-        total_search_time_s=seconds_per_move * record.num_moves,
+        total_search_time_s=seconds_per_move * num_moves,
         total_inference_time_s=0.0,  # fused with search under jit — not separable
         num_leaf_expansions=total_sims,
         tree_size=total_sims + 1,
-        mean_policy_entropy=record.mean_policy_entropy,
+        mean_policy_entropy=mean_policy_entropy,
     )
 
 
@@ -120,6 +121,7 @@ def generate_self_play_games(
     config: RunConfig,
     generation: int,
     checkpoint_path: str,
+    sink: Callable[[list[ProcessedExample]], None] | None = None,
 ) -> tuple[list[list[ProcessedExample]], list[MCTSEpisodeStats]]:
     """Generate ``config.num_eps`` self-play games on the GPU.
 
@@ -129,10 +131,17 @@ def generate_self_play_games(
             generation explores differently at a fixed ``config.seed``.
         checkpoint_path: Filename (under ``config.net_directory``) of the
             torch checkpoint holding the current network.
+        sink: Optional per-game consumer. When provided, each kept game's
+            examples are handed over as soon as its final wave is harvested —
+            the whole generation is never accumulated here — and the returned
+            examples list is empty. Stats are still returned at the end
+            because their timing apportionment needs the generation's total
+            wall clock.
 
     Returns:
-        ``(per_game_examples, per_game_stats)`` with exactly ``num_eps``
-        entries each, completion-ordered.
+        ``(per_game_examples, per_game_stats)`` — stats always have exactly
+        ``num_eps`` entries, completion-ordered; the examples list matches
+        when ``sink`` is ``None`` and is empty when a ``sink`` consumed them.
     """
     import time
 
@@ -154,11 +163,13 @@ def generate_self_play_games(
     harvester = artefacts["make_harvester"]()
     run_wave = artefacts["run_wave"]
 
-    records: list[HarvestedGame] = []
+    per_game_examples: list[list[ProcessedExample]] = []
+    game_meta: list[tuple[int, float]] = []  # (num_moves, mean_policy_entropy) per kept game
+    overflow = 0
     wave_seconds = 0.0
     total_moves = 0
     with tqdm(total=config.num_eps, desc=f"Self-play gen {generation} (jax)") as progress:
-        while len(records) < config.num_eps:
+        while len(game_meta) < config.num_eps:
             rng_key, wave_key = jax.random.split(rng_key)
             wave_start = time.perf_counter()
             carry, trace = run_wave(params, wave_key, carry)
@@ -166,23 +177,31 @@ def generate_self_play_games(
             wave_seconds += time.perf_counter() - wave_start
             fresh_records = harvester.harvest(trace)
             total_moves += sum(record.num_moves for record in fresh_records)
-            records.extend(fresh_records)
-            progress.update(min(len(records), config.num_eps) - progress.n)
+            for record in fresh_records:
+                if len(game_meta) >= config.num_eps:
+                    overflow += 1  # harvested beyond num_eps in the final wave — dropped
+                    continue
+                game_meta.append((record.num_moves, record.mean_policy_entropy))
+                if sink is not None:
+                    sink(record.examples)
+                else:
+                    per_game_examples.append(record.examples)
+            progress.update(len(game_meta) - progress.n)
 
-    overflow = len(records) - config.num_eps
-    records = records[: config.num_eps]
     harvester.finalize()
     if overflow or harvester.truncated_games:
         logger.info(
             "jax self-play gen {}: kept {} games ({} overflow beyond num_eps dropped, "
             "{} truncated tail games discarded)",
             generation,
-            len(records),
+            len(game_meta),
             overflow,
             harvester.truncated_games,
         )
 
     seconds_per_move = wave_seconds / max(total_moves, 1)
-    examples = [record.examples for record in records]
-    stats = [_stats_for(record, config.mcts_config.num_mcts_sims, seconds_per_move) for record in records]
-    return examples, stats
+    stats = [
+        _stats_for(num_moves, entropy, config.mcts_config.num_mcts_sims, seconds_per_move)
+        for num_moves, entropy in game_meta
+    ]
+    return per_game_examples, stats

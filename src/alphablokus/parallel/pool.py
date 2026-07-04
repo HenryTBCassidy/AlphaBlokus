@@ -427,6 +427,7 @@ def run_self_play_episodes_parallel(
     generation: int,
     checkpoint_path: str,
     num_workers: int,
+    sink: Callable[[list[ProcessedExample], MCTSEpisodeStats], None] | None = None,
 ) -> tuple[list[list[ProcessedExample]], list[MCTSEpisodeStats]]:
     """Run ``config.num_eps`` self-play episodes across a worker pool.
 
@@ -447,12 +448,19 @@ def run_self_play_episodes_parallel(
             testing the worker module in isolation; for the actual
             single-process path :class:`alphablokus.training.coach.Coach` skips this
             function entirely).
+        sink: Optional per-episode consumer, called with each episode's
+            ``(examples, stats)`` in submission order as results arrive.
+            When provided, nothing is accumulated here (the returned lists
+            are empty) — the caller owns the data, so a whole generation
+            never piles up in this orchestrator alongside the replay
+            buffer (``docs/plans/oom-hardening.md`` O6).
 
     Returns:
         ``(per_episode_examples, per_episode_stats)`` — outer list is
         one entry per episode, in submission order
         ``range(config.num_eps)``. The order is preserved (not
         ``imap_unordered``) so episode-indexed metrics line up cleanly.
+        Both lists are empty when ``sink`` consumed the episodes.
     """
     if num_workers < 1:
         raise ValueError(f"num_workers must be >= 1, got {num_workers}")
@@ -523,8 +531,11 @@ def run_self_play_episodes_parallel(
             tqdm(total=len(tasks), desc=f"Self-play gen {generation}") as bar,
         ):
             for examples, stats in pool.map(_worker_play_self_play_episode, tasks, chunksize=1):
-                per_episode_examples.append(examples)
-                per_episode_stats.append(stats)
+                if sink is not None:
+                    sink(examples, stats)
+                else:
+                    per_episode_examples.append(examples)
+                    per_episode_stats.append(stats)
                 bar.update(1)
     finally:
         if channel is not None:
