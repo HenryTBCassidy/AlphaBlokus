@@ -184,7 +184,7 @@ def measure_train_seconds_per_position(
 def measure_selfplay_games_per_second(
     config: RunConfig,
     wrapper: INeuralNetWrapper,
-    num_games: int,
+    num_games: int = 0,
     warmup: bool = True,
 ) -> tuple[float, float]:
     """jax-backend self-play throughput: ``(games_per_s, mean_positions_per_game)``.
@@ -193,16 +193,29 @@ def measure_selfplay_games_per_second(
     ``generate_self_play_games``. A warmup burst absorbs jit compilation so
     the measured burst reflects steady-state throughput (the artefact cache
     persists between calls).
+
+    ``num_games`` defaults (0) to ``2 × jax_selfplay.batch_size``: the backend
+    computes whole waves of ``batch_size`` game slots regardless of how few
+    games are requested, so a burst smaller than the batch would divide full-
+    wave wall-clock by a fraction of the games actually produced and badly
+    undercount throughput.
+
+    ``positions_per_game`` counts **training examples** (symmetry augmentation
+    included) — the number the buffer-size cost model needs — not raw moves.
     """
     from alphablokus.registry import resolve_jax_selfplay_backend
 
     generate = resolve_jax_selfplay_backend(config)
     wrapper.save_checkpoint(filename="calibration.pth.tar")
+    if num_games <= 0:
+        num_games = 2 * config.jax_selfplay.batch_size
     burst_config = replace(config, num_eps=num_games)
     if warmup:
-        generate(replace(burst_config, num_eps=max(1, num_games // 4)), 0, "calibration.pth.tar")
+        generate(replace(burst_config, num_eps=max(1, num_games // 8)), 0, "calibration.pth.tar")
     start = time.perf_counter()
-    examples, stats = generate(burst_config, 1, "calibration.pth.tar")
+    per_game_examples, _stats = generate(burst_config, 1, "calibration.pth.tar")
     elapsed = time.perf_counter() - start
-    positions_per_game = float(np.mean([s.num_moves for s in stats])) if stats else DEFAULT_POSITIONS_PER_GAME
+    positions_per_game = (
+        float(np.mean([len(g) for g in per_game_examples])) if per_game_examples else DEFAULT_POSITIONS_PER_GAME
+    )
     return num_games / elapsed, positions_per_game

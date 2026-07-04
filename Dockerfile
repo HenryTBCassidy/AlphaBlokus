@@ -18,16 +18,23 @@ FROM python:3.11-slim-bookworm
 
 COPY --from=ghcr.io/astral-sh/uv:0.7 /uv /uvx /bin/
 
+# torch.compile (inductor) wants a host C toolchain; without it the wrapper
+# falls back to eager (guarded), but the whole point of the image is speed.
+RUN apt-get update -qq && apt-get install -y -qq --no-install-recommends gcc g++ \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
 
-# Lockfile + project definition first so dependency layers cache across
-# source-only changes; src/ must be present for the editable project install.
+ARG EXTRAS="--extra jax-cuda --extra s3"
+
+# Dependencies first (lockfile only) so the multi-GB wheel layer caches across
+# source-only rebuilds; the project itself installs in the second sync.
 COPY pyproject.toml uv.lock ./
+RUN uv sync --frozen --no-dev --no-install-project ${EXTRAS}
+
 COPY src ./src
 COPY run_configurations ./run_configurations
 COPY scripts ./scripts
-
-ARG EXTRAS="--extra jax-cuda --extra s3"
 RUN uv sync --frozen --no-dev ${EXTRAS}
 
 # W&B and tqdm behave better told they're headless.

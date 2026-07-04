@@ -54,7 +54,12 @@ def main() -> None:
     ap.add_argument("--budget-gbp", type=float, default=100.0, help="Total budget to fit (default £100)")
     ap.add_argument("--games-per-gen", type=int, default=None, help="Override config num_eps for the cost model")
     ap.add_argument("--min-generations", type=int, default=30, help="Floor a net must fit to be recommendable")
-    ap.add_argument("--selfplay-games", type=int, default=64, help="Games in the measured self-play burst")
+    ap.add_argument(
+        "--selfplay-games",
+        type=int,
+        default=0,
+        help="Games in the measured self-play burst (0 = auto: 2× the jax batch size)",
+    )
     ap.add_argument("--train-positions", type=int, default=8192, help="Synthetic buffer positions timed per size")
     ap.add_argument("--eval-overhead", type=float, default=0.15, help="Arena/Elo/report time as a fraction of core")
     ap.add_argument("--skip-selfplay", action="store_true", help="Train-only measurement (no jax required)")
