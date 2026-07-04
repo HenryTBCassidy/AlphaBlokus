@@ -77,7 +77,7 @@ The Pentobi GTP harness also landed in this phase (`games/blokusduo/pentobi/` + 
 With generation ~12× cheaper, the constraint moves to memory and run length. Two plans are in flight (`docs/plans/`):
 
 - [`oom-hardening.md`](docs/plans/oom-hardening.md) — the on-disk self-play format still stores policies **dense** (~71 KB/position), which OOM-killed a 10k-games/gen overnight run at the save/resume boundaries. Storing them sparse (as they already are in RAM) lifts the ceiling. Execution deferred until the box is free; interim mitigation `num_eps ≤ 8000`.
-- [`refactor-repo-architecture.md`](docs/plans/refactor-repo-architecture.md) — the repo-wide restructure into the installable `src/alphablokus` package (final phases).
+- [`refactor-repo-architecture.md`](docs/plans/archive/refactor-repo-architecture.md) — the repo-wide restructure into the installable `src/alphablokus` package (final phases).
 
 ### ⏭ What's next
 1. Land OOM hardening, then run **long Gumbel-backend training runs** at 10k+ games/generation.
@@ -197,7 +197,7 @@ Two players, 14×14 board, 21 polyomino pieces each (sizes 1–5). The first mov
 `STYLE-GUIDE.md` (code conventions + project layout), `PLAN-FORMAT.md` (how plans are written), `REMOTE-TRAINING.md` (home-GPU runbook), `AI-CONTEXT.md` (extended context for AI assistants).
 
 ### Plans (`docs/plans/`)
-Top-level plans are in-flight; `docs/plans/archive/` is the historical record of completed work — the optimisation stack ([`full-cycle-optimisation.md`](docs/plans/archive/full-cycle-optimisation.md)), the JAX pipeline ([`jax-selfplay-pipeline.md`](docs/plans/archive/jax-selfplay-pipeline.md)), the Pentobi harness ([`pentobi-harness.md`](docs/plans/archive/pentobi-harness.md)), the replay-buffer refactor ([`replay-buffer-refactor.md`](docs/plans/archive/replay-buffer-refactor.md)), and ~40 more. Currently in flight: [`oom-hardening.md`](docs/plans/oom-hardening.md) (execution deferred until the box is free) and [`refactor-repo-architecture.md`](docs/plans/refactor-repo-architecture.md) (final phases). Candidate-but-uncommitted ideas live in [`docs/IDEAS.md`](docs/IDEAS.md); deep investigations in `docs/research/`.
+Top-level plans are in-flight; `docs/plans/archive/` is the historical record of completed work — the optimisation stack ([`full-cycle-optimisation.md`](docs/plans/archive/full-cycle-optimisation.md)), the JAX pipeline ([`jax-selfplay-pipeline.md`](docs/plans/archive/jax-selfplay-pipeline.md)), the Pentobi harness ([`pentobi-harness.md`](docs/plans/archive/pentobi-harness.md)), the replay-buffer refactor ([`replay-buffer-refactor.md`](docs/plans/archive/replay-buffer-refactor.md)), and ~40 more. Currently in flight: [`oom-hardening.md`](docs/plans/oom-hardening.md) (execution deferred until the box is free) and [`refactor-repo-architecture.md`](docs/plans/archive/refactor-repo-architecture.md) (final phases). Candidate-but-uncommitted ideas live in [`docs/IDEAS.md`](docs/IDEAS.md); deep investigations in `docs/research/`.
 
 ---
 

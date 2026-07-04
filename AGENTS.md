@@ -12,7 +12,7 @@ AlphaZero implementation for Blokus Duo. Self-play reinforcement learning on a 1
 
 ## Current focus
 
-In-flight work lives in `docs/plans/` (top-level = in-flight, `archive/` = done). Right now: [`oom-hardening.md`](docs/plans/oom-hardening.md) (sparse on-disk policy storage; execution deferred until the box is free — keep `num_eps ≤ 8000` meanwhile) and [`refactor-repo-architecture.md`](docs/plans/refactor-repo-architecture.md) (final phases). After those: long Gumbel-backend runs and the Pentobi ladder. Candidate ideas queue in `docs/IDEAS.md`.
+In-flight work lives in `docs/plans/` (top-level = in-flight, `archive/` = done). Right now: [`oom-hardening.md`](docs/plans/oom-hardening.md) (sparse on-disk policy storage; execution deferred until the box is free — keep `num_eps ≤ 8000` meanwhile) and [`refactor-repo-architecture.md`](docs/plans/archive/refactor-repo-architecture.md) (final phases). After those: long Gumbel-backend runs and the Pentobi ladder. Candidate ideas queue in `docs/IDEAS.md`.
 
 ## Commands
 

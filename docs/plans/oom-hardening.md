@@ -1,6 +1,6 @@
 # OOM Hardening — Kill the Dense-Policy Materializations
 
-> **Status (2026-07-03): in flight, execution deferred.** The box is unavailable for the verification this plan needs (peak-RSS at scale), so [refactor-repo-architecture](refactor-repo-architecture.md) runs first; that plan's R18 re-maps the file/line citations below onto the post-refactor layout, and its R31 performs the `load_window` deletion mentioned under O2. Until O1–O2 land, keep the interim mitigation: `num_eps ≤ 8000`.
+> **Status (2026-07-03): in flight, execution deferred.** The box is unavailable for the verification this plan needs (peak-RSS at scale), so [refactor-repo-architecture](archive/refactor-repo-architecture.md) runs first; that plan's R18 re-maps the file/line citations below onto the post-refactor layout, and its R31 performs the `load_window` deletion mentioned under O2. Until O1–O2 land, keep the interim mitigation: `num_eps ≤ 8000`.
 
 This plan fixes the recurring out-of-memory crashes on the 32 GB box (most recently `blokus_gumbel_overnight_20260703`, which OOM-killed the whole box at the gen-1 self-play→train transition and lost the night). It is the output of a full-codebase memory-materialization audit (four parallel sweeps: self-play/buffer/persistence, JAX backend, training/inference/MCTS, eval/arena/reporting/scripts).
 
