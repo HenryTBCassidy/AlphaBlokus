@@ -23,7 +23,7 @@ bit-identically unless a flag opts in; JAX/torch CUDA coexistence preserved; CI 
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| C1 | Parameterize the JAX XLA VRAM fraction (config + env, default 0.4) | 45 min | High | |
+| C1 | Parameterize the JAX XLA VRAM fraction (config + env, default 0.4) | 45 min | High | ✅ |
 | C2 | `TrainingPerfConfig`: opt-in training-perf knobs on `NetConfig` (all default off) | 1 h | High | |
 | C3 | Modernize `train()`: autocast bf16/fp16 + GradScaler, TF32, cudnn.benchmark, channels_last, DataLoader workers/pin_memory/prefetch, non_blocking copies, on-device loss accumulation | 3 h | High | |
 | C4 | `torch.compile` on the net, guarded with fallback on failure | 1 h | High | |

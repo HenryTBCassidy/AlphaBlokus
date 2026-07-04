@@ -88,6 +88,14 @@ class JaxSelfPlayConfig:
     dtype: str = "bfloat16"  # net inference dtype: "bfloat16" or "float32"
     wave_plies: int = 32  # scan horizon between host-side harvests
 
+    # Fraction of VRAM XLA may claim (XLA_PYTHON_CLIENT_MEM_FRACTION). 0.4
+    # suits an 8 GB card shared with torch (the box); raise on bigger cloud
+    # cards so jax search isn't needlessly capped. An explicit env var always
+    # wins over this value; torch/jax coexistence (PREALLOCATE=false) is
+    # unaffected. Applied at the backend entry point, before the process's
+    # first ``import jax``.
+    xla_mem_fraction: float = 0.4
+
 
 @dataclass(frozen=True)
 class NetConfig:

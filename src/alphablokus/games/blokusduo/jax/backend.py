@@ -145,6 +145,12 @@ def generate_self_play_games(
     """
     import time
 
+    # Apply the configured VRAM cap before this process's first ``import jax``
+    # (XLA reads the env var once at backend init; explicit env vars win).
+    from alphablokus.games.blokusduo.jax import configure_xla_mem_fraction
+
+    configure_xla_mem_fraction(config.jax_selfplay.xla_mem_fraction)
+
     import jax
 
     from alphablokus.games.blokusduo.jax.checkpoint import convert_torch_checkpoint, params_to_device
