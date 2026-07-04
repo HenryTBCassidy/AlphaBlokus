@@ -74,11 +74,12 @@ def main() -> None:
     if not replays_dir.exists():
         raise SystemExit(f"No ArenaReplays directory at {replays_dir}.")
 
-    df = pd.read_parquet(replays_dir)
-    df["generation"] = df["generation"].astype(int)
-    df["game_idx"] = df["game_idx"].astype(int)
-
-    sub = df[(df["generation"] == args.gen) & (df["game_idx"] == args.game)]
+    # Push both keys into the parquet read: the hive partition filter makes
+    # this a single-generation directory read instead of the whole history.
+    sub = pd.read_parquet(
+        replays_dir,
+        filters=[("generation", "=", args.gen), ("game_idx", "=", args.game)],
+    )
     if sub.empty:
         raise SystemExit(f"No game at gen={args.gen} game={args.game} in {replays_dir}.")
     sub = sub.sort_values("move_idx")

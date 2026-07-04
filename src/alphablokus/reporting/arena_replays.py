@@ -11,6 +11,8 @@ from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.registry import instantiate_game
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     import pandas as pd
 
     from alphablokus.config import RunConfig
@@ -28,6 +30,34 @@ def _evenly_sample(values: list[int], n: int) -> list[int]:
         return list(values)
     idxs = {round(i * (len(values) - 1) / (n - 1)) for i in range(n)}
     return sorted(values[i] for i in idxs)
+
+
+def load_sampled_replays(directory: Path) -> pd.DataFrame | None:
+    """Read only the replay slice the viewer renders, not the whole history.
+
+    The ArenaReplays store grows unbounded with generations, but the viewer
+    shows at most ``_REPLAY_MAX_GENERATIONS × _REPLAY_MAX_GAMES_PER_GEN``
+    games. Sample the generations from the hive partition names first (no row
+    data read), then push both the generation sample and the games-per-gen cap
+    into the parquet read via ``filters=`` — hive partitioning turns the
+    generation filter into per-directory file pruning, so a long run's report
+    reads ~100 games instead of everything (oom-hardening O7).
+
+    Returns ``None`` when the directory holds no generation partitions.
+    """
+    import pandas as pd
+
+    generations = sorted(int(p.name.split("=", 1)[1]) for p in directory.glob("generation=*") if p.is_dir())
+    if not generations:
+        return None
+    sampled = _evenly_sample(generations, _REPLAY_MAX_GENERATIONS)
+    return pd.read_parquet(
+        directory,
+        filters=[
+            ("generation", "in", sampled),
+            ("game_idx", "<", _REPLAY_MAX_GAMES_PER_GEN),
+        ],
+    )
 
 
 def build_arena_replays_section(

@@ -36,7 +36,7 @@ This plan fixes the recurring out-of-memory crashes on the 32 GB box (most recen
 | O4 | Sparsify JAX harvester policy at append (kill per-position dense 17,837 + `np.zeros` churn) | 1-1.5 h | Medium | ✅ |
 | O5 | Cap JAX VRAM via `XLA_PYTHON_CLIENT_MEM_FRACTION` on the shared 8 GB card | 30-45 m | Medium | ✅ |
 | O6 | Stream completed games into the buffer instead of accumulating the whole generation | 2-3 h | Medium | ✅ |
-| O7 | Partition-filtered ArenaReplays reads (report + `scripts/replay.py`) | 1-1.5 h | Medium | |
+| O7 | Partition-filtered ArenaReplays reads (report + `scripts/replay.py`) | 1-1.5 h | Medium | ✅ |
 | O8 | Guardrails: startup RAM-budget check + peak-RSS logging at phase transitions + regression test | 2 h | High | |
 | O9 | Minor trims: eval-set cap assert, MCTS `int32`/list transients | 45 m | Low | |
 

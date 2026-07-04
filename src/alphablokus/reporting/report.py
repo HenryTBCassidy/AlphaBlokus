@@ -15,7 +15,7 @@ if TYPE_CHECKING:
     from alphablokus.config import RunConfig
 
 
-from alphablokus.reporting.arena_replays import build_arena_replays_section
+from alphablokus.reporting.arena_replays import build_arena_replays_section, load_sampled_replays
 from alphablokus.reporting.charts import (
     accepted_mask,
     make_arena_plot,
@@ -239,8 +239,10 @@ def create_html_report(config: RunConfig) -> None:
     network_entropy_data = (
         _load_metrics(config.training_entropy_directory) if config.training_entropy_directory.exists() else None
     )
+    # Replays are partition-filtered down to the sampled generations × capped
+    # games the viewer actually renders — never the whole (unbounded) history.
     arena_replays_data = (
-        _load_metrics(config.arena_replays_directory) if config.arena_replays_directory.exists() else None
+        load_sampled_replays(config.arena_replays_directory) if config.arena_replays_directory.exists() else None
     )
     policy_accuracy_data = (
         _load_metrics(config.policy_accuracy_directory) if config.policy_accuracy_directory.exists() else None
