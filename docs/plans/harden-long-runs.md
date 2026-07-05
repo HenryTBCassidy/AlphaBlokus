@@ -38,7 +38,7 @@ exposed: **a crash yields no report**, and **W&B was run offline** (nothing to a
 |---|------|--------|----------|------|
 | H1 | Fix the crash: forkserver/spawn start method for the training DataLoader workers | 2 h | High | ✅ |
 | H2 | Crash-safe reporting: render the report even when `learn()` raises | 1.5 h | High | ✅ |
-| H3 | W&B online by default for real runs; loud warning + cloud config set to online | 1 h | High | |
+| H3 | W&B online by default for real runs; loud warning + cloud config set to online | 1 h | High | ✅ |
 | H4 | Validate: injected mid-run crash still yields a report; workers+JAX run is stable | 1 h | High | |
 
 ---

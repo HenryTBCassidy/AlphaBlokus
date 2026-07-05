@@ -186,22 +186,52 @@ class MetricsCollector:
 
         assert self.config is not None and self.config.wandb is not None  # narrowed by caller
         wandb_config = self.config.wandb
+
+        # Loud warning: an OFFLINE multi-generation run can't be watched live and
+        # its data lives only on the (ephemeral) container disk — lost if a cloud
+        # pod is terminated (exactly the blokus_cloud_60 gap). Online is the
+        # default; offline is for throwaway local tests only. Not a hard failure —
+        # a deliberate, warned choice. See docs/plans/archive/harden-long-runs.md H3.
+        if wandb_config.mode == "offline" and self.config.num_generations > 1:
+            logger.warning(
+                "W&B is OFFLINE for a {}-generation run: metrics will NOT stream to the "
+                "dashboard and offline data is lost if the pod is terminated. Set "
+                "WANDB_API_KEY and wandb.mode='online' for any run you care about.",
+                self.config.num_generations,
+            )
+
         run_name = f"{self.config.run_name}_{datetime.now(UTC).strftime('%Y%m%d_%H%M%S')}"
         # On resume, re-attach to the original run id so the dashboard shows one
         # continuous run; resume="allow" creates it if the id isn't found.
         resume_kwargs: dict[str, Any] = (
             {"id": self.resume_wandb_run_id, "resume": "allow"} if self.resume_wandb_run_id else {}
         )
-        self._wandb_run = wandb.init(
-            project=wandb_config.project,
-            entity=wandb_config.entity,
-            tags=list(wandb_config.tags),
-            mode=wandb_config.mode,
-            name=run_name,
-            config=_dataclass_to_jsonable(self.config),
-            **resume_kwargs,
-        )
-        if self._wandb_run is not None and getattr(self._wandb_run, "url", None):
+        # A W&B init failure (e.g. missing WANDB_API_KEY in online mode, or no
+        # network on the pod) must never sink the training run — parquet metrics,
+        # which drive the report, are unaffected. Degrade to no-W&B and continue.
+        try:
+            self._wandb_run = wandb.init(
+                project=wandb_config.project,
+                entity=wandb_config.entity,
+                tags=list(wandb_config.tags),
+                mode=wandb_config.mode,
+                name=run_name,
+                config=_dataclass_to_jsonable(self.config),
+                **resume_kwargs,
+            )
+        except Exception as err:
+            logger.warning(
+                "W&B init failed ({}); continuing without W&B (parquet metrics unaffected).",
+                err,
+            )
+            self._wandb_run = None
+            return
+
+        if self._wandb_run is None:
+            logger.warning("W&B init returned no run; continuing without W&B (parquet metrics unaffected).")
+            return
+
+        if getattr(self._wandb_run, "url", None):
             logger.info("Initialised W&B run: {}", self._wandb_run.url)
         else:
             logger.info("Initialised W&B run in {} mode", wandb_config.mode)
