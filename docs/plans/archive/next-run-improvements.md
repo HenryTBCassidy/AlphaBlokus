@@ -1,7 +1,7 @@
 # Next-run training improvements — from the blokus_cloud_60 analysis
 
 **What this covers.** Turn the findings of
-[`../research/blokus-cloud-60-analysis.md`](../research/blokus-cloud-60-analysis.md) into concrete
+[`../../research/blokus-cloud-60-analysis.md`](../../research/blokus-cloud-60-analysis.md) into concrete
 changes for the next scaled run. The headline finding: the `blokus_cloud_60` run **did not saturate** —
 the cosine LR schedule (`T_max=60`, `eta_min=0`) annealed the learning rate below 1e-4 by ~gen 48 and to
 2.7e-6 by gen 58, so the **last ~quarter of the run trained at a near-dead LR**. That, not capacity,
@@ -40,12 +40,18 @@ it or it re-crashes at ~gen 59.
 | N1 | Floor the cosine LR — add `lr_eta_min` config knob, used by `_create_scheduler` | 45 min | High | ✅ |
 | N2 | `blokus_cloud_v2.json`: LR floor + Gumbel n128/considered32 + arena 100 + buffer 60k + warm-start from gen-57 | 1 h | High | ✅ |
 | N3 | Fix the eval-set diagnostic (score vs current-net MCTS + relabel; optional periodic rebuild) | 2.5 h | Medium | ✅ |
-| N4 | Run the (already-merged) pool-Elo tournament on the checkpoints; optionally add the deferred live sliding-reference Elo | 1 h | Low | |
-| N5 | Validate: defaults unchanged; short run exercises the v2 config; CI green | 1 h | High | |
+| N4 | Run the (already-merged) pool-Elo tournament on the checkpoints; optionally add the deferred live sliding-reference Elo | 1 h | Low | Deferred |
+| N5 | Validate: defaults unchanged; short run exercises the v2 config; CI green | 1 h | High | ✅ |
 
 > Do **N1 + N2** before the next run (they're the ones that make it learn further). N3/N4 are
 > metric-quality follow-ups that make the *next* run's diagnostics trustworthy — nice-to-have, not
 > blocking the launch.
+>
+> **N4 is Deferred (no code in this PR).** The non-saturating pool BayesElo curve is already built and
+> merged (PR #36: `scripts/tournament_elo.py` + `src/alphablokus/evaluation/rating.py`). Running it on the
+> `blokus_cloud_60` checkpoints is an *operational* step (needs a pod mounted on the network volume that
+> holds the checkpoints), not a code change. The *live*, in-loop sliding-reference Elo was itself deferred
+> (pool-elo plan E8). Nothing to implement here.
 
 ---
 
@@ -99,7 +105,7 @@ analysis §4 recommended config), keeping everything else (net `large`, `num_eps
   + the strong starting net + a fresh, informative Elo baseline** — strictly better than `--resume
   blokus_cloud_60`, which would inherit the dead LR tail.
 - **Cost:** ~21 min/gen ⇒ ~21 h for 60 gens on a 5090 (the n=64→128 doubling is most of it).
-- **Follow the data-safety protocol** ([`../guides/CLOUD-TRAINING.md`](../guides/CLOUD-TRAINING.md)):
+- **Follow the data-safety protocol** ([`../../guides/CLOUD-TRAINING.md`](../../guides/CLOUD-TRAINING.md)):
   `object_store` on + verified after gen 1, W&B online, pull-before-stop.
 - **Fill in the object-store placeholders before launch.** JSON has no comments, so the shipped
   `object_store` block uses literal `REPLACE_ME-…` `bucket` / `endpoint_url` strings — replace them with
