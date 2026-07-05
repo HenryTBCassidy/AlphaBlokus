@@ -69,6 +69,28 @@ Acceptance collapses precisely where LR crosses below ~1e-4 (gen ~48). With near
 
 **Not** capacity: no policy-loss plateau, healthy entropy, external strength still rising.
 
+### Addendum (2026-07-05): the LR table above is formula-derived and overstates the anneal
+
+The §3 LR table is computed from `0.5·lr₀·(1 + cos(π·t/60))` indexed by *generation number*. That is **not** the LR the run actually trained at. Scheduler state has been embedded in checkpoints since `e08a0a1` (2026-06-23), and the Coach's rejection path reloads `temp.pth.tar` (`coach.py:223` saves it before training; `coach.py:297` reloads it on reject), whose `load_checkpoint` (`base_wrapper.py:774-775`) restored **both** the optimizer (pre-step LR) and the scheduler position. Net effect: **every arena rejection rewound the LR schedule by one step.** The scheduler's effective clock was *cumulative accepted generations*, not generation number.
+
+Simulating the exact save → step → reject-reload cycle against `blokus_cloud_60`'s acceptance pattern (39/58 accepted; 37/48 by gen 48; gens 49–54 a rejection streak) gives the corrected trajectory:
+
+| Gen | §3 table (formula, no rewind) | Actual LR under reject-rewind |
+|---|---|---|
+| 20 | 7.5e-4 | ~8.5e-4 |
+| 40 | 2.5e-4 | ~4.5e-4 |
+| 48 | 9.5e-5 | ~3.5e-4 |
+| 49–54 (rejection streak) | 6.7e-5 → 3.3e-5 | **pinned at ~3.2e-4** |
+| 58 | 2.7e-6 | ~2.7e-4 |
+
+**The run never trained below ~2.7e-4** — the §3 table overstates the late-run anneal by ~10–50×. The LR-tail story survives in weaker, composite form: falling LR *raised the probability of entering* a gate-hysteresis trap (a one-generation training delta at ~3.2e-4 stopped reliably clearing a noisy 55%-of-40-games gate), and the trap then *sustained itself* — each rejection rewound weights, Adam moments **and** the LR onto an increasingly single-incumbent buffer (after four rejections the 40k buffer is one net's games), so the next generation retrained from the same start at the same LR and produced a near-identical ~50% candidate. Six generations of self-play (49–54) were discarded.
+
+Consequences for recommendation #1 above:
+- **The `eta_min = 1e-4` floor barely binds** under these semantics — at a realistic acceptance rate a 60-gen run's schedule position stays well above where the floor would engage. The stopgap is nearly inert.
+- **`blokus_cloud_v2` as configured would not start at 1e-3.** Its `load_model: true` full-restored the donor's optimizer LR (~2.7e-4) and scheduler position, so the warm start silently began at ~27% of peak.
+
+Recommendation #1's mechanism is **superseded by `docs/plans/lr-scheduler-options.md`**, which fixes the reject-rewind (L3), makes warm start weights-only (L4), logs the actual LR (L2), and A/Bs constant vs floored cosine to set the production default.
+
 ---
 
 ## 4. Recommendations for the next run
