@@ -8,7 +8,7 @@ import numpy as np
 from loguru import logger
 from tqdm import tqdm
 
-from alphablokus.interfaces import IBoard, IGame
+from alphablokus.interfaces import RESIGN_ACTION, IBoard, IGame
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
@@ -134,6 +134,28 @@ class Arena:
 
             canonical_board = self.game.get_canonical_form(board, cur_player)
             action = current_player(canonical_board)
+
+            # A player may resign instead of moving (e.g. Pentobi's GTP genmove returns
+            # "resign"). Score it immediately as a loss for the resigner — before the
+            # legality assert, since RESIGN_ACTION is not a valid board move. Outcome is
+            # from player1's (cur_player==1 slot) perspective, so the opponent's win is
+            # simply -cur_player.
+            if action == RESIGN_ACTION:
+                resign_outcome: GameResult = float(-cur_player)
+                logger.info("Player {} resigned on move {} → outcome {}", cur_player, move_count, resign_outcome)
+                resign_record: GameRecord | None = None
+                if record:
+                    resign_record = GameRecord(
+                        moves=tuple(recorded_moves),
+                        outcome=resign_outcome,
+                        player1_was_white=True,  # set per-game by play_games when it alternates
+                    )
+                # Give players a chance to tear down as they would at a normal game end.
+                for player in players.values():
+                    if hasattr(player, "endGame"):
+                        player.endGame()
+                return resign_outcome, resign_record
+
             valids = self.game.valid_move_masking(canonical_board, 1)
 
             if record:
