@@ -163,6 +163,10 @@ def _export_onnx(
 
     board = game.initialise_board()
     example = torch.zeros((1, board.num_channels, *game.get_board_size()), dtype=torch.float32)
+    # dynamo=False: the legacy TorchScript exporter writes one self-contained
+    # file (the dynamo path splits weights into an external .data file, which
+    # the static-hosted browser fetch would have to stitch back together) and
+    # produces a graph onnxruntime's dynamic quantiser accepts.
     torch.onnx.export(
         net,
         (example,),
@@ -171,6 +175,7 @@ def _export_onnx(
         output_names=["log_policy", "value"],
         dynamic_axes={"board": {0: "batch"}, "log_policy": {0: "batch"}, "value": {0: "batch"}},
         opset_version=17,
+        dynamo=False,
     )
     logger.info("Wrote ONNX net: {} ({:.1f} MB)", out_path, out_path.stat().st_size / 1e6)
 
