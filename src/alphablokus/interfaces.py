@@ -200,6 +200,25 @@ class IGame(Protocol[TBoard]):
         """
         ...
 
+    def board_from_compact(self, compact: NDArray) -> TBoard:
+        """Rebuild a playable board from a compact board array.
+
+        The board-object counterpart of :meth:`encode_compact` (which returns
+        only the neural-net planes): takes the compact int8 array produced by
+        ``board.to_compact()`` and returns a full :class:`IBoard` — with legal
+        moves, game-over detection and next-state transitions all working — so
+        MCTS can search from a stored position (e.g. the frozen eval set). The
+        returned board is in canonical (player-1) form, matching how
+        ``to_compact`` stores it.
+
+        Args:
+            compact: Compact int8 array from ``TBoard.to_compact``.
+
+        Returns:
+            A canonical board equivalent to the one the compact array came from.
+        """
+        ...
+
     def get_symmetries(self, board: TBoard, pi: NDArray) -> list[tuple[TBoard, NDArray]]:
         """Generate all symmetric forms of the board state and policy vector.
 

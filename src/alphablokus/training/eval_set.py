@@ -54,6 +54,10 @@ def build_or_load_eval_set(
     boards_path = eval_dir / "boards.npy"
     policies_path = eval_dir / "target_policies.npy"
     values_path = eval_dir / "target_values.npy"
+    # Compact (canonical int8) boards let the diagnostic rebuild playable
+    # positions and search them with the current net's MCTS. Optional: absent
+    # for eval sets built before this was persisted, so we load it only if there.
+    compact_path = eval_dir / "compact_boards.npy"
     # Marker file: tells us *how* the targets were generated. We refuse to
     # reuse an on-disk eval set whose targets don't match the current
     # scheme — otherwise an old "selfplay-targets" file would silently
@@ -71,6 +75,7 @@ def build_or_load_eval_set(
             boards=np.load(boards_path),
             target_policies=np.load(policies_path),
             target_values=np.load(values_path),
+            compact_boards=np.load(compact_path) if compact_path.exists() else None,
         )
         logger.info("Loaded eval set ({} positions, kind={}) from {}", len(eval_set), expected_kind, eval_dir)
         return eval_set
@@ -89,6 +94,7 @@ def build_or_load_eval_set(
     idx = rng.choice(len(train_examples), size=n, replace=False)
     sampled = [train_examples[i] for i in idx]
     sampled_compact = [ex[0] for ex in sampled]
+    compact_boards = np.array(sampled_compact)
     sampled_boards = np.array([game.encode_compact(b) for b in sampled_compact])
     target_policies = np.array([as_dense(ex[1], action_size) for ex in sampled])
     target_values = np.array([ex[2] for ex in sampled])
@@ -103,12 +109,14 @@ def build_or_load_eval_set(
         boards=sampled_boards,
         target_policies=target_policies,
         target_values=target_values,
+        compact_boards=compact_boards,
     )
 
     eval_dir.mkdir(parents=True, exist_ok=True)
     np.save(boards_path, eval_set.boards)
     np.save(policies_path, eval_set.target_policies)
     np.save(values_path, eval_set.target_values)
+    np.save(compact_path, compact_boards)
     marker_path.write_text(expected_kind)
     logger.info("Built eval set ({} positions, kind={}) → {}", n, expected_kind, eval_dir)
     return eval_set

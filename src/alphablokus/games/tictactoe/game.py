@@ -119,6 +119,14 @@ class TicTacToeGame(IGame[Board]):
         """
         return np.stack([compact == 1, compact == -1]).astype(np.float32)
 
+    def board_from_compact(self, compact: NDArray) -> Board:
+        """Rebuild a playable :class:`Board` from a compact 3×3 grid.
+
+        The board-object counterpart of :meth:`encode_compact`: the compact
+        form is the canonical grid, so the reconstructed board is canonical.
+        """
+        return Board._from_pieces(np.asarray(compact).astype(int).tolist())
+
     def get_symmetries(self, board: Board, pi: NDArray) -> list[tuple[Board, NDArray]]:
         assert len(pi) == self.N**2 + 1  # 1 for pass
         pi_board = np.reshape(pi[:-1], (self.N, self.N))

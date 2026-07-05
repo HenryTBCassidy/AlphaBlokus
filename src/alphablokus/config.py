@@ -230,6 +230,16 @@ class NetConfig:
     num_residual_blocks: int  # Number of residual blocks in the network
     lr_scheduler: str | None = None  # LR schedule: None = constant, "cosine" = CosineAnnealingLR
 
+    # Floor the cosine schedule at this learning rate (``CosineAnnealingLR``'s
+    # ``eta_min``). 0.0 (default) preserves the original behaviour exactly —
+    # the schedule anneals all the way to ~0, which strangled the last quarter
+    # of ``blokus_cloud_60`` (LR ≤ 1e-4 from ~gen 48, 2.7e-6 by gen 58: late
+    # arena rejections + value-loss rise while policy loss was still falling —
+    # see docs/research/blokus-cloud-60-analysis.md §3). A non-zero floor (e.g.
+    # 1e-4, 10% of a 1e-3 peak) keeps the optimiser moving to the run's end.
+    # Only consulted when ``lr_scheduler == "cosine"``.
+    lr_eta_min: float = 0.0
+
     # Half-precision (fp16) inference. When True AND running on CUDA, the
     # forward pass in predict/predict_batch runs under torch.autocast(fp16) —
     # faster on GPUs with Tensor Cores (e.g. the 3060 Ti), inference-only so no

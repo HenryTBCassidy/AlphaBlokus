@@ -746,35 +746,39 @@ def make_policy_accuracy_plot(
     accuracy_data: pd.DataFrame,
     game_name: str,
 ) -> go.Figure:
-    """Per-generation top-K agreement between the network's raw policy and
-    the eval-set target. ``game_name`` switches the framing only — the
-    numbers come from the same diagnostic either way.
+    """Per-generation top-K agreement between the network's raw policy and two
+    reference move choices on the frozen held-out set.
 
-    - **TTT**: target is *minimax-optimal*. A "hit" means the net picks an
-      action that is genuinely optimal under perfect play. Top-1 should
-      climb toward 100% as the net internalises perfect play.
-    - **Blokus / other**: target is the MCTS visit-count argmax recorded in
-      gen-1 self-play. Top-1 measures how often the raw net agrees with
-      what search arrived at — AlphaGo Zero's Figure 3b in spirit.
+    **Frozen gen-1 targets** (always present) — the raw policy vs the targets
+    baked into the eval set at generation 1:
+
+    - **TTT**: minimax-optimal targets. A "hit" means the net picks a genuinely
+      optimal move; top-1 should climb toward 100% as the net learns perfect play.
+    - **Blokus / other**: the gen-1 64-sim MCTS visit-count argmax. This series
+      *decays* over training and is **not a strength signal** — once the net
+      surpasses gen-1's weak search it rightly disagrees with it (see
+      docs/research/blokus-cloud-60-analysis.md §1). Kept for continuity.
+
+    **Current-net MCTS** (present for runs that persisted compact eval boards) —
+    the raw policy vs the *current* net's own search on the same positions: the
+    net-vs-own-search gap, which should hold or rise as training works. This is
+    the series to read as a learning-health signal.
 
     Computed on the frozen eval set after every training epoch; one point
     per generation is shown (mean across epochs).
     """
     df = accuracy_data.copy()
-    agg = (
-        df.groupby("generation")
-        .agg(
-            top1_mean=("top1_accuracy", "mean"),
-            top5_mean=("top5_accuracy", "mean"),
-        )
-        .reset_index()
-        .sort_values("generation")
-    )
+    agg_spec = {
+        "top1_mean": ("top1_accuracy", "mean"),
+        "top5_mean": ("top5_accuracy", "mean"),
+    }
+    has_mcts = "mcts_top1_accuracy" in df.columns and df["mcts_top1_accuracy"].notna().any()
+    if has_mcts:
+        agg_spec["mcts_top1_mean"] = ("mcts_top1_accuracy", "mean")
+        agg_spec["mcts_top5_mean"] = ("mcts_top5_accuracy", "mean")
+    agg = df.groupby("generation").agg(**agg_spec).reset_index().sort_values("generation")
 
-    if game_name == "tictactoe":
-        title = "Policy Agreement vs Minimax Oracle (held-out set)"
-    else:
-        title = "Policy Agreement vs MCTS (held-out set)"
+    frozen_label = "minimax oracle" if game_name == "tictactoe" else "gen-1 MCTS targets"
 
     fig = go.Figure()
     fig.add_trace(
@@ -782,9 +786,9 @@ def make_policy_accuracy_plot(
             x=agg["generation"],
             y=100 * agg["top1_mean"],
             mode="lines+markers",
-            name="Top-1",
+            name=f"Top-1 vs {frozen_label}",
             line={"width": 2.5, "color": _COLORS["primary"]},
-            hovertemplate="Gen %{x} — top-1: %{y:.1f}%<extra></extra>",
+            hovertemplate="Gen %{x} — top-1 vs " + frozen_label + ": %{y:.1f}%<extra></extra>",
         )
     )
     fig.add_trace(
@@ -792,16 +796,38 @@ def make_policy_accuracy_plot(
             x=agg["generation"],
             y=100 * agg["top5_mean"],
             mode="lines+markers",
-            name="Top-5",
-            line={"width": 2.5, "color": _COLORS["tertiary"], "dash": "dot"},
-            hovertemplate="Gen %{x} — top-5: %{y:.1f}%<extra></extra>",
+            name=f"Top-5 vs {frozen_label}",
+            line={"width": 2.5, "color": _COLORS["primary"], "dash": "dot"},
+            hovertemplate="Gen %{x} — top-5 vs " + frozen_label + ": %{y:.1f}%<extra></extra>",
         )
     )
+    if has_mcts:
+        fig.add_trace(
+            go.Scatter(
+                x=agg["generation"],
+                y=100 * agg["mcts_top1_mean"],
+                mode="lines+markers",
+                name="Top-1 vs current-net MCTS",
+                line={"width": 2.5, "color": _COLORS["tertiary"]},
+                hovertemplate="Gen %{x} — top-1 vs current MCTS: %{y:.1f}%<extra></extra>",
+            )
+        )
+        fig.add_trace(
+            go.Scatter(
+                x=agg["generation"],
+                y=100 * agg["mcts_top5_mean"],
+                mode="lines+markers",
+                name="Top-5 vs current-net MCTS",
+                line={"width": 2.5, "color": _COLORS["tertiary"], "dash": "dot"},
+                hovertemplate="Gen %{x} — top-5 vs current MCTS: %{y:.1f}%<extra></extra>",
+            )
+        )
+
     fig.update_layout(
         xaxis_title="Generation",
         yaxis_title="Agreement (%)",
         yaxis_range=[0, 105],
-        title=title,
+        title="Policy Agreement: raw net vs search (held-out set)",
         xaxis={"dtick": 1 if agg["generation"].max() < 40 else 5},
     )
     return _apply_defaults(fig)
