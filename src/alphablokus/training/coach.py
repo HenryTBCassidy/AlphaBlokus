@@ -294,7 +294,11 @@ class Coach:
             else:
                 logger.info("REJECTING NEW MODEL")
                 self.nnet.save_checkpoint(filename=f"rejected_{generation}.pth.tar")
-                self.nnet.load_checkpoint(filename="temp.pth.tar")
+                # Revert weights + Adam moments to the pre-training net (the
+                # gate's job) but do NOT rewind the LR-schedule clock: the LR
+                # must advance once per generation regardless of accept/reject,
+                # so a rejection streak no longer freezes the schedule (L3).
+                self.nnet.load_checkpoint(filename="temp.pth.tar", restore_lr_schedule=False)
 
             # PHASE 4: Strength evaluation against fixed baselines.
             # The new network this gen is measured against the frozen gen-0

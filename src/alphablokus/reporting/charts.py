@@ -501,6 +501,40 @@ def make_throughput_plot(throughput_data: pd.DataFrame) -> go.Figure:
     return _apply_defaults(fig, width=_HALF_WIDTH, height=_GRID_HEIGHT)
 
 
+def make_learning_rate_plot(learning_rate_data: pd.DataFrame) -> go.Figure:
+    """Optimizer learning rate per generation, on a log-y axis.
+
+    One point per generation (the mean across that generation's epochs — a
+    no-op at the usual ``epochs=1``). Log-y because schedules span orders of
+    magnitude; a constant schedule shows as a flat line. This is the definitive
+    trace of what the optimiser actually trained at (L2).
+    """
+    agg = (
+        learning_rate_data.groupby("generation")
+        .agg(learning_rate=("learning_rate", "mean"))
+        .reset_index()
+        .sort_values("generation")
+    )
+
+    fig = go.Figure(
+        go.Scatter(
+            x=agg["generation"],
+            y=agg["learning_rate"],
+            mode="lines+markers",
+            marker_color=_COLORS["accent"],
+            name="Learning rate",
+        )
+    )
+    fig.update_layout(
+        xaxis_title="Generation",
+        yaxis_title="Learning rate",
+        yaxis_type="log",
+        title="Optimizer Learning Rate",
+        xaxis={"dtick": 1 if agg["generation"].max() < 40 else 5},
+    )
+    return _apply_defaults(fig, width=_HALF_WIDTH, height=_GRID_HEIGHT)
+
+
 def make_network_entropy_plot(entropy_data: pd.DataFrame) -> go.Figure:
     """Network policy entropy on the held-out eval set, per generation.
 

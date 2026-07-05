@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 
 from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
 from alphablokus.storage.metrics import EvalSet, MetricsCollector
@@ -64,6 +65,178 @@ def test_cosine_default_eta_min_is_unchanged(ttt_game: TicTacToeGame, test_confi
         ref.append(ref_optimizer.param_groups[0]["lr"])
 
     assert seq == ref, "Default lr_eta_min=0.0 changed the cosine schedule"
+
+
+def test_train_logs_actual_learning_rate(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """train() records the optimizer's actual LR once per epoch (L2).
+
+    The logged value is the LR *before* the epoch's scheduler step — what the
+    epoch actually trained at — and for a constant schedule it is the config LR.
+    """
+    net_config = replace(test_config.net_config, epochs=2)  # lr_scheduler defaults to None (constant)
+    config = replace(test_config, net_config=net_config)
+    wrapper = NNetWrapper(ttt_game, config)
+
+    compacts = _ttt_eval_positions(ttt_game, 4)
+    examples = [(compact, sparsify(_uniform_over_legal(ttt_game, compact)), 0.0) for compact in compacts]
+    metrics = MetricsCollector(config=config)
+    wrapper.train(examples, generation=3, metrics=metrics)
+
+    records = metrics._learning_rate_records
+    assert len(records) == config.net_config.epochs, "expected one LR record per epoch"
+    assert all(r["generation"] == 3 for r in records)
+    assert {r["epoch"] for r in records} == set(range(config.net_config.epochs))
+    # Constant schedule: every epoch trains at the configured LR.
+    assert all(r["learning_rate"] == config.net_config.learning_rate for r in records)
+
+
+def _cosine_wrapper(ttt_game: TicTacToeGame, test_config: RunConfig) -> tuple[NNetWrapper, RunConfig]:
+    net_config = replace(test_config.net_config, lr_scheduler="cosine", lr_eta_min=1e-4)
+    config = replace(test_config, num_generations=10, net_config=net_config)
+    wrapper = NNetWrapper(ttt_game, config)
+    config.net_directory.mkdir(parents=True, exist_ok=True)
+    return wrapper, config
+
+
+def test_reject_reload_does_not_rewind_lr_schedule(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """After a rejection, the LR clock is where the next generation expects it,
+    not rewound to before this generation's training (L3).
+
+    Weights are still reverted (the gate's job); only the LR clock is preserved.
+    """
+    import torch
+
+    wrapper, _ = _cosine_wrapper(ttt_game, test_config)
+    assert wrapper.scheduler is not None
+
+    # Coach cycle: save temp before training, then training steps the scheduler.
+    wrapper.save_checkpoint("temp.pth.tar")
+    reference_param = next(iter(wrapper.nnet.parameters())).detach().clone()
+    lr_before_training = wrapper.optimizer.param_groups[0]["lr"]
+
+    wrapper.scheduler.step()  # one generation of training advances the clock
+    last_epoch_after_step = wrapper.scheduler.last_epoch
+    lr_after_step = wrapper.optimizer.param_groups[0]["lr"]
+    assert lr_after_step != lr_before_training, "schedule should have moved"
+
+    # Perturb the weights so we can confirm the reject-reload reverts them.
+    with torch.no_grad():
+        for param in wrapper.nnet.parameters():
+            param.add_(1.0)
+
+    # Rejection: reload the pre-training checkpoint, keeping the LR clock.
+    wrapper.load_checkpoint("temp.pth.tar", restore_lr_schedule=False)
+
+    # Weights reverted...
+    assert torch.equal(next(iter(wrapper.nnet.parameters())).detach(), reference_param)
+    # ...but the LR clock did NOT rewind: it stays at the post-training position,
+    # and the optimizer LR is re-synced to the scheduler (not the pre-step value).
+    assert wrapper.scheduler.last_epoch == last_epoch_after_step
+    assert wrapper.optimizer.param_groups[0]["lr"] == lr_after_step
+
+
+def test_resume_reload_restores_lr_schedule(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """The default (``--resume``) path restores the saved scheduler position.
+
+    Contrast with the reject path: a resume must continue the exact schedule.
+    """
+    wrapper, _ = _cosine_wrapper(ttt_game, test_config)
+    assert wrapper.scheduler is not None
+
+    # Advance the schedule, then checkpoint at that position (latest.pth.tar).
+    for _ in range(3):
+        wrapper.scheduler.step()
+    saved_last_epoch = wrapper.scheduler.last_epoch
+    saved_lr = wrapper.optimizer.param_groups[0]["lr"]
+    wrapper.save_checkpoint("latest.pth.tar")
+
+    # Advance further to prove the reload rewinds to the saved position.
+    for _ in range(2):
+        wrapper.scheduler.step()
+    assert wrapper.scheduler.last_epoch != saved_last_epoch
+
+    wrapper.load_checkpoint("latest.pth.tar")  # default restore_lr_schedule=True
+    assert wrapper.scheduler.last_epoch == saved_last_epoch
+    assert wrapper.optimizer.param_groups[0]["lr"] == saved_lr
+
+
+def test_load_weights_yields_fresh_optimizer_and_scheduler(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """Warm start (``load_weights``) loads weights only: the optimizer LR and
+    scheduler clock start fresh at the config LR, not the donor's annealed state (L4).
+    """
+    import torch
+
+    # Donor: advance the schedule deep into the anneal, then checkpoint.
+    donor, config = _cosine_wrapper(ttt_game, test_config)
+    assert donor.scheduler is not None
+    for _ in range(8):
+        donor.scheduler.step()
+    donor_lr = donor.optimizer.param_groups[0]["lr"]
+    assert donor_lr < config.net_config.learning_rate, "donor should be mid-anneal"
+    with torch.no_grad():
+        for param in donor.nnet.parameters():
+            param.add_(0.5)  # make the donor weights distinctive
+    donor.save_checkpoint("best.pth.tar")
+    donor_param = next(iter(donor.nnet.parameters())).detach().clone()
+
+    # Recipient: a fresh run that warm-starts from the donor's weights.
+    recipient = NNetWrapper(ttt_game, config)
+    recipient.load_weights("best.pth.tar")
+
+    # Weights adopted...
+    assert torch.equal(next(iter(recipient.nnet.parameters())).detach(), donor_param)
+    # ...but the optimisation is fresh: first generation trains at the peak LR,
+    # and the scheduler is back at its initial position.
+    assert recipient.optimizer.param_groups[0]["lr"] == config.net_config.learning_rate
+    assert recipient.scheduler is not None
+    assert recipient.scheduler.last_epoch == 0
+
+
+def test_constant_scheduler_is_none(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """Both None and the explicit "constant" alias build no scheduler (L5)."""
+    for value in (None, "constant"):
+        net_config = replace(test_config.net_config, lr_scheduler=value)
+        config = replace(test_config, net_config=net_config)
+        wrapper = NNetWrapper(ttt_game, config)
+        assert wrapper.scheduler is None
+        assert wrapper.optimizer.param_groups[0]["lr"] == config.net_config.learning_rate
+
+
+def test_step_scheduler_decays_at_milestones(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """The "step" scheduler multiplies LR by lr_gamma at each milestone (L5)."""
+    net_config = replace(
+        test_config.net_config,
+        lr_scheduler="step",
+        lr_milestones=(2, 4),
+        lr_gamma=0.1,
+        epochs=1,
+    )
+    config = replace(test_config, num_generations=6, net_config=net_config)
+
+    seq = _lr_sequence(config, ttt_game, steps=config.num_generations)
+
+    base = config.net_config.learning_rate
+    # seq[i] is the LR after i steps: constant until milestone 2, then ×0.1,
+    # then ×0.1 again at milestone 4.
+    assert seq[0] == base
+    assert seq[2] == pytest.approx(base * 0.1)
+    assert seq[4] == pytest.approx(base * 0.01)
+
+
+def test_step_scheduler_requires_milestones(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """ "step" with empty lr_milestones is a config error (L5)."""
+    net_config = replace(test_config.net_config, lr_scheduler="step")  # lr_milestones defaults to ()
+    config = replace(test_config, net_config=net_config)
+    with pytest.raises(ValueError, match="lr_milestones"):
+        NNetWrapper(ttt_game, config)
+
+
+def test_unknown_scheduler_raises(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """An unrecognised lr_scheduler value is rejected (L5)."""
+    net_config = replace(test_config.net_config, lr_scheduler="nope")
+    config = replace(test_config, net_config=net_config)
+    with pytest.raises(ValueError, match="Unknown lr_scheduler"):
+        NNetWrapper(ttt_game, config)
 
 
 def _ttt_eval_positions(game: TicTacToeGame, count: int) -> list[np.ndarray]:

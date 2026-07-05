@@ -228,7 +228,10 @@ class NetConfig:
     cuda: bool  # Whether to use CUDA for GPU acceleration
     num_filters: int  # Number of convolutional filters per layer (power of 2)
     num_residual_blocks: int  # Number of residual blocks in the network
-    lr_scheduler: str | None = None  # LR schedule: None = constant, "cosine" = CosineAnnealingLR
+    # LR schedule: None / "constant" = constant at ``learning_rate``,
+    # "cosine" = CosineAnnealingLR (floored by ``lr_eta_min``),
+    # "step" = MultiStepLR (see ``lr_milestones`` / ``lr_gamma``).
+    lr_scheduler: str | None = None
 
     # Floor the cosine schedule at this learning rate (``CosineAnnealingLR``'s
     # ``eta_min``). 0.0 (default) preserves the original behaviour exactly —
@@ -239,6 +242,18 @@ class NetConfig:
     # 1e-4, 10% of a 1e-3 peak) keeps the optimiser moving to the run's end.
     # Only consulted when ``lr_scheduler == "cosine"``.
     lr_eta_min: float = 0.0
+
+    # Milestones for the ``"step"`` scheduler (MultiStepLR), in **generations**:
+    # at each listed generation the LR is multiplied by ``lr_gamma``. Converted
+    # to scheduler steps via ``epochs`` (mirroring the cosine ``T_max``
+    # convention). Empty () is invalid for ``"step"`` (raises). Ignored by every
+    # other scheduler. e.g. ``[20]`` with ``lr_gamma=0.3`` steps 1e-3 → 3e-4 at
+    # generation 20.
+    lr_milestones: tuple[int, ...] = ()
+
+    # Decay factor applied at each ``lr_milestones`` entry for the ``"step"``
+    # scheduler. Only consulted when ``lr_scheduler == "step"``.
+    lr_gamma: float = 0.1
 
     # Half-precision (fp16) inference. When True AND running on CUDA, the
     # forward pass in predict/predict_batch runs under torch.autocast(fp16) —
@@ -546,6 +561,16 @@ class RunConfig:
     def training_throughput_directory(self) -> Path:
         """Directory for per-epoch training throughput metrics."""
         return self.run_directory / "TrainingThroughput"
+
+    @property
+    def learning_rate_directory(self) -> Path:
+        """Directory for the per-generation optimizer learning rate.
+
+        Records ``optimizer.param_groups[0]["lr"]`` — the LR the epoch actually
+        trained at — so any LR-schedule experiment is reviewable. Absent for
+        runs predating LR logging, in which case the report omits the section.
+        """
+        return self.run_directory / "LearningRate"
 
     @property
     def eval_set_directory(self) -> Path:

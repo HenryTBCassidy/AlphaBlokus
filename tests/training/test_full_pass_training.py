@@ -32,6 +32,9 @@ class _CountingMetrics:
     def log_training_throughput(self, **_kwargs: object) -> None:
         pass
 
+    def log_learning_rate(self, **_kwargs: object) -> None:
+        pass
+
 
 def _buffer(action_size: int, n: int) -> list:
     """A buffer of ``n`` compact TTT positions with valid dense policies."""

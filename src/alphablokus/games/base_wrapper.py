@@ -13,7 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from loguru import logger
 from torch import Tensor, optim
-from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler
+from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler, MultiStepLR
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
@@ -278,8 +278,19 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         return torch.device("cpu")
 
     def _create_scheduler(self) -> LRScheduler | None:
-        """Create LR scheduler based on config. Returns None if no schedule configured."""
+        """Create the LR scheduler from config, or None for a constant LR.
+
+        Supported ``net_config.lr_scheduler`` values:
+
+        - ``None`` / ``"constant"``: no scheduler — constant ``learning_rate``.
+        - ``"cosine"``: ``CosineAnnealingLR`` over the whole run, floored at
+          ``lr_eta_min``.
+        - ``"step"``: ``MultiStepLR`` decaying by ``lr_gamma`` at each
+          ``lr_milestones`` generation.
+        """
         match self.net_config.lr_scheduler:
+            case None | "constant":
+                return None
             case "cosine":
                 total_epochs = self.config.num_generations * self.net_config.epochs
                 # ``eta_min`` floors the anneal. Default 0.0 reproduces the
@@ -293,8 +304,13 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                         self.config.num_generations,
                     )
                 return CosineAnnealingLR(self.optimizer, T_max=total_epochs, eta_min=self.net_config.lr_eta_min)
-            case None:
-                return None
+            case "step":
+                if not self.net_config.lr_milestones:
+                    raise ValueError('lr_scheduler "step" requires non-empty lr_milestones')
+                # Milestones are given in generations; convert to scheduler steps
+                # via epochs (same convention as cosine's T_max).
+                milestones = [m * self.net_config.epochs for m in self.net_config.lr_milestones]
+                return MultiStepLR(self.optimizer, milestones=milestones, gamma=self.net_config.lr_gamma)
             case unknown:
                 raise ValueError(f"Unknown lr_scheduler: {unknown!r}")
 
@@ -484,6 +500,15 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
 
             # Partial window at epoch end (only reachable when log_window > 1).
             self._flush_loss_window(window, pi_losses, v_losses, t, metrics, generation, epoch, len(loader) - 1)
+
+            # Record the LR this epoch actually trained at — read *before* the
+            # scheduler step, which is what makes the schedule reviewable (L2).
+            if metrics is not None:
+                metrics.log_learning_rate(
+                    generation=generation,
+                    epoch=epoch,
+                    learning_rate=self.optimizer.param_groups[0]["lr"],
+                )
 
             if self.scheduler is not None:
                 self.scheduler.step()
@@ -757,8 +782,21 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             checkpoint["scheduler_state_dict"] = self.scheduler.state_dict()
         torch.save(checkpoint, filepath)
 
-    def load_checkpoint(self, filename: str) -> None:
-        """Load a neural network state from a checkpoint file."""
+    def load_checkpoint(self, filename: str, *, restore_lr_schedule: bool = True) -> None:
+        """Load a neural network state from a checkpoint file.
+
+        Args:
+            filename: Checkpoint file under ``config.net_directory``.
+            restore_lr_schedule: When True (the ``--resume`` case), restore the
+                saved scheduler position — a resumed run must continue the exact
+                schedule it was on. When False (the arena reject-reload case),
+                the schedule clock must *not* rewind: the LR advances once per
+                generation regardless of accept/reject, so the pre-training
+                weights and Adam moments are reverted (the gate's job) but the
+                scheduler keeps its current position and the just-restored
+                optimizer LR is re-synced to it. No-op for a scheduler-less run
+                (constant LR), which then reverts fully — bit-for-bit as before.
+        """
         folder = self.config.net_directory
         filepath = folder / filename
 
@@ -771,5 +809,35 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         self.nnet.load_state_dict(checkpoint["state_dict"])
         if "optimizer_state_dict" in checkpoint:
             self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        if self.scheduler is not None and "scheduler_state_dict" in checkpoint:
-            self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
+        if self.scheduler is None:
+            return
+        if restore_lr_schedule:
+            if "scheduler_state_dict" in checkpoint:
+                self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+            return
+        # Reject-reload: keep the scheduler's clock. The optimizer restore above
+        # brought back the pre-step LR, so re-sync each param group to the
+        # scheduler's current LR (the value the next generation should train at).
+        for group, lr in zip(self.optimizer.param_groups, self.scheduler.get_last_lr(), strict=True):
+            group["lr"] = lr
+
+    def load_weights(self, filename: str) -> None:
+        """Load only the network weights, leaving optimizer + scheduler fresh.
+
+        The warm-start (``load_model``) path: borrow another run's weights but
+        start a genuinely fresh optimisation at *this* run's configured learning
+        rate. Unlike :meth:`load_checkpoint` it ignores the checkpoint's
+        optimizer and scheduler state, so a warm start does not silently inherit
+        the donor's annealed LR and scheduler position (L4).
+        """
+        folder = self.config.net_directory
+        filepath = folder / filename
+
+        if not filepath.exists():
+            logger.error(f"No model in path {filepath}")
+            raise FileNotFoundError(f"No model in path {filepath}")
+
+        map_location = None if self.net_config.cuda else "cpu"
+        checkpoint = torch.load(filepath, map_location=map_location)
+        self.nnet.load_state_dict(checkpoint["state_dict"])

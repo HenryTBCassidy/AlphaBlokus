@@ -349,8 +349,28 @@ class INeuralNetWrapper(IPolicyValuePredictor, Protocol):
         """Save the current model state to a checkpoint file."""
         ...
 
-    def load_checkpoint(self, filename: str) -> None:
-        """Load a model state from a checkpoint file.
+    def load_checkpoint(self, filename: str, *, restore_lr_schedule: bool = True) -> None:
+        """Load a model state (weights + optimizer + scheduler) from a checkpoint.
+
+        Args:
+            filename: Checkpoint file to load.
+            restore_lr_schedule: When True (default; the ``--resume`` case),
+                restore the saved LR-scheduler position too. When False (the
+                arena reject-reload case), keep the scheduler's current clock so
+                the LR advances once per generation regardless of accept/reject.
+
+        Raises:
+            FileNotFoundError: If the checkpoint file doesn't exist.
+        """
+        ...
+
+    def load_weights(self, filename: str) -> None:
+        """Load only the network weights, leaving optimizer and scheduler fresh.
+
+        Used for a warm start (``load_model``) from another run's checkpoint:
+        the borrowed weights seed a genuinely fresh optimisation at this run's
+        configured learning rate, rather than inheriting the donor's optimizer
+        LR and scheduler position.
 
         Raises:
             FileNotFoundError: If the checkpoint file doesn't exist.

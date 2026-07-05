@@ -67,6 +67,31 @@ def _write_config_with_net(tmp_path, net_config: dict):
     return path
 
 
+def test_step_scheduler_fields_load_from_json(tmp_path):
+    """lr_milestones (JSON list → tuple) and lr_gamma parse for the "step" scheduler."""
+    path = _write_config_with_net(
+        tmp_path,
+        {
+            "lr_scheduler": "step",
+            "lr_milestones": [20, 40],
+            "lr_gamma": 0.3,
+            "num_filters": 32,
+            "num_residual_blocks": 1,
+        },
+    )
+    config = load_args(path)
+    assert config.net_config.lr_scheduler == "step"
+    assert config.net_config.lr_milestones == (20, 40)
+    assert config.net_config.lr_gamma == 0.3
+
+
+def test_step_scheduler_field_defaults():
+    """Configs that don't mention the step knobs get empty milestones + 0.1 gamma."""
+    config = load_args("run_configurations/test_run.json")
+    assert config.net_config.lr_milestones == ()
+    assert config.net_config.lr_gamma == 0.1
+
+
 def test_net_preset_fills_size_fields(tmp_path):
     """ "preset": "large" supplies num_filters/num_residual_blocks."""
     raw = json.loads(Path("run_configurations/test_run.json").read_text())
@@ -206,3 +231,40 @@ def test_blokus_cloud_v2_config_loads_and_round_trips():
     assert isinstance(config.object_store, ObjectStoreConfig)
     assert config.object_store.bucket
     assert config.wandb is not None and config.wandb.mode == "online"
+
+
+def test_lr_ab_configs_share_recipe_and_differ_only_by_scheduler():
+    """The three L6 A/B configs are identical apart from run_name + scheduler block."""
+    import dataclasses
+
+    constant = load_args("run_configurations/lr_ab_constant.json")
+    cosine = load_args("run_configurations/lr_ab_cosine.json")
+    step = load_args("run_configurations/lr_ab_step.json")
+
+    # Each arm names its scheduler; everything else is the warm-start recipe.
+    assert constant.net_config.lr_scheduler == "constant"
+    assert cosine.net_config.lr_scheduler == "cosine" and cosine.net_config.lr_eta_min == 0.0001
+    assert step.net_config.lr_scheduler == "step"
+    assert step.net_config.lr_milestones == (20,) and step.net_config.lr_gamma == 0.3
+
+    for config in (constant, cosine, step):
+        assert config.num_generations == 30
+        assert config.load_model is True  # warm start weights-only (L4)
+        assert config.num_eps == 10000
+        assert config.num_arena_matches == 40
+        assert config.replay_buffer_games == 40000
+        assert config.net_config.learning_rate == 0.001
+        assert config.net_config.preset == "large"
+        assert config.selfplay_backend == "jax"
+        assert config.mcts_config.gumbel_max_considered == 16
+        assert config.seed == 42
+
+    # Everything outside net_config + run_name is byte-identical across arms.
+    def _recipe(config: RunConfig) -> dict:
+        d = dataclasses.asdict(config)
+        d.pop("run_name")
+        d.pop("net_config")
+        d.pop("wandb")  # tags differ per arm
+        return d
+
+    assert _recipe(constant) == _recipe(cosine) == _recipe(step)

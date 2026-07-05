@@ -1,0 +1,66 @@
+{
+  "game": "blokusduo",
+  "run_name": "lr_ab_cosine",
+  "seed": 42,
+  "num_generations": 30,
+  "num_eps": 10000,
+  "replay_buffer_games": 40000,
+  "temp_threshold": 12,
+  "update_threshold": 0.55,
+  "root_directory": "./temp/",
+  "load_model": true,
+  "num_parallel_workers": 8,
+  "worker_cuda": true,
+  "use_optimised_movegen": true,
+  "elo_games_per_gen": 20,
+  "minimax_games_per_gen": 0,
+  "symmetry_diagnostic_positions": 100,
+  "num_arena_matches": 40,
+  "mcts_config": {
+    "num_mcts_sims": 64,
+    "cpuct": 2.5,
+    "mcts_batch_size": 16,
+    "dirichlet_epsilon": 0.25,
+    "dirichlet_alpha": 0.03,
+    "search_policy": "gumbel",
+    "gumbel_max_considered": 16
+  },
+  "net_config": {
+    "preset": "large",
+    "learning_rate": 0.001,
+    "dropout": 0.3,
+    "epochs": 1,
+    "batch_size": 1024,
+    "cuda": true,
+    "lr_scheduler": "cosine",
+    "lr_eta_min": 0.0001,
+    "policy_head": "conv",
+    "fp16_inference": true,
+    "perf": {
+      "autocast_dtype": "bf16",
+      "tf32": true,
+      "cudnn_benchmark": true,
+      "channels_last": true,
+      "compile": true,
+      "dataloader_workers": 8,
+      "pin_memory": true,
+      "persistent_workers": true,
+      "prefetch_factor": 4,
+      "log_every_batches": 25
+    }
+  },
+  "wandb": {
+    "project": "alphablokus-poc",
+    "entity": null,
+    "tags": ["lr-ab", "cosine", "gumbel", "large", "30gen"],
+    "mode": "online"
+  },
+  "selfplay_backend": "jax",
+  "jax_selfplay": {
+    "batch_size": 1024,
+    "top_k": 64,
+    "dtype": "bfloat16",
+    "wave_plies": 32,
+    "xla_mem_fraction": 0.6
+  }
+}
