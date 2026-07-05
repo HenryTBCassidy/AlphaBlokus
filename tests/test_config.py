@@ -169,3 +169,40 @@ def test_tournament_loads_from_json(tmp_path):
     assert tour.prior_games == 4.0
     assert tour.anchor_rating == 400.0
     assert tour.max_checkpoints == 20
+
+
+def test_blokus_cloud_v2_config_loads_and_round_trips():
+    """The next-run config parses and carries the analysis-driven deltas."""
+    from alphablokus.config import ObjectStoreConfig
+
+    config = load_args("run_configurations/blokus_cloud_v2.json")
+    assert isinstance(config, RunConfig)
+    assert config.run_name == "blokus_cloud_v2"
+
+    # N1 LR floor is set (default is 0.0; v2 floors at 1e-4).
+    assert config.net_config.lr_scheduler == "cosine"
+    assert config.net_config.lr_eta_min == 0.0001
+
+    # Analysis §4 config deltas.
+    assert config.load_model is True
+    assert config.replay_buffer_games == 60000
+    assert config.num_arena_matches == 100
+    assert config.mcts_config.num_mcts_sims == 128
+    assert config.mcts_config.gumbel_max_considered == 32
+
+    # Unchanged from blokus_cloud.json.
+    assert config.net_config.preset == "large"
+    assert config.net_config.num_filters == 192
+    assert config.net_config.num_residual_blocks == 12
+    assert config.num_eps == 10000
+    assert config.mcts_config.dirichlet_alpha == 0.03
+    assert config.update_threshold == 0.55
+    assert config.net_config.epochs == 1
+    assert config.net_config.batch_size == 1024
+    assert config.jax_selfplay.top_k == 64
+    assert config.jax_selfplay.wave_plies == 32
+
+    # Data-safety protocol: object_store block present (creds stay env-only).
+    assert isinstance(config.object_store, ObjectStoreConfig)
+    assert config.object_store.bucket
+    assert config.wandb is not None and config.wandb.mode == "online"

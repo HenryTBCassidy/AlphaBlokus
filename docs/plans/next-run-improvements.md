@@ -38,7 +38,7 @@ it or it re-crashes at ~gen 59.
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
 | N1 | Floor the cosine LR — add `lr_eta_min` config knob, used by `_create_scheduler` | 45 min | High | ✅ |
-| N2 | `blokus_cloud_v2.json`: LR floor + Gumbel n128/considered32 + arena 100 + buffer 60k + warm-start from gen-57 | 1 h | High | |
+| N2 | `blokus_cloud_v2.json`: LR floor + Gumbel n128/considered32 + arena 100 + buffer 60k + warm-start from gen-57 | 1 h | High | ✅ |
 | N3 | Fix the eval-set diagnostic (score vs current-net MCTS + relabel; optional periodic rebuild) | 2.5 h | Medium | |
 | N4 | Run the (already-merged) pool-Elo tournament on the checkpoints; optionally add the deferred live sliding-reference Elo | 1 h | Low | |
 | N5 | Validate: defaults unchanged; short run exercises the v2 config; CI green | 1 h | High | |
@@ -101,6 +101,10 @@ analysis §4 recommended config), keeping everything else (net `large`, `num_eps
 - **Cost:** ~21 min/gen ⇒ ~21 h for 60 gens on a 5090 (the n=64→128 doubling is most of it).
 - **Follow the data-safety protocol** ([`../guides/CLOUD-TRAINING.md`](../guides/CLOUD-TRAINING.md)):
   `object_store` on + verified after gen 1, W&B online, pull-before-stop.
+- **Fill in the object-store placeholders before launch.** JSON has no comments, so the shipped
+  `object_store` block uses literal `REPLACE_ME-…` `bucket` / `endpoint_url` strings — replace them with
+  the real bucket + endpoint. Credentials stay env-only (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`),
+  never in the JSON.
 
 **Effort:** 1 h.
 
