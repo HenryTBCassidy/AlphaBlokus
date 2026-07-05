@@ -12,7 +12,6 @@ import type { Predictor } from './net';
 import { OrtWebPredictor } from './net';
 import { gameResult, legalMoves, score, step } from './rules';
 import type { LoadedAssets } from './tables';
-import { loadAssets } from './tables';
 import type {
   DifficultyLevel,
   Engine,
@@ -23,11 +22,11 @@ import type {
 } from './types';
 
 export class BrowserEngine implements Engine {
-  private assets: LoadedAssets | null = null;
   private predictor: Predictor | null = null;
   private executionProvider = 'unknown';
 
   constructor(
+    private readonly assets: LoadedAssets,
     private readonly assetsBaseUrl: string,
     private readonly netVariant: string = 'fp32',
   ) {}
@@ -36,7 +35,6 @@ export class BrowserEngine implements Engine {
   onSearchProgress: ((done: number, total: number) => void) | null = null;
 
   async init(): Promise<EngineInfo> {
-    this.assets = await loadAssets(this.assetsBaseUrl);
     const netFile = this.assets.manifest.net?.files[this.netVariant];
     if (!netFile) {
       throw new Error(
@@ -58,21 +56,16 @@ export class BrowserEngine implements Engine {
     };
   }
 
-  get loadedAssets(): LoadedAssets {
-    if (!this.assets) throw new Error('Engine not initialised — call init() first.');
-    return this.assets;
-  }
-
   legalMoves(state: GameState): Promise<number[]> {
-    return Promise.resolve(legalMoves(this.loadedAssets.tables, state, state.currentPlayer));
+    return Promise.resolve(legalMoves(this.assets.tables, state, state.currentPlayer));
   }
 
   applyMove(state: GameState, action: number): GameState {
-    return step(this.loadedAssets.tables, state, action);
+    return step(this.assets.tables, state, action);
   }
 
   gameStatus(state: GameState): GameStatus {
-    const tables = this.loadedAssets.tables;
+    const tables = this.assets.tables;
     const ended = gameResult(tables, state, 1);
     if (ended === 0) return { isOver: false };
     const scores: [number, number] = [score(tables, state, 0), score(tables, state, 1)];
@@ -82,7 +75,7 @@ export class BrowserEngine implements Engine {
 
   async bestMove(state: GameState, difficulty: DifficultyLevel): Promise<SearchResult> {
     if (!this.predictor) throw new Error('Engine not initialised — call init() first.');
-    const tables = this.loadedAssets.tables;
+    const tables = this.assets.tables;
     const start = performance.now();
     const onProgress = this.onSearchProgress ?? undefined;
 

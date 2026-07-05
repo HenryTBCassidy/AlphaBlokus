@@ -41,7 +41,7 @@ swappable by design; re-export + redeploy when stronger nets land).
 | W5 | ONNX export (+ optional fp16/int8) in the export script + manifest net entry | 1.5 h | High | ✅ |
 | W6 | TS net predictor (onnxruntime-web, WebGPU → WASM fallback) + net-output parity test | 1.5 h | High | ✅ |
 | W7 | TS play-time MCTS (PUCT + Gumbel root) + difficulty levels | 2 h | High | ✅ |
-| W8 | Frontend UI: board, tray, rotate/flip, legal-move highlighting, controls | 3 h | High | |
+| W8 | Frontend UI: board, tray, rotate/flip, legal-move highlighting, controls | 3 h | High | ✅ |
 | W9 | Local Python play server (`alphablokus/play/`, FastAPI `play` extra, `alphablokus-play`) | 2 h | High | |
 | W10 | `ServerEngine` (HTTP client) + engine selection in the frontend | 1 h | High | |
 | W11 | Scripted browser-engine vs Python-engine agreement game | 1 h | High | |
