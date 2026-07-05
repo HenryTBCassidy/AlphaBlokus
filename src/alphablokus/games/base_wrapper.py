@@ -13,7 +13,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from loguru import logger
 from torch import Tensor, optim
-from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler
+from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler, MultiStepLR
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
@@ -278,8 +278,19 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         return torch.device("cpu")
 
     def _create_scheduler(self) -> LRScheduler | None:
-        """Create LR scheduler based on config. Returns None if no schedule configured."""
+        """Create the LR scheduler from config, or None for a constant LR.
+
+        Supported ``net_config.lr_scheduler`` values:
+
+        - ``None`` / ``"constant"``: no scheduler — constant ``learning_rate``.
+        - ``"cosine"``: ``CosineAnnealingLR`` over the whole run, floored at
+          ``lr_eta_min``.
+        - ``"step"``: ``MultiStepLR`` decaying by ``lr_gamma`` at each
+          ``lr_milestones`` generation.
+        """
         match self.net_config.lr_scheduler:
+            case None | "constant":
+                return None
             case "cosine":
                 total_epochs = self.config.num_generations * self.net_config.epochs
                 # ``eta_min`` floors the anneal. Default 0.0 reproduces the
@@ -293,8 +304,13 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                         self.config.num_generations,
                     )
                 return CosineAnnealingLR(self.optimizer, T_max=total_epochs, eta_min=self.net_config.lr_eta_min)
-            case None:
-                return None
+            case "step":
+                if not self.net_config.lr_milestones:
+                    raise ValueError('lr_scheduler "step" requires non-empty lr_milestones')
+                # Milestones are given in generations; convert to scheduler steps
+                # via epochs (same convention as cosine's T_max).
+                milestones = [m * self.net_config.epochs for m in self.net_config.lr_milestones]
+                return MultiStepLR(self.optimizer, milestones=milestones, gamma=self.net_config.lr_gamma)
             case unknown:
                 raise ValueError(f"Unknown lr_scheduler: {unknown!r}")
 

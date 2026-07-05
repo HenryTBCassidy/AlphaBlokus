@@ -67,6 +67,31 @@ def _write_config_with_net(tmp_path, net_config: dict):
     return path
 
 
+def test_step_scheduler_fields_load_from_json(tmp_path):
+    """lr_milestones (JSON list → tuple) and lr_gamma parse for the "step" scheduler."""
+    path = _write_config_with_net(
+        tmp_path,
+        {
+            "lr_scheduler": "step",
+            "lr_milestones": [20, 40],
+            "lr_gamma": 0.3,
+            "num_filters": 32,
+            "num_residual_blocks": 1,
+        },
+    )
+    config = load_args(path)
+    assert config.net_config.lr_scheduler == "step"
+    assert config.net_config.lr_milestones == (20, 40)
+    assert config.net_config.lr_gamma == 0.3
+
+
+def test_step_scheduler_field_defaults():
+    """Configs that don't mention the step knobs get empty milestones + 0.1 gamma."""
+    config = load_args("run_configurations/test_run.json")
+    assert config.net_config.lr_milestones == ()
+    assert config.net_config.lr_gamma == 0.1
+
+
 def test_net_preset_fills_size_fields(tmp_path):
     """ "preset": "large" supplies num_filters/num_residual_blocks."""
     raw = json.loads(Path("run_configurations/test_run.json").read_text())

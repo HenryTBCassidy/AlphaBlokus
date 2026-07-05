@@ -6,6 +6,7 @@ from dataclasses import replace
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pytest
 
 from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
 from alphablokus.storage.metrics import EvalSet, MetricsCollector
@@ -72,8 +73,6 @@ def test_train_logs_actual_learning_rate(ttt_game: TicTacToeGame, test_config: R
     The logged value is the LR *before* the epoch's scheduler step — what the
     epoch actually trained at — and for a constant schedule it is the config LR.
     """
-    from alphablokus.storage.sparse_policy import sparsify
-
     net_config = replace(test_config.net_config, epochs=2)  # lr_scheduler defaults to None (constant)
     config = replace(test_config, net_config=net_config)
     wrapper = NNetWrapper(ttt_game, config)
@@ -191,6 +190,53 @@ def test_load_weights_yields_fresh_optimizer_and_scheduler(ttt_game: TicTacToeGa
     assert recipient.optimizer.param_groups[0]["lr"] == config.net_config.learning_rate
     assert recipient.scheduler is not None
     assert recipient.scheduler.last_epoch == 0
+
+
+def test_constant_scheduler_is_none(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """Both None and the explicit "constant" alias build no scheduler (L5)."""
+    for value in (None, "constant"):
+        net_config = replace(test_config.net_config, lr_scheduler=value)
+        config = replace(test_config, net_config=net_config)
+        wrapper = NNetWrapper(ttt_game, config)
+        assert wrapper.scheduler is None
+        assert wrapper.optimizer.param_groups[0]["lr"] == config.net_config.learning_rate
+
+
+def test_step_scheduler_decays_at_milestones(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """The "step" scheduler multiplies LR by lr_gamma at each milestone (L5)."""
+    net_config = replace(
+        test_config.net_config,
+        lr_scheduler="step",
+        lr_milestones=(2, 4),
+        lr_gamma=0.1,
+        epochs=1,
+    )
+    config = replace(test_config, num_generations=6, net_config=net_config)
+
+    seq = _lr_sequence(config, ttt_game, steps=config.num_generations)
+
+    base = config.net_config.learning_rate
+    # seq[i] is the LR after i steps: constant until milestone 2, then ×0.1,
+    # then ×0.1 again at milestone 4.
+    assert seq[0] == base
+    assert seq[2] == pytest.approx(base * 0.1)
+    assert seq[4] == pytest.approx(base * 0.01)
+
+
+def test_step_scheduler_requires_milestones(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """ "step" with empty lr_milestones is a config error (L5)."""
+    net_config = replace(test_config.net_config, lr_scheduler="step")  # lr_milestones defaults to ()
+    config = replace(test_config, net_config=net_config)
+    with pytest.raises(ValueError, match="lr_milestones"):
+        NNetWrapper(ttt_game, config)
+
+
+def test_unknown_scheduler_raises(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """An unrecognised lr_scheduler value is rejected (L5)."""
+    net_config = replace(test_config.net_config, lr_scheduler="nope")
+    config = replace(test_config, net_config=net_config)
+    with pytest.raises(ValueError, match="Unknown lr_scheduler"):
+        NNetWrapper(ttt_game, config)
 
 
 def _ttt_eval_positions(game: TicTacToeGame, count: int) -> list[np.ndarray]:

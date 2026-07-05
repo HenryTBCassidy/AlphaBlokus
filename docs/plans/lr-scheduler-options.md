@@ -115,7 +115,7 @@ SGDR are deliberately not implemented.
 | L2 | Log the actual optimizer LR per generation (parquet + W&B + report chart) | 1.5 h | High | ✅ |
 | L3 | Scheduler clock follows generations: arena rejection no longer rewinds LR state | 1.5 h | High | ✅ |
 | L4 | Warm start = weights-only: `load_model` gets a fresh optimizer + scheduler at the config LR (`--resume` keeps full restore) | 1.5 h | High | ✅ |
-| L5 | Pluggable `lr_scheduler`: `"constant"`/`null`, `"cosine"`, `"step"` (+ `lr_milestones`, `lr_gamma`) in `_create_scheduler` | 1.5 h | High | |
+| L5 | Pluggable `lr_scheduler`: `"constant"`/`null`, `"cosine"`, `"step"` (+ `lr_milestones`, `lr_gamma`) in `_create_scheduler` | 1.5 h | High | ✅ |
 | L6 | A/B run configs: identical warm-start recipe, scheduler-only delta (constant vs floored cosine, optional step arm) | 30 min | Medium | |
 | L7 | Run the A/B; judge by head-to-head arena + pool-Elo slope + Pentobi ladder; write `docs/research/lr-schedule-ab.md`; set the production default | ~13 h GPU + 1 h analysis | Medium | |
 
