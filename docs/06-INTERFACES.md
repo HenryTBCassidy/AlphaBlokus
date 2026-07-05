@@ -35,9 +35,15 @@ Pentobi's GTP interface uses a different format:
 | Coordinates | Origin bottom-left. Columns are letters (a=0, b=1, ..., n=13). Rows are 1-indexed (1=bottom) |
 | Moves | Comma-separated coordinate list: `e8,d9,e9,f9,e10` |
 | Players | Two GTP colour letters — **verify the exact letters and first-mover mapping against the actual `pentobi-gtp` build before relying on them** |
-| Pass | The string `pass` |
+| `genmove` result | A cell list, the string `pass`, or the string `resign` |
 
 > **Colour mapping — pinned as built** (`pentobi/player.py` `_assign_colors`): our **White = player `+1` = first to move, starting at (4, 4)** maps onto Pentobi's *first* GTP colour letter **`b`**; Black = `−1` = second, starting at (9, 9) = `w`. (Counter-intuitive letters, verified against the real binary's `showboard`/`genmove` output during the harness build — a swapped mapping would silently flip every benchmark result.) One further as-built wrinkle: a **pass is never relayed** via `play` — Pentobi has no `play <colour> pass`; it expresses passes only through `genmove` returning `pass`, and since a pass places nothing, skipping it keeps both boards in sync.
+
+> **Non-coordinate `genmove` responses — pass and resign.** GTP `genmove` may return a normal move, `pass`, or `resign`, and the translation layer maps each to an integer the Arena understands (`pentobi/translation.py` `pentobi_to_action_index`):
+> - `pass` → the pass action index (played like any other move);
+> - `resign` → `RESIGN_ACTION` (`alphablokus.interfaces`, `= -1`), a sentinel outside the valid action range. `Arena.play_game` intercepts it *before* the legality assertion and ends the game immediately, awarding the win to the opponent — so **Pentobi resigning counts as a net win**, not a crash. (Before this was handled, a `resign` was parsed as a coordinate and `int("esign")` crashed the whole benchmark, discarding the win and aborting the rest of the ladder — observed on a strong gen-44 net at level 4 on 2026-07-05.)
+>
+> `pentobi_to_coord` now raises a clear `ValueError("Non-coordinate GTP token …")` for any non-cell token, so any future non-coordinate response fails loudly at the parse site rather than with a cryptic `int()` error.
 
 A move in Pentobi does **not** specify which piece or orientation — just the cells the piece occupies. The engine deduces the piece from the coordinates. This is elegant but means the translation layer needs to work in both directions differently.
 
