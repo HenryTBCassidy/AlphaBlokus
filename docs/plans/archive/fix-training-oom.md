@@ -44,7 +44,40 @@ one systemic cause worth naming:
 | M3 | Fix `check_ram_budget` to model worker multiplication + cgroup limit; abort pre-flight with guidance | 2 h | High | ✅ |
 | M4 | Cheap full-buffer **memory probe** script — know the peak RAM before renting a GPU | 1.5 h | High | ✅ |
 | M5 | Memory-cost model doc + add the probe/guard to the CLOUD-TRAINING pre-flight checklist | 1 h | Medium | ✅ |
-| M6 | Validate: 60k buffer + 8 workers fits (or aborts cleanly); reproduce-then-fixed; CI green | 1 h | High | |
+| M6 | Validate: 60k buffer + 8 workers fits (or aborts cleanly); reproduce-then-fixed; CI green | 1 h | High | ✅ |
+
+### M6 validation
+
+- **Per-worker drop (the fix).** The memmap dataset pickles to a constant few
+  hundred bytes regardless of buffer size (test:
+  `test_memmap_dataset_pickle_is_tiny_and_buffer_independent`), vs the old in-RAM
+  dataset's ~1.4 KB/position that pickled a full buffer copy per worker (M1). For
+  the production `blokus_cloud_v2` config (60k buffer, 8 workers) the guard
+  estimate falls from **~164.9 GB pre-M2 → 31.4 GB post-M2** (the removed +133.5
+  GB was the 8× per-worker buffer copy — the OOM).
+- **Guard fires/passes correctly.** With the post-M2 estimate, `check_ram_budget`
+  on the v2 config **aborts with guidance on a 32 GB box** (budget 25.6 GB) and
+  **passes on 64/128 GB** — so the run either fits or refuses cleanly instead of
+  OOM-killing hours in. Guard estimate is conservative (always ≥ probe-measured
+  RSS, the safe direction).
+- **No regression.** `dataloader_workers = 0` (Mac/CPU default) keeps the in-RAM
+  dataset unchanged; the memmap path only activates for `workers > 0` and trains
+  bit-identically (existing `test_dataloader_workers_train_identically` /
+  `test_default_dataloader_context_is_non_fork` now exercise it). `--resume` and
+  the `forkserver` JAX-deadlock fix are untouched.
+- **CI green:** ruff + format + strict mypy clean; full `pytest -m "not slow"`
+  (485 passed) plus the slow training-loop + resume integration tests pass.
+
+## Scope additions
+
+- Added `MemmapPolicyDataset` (`training/memmap_dataset.py`) as the M2 fix
+  (on-disk CSR memmap the workers share via the page cache), rather than the
+  shared-memory-array alternative — memmap keeps the buffer off the anonymous
+  heap and out of the per-generation object-store sync, and needs no buffer
+  refactor. The in-process path is left exactly as it was.
+- M3 additionally reads the **cgroup** memory limit (v2 `memory.max` / v1
+  `memory.limit_in_bytes`), not just `psutil` physical RAM, so a container capped
+  below the host is measured against the real ceiling.
 
 ### M1 findings (mechanism confirmed)
 
