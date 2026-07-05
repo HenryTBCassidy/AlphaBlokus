@@ -56,11 +56,20 @@ loop and must preserve resume behaviour.
 | E5 | `scripts/tournament_elo.py`: enumerate checkpoints → run pairings → W/L/D matrix → BayesElo → write parquet/JSON | 3 h | High | ✅ |
 | E6 | Reporting: `make_tournament_elo_plot` + wire into `report.py`; relabel old chart "(saturates)" | 1.5 h | High | ✅ |
 | E7 | Docs: methodology note in `docs/research/`, update `docs/05-EVALUATION.md`, report caveat | 45 min | Medium | ✅ |
-| E8 | *(Optional)* In-loop sliding-reference Elo in coach (rate gen N vs recent net, accumulate) | 3 h | Low | |
-| E9 | *(Optional)* Pentobi as an anchored external player for an absolute scale | 2 h | Low | |
+| E8 | *(Optional)* In-loop sliding-reference Elo in coach (rate gen N vs recent net, accumulate) | 3 h | Low | Deferred |
+| E9 | *(Optional)* Pentobi as an anchored external player for an absolute scale | 2 h | Low | Deferred |
 
 > Part A = E1–E7 (do these; they fully deliver the DeepMind-style curve on existing checkpoints).
 > Part B = E8–E9 (forward-looking polish; safe to defer). Mark deferred rows `Deferred` with a note.
+>
+> **E8/E9 deferred (2026-07-05).** Part A (E1–E7) is complete and fully delivers the stated goal — a
+> non-saturating DeepMind-style pool BayesElo curve computed post-hoc from any finished run's saved
+> checkpoints, with no retraining. E8 (in-loop sliding-reference Elo) and E9 (Pentobi as an anchored
+> external player) are forward-looking polish that touch the training loop / require the Pentobi
+> adapter running during the tournament; they add no capability Part A lacks for the current goal.
+> Both are cleanly re-openable from this archived plan when a *live* non-saturating number or an
+> *absolute* cross-run scale is wanted. E9's hook already exists: `fit_bayeselo`'s `anchor`/
+> `anchor_rating` accept any pool player, so folding Pentobi in is additive.
 
 ---
 
