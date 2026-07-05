@@ -42,7 +42,7 @@ one systemic cause worth naming:
 | M1 | Profile + **confirm the mechanism** — reproduce the OOM cheaply, measure peak RSS vs worker count | 2 h | High | ✅ |
 | M2 | Fix the mechanism so workers don't each copy the buffer (shared-memory / on-disk-backed dataset) | 3 h | High | ✅ |
 | M3 | Fix `check_ram_budget` to model worker multiplication + cgroup limit; abort pre-flight with guidance | 2 h | High | ✅ |
-| M4 | Cheap full-buffer **memory probe** script — know the peak RAM before renting a GPU | 1.5 h | High | |
+| M4 | Cheap full-buffer **memory probe** script — know the peak RAM before renting a GPU | 1.5 h | High | ✅ |
 | M5 | Memory-cost model doc + add the probe/guard to the CLOUD-TRAINING pre-flight checklist | 1 h | Medium | |
 | M6 | Validate: 60k buffer + 8 workers fits (or aborts cleanly); reproduce-then-fixed; CI green | 1 h | High | |
 
