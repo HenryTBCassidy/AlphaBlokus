@@ -1,7 +1,10 @@
+from dataclasses import replace
+
 import pandas as pd
 import pytest
+from loguru import logger
 
-from alphablokus.config import RunConfig
+from alphablokus.config import RunConfig, WandbConfig
 from alphablokus.storage.metrics import CycleStage, MetricsCollector
 
 
@@ -360,3 +363,59 @@ def test_flush_clears_all_six_buffers(collector: MetricsCollector, test_config: 
     assert len(collector._self_play_profiling_records) == 0
     assert len(collector._resource_usage_records) == 0
     assert len(collector._training_throughput_records) == 0
+
+
+# ── H3: W&B online-by-default + graceful degradation (harden-long-runs) ────────
+
+
+class _FakeWandbRun:
+    """Minimal stand-in for a wandb Run (no network)."""
+
+    id = "fake-run-id"
+    url = None
+
+    def define_metric(self, *_args: object, **_kwargs: object) -> None:
+        pass
+
+
+def test_offline_multigen_run_warns_loudly(test_config: RunConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An offline multi-generation run emits a loud warning (data-loss/observability)."""
+    monkeypatch.setattr("wandb.init", lambda *a, **k: _FakeWandbRun())
+    config = replace(
+        test_config,
+        num_generations=5,
+        wandb=WandbConfig(project="test-project", mode="offline"),
+    )
+
+    messages: list[str] = []
+    handler_id = logger.add(messages.append, level="WARNING")
+    try:
+        MetricsCollector(config=config)
+    finally:
+        logger.remove(handler_id)
+
+    combined = "".join(messages)
+    assert "OFFLINE" in combined, f"expected an offline warning, got: {combined!r}"
+
+
+def test_online_init_failure_degrades_gracefully(test_config: RunConfig, monkeypatch: pytest.MonkeyPatch) -> None:
+    """An online init failure (e.g. missing key) must not crash the run."""
+
+    def boom(*_args: object, **_kwargs: object) -> None:
+        raise RuntimeError("no WANDB_API_KEY")
+
+    monkeypatch.setattr("wandb.init", boom)
+    config = replace(
+        test_config,
+        num_generations=5,
+        wandb=WandbConfig(project="test-project", mode="online"),
+    )
+
+    collector = MetricsCollector(config=config)  # must not raise
+    assert collector._wandb_run is None
+    assert collector.wandb_run_id is None
+
+
+def test_wandb_default_mode_is_online() -> None:
+    """Online is the sensible default so a real run is observable without extra config."""
+    assert WandbConfig(project="x").mode == "online"

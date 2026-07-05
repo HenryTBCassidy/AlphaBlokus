@@ -178,12 +178,20 @@ class BlokusDuoGame(IGame[BlokusDuoBoard]):
         """
         return board.canonical(player)
 
-    def encode_compact(self, compact: NDArray) -> NDArray:
+    @staticmethod
+    def encode_compact(compact: NDArray) -> NDArray:
         """Rebuild the 44-channel float32 planes from a compact placement board.
 
         Inverse of ``BlokusDuoBoard.to_compact``: ``compact`` is the int8 14×14
         canonical placement board, and the result equals ``as_multi_channel(1)``
         for the board it came from.
+
+        A ``@staticmethod`` (it needs no instance state) so that
+        ``game.encode_compact`` is a plain, cheaply-picklable function
+        reference — the training ``DataLoader`` ships it to forkserver/spawn
+        workers, and pickling a bound method would instead drag the whole game
+        (with its multi-MB optimised move generator). See
+        docs/plans/archive/harden-long-runs.md H1.
         """
         return encode_planes_from_placement(compact)
 

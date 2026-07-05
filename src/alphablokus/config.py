@@ -157,6 +157,18 @@ class TrainingPerfConfig:
     persistent_workers: bool = False  # keep workers alive across epochs (skip respawn cost)
     prefetch_factor: int = 2  # batches each worker keeps ready (used only when workers > 0)
 
+    # multiprocessing start method for the DataLoader's worker processes (used
+    # only when ``dataloader_workers > 0``). The default **fork** deadlocks here:
+    # self-play (JAX) and training (torch) share one process, so JAX's threads
+    # are live when the loader forks workers — that is what killed the
+    # pin-memory thread at gen 59 of blokus_cloud_60. "forkserver" (default)
+    # forks workers from a clean helper process that never loaded JAX; "spawn"
+    # cold-starts a fresh interpreter (heavier, always available); "fork"
+    # restores the old behaviour. An unavailable method falls back to "spawn".
+    # Inert when ``dataloader_workers == 0`` (the Mac/CPU default), so default
+    # behaviour there is unchanged. See docs/plans/archive/harden-long-runs.md H1.
+    dataloader_context: Literal["forkserver", "spawn", "fork"] = "forkserver"
+
     # Per-batch metric cadence. 1 (default) = today's behaviour: a CUDA sync
     # (.item()) and a metrics row every batch. N>1 accumulates losses on-device
     # and syncs/logs once every N batches (the logged row carries the mean of

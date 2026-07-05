@@ -123,21 +123,28 @@ def main() -> None:
         start_generation = 1
 
     logger.info("Starting the learning process")
-    c.learn(start_generation=start_generation)
-
-    # A finished training run must not be sunk by report rendering (R7): all data
-    # is already on disk, so log and continue — regenerate later with --report-only.
+    # Render the report on the way out even if learn() raises. The crash that
+    # ended blokus_cloud_60 at gen 59 left no report at all, because the render
+    # sat *after* learn() returned; per-generation parquets are already on disk,
+    # so a finally-render recovers a report from whatever generations completed
+    # (the same data --report-only reads). See docs/plans/archive/harden-long-runs.md H2.
     try:
-        create_html_report(args)
-    except Exception:
-        logger.exception(
-            "Report generation failed, but training data is intact. Regenerate with: --report-only.",
-        )
-
-    # Final mirror so the rendered report (and anything else since the last
-    # per-generation sync) reaches the bucket. Reuses the Coach's store so the
-    # sync stays incremental. Best-effort, like the report itself.
-    sync_up_guarded(c.object_store, args.run_directory, "final")
+        c.learn(start_generation=start_generation)
+    finally:
+        # A finished (or crashed) run must not be sunk by report rendering (R7):
+        # all data is already on disk, so log and continue — regenerate later
+        # with --report-only.
+        try:
+            create_html_report(args)
+        except Exception:
+            logger.exception(
+                "Report generation failed, but training data is intact. Regenerate with: --report-only.",
+            )
+        # Final mirror so the rendered report (and anything else since the last
+        # per-generation sync) reaches the bucket even on crash. Reuses the
+        # Coach's store so the sync stays incremental. Best-effort, like the
+        # report itself.
+        sync_up_guarded(c.object_store, args.run_directory, "final")
 
     end = time.perf_counter()
     logger.info(f"Total time elapsed: {end - start}")
