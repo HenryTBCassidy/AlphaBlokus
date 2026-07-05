@@ -39,12 +39,39 @@ one systemic cause worth naming:
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| M1 | Profile + **confirm the mechanism** — reproduce the OOM cheaply, measure peak RSS vs worker count | 2 h | High | |
+| M1 | Profile + **confirm the mechanism** — reproduce the OOM cheaply, measure peak RSS vs worker count | 2 h | High | ✅ |
 | M2 | Fix the mechanism so workers don't each copy the buffer (shared-memory / on-disk-backed dataset) | 3 h | High | |
 | M3 | Fix `check_ram_budget` to model worker multiplication + cgroup limit; abort pre-flight with guidance | 2 h | High | |
 | M4 | Cheap full-buffer **memory probe** script — know the peak RAM before renting a GPU | 1.5 h | High | |
 | M5 | Memory-cost model doc + add the probe/guard to the CLOUD-TRAINING pre-flight checklist | 1 h | Medium | |
 | M6 | Validate: 60k buffer + 8 workers fits (or aborts cleanly); reproduce-then-fixed; CI green | 1 h | High | |
+
+### M1 findings (mechanism confirmed)
+
+Measured peak **process-tree** RSS (main + all worker children) for the current
+in-RAM `_LazyPolicyDataset` + `forkserver` DataLoader on a synthetic Blokus
+buffer (compact 14×14 int8 boards, sparse 150-nnz policies), on a 24 GB Mac:
+
+| buffer | dataset pickle | w=0 | w=2 | w=4 | w=8 |
+|--------|---------------|-----|-----|-----|-----|
+| 65k positions (1000 games) | 0.091 GB | 1.01 GB | 2.81 GB | 4.08 GB | 6.37 GB |
+| 195k positions (3000 games) | 0.274 GB | 1.81 GB | 5.10 GB | 7.53 GB | — |
+
+- **The dataset is pickled in full to every worker**, and its size is *exactly
+  linear* in buffer size (0.091 → 0.274 GB as positions go 65k → 195k, ~1.4
+  KB/position in this synthetic; production policies have more nonzeros so it is
+  larger). Confirms the `forkserver` per-worker-copy hypothesis — plain `fork`
+  shared it copy-on-write, which is why the 40k-buffer `fork` run survived.
+- Peak RSS rises monotonically with worker count; the per-worker cost is a fixed
+  torch-import + prefetched-dense-batch base (~0.4–0.6 GB, buffer-independent)
+  **plus** the pickled buffer copy (buffer-proportional).
+- **Extrapolation to production (60k games ≈ 3.9M positions):** the pickled copy
+  alone is ≈5.5 GB/worker → ≈44 GB across 8 workers, on top of the ~18 GB
+  resident buffer → OOM at the buffer-fill generation. Matches the exit-137.
+- **Fix direction:** the buffer-fill OOM is driven by the *buffer-proportional*
+  pickled copy, so the fix must remove the buffer from what workers receive
+  (memmap-backed dataset — M2). The fixed prefetch base is bounded and not the
+  cause.
 
 ---
 
