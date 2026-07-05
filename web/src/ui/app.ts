@@ -7,12 +7,13 @@ import type { LoadedAssets } from '../engine/tables';
 import type { DifficultyLevel, GameState, Player } from '../engine/types';
 import type { GameController } from './controller';
 import type { Grid, OrientationMaps } from './orientation';
-import { BOARD_SIZE, buildOrientationMaps, decodeAction, encodeAction } from './orientation';
+import { BOARD_SIZE, buildOrientationMaps, encodeAction } from './orientation';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 const CELL = 36;
 const MARGIN = 26;
 const REPO_URL = 'https://github.com/HenryTBCassidy/AlphaBlokus';
+const FULL_STRENGTH_GUIDE_URL = `${REPO_URL}#play-against-the-net`;
 
 interface Selection {
   pieceId: number;
@@ -97,10 +98,10 @@ export class AppView {
 
     const footer = el('footer', 'footer');
     const link = document.createElement('a');
-    link.href = REPO_URL;
+    link.href = FULL_STRENGTH_GUIDE_URL;
     link.target = '_blank';
     link.rel = 'noreferrer';
-    link.textContent = 'Download the repo to play the full-strength engine locally';
+    link.textContent = 'How to play the full-strength engine locally';
     footer.append(link);
     layout.append(footer);
 
@@ -132,12 +133,23 @@ export class AppView {
       this.colorSelect.append(option);
     }
 
-    const newGame = button('New game', 'primary', () => {
+    const startNewGame = () => {
       const level = this.findDifficulty(this.difficultySelect.value);
       const humanPlayer = Number(this.colorSelect.value) as Player;
       this.selection = null;
       void this.controller.newGame(humanPlayer, level);
+    };
+    // Switching side requires a fresh game, so apply it immediately — picking
+    // "Play Black" now actually makes you Black and lets the engine open,
+    // rather than silently waiting for a New game click.
+    this.colorSelect.addEventListener('change', startNewGame);
+    // Difficulty applies to the engine's subsequent moves without discarding
+    // the game in progress (New game reads it too).
+    this.difficultySelect.addEventListener('change', () => {
+      this.controller.difficulty = this.findDifficulty(this.difficultySelect.value);
     });
+
+    const newGame = button('New game', 'primary', startNewGame);
 
     this.passButton = button('Pass', '', () => {
       void this.controller.humanMove(this.assets.tables.passIndex);
@@ -352,21 +364,11 @@ export class AppView {
     this.overlayLayer.innerHTML = '';
     if (!this.selection || this.controller.phase !== 'humanTurn') return;
 
-    // Legal anchor dots for the selected orientation.
+    // Ghost preview of the selected piece, following the cursor: green when the
+    // placement is legal, red otherwise. (Legal placements are shown by the
+    // ghost snapping legal — no separate anchor-dot markers, which confused by
+    // marking bounding-box corners rather than where the piece connects.)
     const orientationId = this.selection.orientationId;
-    for (const action of this.controller.legal) {
-      if (action === this.assets.tables.passIndex) continue;
-      if (action % 91 !== orientationId) continue;
-      const { row, col } = decodeAction(action);
-      const dot = document.createElementNS(SVG_NS, 'circle');
-      dot.setAttribute('cx', String(MARGIN + col * CELL + CELL / 2));
-      dot.setAttribute('cy', String(MARGIN + row * CELL + CELL / 2));
-      dot.setAttribute('r', '4');
-      dot.classList.add('anchor-dot');
-      this.overlayLayer.append(dot);
-    }
-
-    // Ghost preview anchored at the hovered cell (top-left of bounding box).
     if (this.hoverCell === null) return;
     const row = Math.floor(this.hoverCell / BOARD_SIZE);
     const col = this.hoverCell % BOARD_SIZE;
