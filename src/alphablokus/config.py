@@ -548,6 +548,16 @@ class RunConfig:
         return self.run_directory / "TrainingThroughput"
 
     @property
+    def learning_rate_directory(self) -> Path:
+        """Directory for the per-generation optimizer learning rate.
+
+        Records ``optimizer.param_groups[0]["lr"]`` — the LR the epoch actually
+        trained at — so any LR-schedule experiment is reviewable. Absent for
+        runs predating LR logging, in which case the report omits the section.
+        """
+        return self.run_directory / "LearningRate"
+
+    @property
     def eval_set_directory(self) -> Path:
         """Directory holding the frozen held-out positions used for per-epoch
         network-entropy evaluation. Built once after the first generation's

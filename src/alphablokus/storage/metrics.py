@@ -137,6 +137,7 @@ class MetricsCollector:
     _self_play_profiling_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _resource_usage_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _training_throughput_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _learning_rate_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _training_entropy_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _policy_accuracy_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _value_calibration_records: list[dict] = field(default_factory=list, init=False, repr=False)
@@ -889,6 +890,36 @@ class MetricsCollector:
             }
         )
 
+    def log_learning_rate(
+        self,
+        generation: int,
+        epoch: int,
+        learning_rate: float,
+    ) -> None:
+        """Record the optimizer's actual learning rate for one training epoch.
+
+        This is ``optimizer.param_groups[0]["lr"]`` read *before* the epoch's
+        ``scheduler.step()`` — i.e. the LR the epoch actually trained at. It is
+        the visibility gap that let ``blokus_cloud_60``'s real LR trajectory go
+        unmeasured (docs/research/blokus-cloud-60-analysis.md §3 addendum);
+        logging it makes any schedule experiment reviewable. Keyed on
+        ``generation`` for W&B (``training_per_gen/learning_rate``).
+        """
+        self._learning_rate_records.append(
+            {
+                "generation": generation,
+                "epoch": epoch,
+                "learning_rate": learning_rate,
+            }
+        )
+        self._publish(
+            {
+                "training_per_gen/learning_rate": learning_rate,
+                "generation": generation,
+                "epoch": epoch,
+            }
+        )
+
     def log_training_dynamics(
         self,
         generation: int,
@@ -1002,6 +1033,16 @@ class MetricsCollector:
             )
             count += len(self._training_throughput_records)
             self._training_throughput_records.clear()
+
+        if self._learning_rate_records:
+            self._write_partition(
+                pd.DataFrame(self._learning_rate_records),
+                config.learning_rate_directory,
+                generation,
+                "learning_rate.parquet",
+            )
+            count += len(self._learning_rate_records)
+            self._learning_rate_records.clear()
 
         if self._training_entropy_records:
             self._write_partition(

@@ -66,6 +66,31 @@ def test_cosine_default_eta_min_is_unchanged(ttt_game: TicTacToeGame, test_confi
     assert seq == ref, "Default lr_eta_min=0.0 changed the cosine schedule"
 
 
+def test_train_logs_actual_learning_rate(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """train() records the optimizer's actual LR once per epoch (L2).
+
+    The logged value is the LR *before* the epoch's scheduler step — what the
+    epoch actually trained at — and for a constant schedule it is the config LR.
+    """
+    from alphablokus.storage.sparse_policy import sparsify
+
+    net_config = replace(test_config.net_config, epochs=2)  # lr_scheduler defaults to None (constant)
+    config = replace(test_config, net_config=net_config)
+    wrapper = NNetWrapper(ttt_game, config)
+
+    compacts = _ttt_eval_positions(ttt_game, 4)
+    examples = [(compact, sparsify(_uniform_over_legal(ttt_game, compact)), 0.0) for compact in compacts]
+    metrics = MetricsCollector(config=config)
+    wrapper.train(examples, generation=3, metrics=metrics)
+
+    records = metrics._learning_rate_records
+    assert len(records) == config.net_config.epochs, "expected one LR record per epoch"
+    assert all(r["generation"] == 3 for r in records)
+    assert {r["epoch"] for r in records} == set(range(config.net_config.epochs))
+    # Constant schedule: every epoch trains at the configured LR.
+    assert all(r["learning_rate"] == config.net_config.learning_rate for r in records)
+
+
 def _ttt_eval_positions(game: TicTacToeGame, count: int) -> list[np.ndarray]:
     """A few distinct canonical TTT compact boards from random short games."""
     rng = np.random.default_rng(0)

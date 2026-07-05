@@ -20,6 +20,7 @@ from alphablokus.reporting.charts import (
     accepted_mask,
     make_arena_plot,
     make_elo_plot,
+    make_learning_rate_plot,
     make_loss_per_generation,
     make_loss_timeline,
     make_minimax_plot,
@@ -252,6 +253,10 @@ def create_html_report(config: RunConfig) -> None:
     value_calibration_data = (
         _load_metrics(config.value_calibration_directory) if config.value_calibration_directory.exists() else None
     )
+    # Optional — only populated once LR logging landed (L2); older runs omit it.
+    learning_rate_data = (
+        _load_metrics(config.learning_rate_directory) if config.learning_rate_directory.exists() else None
+    )
     elo_data = _load_metrics(config.elo_ratings_directory) if config.elo_ratings_directory.exists() else None
     # Pool BayesElo ratings: a single file written by scripts/tournament_elo.py,
     # absent for runs that never ran the post-hoc tournament.
@@ -286,6 +291,11 @@ def create_html_report(config: RunConfig) -> None:
     fig_value_calibration = (
         make_value_calibration_plot(value_calibration_data, config.game)
         if value_calibration_data is not None and not value_calibration_data.empty
+        else None
+    )
+    fig_learning_rate = (
+        make_learning_rate_plot(learning_rate_data)
+        if learning_rate_data is not None and not learning_rate_data.empty
         else None
     )
     fig_elo = make_elo_plot(elo_data, arena_data) if elo_data is not None and not elo_data.empty else None
@@ -328,6 +338,17 @@ def create_html_report(config: RunConfig) -> None:
         update_threshold=config.update_threshold,
     )
     config_html = _make_config_table(config)
+
+    learning_rate_html = ""
+    if fig_learning_rate is not None:
+        learning_rate_html = (
+            '<p class="section-desc" style="margin-top:18px;">'
+            "The learning rate the optimiser actually trained at each generation "
+            "(log scale). On a gated run the schedule clock now follows "
+            "generations, not accepted generations, so this trace is the ground "
+            "truth for any LR-schedule comparison.</p>\n"
+            f"{_chart(fig_learning_rate)}"
+        )
 
     pentobi_ladder_html = build_pentobi_ladder_section(config.pentobi_ladder_directory)
 
@@ -438,6 +459,7 @@ def create_html_report(config: RunConfig) -> None:
     </p>
     {_chart(fig_per_gen_curves)}
 </details>
+{learning_rate_html}
 </section>
 
 {diagnostics_html}

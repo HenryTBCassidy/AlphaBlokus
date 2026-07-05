@@ -318,6 +318,29 @@ def test_training_throughput_has_derived_columns(
     assert pytest.approx(df["samples_per_second"].iloc[0], abs=1e-6) == 500.0  # 1000 / 2.0
 
 
+def test_log_learning_rate_appends(collector: MetricsCollector):
+    """log_learning_rate should accumulate records (L2)."""
+    collector.log_learning_rate(generation=1, epoch=0, learning_rate=1e-3)
+    assert len(collector._learning_rate_records) == 1
+    assert collector._learning_rate_records[0]["learning_rate"] == 1e-3
+
+
+def test_flush_writes_learning_rate_parquet(
+    collector: MetricsCollector,
+    test_config: RunConfig,
+):
+    """flush should create learning_rate.parquet under LearningRate/generation=1/."""
+    collector.log_learning_rate(generation=1, epoch=0, learning_rate=7.5e-4)
+    collector.flush(test_config, generation=1)
+
+    parquet_path = test_config.learning_rate_directory / "generation=1" / "learning_rate.parquet"
+    assert parquet_path.exists()
+
+    df = pd.read_parquet(test_config.learning_rate_directory)
+    assert "learning_rate" in df.columns
+    assert pytest.approx(df["learning_rate"].iloc[0]) == 7.5e-4
+
+
 # --- Flush clears all six buffers ---
 
 

@@ -485,6 +485,15 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             # Partial window at epoch end (only reachable when log_window > 1).
             self._flush_loss_window(window, pi_losses, v_losses, t, metrics, generation, epoch, len(loader) - 1)
 
+            # Record the LR this epoch actually trained at — read *before* the
+            # scheduler step, which is what makes the schedule reviewable (L2).
+            if metrics is not None:
+                metrics.log_learning_rate(
+                    generation=generation,
+                    epoch=epoch,
+                    learning_rate=self.optimizer.param_groups[0]["lr"],
+                )
+
             if self.scheduler is not None:
                 self.scheduler.step()
 
