@@ -2,7 +2,7 @@
 
 What card to rent, what net to train, and how to spend ~£100 for the strongest Blokus Duo net we
 can get — with a staged plan up the Pentobi ladder. Written 2026-07-04 for
-[`docs/plans/cloud-scale-training.md`](../plans/cloud-scale-training.md) (C13).
+[`docs/plans/archive/cloud-scale-training.md`](../plans/archive/cloud-scale-training.md) (C13).
 
 **Evidence tagging.** Every number is one of:
 **[measured]** — from an actual run on the 3060 Ti (mostly [jax-pipeline-ab.md](jax-pipeline-ab.md));
