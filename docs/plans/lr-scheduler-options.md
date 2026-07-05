@@ -117,7 +117,7 @@ SGDR are deliberately not implemented.
 | L4 | Warm start = weights-only: `load_model` gets a fresh optimizer + scheduler at the config LR (`--resume` keeps full restore) | 1.5 h | High | ✅ |
 | L5 | Pluggable `lr_scheduler`: `"constant"`/`null`, `"cosine"`, `"step"` (+ `lr_milestones`, `lr_gamma`) in `_create_scheduler` | 1.5 h | High | ✅ |
 | L6 | A/B run configs: identical warm-start recipe, scheduler-only delta (constant vs floored cosine, optional step arm) | 30 min | Medium | ✅ |
-| L7 | Run the A/B; judge by head-to-head arena + pool-Elo slope + Pentobi ladder; write `docs/research/lr-schedule-ab.md`; set the production default | ~13 h GPU + 1 h analysis | Medium | |
+| L7 | Run the A/B; judge by head-to-head arena + pool-Elo slope + Pentobi ladder; write `docs/research/lr-schedule-ab.md`; set the production default | ~13 h GPU + 1 h analysis | Medium | Protocol documented (§L7); run deferred (needs GPU/pods) |
 
 Execution order is dependency order: L2–L4 make any schedule's behaviour observable and its warm-start
 semantics correct *before* the comparison, otherwise the A/B measures accidents again. L1 is
@@ -277,6 +277,9 @@ recommendations go in a later run once the schedule question is settled.
 ---
 
 ## L7. Run the A/B and pick the default
+
+**Status (2026-07-05):** L1–L6 have landed (`feat/lr-scheduler-experiments`); the run/judge protocol below is the deliverable for L7 at this stage. The actual A/B run is **deferred** — it needs the GPU box / cloud pods, which aren't available in this working context. The A/B configs are ready (`run_configurations/lr_ab_{constant,cosine,step}.json`, L6); to execute, copy `blokus_cloud_60`'s `best.pth.tar` into each run's `Nets/` directory (weights-only warm start via L4) and launch the two primary arms sequentially, then follow the judging protocol and write `docs/research/lr-schedule-ab.md`.
+
 
 **Compute.** ~12.5 min/gen at this recipe on a 5090 ⇒ ~6.5 h/arm; two arms sequentially on one pod
 ≈ 13 h (≈ one cloud_60-sized budget), +6.5 h if the step arm is triggered. Evaluation (arena
