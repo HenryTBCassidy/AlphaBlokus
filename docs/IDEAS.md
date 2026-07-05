@@ -15,6 +15,7 @@ Status legend: **Idea** (raw, unexamined) · **Researching** (actively being inv
 | I2 | [Evaluation-time search tuning](#i2-evaluation-time-search-tuning) | Idea | Use a stronger/exact search at eval than at train (e.g. K=1 and/or more sims) since eval cares about strength, not throughput |
 | I3 | [Shared-state self-play workers](#i3-shared-state-self-play-workers) | Promoted (partially shipped) | Cut the ~2.5 GB-per-worker framework duplication — CPU workers (`worker_cuda: false`) + forkserver landed; the "vectorise on-device" endgame shipped as the jax backend |
 | I4 | [Continuous (non-gated) training](#i4-continuous-non-gated-training) | Promoted | First step (rolling game-sized replay buffer + compact storage, full-pass training) promoted to [`plans/archive/replay-buffer-refactor.md`](plans/archive/replay-buffer-refactor.md); full async actor/learner stays parked |
+| I5 | [Parallel Pentobi benchmark](#i5-parallel-pentobi-benchmark) | Promoted (shipped) | The Pentobi benchmark now fans games across a `spawn` worker pool (`--workers N`), each with its own net + engine — the GPU sat ~2% idle serially ([`plans/archive/parallel-pentobi-benchmark.md`](plans/archive/parallel-pentobi-benchmark.md)) |
 
 > Ideas already captured elsewhere (not duplicated here): the conv policy head (F4) and the cross-worker inference server (F5) are done — see the [optimisation menu](plans/archive/full-cycle-optimisation.md#optimisation-menu); MCTS tree reuse, Cython move-gen and cached-valid-moves are in that plan's [Considered and set aside](plans/archive/full-cycle-optimisation.md#considered-and-set-aside) section; mixed-precision / fp16 inference is in its Out-of-scope list. Dirichlet root noise is **implemented** (`dirichlet_epsilon`/`dirichlet_alpha` in `MCTSConfig`, default-off).
 
@@ -101,3 +102,24 @@ So a flat 300 is simultaneously *thin* in the opening and *wasteful* in the endg
 **Promoted (2026-06-23).** The replay-buffer refactor — rolling game-sized buffer + compact board storage + full-pass epoch training (use all the data), keeping the gate — is now a plan: [`plans/archive/replay-buffer-refactor.md`](plans/archive/replay-buffer-refactor.md). (A `target_reuse` sampling variant was considered and reversed on 2026-06-25 — wrong fit for a data-poor regime.) It's also the OOM fix and gives an independent reuse dial. True async continuous generation stays **parked**: it's the wrong move for a game-limited single-GPU project and only worth revisiting on hardware that can run actors and the learner concurrently. Discussed at length 2026-06-21; promoted after the storage/sampling investigation 2026-06-23.
 
 **Related:** the data-reuse / replay-window discussion, [I1](#i1-adaptive-simulation-budget) (sims budget), and the DeepMind run-config comparison (AlphaGo → AlphaGo Zero → AlphaZero → MuZero).
+
+---
+
+## I5. Parallel Pentobi benchmark
+
+**The observation.** The Pentobi benchmark played its games strictly serially against one
+`pentobi-gtp` engine, so a full 1–9 ladder (e.g. 20 games × 9 levels) took ~45–70 min with the
+**GPU idle at ~2%** — it's bottlenecked by Pentobi's CPU search (which grows sharply with level)
+and the per-move GTP round-trip, not by inference.
+
+**Shipped.** `scripts/pentobi_benchmark.py --workers N` fans the requested games across a `spawn`
+worker pool, each worker rebuilding its own net + Pentobi engine from the config path (nothing
+GPU-touching crosses the process boundary — forking a Torch/CUDA/JAX process deadlocks). Games
+split into even per-worker chunks with disjoint Pentobi seeds; one pool serves all levels at once
+so fast low-level chunks free their worker for slow level-8/9 chunks. `--workers 1` reproduces
+the serial path bit-for-bit; `--cpu-net` scales past the ~4-worker VRAM ceiling on the 8 GB
+3060 Ti. Measured ~2.9× at 4 CPU-net workers on the Mac. Plan:
+[`plans/archive/parallel-pentobi-benchmark.md`](plans/archive/parallel-pentobi-benchmark.md).
+
+**Related:** [I2](#i2-evaluation-time-search-tuning) (eval-time search), `docs/05-EVALUATION.md`
+(benchmark usage), `docs/plans/archive/pentobi-harness.md` (the GTP adapter this parallelises).
