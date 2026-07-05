@@ -161,6 +161,38 @@ def test_resume_reload_restores_lr_schedule(ttt_game: TicTacToeGame, test_config
     assert wrapper.optimizer.param_groups[0]["lr"] == saved_lr
 
 
+def test_load_weights_yields_fresh_optimizer_and_scheduler(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """Warm start (``load_weights``) loads weights only: the optimizer LR and
+    scheduler clock start fresh at the config LR, not the donor's annealed state (L4).
+    """
+    import torch
+
+    # Donor: advance the schedule deep into the anneal, then checkpoint.
+    donor, config = _cosine_wrapper(ttt_game, test_config)
+    assert donor.scheduler is not None
+    for _ in range(8):
+        donor.scheduler.step()
+    donor_lr = donor.optimizer.param_groups[0]["lr"]
+    assert donor_lr < config.net_config.learning_rate, "donor should be mid-anneal"
+    with torch.no_grad():
+        for param in donor.nnet.parameters():
+            param.add_(0.5)  # make the donor weights distinctive
+    donor.save_checkpoint("best.pth.tar")
+    donor_param = next(iter(donor.nnet.parameters())).detach().clone()
+
+    # Recipient: a fresh run that warm-starts from the donor's weights.
+    recipient = NNetWrapper(ttt_game, config)
+    recipient.load_weights("best.pth.tar")
+
+    # Weights adopted...
+    assert torch.equal(next(iter(recipient.nnet.parameters())).detach(), donor_param)
+    # ...but the optimisation is fresh: first generation trains at the peak LR,
+    # and the scheduler is back at its initial position.
+    assert recipient.optimizer.param_groups[0]["lr"] == config.net_config.learning_rate
+    assert recipient.scheduler is not None
+    assert recipient.scheduler.last_epoch == 0
+
+
 def _ttt_eval_positions(game: TicTacToeGame, count: int) -> list[np.ndarray]:
     """A few distinct canonical TTT compact boards from random short games."""
     rng = np.random.default_rng(0)

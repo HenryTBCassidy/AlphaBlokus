@@ -805,3 +805,23 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         # scheduler's current LR (the value the next generation should train at).
         for group, lr in zip(self.optimizer.param_groups, self.scheduler.get_last_lr(), strict=True):
             group["lr"] = lr
+
+    def load_weights(self, filename: str) -> None:
+        """Load only the network weights, leaving optimizer + scheduler fresh.
+
+        The warm-start (``load_model``) path: borrow another run's weights but
+        start a genuinely fresh optimisation at *this* run's configured learning
+        rate. Unlike :meth:`load_checkpoint` it ignores the checkpoint's
+        optimizer and scheduler state, so a warm start does not silently inherit
+        the donor's annealed LR and scheduler position (L4).
+        """
+        folder = self.config.net_directory
+        filepath = folder / filename
+
+        if not filepath.exists():
+            logger.error(f"No model in path {filepath}")
+            raise FileNotFoundError(f"No model in path {filepath}")
+
+        map_location = None if self.net_config.cuda else "cpu"
+        checkpoint = torch.load(filepath, map_location=map_location)
+        self.nnet.load_state_dict(checkpoint["state_dict"])

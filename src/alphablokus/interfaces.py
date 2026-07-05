@@ -363,3 +363,16 @@ class INeuralNetWrapper(IPolicyValuePredictor, Protocol):
             FileNotFoundError: If the checkpoint file doesn't exist.
         """
         ...
+
+    def load_weights(self, filename: str) -> None:
+        """Load only the network weights, leaving optimizer and scheduler fresh.
+
+        Used for a warm start (``load_model``) from another run's checkpoint:
+        the borrowed weights seed a genuinely fresh optimisation at this run's
+        configured learning rate, rather than inheriting the donor's optimizer
+        LR and scheduler position.
+
+        Raises:
+            FileNotFoundError: If the checkpoint file doesn't exist.
+        """
+        ...

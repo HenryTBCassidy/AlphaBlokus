@@ -109,8 +109,11 @@ def main() -> None:
         start_generation = last_gen + 1
     else:
         if args.load_model:
-            logger.info("Loading checkpoint from best.pth.tar...")
-            nnet.load_checkpoint("best.pth.tar")
+            # Warm start: weights only, so the optimizer + LR schedule start
+            # fresh at this run's configured learning rate rather than inheriting
+            # the donor checkpoint's annealed LR / scheduler position (L4).
+            logger.info("Warm-starting weights from best.pth.tar (fresh optimizer + LR schedule)...")
+            nnet.load_weights("best.pth.tar")
         else:
             logger.warning("Not loading a checkpoint!")
 
