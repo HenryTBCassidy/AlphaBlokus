@@ -53,7 +53,7 @@ loop and must preserve resume behaviour.
 | E2 | `evaluation/rating.py`: self-contained BayesElo (Bradley–Terry MM) estimator + tests | 2.5 h | High | ✅ |
 | E3 | `TournamentConfig` nested dataclass + `tournament_directory` property in config.py | 45 min | High | ✅ |
 | E4 | Sparse pairing-schedule generator (consecutive + exponential back-refs) + connectivity test | 1 h | High | ✅ |
-| E5 | `scripts/tournament_elo.py`: enumerate checkpoints → run pairings → W/L/D matrix → BayesElo → write parquet/JSON | 3 h | High | |
+| E5 | `scripts/tournament_elo.py`: enumerate checkpoints → run pairings → W/L/D matrix → BayesElo → write parquet/JSON | 3 h | High | ✅ |
 | E6 | Reporting: `make_tournament_elo_plot` + wire into `report.py`; relabel old chart "(saturates)" | 1.5 h | High | |
 | E7 | Docs: methodology note in `docs/research/`, update `docs/05-EVALUATION.md`, report caveat | 45 min | Medium | |
 | E8 | *(Optional)* In-loop sliding-reference Elo in coach (rate gen N vs recent net, accumulate) | 3 h | Low | |
