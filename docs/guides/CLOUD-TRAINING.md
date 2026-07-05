@@ -10,12 +10,64 @@ container runtime works (RunPod, Vast, Lambda, the home box).
 
 ---
 
+## ⛔ Data-safety protocol — READ FIRST (non-negotiable)
+
+The valuable output of a run is the trained net **and every per-generation checkpoint** (the pool-Elo
+tournament needs all of them). Losing them throws away the entire run's money. The rules below are
+non-negotiable; they exist because a run once completed cleanly and then its net was **stranded on a
+stopped pod that lost its GPU** — because auto-shutdown ran *before* the results were pulled off, and
+S3 sync had been skipped "to keep it simple." Do not repeat that.
+
+1. **Every cloud run config MUST have an `object_store` block enabled** (see §0). Checkpoints + report
+   mirror to a bucket *as the run progresses*, so the artifacts are safe no matter what happens to the
+   pod. **Never launch a cloud run without it.** After generation 1, **verify the first sync actually
+   landed in the bucket** before walking away — an unverified sync is not a backup.
+2. **Data-safety is sequenced *before* cost-saving, never after.** Auto-stopping to avoid wasted GPU
+   spend is correct, but it must happen **only after results are durably off the pod**. The one true
+   end-of-run order is: **run finishes → results synced/pulled to durable storage → verify they exist →
+   *then* stop/terminate.** Never stop or terminate a pod whose only copy of the results is its own disk.
+3. **Treat a stopped pod as already gone.** On-demand / community pods can lose their GPU the instant
+   they stop — **resume is not guaranteed** ("not enough free GPUs on the host"). So "stop now, resume
+   later to grab the data" is not a plan. If the data isn't already off-box, do not stop.
+4. **A shutdown watchdog must SYNC-then-stop, not just stop.** Any auto-shutdown must first confirm the
+   final net + all checkpoints + report are in the bucket (or pulled locally), *then* stop. A watchdog
+   that only stops is a data-loss trap — that is exactly what went wrong.
+5. **Terminate wipes the container disk immediately** — there is no grace period or delayed flush. Only
+   terminate once the results are confirmed durable somewhere else.
+6. **Prefer terminate-safe storage.** Attach a **Network Volume** (survives terminate, remounts to a new
+   pod) *and/or* use S3. With either, a GPU-reclaim or a terminate can never lose data and you can
+   stop/terminate freely.
+7. **Explicitly pull the final net + report at run end** as belt-and-braces even with S3 on, and confirm
+   the files exist locally **before** killing the pod.
+8. **Run W&B ONLINE, never offline, for a real run.** Pass `WANDB_API_KEY` as a pod env var so metrics
+   stream to the dashboard live (and survive the pod). Offline mode writes to the pod's *container disk*
+   (wiped on terminate) and gives you nothing to watch or analyse mid-run — a run you can't observe is
+   half-useless. If you can SSH-inject a key for the pod, you can inject `WANDB_API_KEY` too; there's no
+   excuse for offline.
+9. **The report must render even on crash.** The HTML report only auto-renders after a *clean* run
+   (the render call sits *after* `learn()` returns), so a crash *inside* training yields **no report** —
+   that is exactly what happened here. Metrics are written per-generation, so the data survives; make the
+   report survive too: render it in a `finally`/except path (and/or periodically every N gens), and know
+   you can always regenerate post-hoc with `alphablokus --config <cfg> --report-only` from the synced
+   parquets. Never let a crash leave you with nothing to look at.
+
+**Pre-flight / post-flight checklist:**
+- [ ] W&B online: `WANDB_API_KEY` set as a pod env var, first metrics visible on the dashboard.
+- [ ] Reporting is crash-safe (renders on failure), or you know the `--report-only` recovery path.
+- [ ] Before launch: `object_store` block set and the bucket is writable with the creds on the pod.
+- [ ] After gen 1: the first checkpoint/report is visibly in the bucket.
+- [ ] At run end: final net + all `accepted_*.pth.tar` + report confirmed in the bucket **and** pulled
+      locally — *only then* stop/terminate the pod.
+
+---
+
 ## 0. One-time setup
 
 - **Object storage** (any S3-compatible bucket — Cloudflare R2, Backblaze B2, AWS S3, RunPod's
   MinIO...): create a bucket, e.g. `alphablokus-runs`, and an access key pair.
-- **W&B** (optional): have `WANDB_API_KEY` ready, or set `"mode": "offline"` in the config's
-  `wandb` block.
+- **W&B** (required for a real run — see protocol rule 8): pass `WANDB_API_KEY` as a pod env var and keep
+  `wandb.mode: "online"`. Offline is only for throwaway local tests — never for a run you care about
+  (offline data lives on the container disk and is lost on terminate, and you can't watch it live).
 - Add the object-store block to your run config:
 
 ```json

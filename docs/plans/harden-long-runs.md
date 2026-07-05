@@ -39,7 +39,13 @@ exposed: **a crash yields no report**, and **W&B was run offline** (nothing to a
 | H1 | Fix the crash: forkserver/spawn start method for the training DataLoader workers | 2 h | High | ✅ |
 | H2 | Crash-safe reporting: render the report even when `learn()` raises | 1.5 h | High | ✅ |
 | H3 | W&B online by default for real runs; loud warning + cloud config set to online | 1 h | High | ✅ |
-| H4 | Validate: injected mid-run crash still yields a report; workers+JAX run is stable | 1 h | High | |
+| H4 | Validate: injected mid-run crash still yields a report; workers+JAX run is stable | 1 h | High | ✅ |
+
+> **H4 note.** The code-side validation is done: full CI green (ruff, format, mypy, base + jax
+> `pytest -m "not slow"`, plus the slow suite), the injected-crash report test passes, and Mac/CPU
+> defaults (`dataloader_workers=0`, `wandb.mode="online"`) are unchanged. The end-to-end box re-run of
+> the `blokus_cloud.json` recipe *past* the gen-59 failure point is pending the next box run (same
+> "verify at scale on the box" tail as `archive/oom-hardening.md`).
 
 ---
 
@@ -151,4 +157,6 @@ gracefully (doesn't crash the run).
   do H1 first. Default behaviour on Mac/CPU (`cuda: false`, `num_workers=0`) must be unchanged.
 - **The subtle risk in H1 is picklability** under forkserver/spawn — test the dataset + encode_fn
   pickle, and have `pin_memory=False` / `num_workers=0` as documented fallbacks.
-- One commit per checklist row; tick Done as each lands. Archive to `docs/plans/archive/` when complete.
+- One commit per checklist row; tick Done as each lands. **Archive this file to
+  `docs/plans/archive/harden-long-runs.md` (via `git mv`) once this branch merges** — the in-code
+  references already point at the archive path.
