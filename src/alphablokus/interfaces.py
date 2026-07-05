@@ -14,6 +14,12 @@ if TYPE_CHECKING:
 TrainingExample: TypeAlias = tuple[NDArray, NDArray, float]  # (board_state, policy_vector, value)
 PolicyValue: TypeAlias = tuple[NDArray, float]  # (policy_vector, value_prediction)
 
+# Sentinel "action" a Player may return to concede the game instead of moving. It is
+# deliberately outside the valid action range (all real indices are >= 0), so the Arena
+# can intercept it before the legality assertion and award the win to the opponent. Used
+# by PentobiPlayer to relay a GTP ``genmove`` -> ``resign`` response.
+RESIGN_ACTION: int = -1
+
 
 class IBoard(Protocol):
     """Immutable snapshot of a game state.

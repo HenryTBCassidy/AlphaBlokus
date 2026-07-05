@@ -22,13 +22,18 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from alphablokus.games.blokusduo.codec import Action, CoordinateIndexDecoder
+from alphablokus.interfaces import RESIGN_ACTION
 
 if TYPE_CHECKING:
     from alphablokus.games.blokusduo.board import BlokusDuoBoard
     from alphablokus.games.blokusduo.game import BlokusDuoGame
     from alphablokus.games.blokusduo.pieces import Orientation
 
+# Standard GTP ``genmove`` responses that are not board coordinates. ``pass`` places
+# nothing; ``resign`` concedes the game (a win for the opponent). Both must be handled
+# before any attempt to parse cells.
 PASS = "pass"
+RESIGN = "resign"
 
 
 class PentobiMoveTranslator:
@@ -65,8 +70,13 @@ class PentobiMoveTranslator:
         return f"{chr(ord('a') + x)}{y + 1}"
 
     def pentobi_to_coord(self, token: str) -> tuple[int, int]:
-        """Pentobi cell → AlphaBlokus board coord, e.g. 'e9' → (4, 8)."""
+        """Pentobi cell → AlphaBlokus board coord, e.g. 'e9' → (4, 8).
+
+        Raises a clear error on any non-coordinate token (e.g. ``pass``/``resign``);
+        those are game-flow signals the caller must handle, not cells to parse."""
         token = token.strip()
+        if not token or not token[0].isalpha() or not token[1:].isdigit():
+            raise ValueError(f"Non-coordinate GTP token {token!r}; caller must handle pass/resign.")
         return ord(token[0]) - ord("a"), int(token[1:]) - 1
 
     # -- moves -----------------------------------------------------------------
@@ -108,9 +118,15 @@ class PentobiMoveTranslator:
         return self.action_to_cells(self._codec.decode(action_index))
 
     def pentobi_to_action_index(self, move: str) -> int:
-        """Pentobi move string → action index ('pass' → the pass action)."""
-        if move.strip().lower() == PASS:
+        """Pentobi move string → action index.
+
+        ``pass`` → the pass action; ``resign`` → :data:`RESIGN_ACTION` (the Arena scores
+        this as a loss for the resigner). Anything else is parsed as a cell list."""
+        normalised = move.strip().lower()
+        if normalised == PASS:
             return self._codec.pass_action_index
+        if normalised == RESIGN:
+            return RESIGN_ACTION
         return self._codec.encode(self.cells_to_action(move))
 
     # -- debugging / cross-validation -----------------------------------------

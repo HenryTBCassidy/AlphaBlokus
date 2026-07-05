@@ -82,6 +82,9 @@ class PentobiPlayer:
         only via ``genmove`` returning ``pass``), and a pass places nothing on the board,
         so skipping it keeps both boards in sync. (Verified: Pentobi genmoves the other
         colour fine without being told about the opponent's pass.)
+
+        A **resign** never arrives here: it only comes from *our own* ``genmove`` (handled
+        in ``__call__``), never as an opponent move relayed to us — so no branch is needed.
         """
         self._assign_colors(i_am_white=False)
         assert self._opp_color is not None  # set by _assign_colors
@@ -99,6 +102,11 @@ class PentobiPlayer:
         """Our turn: ask the engine for a move and translate it to an action index.
 
         First call before any ``notify`` ⇒ we move first ⇒ we're White.
+
+        ``genmove`` may return a normal move, ``pass``, or ``resign``. The translator maps
+        each: cells → the action index, ``pass`` → the pass action, and ``resign`` →
+        :data:`~alphablokus.interfaces.RESIGN_ACTION`, which the Arena intercepts and scores
+        as a loss for us (Pentobi conceding = a win for the net).
         """
         self._assign_colors(i_am_white=True)
         assert self._my_color is not None  # set by _assign_colors
