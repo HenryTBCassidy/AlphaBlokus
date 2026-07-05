@@ -197,6 +197,35 @@ For each difficulty level d ∈ {1, 2, ..., 9}:
 
 Run Pentobi benchmarks every 10-20 generations during training to track absolute strength improvement over time.
 
+### Running the benchmark
+
+```bash
+uv run python -m scripts.pentobi_benchmark --config <run.json> --net best.pth.tar --level 5 --games 100
+uv run python -m scripts.pentobi_benchmark --config <run.json> --net best.pth.tar --sweep --games 100
+uv run python -m scripts.pentobi_benchmark --config <run.json> --net best.pth.tar --levels 1-3 --games 40
+uv run python -m scripts.pentobi_benchmark --config <run.json> --net best.pth.tar --sweep --games 100 --workers 4
+```
+
+**Parallelism (`--workers`).** The benchmark is *not* inference-bound — the GPU sits near-idle
+while Pentobi's CPU search (which grows sharply with level) and the per-move GTP round-trip
+dominate. `--workers N` splits the requested games across `N` worker processes, each with its
+own net + its own `pentobi-gtp` engine, then aggregates the results. Games are split into even
+per-worker chunks (so each keeps `Arena`'s half-white/half-black colour swap) with disjoint
+Pentobi seeds (no two workers replay the same games), and one pool serves *all* levels at once
+so fast low-level chunks free their worker to pick up slow level-8/9 chunks. Expect a
+near-linear speedup up to the VRAM/core ceiling (measured ~2.9× at 4 CPU-net workers on the Mac;
+a full 1–9 ladder drops from ~45–70 min to well under 15 min).
+
+- `--workers 1` reproduces the serial path bit-for-bit. The default (when `--workers` is unset)
+  is `num_parallel_workers` from the config if it opts into parallelism, else 4.
+- Workers use the `spawn` start method — forking a process that has imported Torch/CUDA (or JAX)
+  deadlocks. Each worker is a fresh interpreter that rebuilds its own game/net/engine from the
+  config path, so nothing GPU-touching crosses the process boundary.
+- Each GPU worker needs its own CUDA context (~0.6–1.5 GB), so on the 8 GB 3060 Ti expect ~4
+  workers before CUDA OOM — lower `--workers`, or pass `--cpu-net` to run the net on CPU and
+  scale past the VRAM cap (slower per move, but the win is parallelism). The ceiling scales up
+  with VRAM on a bigger card.
+
 ### Headline Metrics
 
 Four metrics summarise Pentobi benchmark results. Together they give a complete picture at a glance.
