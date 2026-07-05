@@ -16,8 +16,9 @@ import pytest
 
 from alphablokus.games.blokusduo.codec import Action, CoordinateIndexDecoder
 from alphablokus.games.blokusduo.game import BlokusDuoGame
-from alphablokus.games.blokusduo.pentobi.translation import PASS, PentobiMoveTranslator
+from alphablokus.games.blokusduo.pentobi.translation import PASS, RESIGN, PentobiMoveTranslator
 from alphablokus.games.blokusduo.pieces import default_pieces_path
+from alphablokus.interfaces import RESIGN_ACTION
 
 _PIECES = default_pieces_path()
 
@@ -54,6 +55,26 @@ def test_pass_roundtrips(tr: PentobiMoveTranslator, game: BlokusDuoGame) -> None
     assert tr.action_index_to_pentobi(pass_idx) == PASS
     assert tr.pentobi_to_action_index(PASS) == pass_idx
     assert tr.pentobi_to_action_index("PASS") == pass_idx  # case-insensitive
+    assert tr.pentobi_to_action_index("  pass  ") == pass_idx  # whitespace-tolerant
+
+
+def test_resign_maps_to_sentinel(tr: PentobiMoveTranslator) -> None:
+    """A GTP ``resign`` response maps to the resign sentinel, not a coordinate parse.
+
+    This is the bug the harness fix closes: previously ``int('esign')`` crashed here."""
+    assert tr.pentobi_to_action_index(RESIGN) == RESIGN_ACTION
+    assert tr.pentobi_to_action_index("RESIGN") == RESIGN_ACTION  # case-insensitive
+    assert tr.pentobi_to_action_index("  resign  ") == RESIGN_ACTION  # whitespace-tolerant
+
+
+def test_non_coordinate_token_raises_clear_error(tr: PentobiMoveTranslator) -> None:
+    """``pentobi_to_coord`` on a non-coordinate token gives a clear error, not the
+    cryptic ``ValueError: invalid literal for int()`` from the old ``int(token[1:])``."""
+    with pytest.raises(ValueError, match="Non-coordinate GTP token"):
+        tr.pentobi_to_coord(RESIGN)
+    # cells_to_action defers to pentobi_to_coord, so it surfaces the same clear error.
+    with pytest.raises(ValueError, match="Non-coordinate GTP token"):
+        tr.cells_to_action(RESIGN)
 
 
 def test_action_translation_matches_placement_and_roundtrips(
