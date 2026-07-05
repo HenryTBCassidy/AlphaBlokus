@@ -165,6 +165,43 @@ class TrainingPerfConfig:
 
 
 @dataclass(frozen=True)
+class TournamentConfig:
+    """Knobs for the post-hoc pool BayesElo tournament (``scripts/tournament_elo.py``).
+
+    The tournament plays a *sparse but connected* round-robin among a finished
+    run's saved checkpoints and fits one consistent Elo per checkpoint, giving
+    the rising strength curve the frozen-baseline metric can't (it saturates —
+    see ``evaluation/rating.py``). Nothing here touches the training loop; it's
+    read only by the standalone tournament tool. Plan:
+    docs/plans/archive/pool-based-elo.md.
+    """
+
+    # Games each checkpoint pair plays. Arena rounds this down to even and swaps
+    # colours at halftime, so >= 2. More games = tighter ratings, more compute.
+    games_per_pairing: int = 30
+
+    # Each checkpoint plays the checkpoints these many generations behind it.
+    # Exponential spacing keeps the comparison graph connected at O(K·log K)
+    # pairs instead of a full O(K²) round-robin (60 gens → ~300 pairs, not 1770).
+    back_ref_offsets: tuple[int, ...] = (1, 2, 4, 8, 16, 32)
+
+    # Always also pair every checkpoint with gen-0 and the final generation.
+    # Guarantees connectivity and ties the whole field to the shared anchor.
+    include_first_last: bool = True
+
+    # BayesElo regularisation: virtual draws vs a fixed R=0 anchor. Keeps an
+    # undefeated / winless checkpoint's rating finite.
+    prior_games: float = 2.0
+
+    # Elo assigned to the gen-0 anchor checkpoint after fitting (display gauge).
+    anchor_rating: float = 0.0
+
+    # Subsample the checkpoint list to cap cost (e.g. take every ⌈K/max⌉-th
+    # generation). None = use every saved checkpoint.
+    max_checkpoints: int | None = None
+
+
+@dataclass(frozen=True)
 class NetConfig:
     """Configuration parameters for the neural network.
 
@@ -306,6 +343,10 @@ class RunConfig:
 
     # Execution knobs for the jax backend; ignored by the python backend.
     jax_selfplay: JaxSelfPlayConfig = field(default_factory=JaxSelfPlayConfig)
+
+    # Post-hoc pool BayesElo tournament knobs; read only by
+    # ``scripts/tournament_elo.py``, never by the training loop.
+    tournament: TournamentConfig = field(default_factory=TournamentConfig)
 
     # Optional reporting backends
     wandb: WandbConfig | None = None  # If set, mirror metrics to Weights & Biases
@@ -510,6 +551,15 @@ class RunConfig:
     def elo_ratings_directory(self) -> Path:
         """Directory for per-generation Elo rating measured against the frozen gen-0 baseline."""
         return self.run_directory / "EloRatings"
+
+    @property
+    def tournament_directory(self) -> Path:
+        """Directory for post-hoc pool BayesElo tournament results.
+
+        Written by ``scripts/tournament_elo.py`` (ratings parquet + raw W/L/D
+        JSON); rendered as the report's pool-Elo curve. Absent for older runs.
+        """
+        return self.run_directory / "Tournament"
 
     @property
     def minimax_results_directory(self) -> Path:

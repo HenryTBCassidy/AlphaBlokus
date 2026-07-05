@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from alphablokus.config import MCTSConfig, NetConfig, RunConfig, TrainingPerfConfig, load_args
+from alphablokus.config import MCTSConfig, NetConfig, RunConfig, TournamentConfig, TrainingPerfConfig, load_args
 
 
 def test_load_args_from_test_run_json():
@@ -135,3 +135,37 @@ def test_training_perf_loads_from_json(tmp_path):
     assert perf.pin_memory is True
     assert perf.persistent_workers is True
     assert perf.log_every_batches == 25
+
+
+def test_tournament_defaults_apply_when_block_absent():
+    """A config without a tournament block gets the default TournamentConfig."""
+    config = load_args("run_configurations/test_run.json")
+    assert config.tournament == TournamentConfig()
+    assert config.tournament.games_per_pairing == 30
+    assert config.tournament.back_ref_offsets == (1, 2, 4, 8, 16, 32)
+    assert config.tournament.include_first_last is True
+    assert config.tournament.max_checkpoints is None
+    assert config.tournament_directory == config.run_directory / "Tournament"
+
+
+def test_tournament_loads_from_json(tmp_path):
+    """A tournament block in the JSON populates TournamentConfig."""
+    raw = json.loads(Path("run_configurations/test_run.json").read_text())
+    raw["tournament"] = {
+        "games_per_pairing": 12,
+        "back_ref_offsets": [1, 3, 9],
+        "include_first_last": False,
+        "prior_games": 4.0,
+        "anchor_rating": 400.0,
+        "max_checkpoints": 20,
+    }
+    path = tmp_path / "cfg.json"
+    path.write_text(json.dumps(raw))
+    config = load_args(path)
+    tour = config.tournament
+    assert tour.games_per_pairing == 12
+    assert tour.back_ref_offsets == (1, 3, 9)
+    assert tour.include_first_last is False
+    assert tour.prior_games == 4.0
+    assert tour.anchor_rating == 400.0
+    assert tour.max_checkpoints == 20
