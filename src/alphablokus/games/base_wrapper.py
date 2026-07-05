@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import multiprocessing as mp
 import os
+import shutil
 import time
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, nullcontext
@@ -28,6 +29,7 @@ MAX_EVAL_SET_POSITIONS = 2_000
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
+    from pathlib import Path
 
     from alphablokus.config import RunConfig
     from alphablokus.selfplay.episode import ProcessedExample
@@ -406,7 +408,25 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         )
         assert abs(sample_pi.sum() - 1.0) < 0.01, f"Policy vector sums to {sample_pi.sum()}, expected ~1.0"
         assert -1.0 <= sample_v <= 1.0, f"Value {sample_v} outside [-1, 1]"
-        dataset = _LazyPolicyDataset(boards_np, raw_pis, vs_np, action_size, encode_fn)
+
+        # DataLoader workers must not each pickle a full copy of the buffer.
+        # forkserver/spawn workers receive a *pickled* dataset, so the in-RAM
+        # ``_LazyPolicyDataset`` (which references every position) is duplicated
+        # per worker — N workers ⇒ ~N copies of the ~18 GB buffer ⇒ OOM at the
+        # buffer-fill generation (docs/plans/fix-training-oom.md M1). With
+        # workers, spill the buffer to memmap files once and hand workers only
+        # the paths, so they share the OS page cache instead. The in-process
+        # path (num_workers=0 — the Mac/CPU default) is untouched: it keeps the
+        # in-RAM dataset, so its behaviour is bit-for-bit identical.
+        memmap_dir: Path | None = None
+        dataset: Dataset
+        if self.net_config.perf.dataloader_workers > 0:
+            from alphablokus.training.memmap_dataset import MemmapPolicyDataset
+
+            memmap_dir = self.config.training_data_directory / "train_memmap"
+            dataset = MemmapPolicyDataset.build(examples, action_size, encode_fn, memmap_dir)
+        else:
+            dataset = _LazyPolicyDataset(boards_np, raw_pis, vs_np, action_size, encode_fn)
 
         # Opt-in training-perf knobs (net_config.perf). Everything defaults to
         # off = the original fp32, in-process, per-batch-sync loop; CUDA-only
@@ -549,6 +569,13 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                     bucket_means=diagnostics["calib_means"],
                     bucket_counts=diagnostics["calib_counts"],
                 )
+
+        # Reclaim the on-disk memmap scratch (a whole buffer's worth, ~GBs) so it
+        # is not left behind or swept into the per-generation object-store sync.
+        # A crash mid-training skips this, but also skips that generation's sync,
+        # and the files are overwritten (mode="w+") on the next attempt.
+        if memmap_dir is not None:
+            shutil.rmtree(memmap_dir, ignore_errors=True)
 
     def _compute_eval_set_diagnostics(self, eval_set: EvalSet) -> dict[str, Any]:
         """Forward-pass the network over the eval set and compute three

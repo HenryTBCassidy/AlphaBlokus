@@ -55,6 +55,12 @@ S3 sync had been skipped "to keep it simple." Do not repeat that.
 - [ ] W&B online: `WANDB_API_KEY` set as a pod env var, first metrics visible on the dashboard.
 - [ ] Reporting is crash-safe (renders on failure), or you know the `--report-only` recovery path.
 - [ ] Before launch: `object_store` block set and the bucket is writable with the creds on the pod.
+- [ ] **Memory fits at the FULL buffer.** The training RAM peak lands at the buffer-fill generation
+      (`replay_buffer_games / num_eps` gens in), *not* gen 1 — so a short test never sees it. Run
+      `uv run python -m scripts.benchmarks.memory_probe --config <cfg>` on the box (or confirm the
+      `check_ram_budget` line in the gen-1 logs passed) and check the measured peak sits under available
+      RAM with headroom. If it's close, lower `replay_buffer_games` / `net_config.perf.dataloader_workers`
+      before launching. See [`docs/research/training-memory-model.md`](../research/training-memory-model.md).
 - [ ] After gen 1: the first checkpoint/report is visibly in the bucket.
 - [ ] At run end: final net + all `accepted_*.pth.tar` + report confirmed in the bucket **and** pulled
       locally — *only then* stop/terminate the pod.
