@@ -195,6 +195,21 @@ class BlokusDuoGame(IGame[BlokusDuoBoard]):
         """
         return encode_planes_from_placement(compact)
 
+    def board_from_compact(self, compact: NDArray) -> BlokusDuoBoard:
+        """Rebuild a playable :class:`BlokusDuoBoard` from a compact placement grid.
+
+        Delegates to :meth:`BlokusDuoBoard.from_compact`, supplying the game's
+        shared piece manager, opening-move sets and coordinate decoder so the
+        rebuilt board can generate legal moves. Used to search the frozen eval
+        set with the current net's MCTS.
+        """
+        return BlokusDuoBoard.from_compact(
+            compact,
+            self.piece_manager,
+            self.initial_actions,
+            self._coordinate_index_decoder,
+        )
+
     def get_symmetries(
         self,
         board: BlokusDuoBoard,

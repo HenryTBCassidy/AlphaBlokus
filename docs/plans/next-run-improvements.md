@@ -39,7 +39,7 @@ it or it re-crashes at ~gen 59.
 |---|------|--------|----------|------|
 | N1 | Floor the cosine LR — add `lr_eta_min` config knob, used by `_create_scheduler` | 45 min | High | ✅ |
 | N2 | `blokus_cloud_v2.json`: LR floor + Gumbel n128/considered32 + arena 100 + buffer 60k + warm-start from gen-57 | 1 h | High | ✅ |
-| N3 | Fix the eval-set diagnostic (score vs current-net MCTS + relabel; optional periodic rebuild) | 2.5 h | Medium | |
+| N3 | Fix the eval-set diagnostic (score vs current-net MCTS + relabel; optional periodic rebuild) | 2.5 h | Medium | ✅ |
 | N4 | Run the (already-merged) pool-Elo tournament on the checkpoints; optionally add the deferred live sliding-reference Elo | 1 h | Low | |
 | N5 | Validate: defaults unchanged; short run exercises the v2 config; CI green | 1 h | High | |
 
@@ -127,8 +127,24 @@ values vs gen-1 outcomes).
   agreement is comparable within a version.
 - Same change rehabilitates the value-calibration diagnostic.
 
-**Test:** current-net-MCTS agreement is computed and logged; relabelled chart renders; the frozen-gen-1
-series still available for continuity.
+**What landed.**
+- **Primary (done).** `EvalSet` now also persists the compact (canonical int8) boards; a new
+  `IGame.board_from_compact` rebuilds a *playable* board from one (TTT trivial; Blokus recomputes
+  remaining pieces / side-danger / placement points from the grid using the board's own existing
+  predicates, so the legal-move set is bit-identical to a played-out board). `base_wrapper`'s new
+  `_compute_mcts_agreement` searches each frozen position with the **current net's own MCTS** and logs
+  top-1/top-5 agreement of the raw policy against that search — the net-vs-own-search gap. Logged as a
+  second series via `MetricsCollector.log_policy_accuracy` (`mcts_top1/5_accuracy`, optional so old runs
+  are unaffected).
+- **Relabel (done).** `make_policy_accuracy_plot` is retitled "Policy Agreement: raw net vs search"; the
+  old series is explicitly "vs gen-1 MCTS targets" (or "vs minimax oracle" for TTT) and the new
+  current-net-MCTS series is drawn alongside it. Old runs (no compact boards) render exactly as before.
+- **Deferred:** periodic versioned eval-set rebuild — not needed now that the current-net-MCTS series
+  gives a non-decaying signal; the frozen series is kept for continuity.
+
+**Test:** `board_from_compact` round-trips to a bit-identical move set (Blokus + TTT); current-net-MCTS
+agreement is computed, is `None` without compact boards, and is logged through training; the relabelled
+chart renders both series from fixtures.
 
 **Effort:** 2.5 h.
 

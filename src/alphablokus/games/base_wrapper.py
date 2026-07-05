@@ -507,12 +507,15 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                     std_entropy=diagnostics["entropy_std"],
                     eval_set_size=len(eval_set),
                 )
+                mcts_agreement = self._compute_mcts_agreement(eval_set)
                 metrics.log_policy_accuracy(
                     generation=generation,
                     epoch=epoch,
                     top1_accuracy=diagnostics["top1"],
                     top5_accuracy=diagnostics["top5"],
                     eval_set_size=len(eval_set),
+                    mcts_top1_accuracy=mcts_agreement[0] if mcts_agreement is not None else None,
+                    mcts_top5_accuracy=mcts_agreement[1] if mcts_agreement is not None else None,
                 )
                 metrics.log_value_calibration(
                     generation=generation,
@@ -610,6 +613,57 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             "calib_means": bucket_means,
             "calib_counts": bucket_counts,
         }
+
+    def _compute_mcts_agreement(self, eval_set: EvalSet) -> tuple[float, float] | None:
+        """Agreement of the raw net policy with the net's *own* MCTS on the eval set.
+
+        For each frozen eval position, rebuild a playable board
+        (:meth:`IGame.board_from_compact`), run the current net's MCTS from it,
+        and compare the search's chosen action (argmax visit count) against the
+        raw network policy's top action(s), restricted to legal moves:
+
+        - ``top1``: fraction of positions where the raw policy's best legal move
+          is the move search settled on.
+        - ``top5``: fraction where search's move is in the raw policy's top-5
+          legal moves.
+
+        This is the *net-vs-its-own-search* gap — "is the raw policy keeping up
+        with search?" — which should hold or rise as training works, unlike the
+        frozen-gen-1 agreement that decays once the net surpasses gen-1's search.
+        Returns ``None`` when the eval set predates compact-board persistence
+        (nothing to rebuild from). Uses the python PUCT search regardless of the
+        configured ``search_policy`` (that setting is jax-backend only).
+        """
+        if eval_set.compact_boards is None or len(eval_set) == 0:
+            return None
+
+        from alphablokus.search.mcts import MCTS
+
+        self.nnet.eval()
+        top1_hits = 0
+        top5_hits = 0
+        n = len(eval_set)
+        for compact in eval_set.compact_boards:
+            board = self.game.board_from_compact(compact)
+            # A fresh tree per position so searches never share state; ``self`` is
+            # the current-net predictor MCTS evaluates leaves with.
+            mcts = MCTS(self.game, self, self.config.mcts_config)
+            probs = mcts.get_action_prob(board, temp=0.0, add_root_noise=False)
+            mcts_action = int(np.argmax(probs))
+
+            policy, _ = self.predict(board)
+            valids = self.game.valid_move_masking(board, 1)
+            # Restrict the raw-policy ranking to legal moves so an illegal high-
+            # prior action can't crowd the top-k the search action is compared to.
+            masked = np.where(valids > 0, policy, -np.inf)
+            k = min(5, int(np.count_nonzero(valids)))
+            net_top = np.argsort(masked)[::-1][:k]
+            if len(net_top) > 0 and int(net_top[0]) == mcts_action:
+                top1_hits += 1
+            if mcts_action in net_top:
+                top5_hits += 1
+
+        return top1_hits / n, top5_hits / n
 
     def _inference_autocast(self) -> AbstractContextManager:
         """fp16 autocast context for the forward pass, or a no-op.

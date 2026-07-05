@@ -397,3 +397,36 @@ def test_incremental_side_danger_matches_brute_force(pieces_path) -> None:
                 break
 
     assert checks > 500, f"test didn't exercise enough positions (only {checks})"
+
+
+def test_board_from_compact_roundtrip_matches_played_board(blokus_game: BlokusDuoGame):
+    """A board rebuilt from a compact grid matches the played board's move set.
+
+    Reconstruction recomputes remaining pieces, side-danger and placement points
+    from the bare grid; the legal-move mask (for both players) and the derived
+    caches must equal those of the canonical played-out board.
+    """
+    blokus_game.enable_optimised_movegen()
+    rng = np.random.default_rng(7)
+
+    board = blokus_game.initialise_board()
+    player = 1
+    for _ in range(14):
+        mask = blokus_game.valid_move_masking(board, player)
+        legal = np.flatnonzero(mask)
+        if len(legal) == 0:
+            break
+        board, player = blokus_game.get_next_state(board, player, int(rng.choice(legal)))
+
+    canon = blokus_game.get_canonical_form(board, player)
+    rebuilt = blokus_game.board_from_compact(canon.to_compact())
+
+    assert canon.state_key == rebuilt.state_key
+    assert canon.remaining_piece_ids(1) == rebuilt.remaining_piece_ids(1)
+    assert canon.remaining_piece_ids(-1) == rebuilt.remaining_piece_ids(-1)
+    assert set(canon.placement_points(1)) == set(rebuilt.placement_points(1))
+    assert set(canon.placement_points(-1)) == set(rebuilt.placement_points(-1))
+    assert np.array_equal(canon.side_danger_zone(1), rebuilt.side_danger_zone(1))
+    assert np.array_equal(canon.side_danger_zone(-1), rebuilt.side_danger_zone(-1))
+    assert np.array_equal(blokus_game.valid_move_masking(canon, 1), blokus_game.valid_move_masking(rebuilt, 1))
+    assert np.array_equal(blokus_game.valid_move_masking(canon, -1), blokus_game.valid_move_masking(rebuilt, -1))

@@ -254,3 +254,22 @@ def test_state_key_on_board(ttt_game: TicTacToeGame):
     board = ttt_game.initialise_board()
     board, _ = ttt_game.get_next_state(board, 1, 4)
     assert board.state_key == ttt_game.state_key(board)
+
+
+def test_board_from_compact_roundtrip(ttt_game: TicTacToeGame):
+    """A board rebuilt from a compact grid plays identically to the original."""
+    board = ttt_game.initialise_board()
+    player = 1
+    for _ in range(4):
+        legal = np.flatnonzero(ttt_game.valid_move_masking(board, player))
+        board, player = ttt_game.get_next_state(board, player, int(legal[0]))
+
+    canon = ttt_game.get_canonical_form(board, player)
+    rebuilt = ttt_game.board_from_compact(canon.to_compact())
+
+    assert isinstance(rebuilt, Board)
+    assert np.array_equal(canon.as_2d, rebuilt.as_2d)
+    assert np.array_equal(
+        ttt_game.valid_move_masking(canon, 1),
+        ttt_game.valid_move_masking(rebuilt, 1),
+    )

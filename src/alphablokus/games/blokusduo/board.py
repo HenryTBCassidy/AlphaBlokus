@@ -173,6 +173,55 @@ class BlokusDuoBoard(IBoard):
             coordinate_index_decoder=self._coordinate_index_decoder,
         )
 
+    @classmethod
+    def from_compact(
+        cls,
+        compact: NDArray,
+        piece_manager: PieceManager,
+        initial_actions: ActionDict,
+        coordinate_index_decoder: CoordinateIndexDecoder,
+    ) -> BlokusDuoBoard:
+        """Rebuild a playable board from a compact 14×14 placement grid.
+
+        The board-object inverse of :meth:`to_compact` (``encode_compact`` only
+        rebuilds the neural-net planes). Derived caches — remaining pieces,
+        side-danger zones and placement points — are recomputed from the grid, so
+        every legal move, game-end check and transition works and MCTS can search
+        from the position. The grid is in canonical (player-1) sign convention,
+        so the result is canonical.
+
+        ``last_piece_played`` cannot be recovered from a bare grid (which encodes
+        no move order) and is set to ``None``. It only affects the +5 monomino
+        end-game bonus, reachable only if search from this position plays a
+        player's entire remaining hand out to a terminal — rare in a bounded
+        diagnostic search and immaterial to the legal-move set.
+
+        Args:
+            compact: Canonical int8 placement grid from ``to_compact``.
+            piece_manager: Shared piece definitions (from the game).
+            initial_actions: Shared opening-move sets (from the game).
+            coordinate_index_decoder: Shared coordinate helper (from the game).
+        """
+        ppb = np.asarray(compact, dtype=np.int8).reshape(cls.N, cls.N)
+        board_2d = np.sign(ppb).astype(np.int8)
+        all_ids = frozenset(range(1, 22))
+        white_remaining = all_ids - {int(v) for v in np.unique(ppb[ppb > 0])}
+        black_remaining = all_ids - {int(-v) for v in np.unique(ppb[ppb < 0])}
+        return cls._from_state(
+            piece_placement_board=ppb,
+            white_remaining=white_remaining,
+            black_remaining=black_remaining,
+            white_last=None,
+            black_last=None,
+            white_points=cls._compute_placement_points(board_2d, 1),
+            black_points=cls._compute_placement_points(board_2d, -1),
+            white_side_danger=cls._compute_side_danger(board_2d, 1),
+            black_side_danger=cls._compute_side_danger(board_2d, -1),
+            piece_manager=piece_manager,
+            initial_actions=initial_actions,
+            coordinate_index_decoder=coordinate_index_decoder,
+        )
+
     # -- Piece placement (public, immutable) ------------------------------------
 
     def with_piece(self, action: Action, player_side: PlayerSide) -> BlokusDuoBoard:
@@ -398,6 +447,26 @@ class BlokusDuoBoard(IBoard):
         Uses numpy shifts (no Python loops).
         """
         return cls._danger_from_mask(board_2d == player)
+
+    @classmethod
+    def _compute_placement_points(cls, board_2d: BoardArray, side: PlayerSide) -> PlacementDict:
+        """Recompute a player's placement-point set from scratch.
+
+        Scans every cell for a legal placement anchor via :meth:`_valid_placement`
+        — the same predicate the incremental :meth:`_update_placement_points`
+        applies around each placed piece. A full scan yields the identical set
+        the incremental cache converges to (a cell can only gain/lose corner- or
+        side-adjacency from a piece placed within its ±1 window), so a board
+        rebuilt with this generates the same legal moves. Used by
+        :meth:`from_compact`.
+        """
+        points: PlacementDict = {}
+        n = cls.N
+        for i in range(n):
+            for j in range(n):
+                if cls._valid_placement(i, j, side, board_2d):
+                    points[(i, j)] = {}
+        return points
 
     @classmethod
     def _no_sides(cls, i: int, j: int, side: PlayerSide, board: BoardArray) -> bool:

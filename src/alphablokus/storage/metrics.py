@@ -56,11 +56,18 @@ class EvalSet:
       policy accuracy.
     - ``target_values[i]``: the final game outcome from that position's
       perspective, in {-1, 0, +1}. Used for value calibration.
+    - ``compact_boards[i]`` (optional): the compact int8 board array (canonical
+      form) that ``boards[i]`` was encoded from. Present for runs built after
+      the eval set started persisting it; lets diagnostics rebuild a playable
+      board (``IGame.board_from_compact``) and search it with the current net's
+      MCTS. ``None`` for older eval sets, in which case the MCTS-agreement
+      diagnostic is skipped.
     """
 
     boards: NDArray
     target_policies: NDArray
     target_values: NDArray
+    compact_boards: NDArray | None = None
 
     def __len__(self) -> int:
         return len(self.boards)
@@ -599,30 +606,47 @@ class MetricsCollector:
         top1_accuracy: float,
         top5_accuracy: float,
         eval_set_size: int,
+        mcts_top1_accuracy: float | None = None,
+        mcts_top5_accuracy: float | None = None,
     ) -> None:
-        """Record network top-1 / top-5 policy accuracy vs MCTS targets on the
-        frozen eval set. ``top1_accuracy`` is the fraction of eval positions
-        where the network's argmax matches the MCTS target's argmax; ``top5``
-        is the fraction where the MCTS argmax is in the network's top-5.
-        Should rise toward 1.0 as the network internalises MCTS preferences.
+        """Record network policy agreement on the frozen eval set.
+
+        Two independent agreement series (each top-1 / top-5):
+
+        - ``top1_accuracy`` / ``top5_accuracy``: agreement with the **frozen
+          gen-1 MCTS targets** (or the minimax oracle for TTT). This *decays*
+          for Blokus as the net surpasses gen-1's search — a stale-eval-set
+          artifact, not a strength signal (see
+          docs/research/blokus-cloud-60-analysis.md §1).
+        - ``mcts_top1_accuracy`` / ``mcts_top5_accuracy`` (optional): agreement
+          of the raw policy with the **current net's own MCTS** on the same
+          positions — the net-vs-own-search gap, which should hold/rise as
+          training works. ``None`` when the eval set can't be re-searched
+          (older eval sets without persisted compact boards).
         """
-        self._policy_accuracy_records.append(
-            {
-                "generation": generation,
-                "epoch": epoch,
-                "top1_accuracy": top1_accuracy,
-                "top5_accuracy": top5_accuracy,
-                "eval_set_size": eval_set_size,
-            }
-        )
-        self._publish(
-            {
-                "training/network_top1_accuracy": top1_accuracy,
-                "training/network_top5_accuracy": top5_accuracy,
-                "generation": generation,
-                "epoch": epoch,
-            }
-        )
+        record = {
+            "generation": generation,
+            "epoch": epoch,
+            "top1_accuracy": top1_accuracy,
+            "top5_accuracy": top5_accuracy,
+            "eval_set_size": eval_set_size,
+        }
+        if mcts_top1_accuracy is not None:
+            record["mcts_top1_accuracy"] = mcts_top1_accuracy
+        if mcts_top5_accuracy is not None:
+            record["mcts_top5_accuracy"] = mcts_top5_accuracy
+        self._policy_accuracy_records.append(record)
+        payload: dict[str, Any] = {
+            "training/network_top1_accuracy": top1_accuracy,
+            "training/network_top5_accuracy": top5_accuracy,
+            "generation": generation,
+            "epoch": epoch,
+        }
+        if mcts_top1_accuracy is not None:
+            payload["training/network_mcts_top1_accuracy"] = mcts_top1_accuracy
+        if mcts_top5_accuracy is not None:
+            payload["training/network_mcts_top5_accuracy"] = mcts_top5_accuracy
+        self._publish(payload)
 
     def log_value_calibration(
         self,
@@ -1112,12 +1136,19 @@ class MetricsCollector:
             acc = pd.DataFrame(self._policy_accuracy_records)
             for gen, group in acc.groupby("generation"):
                 last = group[group["epoch"] == group["epoch"].max()]
-                per_gen_payload.setdefault(int(gen), {}).update(
-                    {
-                        "training_per_gen/network_top1_accuracy": float(last["top1_accuracy"].iloc[0]),
-                        "training_per_gen/network_top5_accuracy": float(last["top5_accuracy"].iloc[0]),
-                    }
-                )
+                gen_payload = {
+                    "training_per_gen/network_top1_accuracy": float(last["top1_accuracy"].iloc[0]),
+                    "training_per_gen/network_top5_accuracy": float(last["top5_accuracy"].iloc[0]),
+                }
+                if "mcts_top1_accuracy" in last and pd.notna(last["mcts_top1_accuracy"].iloc[0]):
+                    gen_payload["training_per_gen/network_mcts_top1_accuracy"] = float(
+                        last["mcts_top1_accuracy"].iloc[0]
+                    )
+                if "mcts_top5_accuracy" in last and pd.notna(last["mcts_top5_accuracy"].iloc[0]):
+                    gen_payload["training_per_gen/network_mcts_top5_accuracy"] = float(
+                        last["mcts_top5_accuracy"].iloc[0]
+                    )
+                per_gen_payload.setdefault(int(gen), {}).update(gen_payload)
 
         if self._value_calibration_records:
             calib = pd.DataFrame(self._value_calibration_records)
