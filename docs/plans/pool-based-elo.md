@@ -49,7 +49,7 @@ loop and must preserve resume behaviour.
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| E1 | Unit-test the existing `compute_elo` (lock behaviour + document the ~1200 saturation) | 30 min | High | |
+| E1 | Unit-test the existing `compute_elo` (lock behaviour + document the ~1200 saturation) | 30 min | High | ✅ |
 | E2 | `evaluation/rating.py`: self-contained BayesElo (Bradley–Terry MM) estimator + tests | 2.5 h | High | |
 | E3 | `TournamentConfig` nested dataclass + `tournament_directory` property in config.py | 45 min | High | |
 | E4 | Sparse pairing-schedule generator (consecutive + exponential back-refs) + connectivity test | 1 h | High | |
