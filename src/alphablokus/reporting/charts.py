@@ -657,7 +657,46 @@ def make_elo_plot(
     fig.update_layout(
         xaxis_title="Generation",
         yaxis_title="Elo rating",
-        title="Elo Rating vs Frozen Gen-0 Baseline",
+        title="Elo vs Frozen Gen-0 Baseline (saturates once net ≫ gen-0)",
+        xaxis={"dtick": 1 if df["generation"].max() < 40 else 5},
+    )
+    return _apply_defaults(fig)
+
+
+def make_tournament_elo_plot(tournament_data: pd.DataFrame) -> go.Figure:
+    """Pool BayesElo rating over generations — the non-saturating strength curve.
+
+    Reads ``tournament_ratings.parquet`` (written by ``scripts/tournament_elo.py``):
+    a sparse round-robin among the run's saved checkpoints, fit with BayesElo so
+    every checkpoint gets one consistent rating on a shared scale. Unlike the
+    vs-gen-0 chart above, this keeps rising until genuine convergence — it can
+    separate gen 41 from gen 43 where the frozen-baseline number has flatlined at
+    the ±1200 clamp. This is the DeepMind methodology and the curve to read.
+    """
+    df = tournament_data.sort_values("generation").copy()
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=df["generation"],
+            y=df["rating"],
+            mode="lines+markers",
+            name="Pool Elo",
+            showlegend=False,
+            line={"width": 2.5, "color": _COLORS["tertiary"]},
+            marker={"size": 8, "color": _COLORS["tertiary"]},
+            customdata=df[["n_games", "n_pairings"]].values,
+            hovertemplate=(
+                "Gen %{x} — pool Elo: %{y:.0f}<br>"
+                "%{customdata[0]} games across %{customdata[1]} pairings"
+                "<extra></extra>"
+            ),
+        )
+    )
+    fig.update_layout(
+        xaxis_title="Generation",
+        yaxis_title="Pool Elo rating",
+        title="Pool Elo (BayesElo tournament)",
         xaxis={"dtick": 1 if df["generation"].max() < 40 else 5},
     )
     return _apply_defaults(fig)

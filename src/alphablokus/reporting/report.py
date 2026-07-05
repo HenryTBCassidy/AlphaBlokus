@@ -31,6 +31,7 @@ from alphablokus.reporting.charts import (
     make_symmetry_diagnostic_plot,
     make_throughput_plot,
     make_timing_plot,
+    make_tournament_elo_plot,
     make_value_calibration_plot,
 )
 from alphablokus.reporting.pentobi_ladder import build_pentobi_ladder_section
@@ -252,6 +253,10 @@ def create_html_report(config: RunConfig) -> None:
         _load_metrics(config.value_calibration_directory) if config.value_calibration_directory.exists() else None
     )
     elo_data = _load_metrics(config.elo_ratings_directory) if config.elo_ratings_directory.exists() else None
+    # Pool BayesElo ratings: a single file written by scripts/tournament_elo.py,
+    # absent for runs that never ran the post-hoc tournament.
+    tournament_ratings_path = config.tournament_directory / "tournament_ratings.parquet"
+    tournament_data = pd.read_parquet(tournament_ratings_path) if tournament_ratings_path.exists() else None
     minimax_data = (
         _load_metrics(config.minimax_results_directory) if config.minimax_results_directory.exists() else None
     )
@@ -284,6 +289,9 @@ def create_html_report(config: RunConfig) -> None:
         else None
     )
     fig_elo = make_elo_plot(elo_data, arena_data) if elo_data is not None and not elo_data.empty else None
+    fig_tournament_elo = (
+        make_tournament_elo_plot(tournament_data) if tournament_data is not None and not tournament_data.empty else None
+    )
     fig_minimax = make_minimax_plot(minimax_data) if minimax_data is not None and not minimax_data.empty else None
     fig_symmetry = (
         make_symmetry_diagnostic_plot(symmetry_data) if symmetry_data is not None and not symmetry_data.empty else None
@@ -324,10 +332,24 @@ def create_html_report(config: RunConfig) -> None:
     pentobi_ladder_html = build_pentobi_ladder_section(config.pentobi_ladder_directory)
 
     strength_html = ""
-    if fig_elo is not None or fig_minimax is not None:
+    if fig_tournament_elo is not None or fig_elo is not None or fig_minimax is not None:
         parts = [
             "<section>",
             "<h2>Strength vs Fixed Baselines</h2>",
+        ]
+        if fig_tournament_elo is not None:
+            parts.append(
+                '<p class="section-desc">'
+                "<strong>Pool Elo (BayesElo)</strong> is the canonical strength "
+                "curve: a sparse round-robin among the run's saved checkpoints, "
+                "fit so every checkpoint shares one rating scale. It keeps rising "
+                "until genuine convergence, where the vs-gen-0 number below "
+                "flatlines once the net beats gen-0 ~100% of the time (the ±1200 "
+                "clamp). Read the pool curve; treat vs-gen-0 as an early-training "
+                "signal only.</p>"
+            )
+            parts.append(_chart(fig_tournament_elo))
+        parts.append(
             '<p class="section-desc">'
             "External strength measurements: the active network (after the "
             "accept/reject decision) plays a fixed gen-0 opponent. Filled "
@@ -343,8 +365,8 @@ def create_html_report(config: RunConfig) -> None:
             "small (20-game) sample. Treat the absolute level as noisy; "
             "trust the trend over many gens. The reliable training-progress "
             "signals are <em>policy agreement</em> and <em>value loss</em>."
-            "</p>",
-        ]
+            "</p>"
+        )
         if fig_elo is not None:
             parts.append(_chart(fig_elo))
         if fig_minimax is not None:
