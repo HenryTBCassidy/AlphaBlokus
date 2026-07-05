@@ -91,6 +91,76 @@ def test_train_logs_actual_learning_rate(ttt_game: TicTacToeGame, test_config: R
     assert all(r["learning_rate"] == config.net_config.learning_rate for r in records)
 
 
+def _cosine_wrapper(ttt_game: TicTacToeGame, test_config: RunConfig) -> tuple[NNetWrapper, RunConfig]:
+    net_config = replace(test_config.net_config, lr_scheduler="cosine", lr_eta_min=1e-4)
+    config = replace(test_config, num_generations=10, net_config=net_config)
+    wrapper = NNetWrapper(ttt_game, config)
+    config.net_directory.mkdir(parents=True, exist_ok=True)
+    return wrapper, config
+
+
+def test_reject_reload_does_not_rewind_lr_schedule(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """After a rejection, the LR clock is where the next generation expects it,
+    not rewound to before this generation's training (L3).
+
+    Weights are still reverted (the gate's job); only the LR clock is preserved.
+    """
+    import torch
+
+    wrapper, _ = _cosine_wrapper(ttt_game, test_config)
+    assert wrapper.scheduler is not None
+
+    # Coach cycle: save temp before training, then training steps the scheduler.
+    wrapper.save_checkpoint("temp.pth.tar")
+    reference_param = next(iter(wrapper.nnet.parameters())).detach().clone()
+    lr_before_training = wrapper.optimizer.param_groups[0]["lr"]
+
+    wrapper.scheduler.step()  # one generation of training advances the clock
+    last_epoch_after_step = wrapper.scheduler.last_epoch
+    lr_after_step = wrapper.optimizer.param_groups[0]["lr"]
+    assert lr_after_step != lr_before_training, "schedule should have moved"
+
+    # Perturb the weights so we can confirm the reject-reload reverts them.
+    with torch.no_grad():
+        for param in wrapper.nnet.parameters():
+            param.add_(1.0)
+
+    # Rejection: reload the pre-training checkpoint, keeping the LR clock.
+    wrapper.load_checkpoint("temp.pth.tar", restore_lr_schedule=False)
+
+    # Weights reverted...
+    assert torch.equal(next(iter(wrapper.nnet.parameters())).detach(), reference_param)
+    # ...but the LR clock did NOT rewind: it stays at the post-training position,
+    # and the optimizer LR is re-synced to the scheduler (not the pre-step value).
+    assert wrapper.scheduler.last_epoch == last_epoch_after_step
+    assert wrapper.optimizer.param_groups[0]["lr"] == lr_after_step
+
+
+def test_resume_reload_restores_lr_schedule(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """The default (``--resume``) path restores the saved scheduler position.
+
+    Contrast with the reject path: a resume must continue the exact schedule.
+    """
+    wrapper, _ = _cosine_wrapper(ttt_game, test_config)
+    assert wrapper.scheduler is not None
+
+    # Advance the schedule, then checkpoint at that position (latest.pth.tar).
+    for _ in range(3):
+        wrapper.scheduler.step()
+    saved_last_epoch = wrapper.scheduler.last_epoch
+    saved_lr = wrapper.optimizer.param_groups[0]["lr"]
+    wrapper.save_checkpoint("latest.pth.tar")
+
+    # Advance further to prove the reload rewinds to the saved position.
+    for _ in range(2):
+        wrapper.scheduler.step()
+    assert wrapper.scheduler.last_epoch != saved_last_epoch
+
+    wrapper.load_checkpoint("latest.pth.tar")  # default restore_lr_schedule=True
+    assert wrapper.scheduler.last_epoch == saved_last_epoch
+    assert wrapper.optimizer.param_groups[0]["lr"] == saved_lr
+
+
 def _ttt_eval_positions(game: TicTacToeGame, count: int) -> list[np.ndarray]:
     """A few distinct canonical TTT compact boards from random short games."""
     rng = np.random.default_rng(0)

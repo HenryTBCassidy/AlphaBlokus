@@ -766,8 +766,21 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             checkpoint["scheduler_state_dict"] = self.scheduler.state_dict()
         torch.save(checkpoint, filepath)
 
-    def load_checkpoint(self, filename: str) -> None:
-        """Load a neural network state from a checkpoint file."""
+    def load_checkpoint(self, filename: str, *, restore_lr_schedule: bool = True) -> None:
+        """Load a neural network state from a checkpoint file.
+
+        Args:
+            filename: Checkpoint file under ``config.net_directory``.
+            restore_lr_schedule: When True (the ``--resume`` case), restore the
+                saved scheduler position — a resumed run must continue the exact
+                schedule it was on. When False (the arena reject-reload case),
+                the schedule clock must *not* rewind: the LR advances once per
+                generation regardless of accept/reject, so the pre-training
+                weights and Adam moments are reverted (the gate's job) but the
+                scheduler keeps its current position and the just-restored
+                optimizer LR is re-synced to it. No-op for a scheduler-less run
+                (constant LR), which then reverts fully — bit-for-bit as before.
+        """
         folder = self.config.net_directory
         filepath = folder / filename
 
@@ -780,5 +793,15 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         self.nnet.load_state_dict(checkpoint["state_dict"])
         if "optimizer_state_dict" in checkpoint:
             self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
-        if self.scheduler is not None and "scheduler_state_dict" in checkpoint:
-            self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+
+        if self.scheduler is None:
+            return
+        if restore_lr_schedule:
+            if "scheduler_state_dict" in checkpoint:
+                self.scheduler.load_state_dict(checkpoint["scheduler_state_dict"])
+            return
+        # Reject-reload: keep the scheduler's clock. The optimizer restore above
+        # brought back the pre-step LR, so re-sync each param group to the
+        # scheduler's current LR (the value the next generation should train at).
+        for group, lr in zip(self.optimizer.param_groups, self.scheduler.get_last_lr(), strict=True):
+            group["lr"] = lr
