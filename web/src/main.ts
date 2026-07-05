@@ -8,9 +8,9 @@
 
 import './style.css';
 
-import { BrowserEngine } from './engine/browserEngine';
 import { fetchServerMeta, ServerEngine } from './engine/serverEngine';
 import { loadAssets } from './engine/tables';
+import { WorkerEngine } from './engine/workerEngine';
 import type { Engine, Player } from './engine/types';
 import { AppView, exposeTestHook } from './ui/app';
 import { GameController } from './ui/controller';
@@ -26,12 +26,12 @@ async function boot(): Promise<void> {
   const serverMeta = await fetchServerMeta();
   const engine: Engine = serverMeta
     ? new ServerEngine(assets)
-    : new BrowserEngine(assets, ASSETS_BASE, netVariantFromQuery());
+    : new WorkerEngine(assets, ASSETS_BASE, netVariantFromQuery());
   const info = await engine.init();
 
   const view = new AppView(root, assets);
   const controller = new GameController(engine, info, view.render);
-  if (engine instanceof BrowserEngine) {
+  if (engine instanceof WorkerEngine) {
     engine.onSearchProgress = (done, total) => controller.reportProgress(done, total);
   }
   view.attach(controller);
