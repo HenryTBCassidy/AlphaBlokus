@@ -157,6 +157,39 @@ uv run alphablokus --config run_configurations/blokus_jax_gumbel_30.json
 
 On the Mac set `"cuda": false`; on the home PC set `"cuda": true`. After a run, the interactive report is at `temp/<run_name>/Reporting/report.html`. Regenerate it from existing data without retraining via `--report-only`; continue a crashed or stopped run from its last completed generation via `--resume`. See [`docs/guides/REMOTE-TRAINING.md`](docs/guides/REMOTE-TRAINING.md) for the home-GPU workflow.
 
+### Play against the net
+
+Two tiers, one shared frontend (`web/`), following the Pentobi model — a browser version and a full-strength download. Difficulty levels are fixed `{search policy, simulations}` pairs, so strength is identical on any machine (hardware only changes think time). See [`docs/research/web-play-calibration.md`](docs/research/web-play-calibration.md) for the level calibration and browser-vs-Python fidelity numbers.
+
+**In the browser (static, shareable).** The rules engine, MCTS, and the net (ONNX Runtime Web — WebGPU with WASM fallback) all run in the visitor's browser; no backend, deployable to GitHub/Cloudflare Pages:
+
+```bash
+# 1. Export the engine assets from a checkpoint (rules tables + ONNX net + manifest)
+uv sync --extra web
+uv run python scripts/export_web_assets.py \
+    --config run_configurations/blokus_run3_overnight.json \
+    --checkpoint <path/to/checkpoint.pth.tar> --fp16
+
+# 2. Build the static site (everything bundles — no CDN calls at runtime)
+cd web && npm install && npm run build   # → web/dist/, deploy anywhere static
+
+npm run dev                              # or play locally with hot reload
+```
+
+When a stronger net lands, re-run the export and redeploy — the checkpoint is swappable by design (the manifest records the architecture + hashes).
+
+**Full strength (download tier).** The same frontend served by a local Python server that answers with the real torch + MCTS stack:
+
+```bash
+uv sync --extra play
+uv run alphablokus-play \
+    --config run_configurations/blokus_run3_overnight.json \
+    --checkpoint <path/to/checkpoint.pth.tar>
+# open http://127.0.0.1:8000 — the header badge shows "full-strength"
+```
+
+Fidelity is enforced, not assumed: the TS rules port replays fixture games from the reference engine with identical legal-move sets and byte-identical encodings (`web/tests/`), ONNX outputs match torch to ~1e-6, and `npm run agreement` + `scripts/verify_web_agreement.py` verify full games ply-by-ply across the two stacks. Plan: [`docs/plans/archive/web-play.md`](docs/plans/archive/web-play.md).
+
 ---
 
 ## How it works (in one screen)

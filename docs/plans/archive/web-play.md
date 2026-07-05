@@ -47,7 +47,7 @@ swappable by design; re-export + redeploy when stronger nets land).
 | W11 | Scripted browser-engine vs Python-engine agreement game | 1 h | High | ✅ |
 | W12 | End-to-end browser game exercised headless (Playwright) | 1 h | High | ✅ |
 | W13 | Difficulty calibration (sims-ladder round robin) + fidelity caveats note | 1.5 h | Medium | ✅ |
-| W14 | README section, web CI job, plan wrap-up | 1 h | High | |
+| W14 | README section, web CI job, plan wrap-up | 1 h | High | ✅ |
 
 ---
 
@@ -195,3 +195,19 @@ full-strength play (`uv sync --extra play && alphablokus-play`), checkpoint re-e
 flow. New CI job: install web deps, regenerate rules assets (`--rules-only`), `tsc`,
 Prettier check, Vitest (rules parity), `vite build`. Tick remaining rows, archive the
 plan.
+
+---
+
+## Scope additions
+
+Discovered and fixed during the build, beyond the original rows:
+
+- **fp16 export needed `keep_io_types=True`** — the default converter also switched the
+  graph inputs to float16, which the browser predictor (float32 feeds) can't use.
+- **int8 dynamic quantisation measured and rejected as a default** (6/32 top-1 flips —
+  see the calibration note §2.2); exported for experimentation only.
+- **`torch.onnx.export` pinned to `dynamo=False`** — torch 2.10's dynamo exporter splits
+  weights into an external `.data` file (bad for static hosting) and emits a graph the
+  onnxruntime dynamic quantiser rejects.
+- **`alphablokus-play` degrades `cuda: true` configs to CPU** when CUDA is unavailable,
+  so box-trained run configs work on the Mac unchanged.

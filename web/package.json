@@ -9,8 +9,8 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\" \"*.html\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\" \"*.html\"",
+    "format": "prettier --write \"src/**/*\" \"tests/*.ts\" \"scripts/**/*\" \"*.html\"",
+    "format:check": "prettier --check \"src/**/*\" \"tests/*.ts\" \"scripts/**/*\" \"*.html\"",
     "test": "vitest run",
     "agreement": "vite-node scripts/agreement_game.ts",
     "e2e": "node scripts/e2e_game.mjs"

@@ -1,6 +1,6 @@
 # Web Play — Difficulty Calibration & Fidelity Notes
 
-Companion to [`docs/plans/web-play.md`](../plans/web-play.md) (W13). Two questions answered
+Companion to [`docs/plans/web-play.md`](../plans/archive/web-play.md) (W13). Two questions answered
 here: **how strong is each difficulty level relative to the others**, and **how faithful is
 the browser stack to the Python reference** it was ported from.
 
@@ -40,9 +40,9 @@ unambiguous):
 - Level 5 (800 sims) matches the training-arena budget and tops the ladder; by the
   measured trend it is clearly the strongest setting.
 
-Absolute strength context: this net is **below Pentobi Level 1** (6% at L1 — see the
-jaxg30 Pentobi baseline). The point of the web tiers is the delivery mechanism with a
-swappable checkpoint, not today's strength.
+Absolute strength context: this net is **below Pentobi Level 1** (the strongest
+checkpoints win ~25% at L1; the fast-pipeline jaxg30 net measured 6%). The point of the
+web tiers is the delivery mechanism with a swappable checkpoint, not today's strength.
 
 ## 2. Fidelity: browser stack vs Python reference
 

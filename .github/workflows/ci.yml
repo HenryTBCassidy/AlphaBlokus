@@ -24,7 +24,7 @@ jobs:
       - uses: astral-sh/setup-uv@v6
         with:
           enable-cache: true
-      - run: uv sync --extra dev --extra jax
+      - run: uv sync --extra dev --extra jax --extra play
       - run: uv run mypy
 
   test:
@@ -46,3 +46,31 @@ jobs:
           enable-cache: true
       - run: uv sync --extra dev --extra jax
       - run: uv run pytest -m "not slow"
+
+  web:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      # Regenerate the deterministic rules assets (no checkpoint needed), then
+      # gate the TS engine: types, format, rules-parity suite, prod build.
+      # The net-parity test self-skips when no model has been exported.
+      - run: uv sync
+        working-directory: .
+      - run: uv run python scripts/export_web_assets.py --rules-only
+        working-directory: .
+      - run: npm ci
+      - run: npm run typecheck
+      - run: npm run format:check
+      - run: npm test
+      - run: npm run build
