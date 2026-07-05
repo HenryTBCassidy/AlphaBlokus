@@ -19,7 +19,7 @@ The target: **beat [Pentobi](https://pentobi.sourceforge.io/)** (MCTS + RAVE, no
 1. **Self-play:** the current network plays games against itself, guided by Monte Carlo Tree Search (MCTS), producing training positions.
 2. **Training:** the network learns to predict MCTS move probabilities (policy) and game outcomes (value).
 3. **Arena:** the new network plays the previous best; it's kept only if it scores above a threshold.
-4. **Strength eval:** Elo vs a frozen gen-0 baseline (+ a perfect-play minimax oracle and a symmetry diagnostic for Tic-Tac-Toe), logged every generation.
+4. **Strength eval:** a live Elo vs a frozen gen-0 baseline (+ a perfect-play minimax oracle and a symmetry diagnostic for Tic-Tac-Toe) logged every generation, plus a post-hoc **pool BayesElo** tournament (`scripts/tournament_elo.py`) that rates all of a run's checkpoints against each other — the DeepMind methodology, and the strength curve to read once the vs-gen-0 number saturates ([`docs/research/pool-elo-methodology.md`](docs/research/pool-elo-methodology.md)).
 
 This is the same recipe that reached superhuman play in Chess, Shogi, and Go — applied to the combinatorially awkward, geometric world of Blokus.
 

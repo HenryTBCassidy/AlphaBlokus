@@ -99,10 +99,25 @@ The crucial property is that the opponent **never moves** — unlike chaining El
 
 **Important caveat:** this is a *relative* measure with an arbitrary anchor. The numbers are not comparable to chess Elo, Pentobi Elo, or any external system — an Elo of 1200 here means only "≈800 points stronger than the random gen-0 net." Its job is tracking progress; if the curve flattens for many generations, something is wrong.
 
+**It saturates.** The `score_rate` clamp to `[0.001, 0.999]` caps `elo_diff` at `±400·log10(0.999/0.001) ≈ ±1200`. Once the current net beats gen-0 ~100% of the time, the number pins at that ceiling and can no longer separate gen 41 from gen 43 — the curve flatlines even while the net keeps improving. This makes vs-gen-0 an **early-training-only** signal. The pool BayesElo curve below is the canonical strength metric; read that once training is past the point where it beats gen-0 consistently.
+
 **Expected trajectory:**
 - Generations 1-10: Rapid Elo gain (learning basic moves)
 - Generations 10-30: Steady improvement (learning piece interactions)
-- Generations 30-50+: Diminishing returns (fine-tuning positional understanding)
+- Generations 30-50+: Diminishing returns — and the vs-gen-0 curve saturates; switch to pool Elo
+
+### Pool BayesElo tournament (the canonical strength curve)
+
+This is how DeepMind actually measured strength: not against one fixed anchor, but from games *among a pool* of checkpoints, with one consistent rating per player fit by **BayesElo** (a Bradley–Terry maximum-likelihood fit). Because the comparison is relative to *nearby* checkpoints rather than a fixed weak anchor, the curve keeps rising until genuine convergence — it never saturates.
+
+Run it post-hoc on any finished run's saved checkpoints (no retraining):
+
+```
+uv run python -m scripts.tournament_elo --config <run.json>
+uv run python -m scripts.tournament_elo --config <run.json> --dry-run   # schedule + game count only
+```
+
+The tool enumerates `Nets/accepted_<N>.pth.tar` (plus the gen-0 `elo_baseline.pth.tar` anchor), plays a **sparse but connected** round-robin (`TournamentConfig.back_ref_offsets`, exponentially spaced so the comparison graph stays connected at O(K·log K) pairings, not O(K²)), fits BayesElo (`evaluation/rating.py`), and writes `Tournament/tournament_ratings.parquet` + `tournament_raw.json`. The report renders the rising pool-Elo curve above the (saturating) vs-gen-0 chart. The gen-0 checkpoint is pinned at `anchor_rating` so the scale is comparable within a run; cross-run comparability still needs a shared external anchor (e.g. Pentobi). Full methodology and the DeepMind lineage: [`research/pool-elo-methodology.md`](research/pool-elo-methodology.md).
 
 ### Minimax oracle (Tic-Tac-Toe only)
 
