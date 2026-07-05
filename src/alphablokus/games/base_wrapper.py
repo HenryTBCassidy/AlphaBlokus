@@ -282,7 +282,17 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         match self.net_config.lr_scheduler:
             case "cosine":
                 total_epochs = self.config.num_generations * self.net_config.epochs
-                return CosineAnnealingLR(self.optimizer, T_max=total_epochs)
+                # ``eta_min`` floors the anneal. Default 0.0 reproduces the
+                # original behaviour; a non-zero floor stops the LR reaching ~0
+                # and killing late-run training (blokus_cloud_60 §3).
+                if self.net_config.lr_eta_min == 0.0 and self.config.num_generations > 1:
+                    logger.warning(
+                        "Cosine LR schedule has lr_eta_min=0.0 over {} generations: the learning "
+                        "rate anneals to ~0 by the run's end, which strangled the last quarter of "
+                        "blokus_cloud_60. Set net_config.lr_eta_min (e.g. 1e-4) to floor it.",
+                        self.config.num_generations,
+                    )
+                return CosineAnnealingLR(self.optimizer, T_max=total_epochs, eta_min=self.net_config.lr_eta_min)
             case None:
                 return None
             case unknown:
