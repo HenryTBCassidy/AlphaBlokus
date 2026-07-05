@@ -203,7 +203,9 @@ def _quantise_fp16(fp32_path: Path) -> Path:
     from onnxconverter_common import float16
 
     model = onnx.load(str(fp32_path))
-    model_fp16 = float16.convert_float_to_float16(model)
+    # keep_io_types: the browser predictor always feeds/reads float32; only
+    # the weights/compute drop to fp16.
+    model_fp16 = float16.convert_float_to_float16(model, keep_io_types=True)
     out_path = fp32_path.with_name(fp32_path.stem + ".fp16.onnx")
     onnx.save(model_fp16, str(out_path))
     logger.info("Wrote fp16 net: {} ({:.1f} MB)", out_path, out_path.stat().st_size / 1e6)
