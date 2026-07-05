@@ -3,7 +3,7 @@
 How to take `feat/cloud-scale-training`'s tooling from "rented a GPU" to "trained net + Pentobi
 ladder result", losing nothing to preemption. Companion docs: the recommendation
 ([cloud-training-recommendation.md](../research/cloud-training-recommendation.md) — which card,
-which net, staged plan) and the plan ([cloud-scale-training.md](../plans/cloud-scale-training.md)).
+which net, staged plan) and the plan ([cloud-scale-training.md](../plans/archive/cloud-scale-training.md)).
 
 Everything here is card- and cloud-agnostic: any CUDA-12 host with an NVIDIA driver and the
 container runtime works (RunPod, Vast, Lambda, the home box).
