@@ -9,10 +9,10 @@
     "build": "vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"*.html\"",
-    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"*.html\"",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\" \"*.html\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.ts\" \"*.html\"",
     "test": "vitest run",
-    "agreement": "node scripts/agreement_game.mjs",
+    "agreement": "vite-node scripts/agreement_game.ts",
     "e2e": "node scripts/e2e_game.mjs"
   },
   "dependencies": {
@@ -24,6 +24,7 @@
     "prettier": "^3.4.2",
     "typescript": "^5.7.2",
     "vite": "^6.0.7",
+    "vite-node": "^6.0.0",
     "vitest": "^2.1.8"
   }
 }
