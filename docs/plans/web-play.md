@@ -34,7 +34,7 @@ swappable by design; re-export + redeploy when stronger nets land).
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| W1 | Scaffold `web/` Vite + TypeScript app with lint/format/test tooling | 45 min | High | |
+| W1 | Scaffold `web/` Vite + TypeScript app with lint/format/test tooling | 45 min | High | ✅ |
 | W2 | `scripts/export_web_assets.py` — rules blob + pieces JSON + manifest (`--rules-only`) | 1.5 h | High | |
 | W3 | TS rules engine + 44-channel encoder (port of the jax kernel semantics) | 2 h | High | |
 | W4 | Python parity-fixture generator + vitest rules/encoding parity suite | 1.5 h | High | |

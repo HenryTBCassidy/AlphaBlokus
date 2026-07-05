@@ -1,0 +1,9 @@
+# Dependencies and build output
+node_modules/
+dist/
+
+# Generated engine assets (scripts/export_web_assets.py writes these)
+public/assets/
+
+# Local artifacts from agreement / e2e runs
+tests/artifacts/

@@ -1,0 +1,29 @@
+{
+  "name": "alphablokus-web",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "description": "Browser frontend + in-browser engine for playing Blokus Duo against the AlphaBlokus net",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "typecheck": "tsc --noEmit",
+    "format": "prettier --write \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"*.html\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"tests/**/*.ts\" \"scripts/**/*.mjs\" \"*.html\"",
+    "test": "vitest run",
+    "agreement": "node scripts/agreement_game.mjs",
+    "e2e": "node scripts/e2e_game.mjs"
+  },
+  "dependencies": {
+    "onnxruntime-web": "^1.20.1"
+  },
+  "devDependencies": {
+    "onnxruntime-node": "^1.20.1",
+    "playwright": "^1.49.0",
+    "prettier": "^3.4.2",
+    "typescript": "^5.7.2",
+    "vite": "^6.0.7",
+    "vitest": "^2.1.8"
+  }
+}
