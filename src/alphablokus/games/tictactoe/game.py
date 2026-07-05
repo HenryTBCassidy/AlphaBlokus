@@ -106,11 +106,16 @@ class TicTacToeGame(IGame[Board]):
     def get_canonical_form(self, board: Board, player: int) -> Board:
         return board.canonical(player)
 
-    def encode_compact(self, compact: NDArray) -> NDArray:
+    @staticmethod
+    def encode_compact(compact: NDArray) -> NDArray:
         """Rebuild the 2-channel float32 planes from a compact 3×3 grid.
 
         Inverse of ``Board.to_compact``: equals ``as_multi_channel(1)`` for the
         board the grid came from.
+
+        A ``@staticmethod`` (it needs no instance state) so ``game.encode_compact``
+        is a cheaply-picklable function reference for the training DataLoader's
+        forkserver/spawn workers. See docs/plans/archive/harden-long-runs.md H1.
         """
         return np.stack([compact == 1, compact == -1]).astype(np.float32)
 

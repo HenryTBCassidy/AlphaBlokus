@@ -9,6 +9,7 @@ weights against the defaults path at the same seed.
 
 from __future__ import annotations
 
+import pickle
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -16,10 +17,12 @@ import numpy as np
 import torch
 
 from alphablokus.config import TrainingPerfConfig
+from alphablokus.games.base_wrapper import _LazyPolicyDataset, resolve_dataloader_context
 from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
 
 if TYPE_CHECKING:
     from alphablokus.config import RunConfig
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
     from alphablokus.games.tictactoe.game import TicTacToeGame
 
 
@@ -163,3 +166,68 @@ def test_persistent_workers_train_to_completion(ttt_game: TicTacToeGame, test_co
     batches_per_epoch = -(-40 // test_config.net_config.batch_size)
     assert len(metrics.rows) == batches_per_epoch * 2  # epochs=2 in _train_with_perf
     assert np.isfinite([row["total_loss"] for row in metrics.rows]).all()
+
+
+# ── H1: non-fork DataLoader workers (docs/plans/archive/harden-long-runs.md) ──
+
+
+def test_resolve_dataloader_context_returns_requested_method() -> None:
+    """The requested start method is honoured when the platform supports it."""
+    for method in ("forkserver", "spawn"):
+        assert resolve_dataloader_context(method).get_start_method() == method
+
+
+def test_resolve_dataloader_context_falls_back_to_spawn() -> None:
+    """An unavailable start method degrades to spawn rather than raising."""
+    assert resolve_dataloader_context("not-a-real-method").get_start_method() == "spawn"
+
+
+def test_lazy_dataset_encode_fn_pickles_without_dragging_the_game(blokus_game: BlokusDuoGame) -> None:
+    """forkserver/spawn workers pickle the dataset — it must not drag the whole game.
+
+    ``encode_compact`` is a ``@staticmethod``, so ``game.encode_compact`` pickles
+    as a bare function reference. A bound method would instead serialise the
+    entire game, including its multi-MB optimised move generator, to every
+    worker on every respawn.
+    """
+    blokus_game.enable_optimised_movegen()  # the production path — loads the heavy F2 state
+    game_blob = pickle.dumps(blokus_game)
+    encode_blob = pickle.dumps(blokus_game.encode_compact)
+    # The full game (with the F2 generator) is multi-MB; the encode_fn alone is tiny.
+    assert len(encode_blob) < 1_000
+    assert len(encode_blob) < len(game_blob)
+
+
+def test_lazy_dataset_round_trips_through_pickle(blokus_game: BlokusDuoGame) -> None:
+    """The dataset a forkserver worker receives pickles and still encodes correctly."""
+    blokus_game.enable_optimised_movegen()
+    action_size = blokus_game.get_action_size()
+    compact_boards = [np.zeros((14, 14), dtype=np.int8) for _ in range(4)]
+    raw_pis = [np.full(action_size, 1.0 / action_size, dtype=np.float32) for _ in range(4)]
+    values = [0.0, 1.0, -1.0, 1e-4]
+    dataset = _LazyPolicyDataset(compact_boards, raw_pis, values, action_size, blokus_game.encode_compact)
+
+    restored = pickle.loads(pickle.dumps(dataset))
+    assert len(restored) == len(dataset)
+    board, pi, value = restored[1]
+    expected_board = blokus_game.encode_compact(compact_boards[1])
+    assert board.shape == expected_board.shape
+    assert pi.shape == (action_size,)
+    assert float(value) == 1.0
+
+
+def test_default_dataloader_context_is_non_fork(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """The default forkserver context trains identically to the in-process path.
+
+    ``dataloader_context`` defaults to "forkserver", so a worker-backed run no
+    longer forks the JAX-loaded parent. The shuffle permutation and per-epoch
+    base seed still come from the main process, so weights stay bit-identical.
+    """
+    assert TrainingPerfConfig().dataloader_context == "forkserver"
+    baseline_weights, _ = _train_with_perf(ttt_game, test_config, TrainingPerfConfig())
+    workers_weights, _ = _train_with_perf(
+        ttt_game,
+        test_config,
+        TrainingPerfConfig(dataloader_workers=2, prefetch_factor=2, dataloader_context="forkserver"),
+    )
+    _assert_identical_weights(baseline_weights, workers_weights)

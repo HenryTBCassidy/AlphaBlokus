@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import multiprocessing as mp
 import os
 import time
 from abc import ABC, abstractmethod
@@ -36,6 +37,33 @@ if TYPE_CHECKING:
 def count_parameters(net: nn.Module) -> int:
     """Total trainable parameter count — the net-size number quoted in docs/reports."""
     return sum(p.numel() for p in net.parameters() if p.requires_grad)
+
+
+def resolve_dataloader_context(context_name: str) -> mp.context.BaseContext:
+    """Resolve the multiprocessing context for the training DataLoader's workers.
+
+    The default **fork** start method is unsafe here: self-play (JAX) and
+    training (torch) share one process, so JAX's live threads are present when
+    the loader forks its workers — forking a multithreaded process is what
+    killed the pin-memory thread mid-run (``blokus_cloud_60`` gen 59).
+    ``forkserver``/``spawn`` create workers from a clean process instead. An
+    unavailable method (e.g. ``forkserver`` on a platform that lacks it) falls
+    back to ``spawn``, which is always available.
+
+    Args:
+        context_name: Requested start method — "forkserver", "spawn", or "fork".
+
+    Returns:
+        The resolved multiprocessing context.
+    """
+    try:
+        return mp.get_context(context_name)
+    except ValueError:
+        logger.warning(
+            "DataLoader multiprocessing context {!r} is unavailable here; falling back to 'spawn'.",
+            context_name,
+        )
+        return mp.get_context("spawn")
 
 
 class AverageMeter:
@@ -384,6 +412,12 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 "persistent_workers": perf.persistent_workers,
                 "prefetch_factor": perf.prefetch_factor,
             }
+            if perf.dataloader_context != "fork":
+                # Never fork workers from this (JAX-loaded, multithreaded)
+                # process — that deadlocked/killed the pin-memory thread at
+                # gen 59 of blokus_cloud_60. forkserver/spawn start workers from
+                # a clean process. See docs/plans/archive/harden-long-runs.md H1.
+                worker_kwargs["multiprocessing_context"] = resolve_dataloader_context(perf.dataloader_context)
         # Built once so persistent workers survive across epochs; iterating a
         # shuffle=True loader reshuffles each epoch exactly as the old
         # loader-per-epoch construction did.
