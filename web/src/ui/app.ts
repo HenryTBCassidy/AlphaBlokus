@@ -71,6 +71,7 @@ export class AppView {
     const header = el('header', 'header');
     header.append(el('h1', '', 'AlphaBlokus'));
     this.engineBadgeEl = el('span', 'engine-badge', this.controller.info.name);
+    if (this.controller.info.isFullStrength) this.engineBadgeEl.classList.add('full-strength');
     header.append(this.engineBadgeEl);
     layout.append(header);
 

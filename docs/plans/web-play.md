@@ -43,7 +43,7 @@ swappable by design; re-export + redeploy when stronger nets land).
 | W7 | TS play-time MCTS (PUCT + Gumbel root) + difficulty levels | 2 h | High | ✅ |
 | W8 | Frontend UI: board, tray, rotate/flip, legal-move highlighting, controls | 3 h | High | ✅ |
 | W9 | Local Python play server (`alphablokus/play/`, FastAPI `play` extra, `alphablokus-play`) | 2 h | High | ✅ |
-| W10 | `ServerEngine` (HTTP client) + engine selection in the frontend | 1 h | High | |
+| W10 | `ServerEngine` (HTTP client) + engine selection in the frontend | 1 h | High | ✅ |
 | W11 | Scripted browser-engine vs Python-engine agreement game | 1 h | High | |
 | W12 | End-to-end browser game exercised headless (Playwright) | 1 h | High | |
 | W13 | Difficulty calibration (sims-ladder round robin) + fidelity caveats note | 1.5 h | Medium | |

@@ -9,6 +9,7 @@
 import './style.css';
 
 import { BrowserEngine } from './engine/browserEngine';
+import { fetchServerMeta, ServerEngine } from './engine/serverEngine';
 import { loadAssets } from './engine/tables';
 import type { Engine, Player } from './engine/types';
 import { AppView, exposeTestHook } from './ui/app';
@@ -22,7 +23,10 @@ async function boot(): Promise<void> {
   root.textContent = 'Loading engine…';
 
   const assets = await loadAssets(ASSETS_BASE);
-  const engine: Engine = new BrowserEngine(assets, ASSETS_BASE, netVariantFromQuery());
+  const serverMeta = await fetchServerMeta();
+  const engine: Engine = serverMeta
+    ? new ServerEngine(assets)
+    : new BrowserEngine(assets, ASSETS_BASE, netVariantFromQuery());
   const info = await engine.init();
 
   const view = new AppView(root, assets);

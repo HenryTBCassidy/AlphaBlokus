@@ -7,29 +7,25 @@
 import { CPUCT, DIFFICULTY_LEVELS, GUMBEL_MAX_CONSIDERED } from './difficulty';
 import { encodePlanes } from './encoding';
 import { gumbelBestAction } from './gumbel';
+import { LocalRulesEngine } from './localRules';
 import { Mcts } from './mcts';
 import type { Predictor } from './net';
 import { OrtWebPredictor } from './net';
-import { gameResult, legalMoves, score, step } from './rules';
+import { legalMoves } from './rules';
 import type { LoadedAssets } from './tables';
-import type {
-  DifficultyLevel,
-  Engine,
-  EngineInfo,
-  GameState,
-  GameStatus,
-  SearchResult,
-} from './types';
+import type { DifficultyLevel, Engine, EngineInfo, GameState, SearchResult } from './types';
 
-export class BrowserEngine implements Engine {
+export class BrowserEngine extends LocalRulesEngine implements Engine {
   private predictor: Predictor | null = null;
   private executionProvider = 'unknown';
 
   constructor(
-    private readonly assets: LoadedAssets,
+    assets: LoadedAssets,
     private readonly assetsBaseUrl: string,
     private readonly netVariant: string = 'fp32',
-  ) {}
+  ) {
+    super(assets);
+  }
 
   /** Progress hook for the UI's thinking indicator. */
   onSearchProgress: ((done: number, total: number) => void) | null = null;
@@ -54,23 +50,6 @@ export class BrowserEngine implements Engine {
       isFullStrength: false,
       difficulties: DIFFICULTY_LEVELS,
     };
-  }
-
-  legalMoves(state: GameState): Promise<number[]> {
-    return Promise.resolve(legalMoves(this.assets.tables, state, state.currentPlayer));
-  }
-
-  applyMove(state: GameState, action: number): GameState {
-    return step(this.assets.tables, state, action);
-  }
-
-  gameStatus(state: GameState): GameStatus {
-    const tables = this.assets.tables;
-    const ended = gameResult(tables, state, 1);
-    if (ended === 0) return { isOver: false };
-    const scores: [number, number] = [score(tables, state, 0), score(tables, state, 1)];
-    const winner = scores[0] === scores[1] ? 0 : scores[0] > scores[1] ? 1 : -1;
-    return { isOver: true, scores, winner };
   }
 
   async bestMove(state: GameState, difficulty: DifficultyLevel): Promise<SearchResult> {
