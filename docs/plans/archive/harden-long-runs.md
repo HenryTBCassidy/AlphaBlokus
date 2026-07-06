@@ -13,7 +13,7 @@ DataLoader forks its workers. It survived 58 generations, then a worker/pin-memo
 exposed: **a crash yields no report**, and **W&B was run offline** (nothing to analyse). All three are
 "make a 13-hour run survivable and observable" fixes.
 
-**Companion:** operational rules are in [`../guides/CLOUD-TRAINING.md`](../guides/CLOUD-TRAINING.md)
+**Companion:** operational rules are in [`../../guides/CLOUD-TRAINING.md`](../../guides/CLOUD-TRAINING.md)
 ("Data-safety protocol", rules 8–9). This plan is the **code** that makes those automatic.
 
 **Ground truth (verified on current `main`):**
