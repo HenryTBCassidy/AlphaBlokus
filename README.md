@@ -24,7 +24,7 @@ No human games, no handcrafted heuristics. The system learns Blokus Duo — a tw
 | 5 | 18–22–0 | 45% | [31, 60] |
 | 6 | 8–30–2 | 20% | [10, 35] |
 
-Current best checkpoint — a 192-filter × 12-block ResNet (~8M parameters) after ~70 generations (~700k self-play games) — playing 40 games per level at 400 MCTS simulations per move, via the project's [Pentobi GTP harness](docs/05-EVALUATION.md). Levels 7–9 remain untested; level 6 is the current frontier.
+Current best checkpoint — a 192-filter × 12-block ResNet (~ 8M parameters) after ~ 70 generations (~ 700k self-play games) — playing 40 games per level at 400 MCTS simulations per move, via the project's [Pentobi GTP harness](docs/05-EVALUATION.md). Levels 7–9 remain untested; level 6 is the current frontier.
 
 ## How it works
 
@@ -33,7 +33,7 @@ Each *generation* of the training loop:
 1. **Self-play** — the current network plays thousands of games against itself, guided by MCTS; visit distributions and outcomes become training targets.
 2. **Train** — the ResNet learns to predict MCTS move probabilities (policy head, KL loss) and game outcomes (value head, MSE loss).
 3. **Gate** — the candidate plays the incumbent in an arena; it is promoted only if it scores above a threshold (chess-style `wins + ½·draws`).
-4. **Evaluate** — relative Elo is tracked per generation, an end-of-run pooled [BayesElo tournament](docs/research/pool-elo-methodology.md) rates all checkpoints against each other (the DeepMind methodology), and checkpoints are benchmarked externally against Pentobi.
+4. **Evaluate** — relative Elo is tracked per generation, an end-of-run pooled [BayesElo tournament](docs/research/pool-elo-methodology.md) rates all checkpoints against each other (DeepMind's methodology), and checkpoints are benchmarked externally against Pentobi.
 
 The framework is game-agnostic (protocol interfaces for game rules, boards, and networks, with a single composition root) and was validated end-to-end on Tic-Tac-Toe — where it reaches near-perfect play against a minimax oracle within a couple of generations — before Blokus was plugged in. Algorithms are documented in [`docs/02-ALGORITHMS.md`](docs/02-ALGORITHMS.md), network architecture in [`docs/03-NEURAL-NETWORKS.md`](docs/03-NEURAL-NETWORKS.md).
 
