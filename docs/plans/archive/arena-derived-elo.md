@@ -8,7 +8,7 @@ Replace the broken per-generation "Elo vs frozen gen-0 baseline" metric with a *
 
 **Philosophy constraint (Henry):** streamed metrics run **per-generation** or not at all; anything needing multiple generations runs in the **reporting/standalone end-of-run step**. No mid-run periodic jobs.
 
-Companion docs: [`docs/guides/PLAN-FORMAT.md`](../guides/PLAN-FORMAT.md), [`docs/guides/STYLE-GUIDE.md`](../guides/STYLE-GUIDE.md), [`docs/research/pool-elo-methodology.md`](../research/pool-elo-methodology.md), [`docs/plans/archive/pool-based-elo.md`](archive/pool-based-elo.md).
+Companion docs: [`docs/guides/PLAN-FORMAT.md`](../../guides/PLAN-FORMAT.md), [`docs/guides/STYLE-GUIDE.md`](../../guides/STYLE-GUIDE.md), [`docs/research/pool-elo-methodology.md`](../../research/pool-elo-methodology.md), [`docs/plans/archive/pool-based-elo.md`](pool-based-elo.md).
 
 ---
 
