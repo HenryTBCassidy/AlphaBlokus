@@ -16,6 +16,7 @@ Status legend: **Idea** (raw, unexamined) · **Researching** (actively being inv
 | I3 | [Shared-state self-play workers](#i3-shared-state-self-play-workers) | Promoted (partially shipped) | Cut the ~2.5 GB-per-worker framework duplication — CPU workers (`worker_cuda: false`) + forkserver landed; the "vectorise on-device" endgame shipped as the jax backend |
 | I4 | [Continuous (non-gated) training](#i4-continuous-non-gated-training) | Promoted | First step (rolling game-sized replay buffer + compact storage, full-pass training) promoted to [`plans/archive/replay-buffer-refactor.md`](plans/archive/replay-buffer-refactor.md); full async actor/learner stays parked |
 | I5 | [Parallel Pentobi benchmark](#i5-parallel-pentobi-benchmark) | Promoted (shipped) | The Pentobi benchmark now fans games across a `spawn` worker pool (`--workers N`), each with its own net + engine — the GPU sat ~2% idle serially ([`plans/archive/parallel-pentobi-benchmark.md`](plans/archive/parallel-pentobi-benchmark.md)) |
+| I6 | [Sharded multi-GPU self-play](#i6-sharded-multi-gpu-self-play) | Idea | Split the jax self-play phase across N GPUs — one pinned producer process per card streaming games into the coach's `sink`, serial loop unchanged; a wall-clock lever for when single-card runs exceed ~a week ([`research/xl-training-scaleup.md`](research/xl-training-scaleup.md) §4) |
 
 > Ideas already captured elsewhere (not duplicated here): the conv policy head (F4) and the cross-worker inference server (F5) are done — see the [optimisation menu](plans/archive/full-cycle-optimisation.md#optimisation-menu); MCTS tree reuse, Cython move-gen and cached-valid-moves are in that plan's [Considered and set aside](plans/archive/full-cycle-optimisation.md#considered-and-set-aside) section; mixed-precision / fp16 inference is in its Out-of-scope list. Dirichlet root noise is **implemented** (`dirichlet_epsilon`/`dirichlet_alpha` in `MCTSConfig`, default-off).
 
@@ -123,3 +124,28 @@ the serial path bit-for-bit; `--cpu-net` scales past the ~4-worker VRAM ceiling 
 
 **Related:** [I2](#i2-evaluation-time-search-tuning) (eval-time search), `docs/05-EVALUATION.md`
 (benchmark usage), `docs/plans/archive/pentobi-harness.md` (the GTP adapter this parallelises).
+
+---
+
+## I6. Sharded multi-GPU self-play
+
+**The observation.** Self-play is ~69–71% of a generation's wall-clock at `large`/`xl` net sizes
+[measured, `blokus_cloud_60`], and the jax backend's compute is cleanly shardable: `run_wave` is a
+jitted pure function over a leading batch dim with fully independent game slots, and nothing in
+`src/` reads or sets `CUDA_VISIBLE_DEVICES`, so per-process GPU pinning is unobstructed.
+
+**The idea.** Keep the serial generation loop; split only the self-play phase across N GPUs. N
+child processes (`spawn` — forking a JAX-loaded parent is the known hazard), each pinned to one
+card via `CUDA_VISIBLE_DEVICES`, each running the existing jax backend on `num_eps/N` games with
+`xla_mem_fraction` raised, streaming completed games back to the coach's `sink` over an mp queue —
+the same contract the CPU worker pool already implements. Coach still owns the buffer, the single
+parquet write, training, and the gate; no storage changes.
+
+**Bounds and cost** (from [`research/xl-training-scaleup.md`](research/xl-training-scaleup.md) §4):
+Amdahl-capped at ~3.4× (train+arena stay serial) — 2×5090 ≈ 1.55× wall-clock at +29% $/run,
+4×5090 ≈ 2.1× at +88%. Strictly a wall-clock lever, never a cost lever. Estimated 2–4 eng-days.
+Worth building the first time a committed run exceeds ~a week on one card; also the natural
+foundation if [I4](#i4-continuous-non-gated-training)'s parked async actor-learner ever revives.
+
+**Related:** [I4](#i4-continuous-non-gated-training) (the async end-state), [I3](#i3-shared-state-self-play-workers)
+(the CPU-era ancestor of the same instinct), `docs/research/xl-training-scaleup.md` (the costing).
