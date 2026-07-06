@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -7,6 +8,7 @@ from functools import partial
 from typing import TYPE_CHECKING, TypeAlias
 
 import numpy as np
+import pandas as pd
 import torch
 from loguru import logger
 from numpy.typing import NDArray
@@ -29,6 +31,8 @@ from alphablokus.training.eval_set import build_or_load_eval_set
 from alphablokus.training.replay_buffer import ReplayBuffer
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from alphablokus.config import RunConfig
     from alphablokus.search.stats import MCTSEpisodeStats
     from alphablokus.selfplay.episode import ProcessedExample
@@ -53,6 +57,39 @@ def read_progress_marker(config: RunConfig) -> dict | None:
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def reconstruct_benchmark_elo(config: RunConfig) -> float:
+    """Rolling-Elo benchmark to resume from = the last *accepted* net's Elo.
+
+    Self-healing: reads the persisted rolling-Elo history rather than adding
+    checkpoint state. Returns the ``rolling_elo`` of the highest generation
+    flagged ``accepted`` (that net *is* the current arena incumbent). Falls back
+    to ``config.elo_baseline_rating`` when no history exists yet or nothing has
+    been accepted — matching a fresh run's anchor.
+
+    The parquet only ever holds completed generations, so the last accepted row
+    is the correct benchmark; a resume landing after a rejection streak still
+    picks the last accepted net, not the last logged (rejected) point.
+    """
+    anchor = float(config.elo_baseline_rating)
+    rolling_dir = config.rolling_elo_directory
+    if not rolling_dir.exists():
+        return anchor
+    try:
+        history = pd.read_parquet(rolling_dir)
+    except (FileNotFoundError, ValueError, OSError):
+        return anchor
+    if history.empty or "accepted" not in history.columns:
+        return anchor
+    accepted = history[history["accepted"].astype(bool)]
+    if accepted.empty:
+        logger.info("Resume: no accepted generation yet — rolling Elo benchmark = anchor {:.0f}", anchor)
+        return anchor
+    last = accepted.sort_values("generation").iloc[-1]
+    benchmark = float(last["rolling_elo"])
+    logger.info("Resume: rolling Elo benchmark = {:.0f} (from gen {})", benchmark, int(last["generation"]))
+    return benchmark
 
 
 class Coach:
@@ -140,24 +177,38 @@ class Coach:
         # reused across generations so the per-gen KL trend is comparable.
         self._symmetry_diagnostic_positions: list[IBoard] | None = None
 
-        # Elo evaluation: freeze the random-init network as the anchor opponent.
-        # ``elo_baseline_net`` is a separate wrapper instance with that frozen
-        # state so the current ``self.nnet`` can train without disturbing it.
-        # Saved to disk under ``Nets/elo_baseline.pth.tar`` so resumed runs use
-        # the same baseline.
-        if self.config.elo_games_per_gen > 0:
-            baseline_path = self.config.net_directory / "elo_baseline.pth.tar"
-            # On resume, reuse the original gen-0 baseline if it's on disk —
-            # re-saving here would re-anchor it to the already-trained net and
-            # make the resumed Elo numbers incomparable to the pre-crash portion.
-            if not (self.resume and baseline_path.exists()):
-                self.nnet.save_checkpoint(filename="elo_baseline.pth.tar")
-            elif self.resume:
-                logger.info("Resume: reusing existing Elo baseline {}", baseline_path)
-            self.elo_baseline_net: INeuralNetWrapper | None = self.nnet.__class__(self.game, config)  # type: ignore[call-arg]
-            self.elo_baseline_net.load_checkpoint(filename="elo_baseline.pth.tar")
-        else:
-            self.elo_baseline_net = None
+        # Gen-0 anchor checkpoint. Freeze the starting network (random-init, or
+        # the warm-start donor) to ``Nets/elo_baseline.pth.tar``. We no longer
+        # play per-generation games against it — the rolling arena-derived Elo
+        # below replaced that eval — but the file is retained because the
+        # post-hoc pool BayesElo tournament anchors the whole pool on it
+        # (``scripts/tournament_elo.py``, ``_ANCHOR_FILENAME``). No in-memory
+        # opponent net is loaded now, only the file on disk.
+        baseline_path = self.config.net_directory / "elo_baseline.pth.tar"
+        # On resume, reuse the original gen-0 anchor if it's on disk — re-saving
+        # would re-anchor it to the already-trained net and break the pool
+        # tournament's gen-0 reference.
+        if not (self.resume and baseline_path.exists()):
+            self.nnet.save_checkpoint(filename="elo_baseline.pth.tar")
+        elif self.resume:
+            logger.info("Resume: reusing existing gen-0 anchor checkpoint {}", baseline_path)
+
+        # Rolling arena-derived Elo (docs/plans/archive/arena-derived-elo.md).
+        # The arena already plays candidate-vs-incumbent, so the incumbent is a
+        # rolling benchmark: the candidate's Elo is ``_benchmark_elo +
+        # compute_elo(arena_result)``, and on acceptance the benchmark rolls
+        # forward to the candidate. Anchored at ``elo_baseline_rating``; this is
+        # the non-saturating live strength curve that replaced the frozen-gen-0
+        # eval. On resume, reconstruct it from the persisted history so the
+        # chained estimate continues seamlessly (last accepted net's Elo).
+        self._benchmark_elo: float = (
+            reconstruct_benchmark_elo(self.config) if self.resume else float(self.config.elo_baseline_rating)
+        )
+
+        # Anchor provenance: what "Elo = elo_baseline_rating" means for this run
+        # (scratch vs warm-start donor). Recorded once so cross-run curves can be
+        # spliced via the donor's weight hash (S3).
+        self._write_anchor_provenance()
 
     def learn(self, start_generation: int = 1) -> None:
         """Run the generation loop, finalising metrics/W&B even on crash.
@@ -300,6 +351,12 @@ class Coach:
                 # so a rejection streak no longer freezes the schedule (L3).
                 self.nnet.load_checkpoint(filename="temp.pth.tar", restore_lr_schedule=False)
 
+            # Rolling arena-derived Elo: derive the candidate's Elo from the
+            # arena score it just played against the incumbent, and roll the
+            # benchmark forward on acceptance. Zero extra games — reuses the
+            # arena result above.
+            self._record_rolling_elo(generation, nwins, pwins, draws, accepted)
+
             # PHASE 4: Strength evaluation against fixed baselines.
             # The new network this gen is measured against the frozen gen-0
             # baseline (Elo) and, for TTT, a perfect-play minimax opponent.
@@ -359,6 +416,50 @@ class Coach:
         # itself) is now on local disk — mirror it. Best-effort by design:
         # object-storage trouble never kills training.
         sync_up_guarded(self.object_store, self.config.run_directory, f"generation {generation}")
+
+    def _write_anchor_provenance(self) -> None:
+        """Record what the rolling-Elo anchor (Elo = ``elo_baseline_rating``) is.
+
+        The anchor is run-specific: for a scratch run it's the random-init net;
+        for a warm-start run (``load_model``) it's the donor net loaded into
+        ``elo_baseline.pth.tar``. Writing the donor weights' SHA-256 lets a
+        reader splice this run's rolling curve onto the donor's pooled Elo (if
+        the donor checkpoint's rating is known) — the only way to compare
+        chained curves across runs. Donor ``run_name``/``generation`` aren't
+        knowable from a weights-only warm start, so they're left null; the hash
+        is the cross-run key. Left untouched on resume (written by the original
+        run) so the recorded provenance stays stable.
+        """
+        anchor_path = self.config.net_directory / "elo_anchor.json"
+        if self.resume and anchor_path.exists():
+            return
+        baseline_path = self.config.net_directory / "elo_baseline.pth.tar"
+        source = "warm_start" if self.config.load_model else "scratch"
+        payload = {
+            "anchor_rating": self.config.elo_baseline_rating,
+            "source": source,
+            "checkpoint": "elo_baseline.pth.tar",
+            "weights_sha256": self._sha256(baseline_path) if baseline_path.exists() else None,
+            "donor_run_name": None,
+            "donor_generation": None,
+        }
+        anchor_path.parent.mkdir(parents=True, exist_ok=True)
+        anchor_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        logger.info(
+            "Elo anchor: {} run, rating {} → {}",
+            source,
+            self.config.elo_baseline_rating,
+            anchor_path,
+        )
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        """SHA-256 of a file, read in 1 MiB chunks (checkpoints are large)."""
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
 
     def load_self_play_history_for_resume(self, last_completed_generation: int) -> None:
         """Refill the rolling replay buffer to resume training at ``last + 1``."""
@@ -464,113 +565,25 @@ class Coach:
     def _evaluate_strength_vs_baselines(self, generation: int) -> None:
         """Play the new network this gen against fixed baselines, log results.
 
-        Two baselines:
+        - **Perfect-play oracle** (only when the game has one and
+          ``minimax_games_per_gen > 0``): draw rate rising to 1.0 with loss
+          rate falling to 0 means the model has internalised optimal play.
+        - **Symmetry diagnostic** (when ``symmetry_diagnostic_positions > 0``).
 
-        1. **Elo vs gen-0** (always, when ``elo_games_per_gen > 0``): the
-           frozen random-init network from training start. Score rate +
-           Elo diff are computed via :func:`alphablokus.evaluation.elo.compute_elo`
-           and logged via :meth:`MetricsCollector.log_elo`.
-        2. **Perfect-play oracle** (only when the game has one and
-           ``minimax_games_per_gen > 0``): draw rate rising to 1.0 with loss
-           rate falling to 0 means the model has internalised optimal play.
+        The old per-generation Elo-vs-frozen-gen-0 eval was removed here: it
+        saturated once the net ≫ gen-0 and cost extra games each generation. The
+        live strength signal is now the rolling arena-derived Elo (recorded in
+        ``_record_rolling_elo`` from the accept/reject arena, zero extra games);
+        the rigorous non-saturating curve is the end-of-run pool tournament.
 
-        Both arenas use the same MCTS sim count as the regular accept/reject
-        arena, for consistent comparison. The new network's MCTS tree is
-        reset between games via the :class:`NetworkPlayer.startGame` hook.
+        The oracle arena uses the same MCTS sim count as the accept/reject
+        arena. The new network's MCTS tree is reset between games via the
+        :class:`NetworkPlayer.startGame` hook.
         """
-        if self.elo_baseline_net is not None and self.config.elo_games_per_gen > 0:
-            self._evaluate_elo_vs_baseline(generation)
         if self._oracle is not None and self.config.minimax_games_per_gen > 0:
             self._evaluate_vs_oracle(generation)
         if self.config.symmetry_diagnostic_positions > 0:
             self._evaluate_symmetry_diagnostic(generation)
-
-    def _evaluate_elo_vs_baseline(self, generation: int) -> None:
-        assert self.elo_baseline_net is not None
-        n = self.config.elo_games_per_gen
-        baseline_rating = self.config.elo_baseline_rating
-        logger.info(f"Evaluating Elo vs frozen gen-0 baseline ({n} games) ...")
-        elo_start = time.perf_counter()
-
-        if self.config.num_parallel_workers > 1:
-            wins, losses, draws = self._run_elo_parallel(generation, n)
-        else:
-            wins, losses, draws = self._run_elo_serial(n)
-
-        elo_diff, score_rate = compute_elo(wins, losses, draws)
-        absolute = baseline_rating + elo_diff
-        elapsed = time.perf_counter() - elo_start
-        logger.info(
-            "Gen {} Elo: {:.0f} ({:+.0f} vs baseline) — W{} L{} D{}, score rate {:.3f}, {:.1f}s",
-            generation,
-            absolute,
-            elo_diff,
-            wins,
-            losses,
-            draws,
-            score_rate,
-            elapsed,
-        )
-        self.metrics.log_elo(
-            generation=generation,
-            elo_diff=elo_diff,
-            baseline_rating=baseline_rating,
-            score_rate=score_rate,
-            wins=wins,
-            losses=losses,
-            draws=draws,
-            games=wins + losses + draws,
-        )
-
-    def _run_elo_serial(self, n: int) -> tuple[int, int, int]:
-        """Sequential Elo loop. Returns ``(new_wins, baseline_wins, draws)``."""
-        assert self.elo_baseline_net is not None
-        new_player = NetworkPlayer(
-            game=self.game,
-            nnet=self.nnet,
-            mcts_config=self.config.mcts_config,
-            temp=0.0,
-        )
-        baseline_player = NetworkPlayer(
-            game=self.game,
-            nnet=self.elo_baseline_net,
-            mcts_config=self.config.mcts_config,
-            temp=0.0,
-        )
-        arena = Arena(new_player, baseline_player, self.game)
-        wins, losses, draws, _ = arena.play_games(n)
-        return wins, losses, draws
-
-    def _run_elo_parallel(self, generation: int, n: int) -> tuple[int, int, int]:
-        """Parallel Elo across the worker pool.
-
-        The baseline checkpoint (``elo_baseline.pth.tar``) is written
-        once in ``Coach.__init__`` and never changes, so workers can
-        load it directly. The new net's weights get a fresh per-gen
-        checkpoint so the right network is being evaluated.
-        Returns ``(new_wins, baseline_wins, draws)``.
-        """
-        from alphablokus.parallel.pool import (
-            PHASE_ELO,
-            run_two_player_games_parallel,
-        )
-
-        new_checkpoint = "parallel_elo_new.pth.tar"
-        self.nnet.save_checkpoint(filename=new_checkpoint)
-
-        a_wins, b_wins, draws, _ = run_two_player_games_parallel(
-            config=self.config,
-            generation=generation,
-            checkpoint_a_path=new_checkpoint,
-            checkpoint_b_path="elo_baseline.pth.tar",
-            num_games=n,
-            num_workers=self.config.num_parallel_workers,
-            phase=PHASE_ELO,
-            record=False,
-            top_k=0,
-            desc="Elo",
-        )
-        return a_wins, b_wins, draws
 
     def _evaluate_vs_oracle(self, generation: int) -> None:
         from alphablokus.evaluation.players import NetworkPlayer
@@ -695,6 +708,51 @@ class Coach:
             staleness_gens=staleness_gens,
             emergent_reuse=emergent_reuse,
         )
+
+    def _record_rolling_elo(
+        self,
+        generation: int,
+        new_wins: int,
+        prev_wins: int,
+        draws: int,
+        accepted: bool,
+    ) -> float:
+        """Derive + log the candidate's rolling Elo, rolling the benchmark on accept.
+
+        ``compute_elo`` returns the candidate's Elo delta vs the incumbent from
+        the arena score (candidate-first orientation, clamped to ``[0.001,
+        0.999]`` so a 100-0 sweep saturates at ~+1200 rather than diverging).
+        The candidate's absolute Elo is ``self._benchmark_elo + delta``. Every
+        generation logs a point; only an accepted generation advances
+        ``self._benchmark_elo`` to the candidate — a rejected generation leaves
+        the benchmark untouched so the next candidate is still measured against
+        the last accepted net. Returns the candidate's Elo (for tests / logging).
+        """
+        elo_delta, score_rate = compute_elo(new_wins, prev_wins, draws)
+        candidate_elo = self._benchmark_elo + elo_delta
+        logger.info(
+            "Gen {} rolling Elo: {:.0f} ({:+.0f} vs incumbent {:.0f}) — score {:.3f}{}",
+            generation,
+            candidate_elo,
+            elo_delta,
+            self._benchmark_elo,
+            score_rate,
+            "" if accepted else " (rejected — benchmark held)",
+        )
+        self.metrics.log_rolling_elo(
+            generation=generation,
+            rolling_elo=candidate_elo,
+            incumbent_elo=self._benchmark_elo,
+            elo_delta=elo_delta,
+            score_rate=score_rate,
+            wins=new_wins,
+            losses=prev_wins,
+            draws=draws,
+            accepted=accepted,
+        )
+        if accepted:
+            self._benchmark_elo = candidate_elo
+        return candidate_elo
 
     def _should_accept_new_network(
         self,

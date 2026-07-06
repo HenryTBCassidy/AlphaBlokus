@@ -4,10 +4,10 @@
 
 Evaluation for AlphaBlokus operates at two levels:
 
-1. **Training diagnostics** — Is the network actually learning? Loss curves, policy accuracy, value calibration, Elo vs a frozen baseline, a minimax oracle (TTT), a symmetry diagnostic, and arena results. Cheap signals computed every generation. **These are implemented.**
+1. **Training diagnostics** — Is the network actually learning? Loss curves, policy accuracy, value calibration, rolling arena-derived Elo, a minimax oracle (TTT), a symmetry diagnostic, and arena results. Cheap signals computed every generation. **These are implemented.**
 2. **Pentobi benchmarking** — How strong is the network in absolute terms? Win rates against Pentobi's 9 difficulty levels, composite scores, and the headline "Pentobi Level" metric. Expensive but meaningful, run periodically. **This is a plan — the Pentobi adapter is not built yet (see [06-INTERFACES.md](06-INTERFACES.md)).**
 
-AlphaZero (Silver et al., 2017) used Elo from self-play arena results as a continuous training health monitor, but grounded its headline strength claims in external matches against Stockfish and Elmo. We follow the same philosophy: internal Elo (vs a frozen gen-0 baseline) tracks training progress; Pentobi results will measure real strength once the adapter exists.
+AlphaZero (Silver et al., 2017) used Elo from self-play arena results as a continuous training health monitor, but grounded its headline strength claims in external matches against Stockfish and Elmo. We follow the same philosophy: internal Elo (live rolling arena-derived + end-of-run pooled BayesElo) tracks training progress; Pentobi results will measure real strength once the adapter exists.
 
 ---
 
@@ -79,45 +79,36 @@ Track per generation:
 - 100% win rate for new network → generations too far apart in strength, reduce training epochs
 - ~50% win rate → network not improving meaningfully per generation
 
-### Elo vs a frozen gen-0 baseline
+### Elo: a two-tier scheme
 
-The headline "is it actually getting stronger?" curve. At run start the random-init network is **frozen** and saved as `elo_baseline.pth.tar`. Every generation (when `elo_games_per_gen > 0`, default 50) the *current* network plays that fixed anchor head-to-head, noise-free, and the result is converted to an Elo difference:
+Strength is tracked at two tiers — a cheap live signal streamed every generation, and a rigorous curve computed once at end-of-run. This mirrors the philosophy constraint: per-generation metrics stream live; anything needing multiple generations runs in the end-of-run step.
+
+**Tier 1 — rolling arena-derived Elo (live, per-generation).** The accept/reject arena *already* plays the candidate against the current incumbent, and on acceptance the candidate *becomes* the incumbent — so the incumbent is a rolling benchmark. Each generation the candidate's Elo is derived from that same arena score (zero extra games):
 
 ```
-score_rate = (wins + 0.5·draws) / games            # clamped to [0.001, 0.999]
-elo_diff   = 400 · log10(score_rate / (1 − score_rate))
-elo_rating = baseline_rating + elo_diff             # baseline_rating default 400
+score_rate    = (wins + 0.5·draws) / games          # clamped to [0.001, 0.999]
+elo_delta     = 400 · log10(score_rate / (1 − score_rate))   # vs the incumbent
+candidate_elo = incumbent_elo + elo_delta
 ```
 
-The crucial property is that the opponent **never moves** — unlike chaining Elo between consecutive generations, every generation is measured against the *same* fixed reference, so the curve is directly comparable across the whole run and isn't distorted by a drifting baseline.
+The starting net is anchored at `elo_baseline_rating` (400). On acceptance the benchmark rolls forward to the candidate; a rejected generation still logs its provisional candidate Elo but leaves the benchmark untouched (so the next candidate is measured against the same incumbent). Because each generation is rated against an opponent of *comparable* strength — not a fixed weak anchor — the curve **never saturates** at the ±1200 clamp the way the retired frozen-gen-0 metric did. Its cost is that it's a *chained* estimate: drift accumulates and the high-score steps are noisy on ~100 games. That's exactly what the end-of-run pooled fit corrects. On `--resume` the benchmark is reconstructed from the last *accepted* net's logged Elo, so the chain continues seamlessly. Reuses `num_arena_matches` as its sample size, so very low arena counts make it noisier (100 is comfortable, ≤40 is coarse).
 
-| Parameter | Value | Rationale |
-|-----------|-------|-----------|
-| Baseline (anchor) rating | 400 (`elo_baseline_rating`) | Display anchor for the random net. Above 0 so a gen that briefly learns something worse-than-random can dip without going negative; low enough to read as "weak". A converged model has room to climb to ~800–1200+ |
-| Games per generation | 50 (`elo_games_per_gen`) | Cheap; 0 disables Elo entirely |
-| Draws | 0.5 | Standard Elo draw handling, baked into `score_rate` |
+> **Retired:** the old per-generation "Elo vs a frozen gen-0 net" eval (`elo_games_per_gen`) was removed. It saturated once the net ≫ gen-0 (bimodal noise) and cost extra games each generation. The gen-0 net is *still* frozen to `elo_baseline.pth.tar` at run start — but only as the pool tournament's anchor (Tier 2), no longer played per generation.
 
-**Important caveat:** this is a *relative* measure with an arbitrary anchor. The numbers are not comparable to chess Elo, Pentobi Elo, or any external system — an Elo of 1200 here means only "≈800 points stronger than the random gen-0 net." Its job is tracking progress; if the curve flattens for many generations, something is wrong.
+**Cross-run comparability.** The anchor (Elo = `elo_baseline_rating`) is run-specific, so `Nets/elo_anchor.json` records what it is: `scratch` (random-init) or `warm_start` (a donor net, with the weights' SHA-256). To splice this run's rolling curve onto another run's, match the donor hash to a checkpoint whose pooled Elo is known.
 
-**It saturates.** The `score_rate` clamp to `[0.001, 0.999]` caps `elo_diff` at `±400·log10(0.999/0.001) ≈ ±1200`. Once the current net beats gen-0 ~100% of the time, the number pins at that ceiling and can no longer separate gen 41 from gen 43 — the curve flatlines even while the net keeps improving. This makes vs-gen-0 an **early-training-only** signal. The pool BayesElo curve below is the canonical strength metric; read that once training is past the point where it beats gen-0 consistently.
-
-**Expected trajectory:**
-- Generations 1-10: Rapid Elo gain (learning basic moves)
-- Generations 10-30: Steady improvement (learning piece interactions)
-- Generations 30-50+: Diminishing returns — and the vs-gen-0 curve saturates; switch to pool Elo
-
-### Pool BayesElo tournament (the canonical strength curve)
+**Tier 2 — pool BayesElo tournament (the canonical strength curve).**
 
 This is how DeepMind actually measured strength: not against one fixed anchor, but from games *among a pool* of checkpoints, with one consistent rating per player fit by **BayesElo** (a Bradley–Terry maximum-likelihood fit). Because the comparison is relative to *nearby* checkpoints rather than a fixed weak anchor, the curve keeps rising until genuine convergence — it never saturates.
 
-Run it post-hoc on any finished run's saved checkpoints (no retraining):
+It runs **automatically at end-of-run** when `TournamentConfig.run_at_end` is set (enabled in cloud/production configs), so the report ships with the rigorous curve. It can also be run post-hoc on any finished run's saved checkpoints (no retraining):
 
 ```
 uv run python -m scripts.tournament_elo --config <run.json>
 uv run python -m scripts.tournament_elo --config <run.json> --dry-run   # schedule + game count only
 ```
 
-The tool enumerates `Nets/accepted_<N>.pth.tar` (plus the gen-0 `elo_baseline.pth.tar` anchor), plays a **sparse but connected** round-robin (`TournamentConfig.back_ref_offsets`, exponentially spaced so the comparison graph stays connected at O(K·log K) pairings, not O(K²)), fits BayesElo (`evaluation/rating.py`), and writes `Tournament/tournament_ratings.parquet` + `tournament_raw.json`. The report renders the rising pool-Elo curve above the (saturating) vs-gen-0 chart. The gen-0 checkpoint is pinned at `anchor_rating` so the scale is comparable within a run; cross-run comparability still needs a shared external anchor (e.g. Pentobi). Full methodology and the DeepMind lineage: [`research/pool-elo-methodology.md`](research/pool-elo-methodology.md).
+The tool enumerates `Nets/accepted_<N>.pth.tar` (plus the gen-0 `elo_baseline.pth.tar` anchor), plays a **sparse but connected** round-robin (`TournamentConfig.back_ref_offsets`, exponentially spaced so the comparison graph stays connected at O(K·log K) pairings, not O(K²)) at a deliberately low `TournamentConfig.num_mcts_sims` (ranking is robust to weak play — keeps a full run to ~30–60 min), fits BayesElo (`evaluation/rating.py`), and writes `Tournament/tournament_ratings.parquet` + `tournament_raw.json`. The report renders the rising pool-Elo curve alongside the live rolling-Elo chart. The gen-0 checkpoint is pinned at `anchor_rating` so the scale is comparable within a run; cross-run comparability still needs a shared external anchor (e.g. Pentobi). Full methodology and the DeepMind lineage: [`research/pool-elo-methodology.md`](research/pool-elo-methodology.md).
 
 ### Minimax oracle (Tic-Tac-Toe only)
 
@@ -364,7 +355,7 @@ Overlay three lines on a single chart, all against generation number:
 
 ### Training Diagnostics (secondary plots)
 
-1. **Elo curve** — Elo vs the frozen gen-0 baseline, per generation. A sanity check that training is progressing between Pentobi evaluations
+1. **Elo curves** — the live rolling arena-derived Elo per generation, plus the end-of-run pooled BayesElo curve. A sanity check that training is progressing between Pentobi evaluations
 2. **Loss curves** — π_loss and v_loss vs generation, with per-epoch detail on hover
 3. **Arena results** — Stacked bar chart of W/L/D per generation
 4. **Timing breakdown** — Stacked area chart of time spent in each phase
@@ -382,7 +373,7 @@ The original AlphaZero paper provides useful reference points for expected train
 | Training games to converge | ~44M | Much fewer (simpler game) |
 | Loss convergence | ~200k training steps | Faster (smaller state space than Go/Chess) |
 | Policy accuracy plateau | ~55% top-1 | Higher expected (fewer "equally good" moves) |
-| Elo-vs-baseline trajectory | Monotonically increasing | Same expected |
+| Elo trajectory | Monotonically increasing | Same expected (rolling + pooled Elo) |
 
 Key differences from AlphaZero's original setup:
 - **Far less compute** — AlphaZero used thousands of TPUs; we use a single consumer GPU, so far fewer games and simulations per move
@@ -402,7 +393,7 @@ Key differences from AlphaZero's original setup:
 - [ ] Arena accepts at least one new network in the first 10 generations
 
 ### Phase 3 (Training) — "It Learns"
-- [ ] Monotonically increasing Elo-vs-baseline curve (with noise)
+- [ ] Monotonically increasing rolling-Elo curve (with noise); rising pooled-Elo curve
 - [ ] Pentobi Level >= 1 within 20 generations
 - [ ] Pentobi Level >= 5 within 50 generations
 - [ ] Training throughput > 10 games/hour

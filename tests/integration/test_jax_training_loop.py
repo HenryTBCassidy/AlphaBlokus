@@ -55,7 +55,6 @@ def test_one_generation_blokus_jax_backend(tmp_path: Path) -> None:
         ),
         selfplay_backend="jax",
         jax_selfplay=JaxSelfPlayConfig(batch_size=2, top_k=32, dtype="float32", wave_plies=16),
-        elo_games_per_gen=0,
         minimax_games_per_gen=0,
         symmetry_diagnostic_positions=0,
         use_optimised_movegen=True,

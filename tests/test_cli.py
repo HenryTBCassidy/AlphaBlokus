@@ -33,7 +33,6 @@ def _write_tictactoe_config(tmp_path: Path) -> Path:
         "replay_buffer_games": 20,
         "root_directory": str(tmp_path),
         "load_model": False,
-        "elo_games_per_gen": 0,
         "minimax_games_per_gen": 0,
         "symmetry_diagnostic_positions": 0,
         "mcts_config": {"num_mcts_sims": 2, "cpuct": 1.0},

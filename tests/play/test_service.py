@@ -39,7 +39,6 @@ def service() -> PlayService:
             num_filters=8,
             num_residual_blocks=1,
         ),
-        elo_games_per_gen=0,
         minimax_games_per_gen=0,
         symmetry_diagnostic_positions=0,
         seed=42,

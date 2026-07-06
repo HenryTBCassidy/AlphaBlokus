@@ -133,6 +133,22 @@ def main() -> None:
     # (the same data --report-only reads). See docs/plans/archive/harden-long-runs.md H2.
     try:
         c.learn(start_generation=start_generation)
+        # Normal completion only (a crash skips this): optionally play the
+        # post-hoc pool BayesElo tournament so the report includes the rigorous,
+        # non-saturating strength curve without a manual step. Crash-safe — a
+        # tournament failure must never lose the run's training artifacts (all
+        # already on disk), so log and fall through to the report render.
+        if args.tournament.run_at_end:
+            try:
+                from alphablokus.evaluation.tournament_run import run_tournament
+
+                logger.info("Running end-of-run pool BayesElo tournament...")
+                run_tournament(args)
+            except Exception:
+                logger.exception(
+                    "End-of-run pool tournament failed; training artifacts intact. "
+                    "Run it manually with: python -m scripts.tournament_elo --config <cfg>.",
+                )
     finally:
         # A finished (or crashed) run must not be sunk by report rendering (R7):
         # all data is already on disk, so log and continue — regenerate later

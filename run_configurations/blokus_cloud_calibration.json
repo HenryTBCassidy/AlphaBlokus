@@ -12,7 +12,6 @@
   "num_parallel_workers": 4,
   "worker_cuda": true,
   "use_optimised_movegen": true,
-  "elo_games_per_gen": 10,
   "minimax_games_per_gen": 0,
   "symmetry_diagnostic_positions": 0,
   "num_arena_matches": 10,
