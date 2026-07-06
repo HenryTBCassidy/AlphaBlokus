@@ -24,7 +24,7 @@ Companion docs: [`docs/guides/PLAN-FORMAT.md`](../guides/PLAN-FORMAT.md), [`docs
 | S6 | Report chart: render the rolling non-saturating Elo | 1 h | High | `reporting/charts.py` | ✅ |
 | S7 | Config cleanup: retire `elo_games_per_gen`, keep anchor rating | 30 min | Medium | `config.py`, `run_configurations/*.json` | ✅ |
 | S8 | Auto-run the pooled tournament at end-of-run | 1 h | Medium | `cli.py`, `training/coach.py` | ✅ |
-| S9 | Tests: chain, resume reconstruction, clamp, reject-no-advance | 1.5 h | High | `tests/training/`, `tests/evaluation/` | |
+| S9 | Tests: chain, resume reconstruction, clamp, reject-no-advance | 1.5 h | High | `tests/training/`, `tests/evaluation/` | ✅ |
 | S10 | Docs: EVALUATION + methodology + CLAUDE gotchas | 45 min | Medium | `docs/05-EVALUATION.md`, `docs/research/pool-elo-methodology.md`, `CLAUDE.md` | |
 
 Execution order matters: S1→S2→S3 build the mechanism, S4 removes the old path (do after S1 so the report never has zero Elo data), S5/S6 surface it, S7 cleans config, S8 is independent, S9/S10 finalise.
