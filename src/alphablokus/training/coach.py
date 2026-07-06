@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import time
@@ -30,6 +31,8 @@ from alphablokus.training.eval_set import build_or_load_eval_set
 from alphablokus.training.replay_buffer import ReplayBuffer
 
 if TYPE_CHECKING:
+    from pathlib import Path
+
     from alphablokus.config import RunConfig
     from alphablokus.search.stats import MCTSEpisodeStats
     from alphablokus.selfplay.episode import ProcessedExample
@@ -204,6 +207,11 @@ class Coach:
         self._benchmark_elo: float = (
             reconstruct_benchmark_elo(self.config) if self.resume else float(self.config.elo_baseline_rating)
         )
+
+        # Anchor provenance: what "Elo = elo_baseline_rating" means for this run
+        # (scratch vs warm-start donor). Recorded once so cross-run curves can be
+        # spliced via the donor's weight hash (S3).
+        self._write_anchor_provenance()
 
     def learn(self, start_generation: int = 1) -> None:
         """Run the generation loop, finalising metrics/W&B even on crash.
@@ -411,6 +419,50 @@ class Coach:
         # itself) is now on local disk — mirror it. Best-effort by design:
         # object-storage trouble never kills training.
         sync_up_guarded(self.object_store, self.config.run_directory, f"generation {generation}")
+
+    def _write_anchor_provenance(self) -> None:
+        """Record what the rolling-Elo anchor (Elo = ``elo_baseline_rating``) is.
+
+        The anchor is run-specific: for a scratch run it's the random-init net;
+        for a warm-start run (``load_model``) it's the donor net loaded into
+        ``elo_baseline.pth.tar``. Writing the donor weights' SHA-256 lets a
+        reader splice this run's rolling curve onto the donor's pooled Elo (if
+        the donor checkpoint's rating is known) — the only way to compare
+        chained curves across runs. Donor ``run_name``/``generation`` aren't
+        knowable from a weights-only warm start, so they're left null; the hash
+        is the cross-run key. Left untouched on resume (written by the original
+        run) so the recorded provenance stays stable.
+        """
+        anchor_path = self.config.net_directory / "elo_anchor.json"
+        if self.resume and anchor_path.exists():
+            return
+        baseline_path = self.config.net_directory / "elo_baseline.pth.tar"
+        source = "warm_start" if self.config.load_model else "scratch"
+        payload = {
+            "anchor_rating": self.config.elo_baseline_rating,
+            "source": source,
+            "checkpoint": "elo_baseline.pth.tar",
+            "weights_sha256": self._sha256(baseline_path) if baseline_path.exists() else None,
+            "donor_run_name": None,
+            "donor_generation": None,
+        }
+        anchor_path.parent.mkdir(parents=True, exist_ok=True)
+        anchor_path.write_text(json.dumps(payload, indent=2), encoding="utf-8")
+        logger.info(
+            "Elo anchor: {} run, rating {} → {}",
+            source,
+            self.config.elo_baseline_rating,
+            anchor_path,
+        )
+
+    @staticmethod
+    def _sha256(path: Path) -> str:
+        """SHA-256 of a file, read in 1 MiB chunks (checkpoints are large)."""
+        digest = hashlib.sha256()
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(1 << 20), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
 
     def load_self_play_history_for_resume(self, last_completed_generation: int) -> None:
         """Refill the rolling replay buffer to resume training at ``last + 1``."""
