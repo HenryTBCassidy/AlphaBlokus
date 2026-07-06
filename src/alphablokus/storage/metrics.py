@@ -142,6 +142,7 @@ class MetricsCollector:
     _policy_accuracy_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _value_calibration_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _elo_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _rolling_elo_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _minimax_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _arena_replay_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _symmetry_diagnostic_records: list[dict] = field(default_factory=list, init=False, repr=False)
@@ -742,6 +743,57 @@ class MetricsCollector:
             }
         )
 
+    def log_rolling_elo(
+        self,
+        generation: int,
+        rolling_elo: float,
+        incumbent_elo: float,
+        elo_delta: float,
+        score_rate: float,
+        wins: int,
+        losses: int,
+        draws: int,
+        accepted: bool,
+    ) -> None:
+        """Record the candidate's rolling arena-derived Elo for a generation.
+
+        The arena already played candidate-vs-incumbent, so the candidate's
+        absolute Elo is ``incumbent_elo + 400·log10(s/(1−s))`` where ``s`` is the
+        candidate's score rate (:func:`alphablokus.evaluation.elo.compute_elo`,
+        clamped to ``[0.001, 0.999]``). Unlike the retired frozen-gen-0 metric
+        this never saturates, because on acceptance the incumbent rolls forward
+        to the candidate — so each generation is rated against an opponent of
+        comparable strength.
+
+        ``accepted`` is stored alongside every point so the report can split the
+        accepted line from the rejected scatter without joining ArenaData — a
+        rejected generation still logs its provisional candidate Elo but does not
+        advance the benchmark. Logged for *every* generation.
+        """
+        self._rolling_elo_records.append(
+            {
+                "generation": generation,
+                "rolling_elo": rolling_elo,
+                "incumbent_elo": incumbent_elo,
+                "elo_delta": elo_delta,
+                "score_rate": score_rate,
+                "wins": wins,
+                "losses": losses,
+                "draws": draws,
+                "accepted": accepted,
+            }
+        )
+        self._publish(
+            {
+                "elo/rolling": rolling_elo,
+                "elo/incumbent": incumbent_elo,
+                "elo/delta_vs_incumbent": elo_delta,
+                "elo/score_rate": score_rate,
+                "elo/accepted": int(accepted),
+                "generation": generation,
+            }
+        )
+
     def log_arena_game(
         self,
         generation: int,
@@ -1083,6 +1135,16 @@ class MetricsCollector:
             )
             count += len(self._elo_records)
             self._elo_records.clear()
+
+        if self._rolling_elo_records:
+            self._write_partition(
+                pd.DataFrame(self._rolling_elo_records),
+                config.rolling_elo_directory,
+                generation,
+                "rolling.parquet",
+            )
+            count += len(self._rolling_elo_records)
+            self._rolling_elo_records.clear()
 
         if self._minimax_records:
             self._write_partition(

@@ -600,6 +600,19 @@ class RunConfig:
         return self.run_directory / "EloRatings"
 
     @property
+    def rolling_elo_directory(self) -> Path:
+        """Directory for the per-generation rolling arena-derived Elo.
+
+        Holds the non-saturating live strength metric (candidate rated against
+        the current arena incumbent, benchmark rolled forward on acceptance).
+        Written by :meth:`MetricsCollector.log_rolling_elo`; rendered as the
+        report's rolling-Elo curve. Absent for runs predating this metric, in
+        which case the report omits the section. See
+        ``docs/plans/archive/arena-derived-elo.md``.
+        """
+        return self.run_directory / "RollingElo"
+
+    @property
     def tournament_directory(self) -> Path:
         """Directory for post-hoc pool BayesElo tournament results.
 

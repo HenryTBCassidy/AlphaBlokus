@@ -159,6 +159,15 @@ class Coach:
         else:
             self.elo_baseline_net = None
 
+        # Rolling arena-derived Elo (docs/plans/archive/arena-derived-elo.md).
+        # The arena already plays candidate-vs-incumbent, so the incumbent is a
+        # rolling benchmark: the candidate's Elo is ``_benchmark_elo +
+        # compute_elo(arena_result)``, and on acceptance the benchmark rolls
+        # forward to the candidate. Anchored at ``elo_baseline_rating``; this is
+        # the non-saturating live strength curve that replaced the frozen-gen-0
+        # eval.
+        self._benchmark_elo: float = float(self.config.elo_baseline_rating)
+
     def learn(self, start_generation: int = 1) -> None:
         """Run the generation loop, finalising metrics/W&B even on crash.
 
@@ -299,6 +308,12 @@ class Coach:
                 # must advance once per generation regardless of accept/reject,
                 # so a rejection streak no longer freezes the schedule (L3).
                 self.nnet.load_checkpoint(filename="temp.pth.tar", restore_lr_schedule=False)
+
+            # Rolling arena-derived Elo: derive the candidate's Elo from the
+            # arena score it just played against the incumbent, and roll the
+            # benchmark forward on acceptance. Zero extra games — reuses the
+            # arena result above.
+            self._record_rolling_elo(generation, nwins, pwins, draws, accepted)
 
             # PHASE 4: Strength evaluation against fixed baselines.
             # The new network this gen is measured against the frozen gen-0
@@ -695,6 +710,51 @@ class Coach:
             staleness_gens=staleness_gens,
             emergent_reuse=emergent_reuse,
         )
+
+    def _record_rolling_elo(
+        self,
+        generation: int,
+        new_wins: int,
+        prev_wins: int,
+        draws: int,
+        accepted: bool,
+    ) -> float:
+        """Derive + log the candidate's rolling Elo, rolling the benchmark on accept.
+
+        ``compute_elo`` returns the candidate's Elo delta vs the incumbent from
+        the arena score (candidate-first orientation, clamped to ``[0.001,
+        0.999]`` so a 100-0 sweep saturates at ~+1200 rather than diverging).
+        The candidate's absolute Elo is ``self._benchmark_elo + delta``. Every
+        generation logs a point; only an accepted generation advances
+        ``self._benchmark_elo`` to the candidate — a rejected generation leaves
+        the benchmark untouched so the next candidate is still measured against
+        the last accepted net. Returns the candidate's Elo (for tests / logging).
+        """
+        elo_delta, score_rate = compute_elo(new_wins, prev_wins, draws)
+        candidate_elo = self._benchmark_elo + elo_delta
+        logger.info(
+            "Gen {} rolling Elo: {:.0f} ({:+.0f} vs incumbent {:.0f}) — score {:.3f}{}",
+            generation,
+            candidate_elo,
+            elo_delta,
+            self._benchmark_elo,
+            score_rate,
+            "" if accepted else " (rejected — benchmark held)",
+        )
+        self.metrics.log_rolling_elo(
+            generation=generation,
+            rolling_elo=candidate_elo,
+            incumbent_elo=self._benchmark_elo,
+            elo_delta=elo_delta,
+            score_rate=score_rate,
+            wins=new_wins,
+            losses=prev_wins,
+            draws=draws,
+            accepted=accepted,
+        )
+        if accepted:
+            self._benchmark_elo = candidate_elo
+        return candidate_elo
 
     def _should_accept_new_network(
         self,
