@@ -213,6 +213,18 @@ class TournamentConfig:
     # generation). None = use every saved checkpoint.
     max_checkpoints: int | None = None
 
+    # MCTS simulations per move for the tournament games. Deliberately explicit
+    # and low (32) rather than inherited from the heavy training ``mcts_config``:
+    # ranking is robust to weak play, so this keeps a full end-of-run tournament
+    # to ~30–60 min instead of hours. See ``pool-elo-methodology.md``.
+    num_mcts_sims: int = 32
+
+    # Run the pool tournament automatically at end-of-run (normal completion),
+    # so the report includes the rigorous pool-Elo curve without a manual step.
+    # Default False preserves current behaviour (run it by hand via
+    # ``scripts/tournament_elo.py``); enable in cloud/production configs.
+    run_at_end: bool = False
+
 
 @dataclass(frozen=True)
 class NetConfig:
