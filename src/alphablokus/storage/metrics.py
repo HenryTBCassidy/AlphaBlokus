@@ -141,7 +141,6 @@ class MetricsCollector:
     _training_entropy_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _policy_accuracy_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _value_calibration_records: list[dict] = field(default_factory=list, init=False, repr=False)
-    _elo_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _rolling_elo_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _minimax_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _arena_replay_records: list[dict] = field(default_factory=list, init=False, repr=False)
@@ -693,56 +692,6 @@ class MetricsCollector:
                 }
             )
 
-    def log_elo(
-        self,
-        generation: int,
-        elo_diff: float,
-        baseline_rating: int,
-        score_rate: float,
-        wins: int,
-        losses: int,
-        draws: int,
-        games: int,
-    ) -> None:
-        """Record the new network's Elo rating vs the frozen gen-0 baseline.
-
-        Math: ``score_rate = (wins + 0.5·draws) / games``;
-        ``elo_diff = 400 · log10(score_rate / (1 − score_rate))`` with score_rate
-        clamped to ``[0.001, 0.999]``. ``baseline_rating`` is the *display
-        anchor* for the random-init network (default 1000 — set in
-        ``RunConfig.elo_baseline_rating``). Absolute rating = baseline + diff,
-        which is what AlphaZero-style papers actually plot.
-
-        Logged unconditionally for *every* generation, including ones where
-        the new network was rejected in arena.
-        """
-        elo_absolute = baseline_rating + elo_diff
-        self._elo_records.append(
-            {
-                "generation": generation,
-                "elo_rating": elo_absolute,
-                "elo_diff": elo_diff,
-                "baseline_rating": baseline_rating,
-                "score_rate": score_rate,
-                "wins": wins,
-                "losses": losses,
-                "draws": draws,
-                "games": games,
-            }
-        )
-        self._publish(
-            {
-                "elo/rating": elo_absolute,
-                "elo/diff_vs_baseline": elo_diff,
-                "elo/baseline_rating": baseline_rating,
-                "elo/score_rate": score_rate,
-                "elo/wins": wins,
-                "elo/losses": losses,
-                "elo/draws": draws,
-                "generation": generation,
-            }
-        )
-
     def log_rolling_elo(
         self,
         generation: int,
@@ -1125,16 +1074,6 @@ class MetricsCollector:
             )
             count += len(self._value_calibration_records)
             self._value_calibration_records.clear()
-
-        if self._elo_records:
-            self._write_partition(
-                pd.DataFrame(self._elo_records),
-                config.elo_ratings_directory,
-                generation,
-                "elo.parquet",
-            )
-            count += len(self._elo_records)
-            self._elo_records.clear()
 
         if self._rolling_elo_records:
             self._write_partition(
