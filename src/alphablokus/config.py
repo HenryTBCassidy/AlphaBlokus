@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Literal
 
 from dataclass_wizard import fromdict
+from loguru import logger
 
 # Maps a game id (RunConfig.game) to the folder runs are grouped under inside
 # ``<root>/runs/``. Keeps the output root tidy (temp/runs/blokus/…,
@@ -344,7 +345,10 @@ class RunConfig:
     num_eps: int  # Number of complete self-play games per generation (fresh games F)
     temp_threshold: int  # Move number after which temperature is set to ~0
     update_threshold: float  # Win rate required for new network to be accepted (0 to 1)
-    num_arena_matches: int  # Number of evaluation games between old/new networks
+    # Number of evaluation games between old/new networks. Doubles as the
+    # rolling arena-derived Elo sample size (that metric reuses these games), so
+    # very low values make the Elo noisier — 100 is comfortable, ≤40 is coarse.
+    num_arena_matches: int
 
     # Model and file management
     root_directory: Path  # Root directory for all output files
@@ -392,13 +396,10 @@ class RunConfig:
     # local filesystem only. See ``ObjectStoreConfig``.
     object_store: ObjectStoreConfig | None = None
 
-    # Elo evaluation: number of games per generation to play vs the frozen
-    # gen-0 baseline. 0 disables Elo tracking entirely. The default of 50 is
-    # always-on by intention — Elo vs gen-0 is the headline "is the model
-    # actually getting stronger?" curve for AlphaZero-style work.
-    elo_games_per_gen: int = 50
-
-    # Anchor rating shown for the gen-0 baseline. Display-only — the
+    # Starting anchor for the rolling arena-derived Elo curve: the run's
+    # gen-0 net is pinned here and every later generation's Elo is chained off
+    # it (see ``docs/plans/archive/arena-derived-elo.md``). Also the display
+    # anchor for the gen-0 checkpoint in the pool tournament. Display-only — the
     # underlying Elo difference math is unchanged. There's no universal
     # convention here:
     #
@@ -660,6 +661,15 @@ def load_args(config_path: str | Path) -> RunConfig:
     config_path = Path(config_path)
     with open(config_path) as f:
         args_json = json.load(f)
+
+    if "elo_games_per_gen" in args_json:
+        logger.warning(
+            "Config {} sets 'elo_games_per_gen', which was retired with the "
+            "per-generation gen-0 Elo eval (replaced by the rolling arena-derived "
+            "Elo — docs/plans/archive/arena-derived-elo.md). The key is ignored.",
+            config_path,
+        )
+        args_json.pop("elo_games_per_gen")
 
     _resolve_net_preset(args_json)
     return fromdict(RunConfig, args_json)

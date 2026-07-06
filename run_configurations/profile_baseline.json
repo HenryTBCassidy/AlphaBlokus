@@ -10,7 +10,6 @@
   "num_arena_matches": 10,
   "root_directory": "./temp/",
   "load_model": false,
-  "elo_games_per_gen": 10,
   "minimax_games_per_gen": 0,
   "symmetry_diagnostic_positions": 0,
   "mcts_config": {

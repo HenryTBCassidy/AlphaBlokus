@@ -22,7 +22,7 @@ Companion docs: [`docs/guides/PLAN-FORMAT.md`](../guides/PLAN-FORMAT.md), [`docs
 | S4 | Delete the gen-0 per-gen Elo eval (keep the anchor checkpoint) | 1 h | High | `training/coach.py`, `config.py` | ✅ |
 | S5 | Metrics schema: rolling-Elo fields + `accepted` | 45 min | High | `storage/metrics.py` | ✅ |
 | S6 | Report chart: render the rolling non-saturating Elo | 1 h | High | `reporting/charts.py` | ✅ |
-| S7 | Config cleanup: retire `elo_games_per_gen`, keep anchor rating | 30 min | Medium | `config.py`, `run_configurations/*.json` | |
+| S7 | Config cleanup: retire `elo_games_per_gen`, keep anchor rating | 30 min | Medium | `config.py`, `run_configurations/*.json` | ✅ |
 | S8 | Auto-run the pooled tournament at end-of-run | 1 h | Medium | `cli.py`, `training/coach.py` | |
 | S9 | Tests: chain, resume reconstruction, clamp, reject-no-advance | 1.5 h | High | `tests/training/`, `tests/evaluation/` | |
 | S10 | Docs: EVALUATION + methodology + CLAUDE gotchas | 45 min | Medium | `docs/05-EVALUATION.md`, `docs/research/pool-elo-methodology.md`, `CLAUDE.md` | |

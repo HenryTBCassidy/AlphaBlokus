@@ -1,4 +1,4 @@
-"""Wall-clock benchmark for self-play, arena, and Elo phases.
+"""Wall-clock benchmark for the self-play and arena phases.
 
 This is the "before/after" tool for performance optimisations in
 ``docs/plans/full-cycle-optimisation.md``. It runs the three game-playing
@@ -403,7 +403,7 @@ def _build_estimator_table(
 
     Each scale row has fields:
         - name (label)
-        - num_eps, num_arena, elo_games, num_gens
+        - num_eps, num_arena, num_gens
     The cost model: per-phase mean per-game wall-clock × game count × num_gens,
     plus a flat per-gen training overhead (taken from
     ``docs/08-TRAINING-ESTIMATES.md`` — ~3 min/gen at 64f×4b).
@@ -416,7 +416,6 @@ def _build_estimator_table(
 
     sp_mean = mean_per_game(phases["Self-Play"])
     arena_mean = mean_per_game(phases["Arena"])
-    elo_mean = mean_per_game(phases["Elo"])
     training_overhead_s = 180.0  # ~3 min — replace once we measure this in
     # the benchmark too if it matters
 
@@ -424,18 +423,14 @@ def _build_estimator_table(
     for scale in extrapolate_scales:
         sp_s = sp_mean * scale["num_eps"] * scale["num_gens"]
         ar_s = arena_mean * scale["num_arena"] * scale["num_gens"]
-        elo_s = elo_mean * scale["elo_games"] * scale["num_gens"]
         train_s = training_overhead_s * scale["num_gens"]
-        total_s = sp_s + ar_s + elo_s + train_s
+        total_s = sp_s + ar_s + train_s
         rows.append(
             {
                 "Scale": scale["name"],
-                "Gens × Eps × Arena × Elo": (
-                    f"{scale['num_gens']} × {scale['num_eps']} × {scale['num_arena']} × {scale['elo_games']}"
-                ),
+                "Gens × Eps × Arena": (f"{scale['num_gens']} × {scale['num_eps']} × {scale['num_arena']}"),
                 "Self-play": _fmt_duration(sp_s),
                 "Arena": _fmt_duration(ar_s),
-                "Elo": _fmt_duration(elo_s),
                 "Training (est.)": _fmt_duration(train_s),
                 "Total": _fmt_duration(total_s),
             }
@@ -451,7 +446,7 @@ def _build_estimator_table(
         out += "<tr>" + "".join(f"<td>{r[h]}</td>" for h in headers) + "</tr>"
     out += "</tbody></table>"
     out += (
-        '<p class="subtitle">Self-play/arena/Elo costs scale linearly with '
+        '<p class="subtitle">Self-play/arena costs scale linearly with '
         "their game counts × number of generations. Training overhead is a "
         "rough 3-min/gen estimate (refresh once F4 work changes it).</p>"
     )
@@ -502,13 +497,12 @@ def _write_parquets(phases: dict[str, PhaseResult], output_dir: Path) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Benchmark self-play / arena / Elo phases")
+    parser = argparse.ArgumentParser(description="Benchmark self-play / arena phases")
     parser.add_argument(
         "--config",
         type=str,
         default="run_configurations/profile_baseline.json",
-        help="Path to a run config JSON. The benchmark uses num_eps, "
-        "num_arena_matches, elo_games_per_gen, and the MCTS + net configs.",
+        help="Path to a run config JSON. The benchmark uses num_eps, num_arena_matches, and the MCTS + net configs.",
     )
     parser.add_argument(
         "--output-dir",
@@ -565,7 +559,7 @@ def main() -> None:
         np.random.seed(config.seed)
 
     game, nnet = instantiate_game_and_network(config)
-    nnet_opponent = nnet.__class__(game, config)  # second random-init for arena/Elo
+    nnet_opponent = nnet.__class__(game, config)  # second random-init for arena
 
     # Enable the optimised move generator in the main-process game if
     # requested. Workers handle this themselves via
@@ -589,15 +583,6 @@ def main() -> None:
         nnet_b=nnet_opponent,
         num_workers=args.num_workers,
     )
-    phases["Elo"] = _run_two_player_phase(
-        phase_name="Elo",
-        num_games=config.elo_games_per_gen,
-        config=config,
-        game=game,
-        nnet_a=nnet,
-        nnet_b=nnet_opponent,
-        num_workers=args.num_workers,
-    )
     overall_wall = time.perf_counter() - overall_start
 
     _write_parquets(phases, output_dir)
@@ -606,10 +591,10 @@ def main() -> None:
         phases,
         config,
         extrapolate_scales=[
-            {"name": "Sanity (1×5×5×5)", "num_eps": 5, "num_arena": 5, "elo_games": 5, "num_gens": 1},
-            {"name": "blokus_pc_second (5×80×50×20)", "num_eps": 80, "num_arena": 50, "elo_games": 20, "num_gens": 5},
-            {"name": "Long (20×80×50×20)", "num_eps": 80, "num_arena": 50, "elo_games": 20, "num_gens": 20},
-            {"name": "Serious (50×200×100×50)", "num_eps": 200, "num_arena": 100, "elo_games": 50, "num_gens": 50},
+            {"name": "Sanity (1×5×5)", "num_eps": 5, "num_arena": 5, "num_gens": 1},
+            {"name": "blokus_pc_second (5×80×50)", "num_eps": 80, "num_arena": 50, "num_gens": 5},
+            {"name": "Long (20×80×50)", "num_eps": 80, "num_arena": 50, "num_gens": 20},
+            {"name": "Serious (50×200×100)", "num_eps": 200, "num_arena": 100, "num_gens": 50},
         ],
     )
 
