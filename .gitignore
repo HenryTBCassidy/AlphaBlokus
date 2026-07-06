@@ -18,6 +18,8 @@ docs/research/*.html
 *.svg
 *.jpg
 *.jpeg
+# ...except README/docs assets, which ship with the repo
+!docs/assets/*.png
 *.gif
 *.webp
 
