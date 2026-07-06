@@ -7,6 +7,7 @@ from functools import partial
 from typing import TYPE_CHECKING, TypeAlias
 
 import numpy as np
+import pandas as pd
 import torch
 from loguru import logger
 from numpy.typing import NDArray
@@ -53,6 +54,39 @@ def read_progress_marker(config: RunConfig) -> dict | None:
     if not path.exists():
         return None
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def reconstruct_benchmark_elo(config: RunConfig) -> float:
+    """Rolling-Elo benchmark to resume from = the last *accepted* net's Elo.
+
+    Self-healing: reads the persisted rolling-Elo history rather than adding
+    checkpoint state. Returns the ``rolling_elo`` of the highest generation
+    flagged ``accepted`` (that net *is* the current arena incumbent). Falls back
+    to ``config.elo_baseline_rating`` when no history exists yet or nothing has
+    been accepted — matching a fresh run's anchor.
+
+    The parquet only ever holds completed generations, so the last accepted row
+    is the correct benchmark; a resume landing after a rejection streak still
+    picks the last accepted net, not the last logged (rejected) point.
+    """
+    anchor = float(config.elo_baseline_rating)
+    rolling_dir = config.rolling_elo_directory
+    if not rolling_dir.exists():
+        return anchor
+    try:
+        history = pd.read_parquet(rolling_dir)
+    except (FileNotFoundError, ValueError, OSError):
+        return anchor
+    if history.empty or "accepted" not in history.columns:
+        return anchor
+    accepted = history[history["accepted"].astype(bool)]
+    if accepted.empty:
+        logger.info("Resume: no accepted generation yet — rolling Elo benchmark = anchor {:.0f}", anchor)
+        return anchor
+    last = accepted.sort_values("generation").iloc[-1]
+    benchmark = float(last["rolling_elo"])
+    logger.info("Resume: rolling Elo benchmark = {:.0f} (from gen {})", benchmark, int(last["generation"]))
+    return benchmark
 
 
 class Coach:
@@ -165,8 +199,11 @@ class Coach:
         # compute_elo(arena_result)``, and on acceptance the benchmark rolls
         # forward to the candidate. Anchored at ``elo_baseline_rating``; this is
         # the non-saturating live strength curve that replaced the frozen-gen-0
-        # eval.
-        self._benchmark_elo: float = float(self.config.elo_baseline_rating)
+        # eval. On resume, reconstruct it from the persisted history so the
+        # chained estimate continues seamlessly (last accepted net's Elo).
+        self._benchmark_elo: float = (
+            reconstruct_benchmark_elo(self.config) if self.resume else float(self.config.elo_baseline_rating)
+        )
 
     def learn(self, start_generation: int = 1) -> None:
         """Run the generation loop, finalising metrics/W&B even on crash.

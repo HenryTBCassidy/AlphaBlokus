@@ -17,7 +17,7 @@ Companion docs: [`docs/guides/PLAN-FORMAT.md`](../guides/PLAN-FORMAT.md), [`docs
 | # | Item | Effort | Priority | Files | Done |
 |---|------|--------|----------|-------|------|
 | S1 | Compute + roll arena-derived Elo in the Coach | 1.5 h | High | `training/coach.py` | ✅ |
-| S2 | Reconstruct the rolling benchmark on `--resume` | 1 h | High | `training/coach.py` | |
+| S2 | Reconstruct the rolling benchmark on `--resume` | 1 h | High | `training/coach.py` | ✅ |
 | S3 | Record the anchor net's provenance (cross-run splicing) | 45 min | Medium | `training/coach.py`, `storage/metrics.py` | |
 | S4 | Delete the gen-0 per-gen Elo eval (keep the anchor checkpoint) | 1 h | High | `training/coach.py`, `config.py` | |
 | S5 | Metrics schema: rolling-Elo fields + `accepted` | 45 min | High | `storage/metrics.py` | |
