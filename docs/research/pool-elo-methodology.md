@@ -4,8 +4,18 @@
 wins ~100% of those games the number pins at the mathematical ceiling (~±1200 Elo) and can no longer
 tell a strong net from a much stronger one. DeepMind never did this — they computed Elo from games
 *among a pool of checkpoints* and fit one consistent rating per player with **BayesElo**. This project
-now does the same, post-hoc, over the checkpoints a run already saves. Tool: `scripts/tournament_elo.py`;
-estimator: `src/alphablokus/evaluation/rating.py`; schedule: `src/alphablokus/evaluation/tournament.py`.
+now does the same, post-hoc, over the checkpoints a run already saves. Tool: `scripts/tournament_elo.py`
+(logic in `src/alphablokus/evaluation/tournament_run.py`, auto-run at end-of-run via
+`TournamentConfig.run_at_end`); estimator: `src/alphablokus/evaluation/rating.py`; schedule:
+`src/alphablokus/evaluation/tournament.py`.
+
+**Live companion metric.** The pooled fit is the *rigorous* curve and stays the one to read for strength
+claims. Its per-generation companion is the **rolling arena-derived Elo** (`Coach._record_rolling_elo`,
+`docs/plans/archive/arena-derived-elo.md`): it reuses the accept/reject arena games to rate each candidate
+against the current incumbent and rolls the benchmark forward on acceptance — non-saturating, zero extra
+games, streamed live every generation. It replaced the retired vs-gen-0 eval. Because it's a *chained*
+estimate it can drift and is noisy per step; that's precisely what the pooled fit corrects at end-of-run.
+Read the rolling curve for the live trend, the pooled curve for the rating.
 
 ## Why vs-gen-0 saturates
 

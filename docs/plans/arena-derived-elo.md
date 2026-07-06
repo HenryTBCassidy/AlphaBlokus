@@ -25,7 +25,7 @@ Companion docs: [`docs/guides/PLAN-FORMAT.md`](../guides/PLAN-FORMAT.md), [`docs
 | S7 | Config cleanup: retire `elo_games_per_gen`, keep anchor rating | 30 min | Medium | `config.py`, `run_configurations/*.json` | ✅ |
 | S8 | Auto-run the pooled tournament at end-of-run | 1 h | Medium | `cli.py`, `training/coach.py` | ✅ |
 | S9 | Tests: chain, resume reconstruction, clamp, reject-no-advance | 1.5 h | High | `tests/training/`, `tests/evaluation/` | ✅ |
-| S10 | Docs: EVALUATION + methodology + CLAUDE gotchas | 45 min | Medium | `docs/05-EVALUATION.md`, `docs/research/pool-elo-methodology.md`, `CLAUDE.md` | |
+| S10 | Docs: EVALUATION + methodology + CLAUDE gotchas | 45 min | Medium | `docs/05-EVALUATION.md`, `docs/research/pool-elo-methodology.md`, `CLAUDE.md` | ✅ |
 
 Execution order matters: S1→S2→S3 build the mechanism, S4 removes the old path (do after S1 so the report never has zero Elo data), S5/S6 surface it, S7 cleans config, S8 is independent, S9/S10 finalise.
 
@@ -166,6 +166,15 @@ Edge case: a resume that lands mid-run where the last few gens were all rejected
 - `CLAUDE.md` gotchas: update the Elo bullet — the live metric no longer saturates; `elo_baseline.pth.tar` is retained solely as the pooled-tournament anchor; `elo_games_per_gen` is gone.
 
 ---
+
+## Scope additions
+
+Work that landed beyond the original checklist, captured here so the archived plan tells the full story:
+
+- **Rolling Elo got its own metrics directory (`RollingElo/`), not the old `EloRatings/`.** Repurposing `EloRatings` in place would have made S1 (mechanism) and S4 (delete old eval) collide mid-migration — the old `log_elo` and new `log_rolling_elo` would both write `EloRatings/generation=N/`. A clean new directory kept every commit green and let S5 delete the old path cleanly. The now-unused `elo_ratings_directory` config property was removed in S6.
+- **The tournament logic moved into the package (`evaluation/tournament_run.py`).** S8 requires `cli.main` to invoke the tournament, but `scripts/` is not importable from the installed console-script entrypoint (`ModuleNotFoundError: No module named 'scripts'` — caught in end-to-end validation). The reusable logic now lives in the package (matching the style guide: scripts are thin CLI wrappers over package code); `scripts/tournament_elo.py` re-exports `run_tournament` so the existing test import and CLI both keep working.
+- **`scripts/benchmarks/benchmark_phases.py` lost its Elo phase.** It benchmarked the per-generation Elo eval that S4 deleted and referenced the retired `config.elo_games_per_gen`; the Elo phase + `elo_games` estimator column were removed so the tool stays runnable.
+- **Backward-compat deprecation warning.** `load_args` warns-and-ignores when an old config JSON still carries `elo_games_per_gen`, rather than erroring — every archived run config still loads.
 
 ## Scope notes
 
