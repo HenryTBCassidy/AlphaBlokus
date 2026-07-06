@@ -583,49 +583,34 @@ def make_network_entropy_plot(entropy_data: pd.DataFrame) -> go.Figure:
 # full record stays in the ArenaReplays parquets either way.
 
 
-def make_elo_plot(
-    elo_data: pd.DataFrame,
-    arena_data: pd.DataFrame | None = None,
-) -> go.Figure:
-    """Absolute Elo rating over generations, anchored at the gen-0 baseline.
+def make_elo_plot(rolling_elo_data: pd.DataFrame) -> go.Figure:
+    """Rolling arena-derived Elo over generations — the live, non-saturating curve.
 
-    Important interpretation detail: Elo evaluation runs *after* the
-    accept/reject decision each gen. When a gen is rejected, ``self.nnet``
-    has been reverted to the previous-best checkpoint — so the rated
-    network is the *previous accepted* net, not the just-trained one.
-    Two consecutive rejected gens produce two Elo points for the *same*
-    underlying network (differing only by 20-game sampling noise).
+    Each generation the candidate is rated against the current arena incumbent
+    (``candidate_elo = incumbent_elo + 400·log10(s/(1−s))``, from the same games
+    the accept/reject arena already played); on acceptance the incumbent rolls
+    forward, so the curve keeps climbing instead of flatlining at the ±1200 clamp
+    the retired frozen-gen-0 metric hit. It is a *chained* estimate — rough, and
+    the high-score steps are noisy on ~100 games — so read it as the live trend
+    and defer to the end-of-run pool BayesElo curve for the rigorous rating.
 
-    Rejected gens are drawn with an open marker + dashed line segment to
-    make this visible — solid filled markers = the gen's newly-trained
-    accepted net, hollow markers = a reverted (previous-best) net being
-    re-evaluated.
-
-    When ``arena_data`` is not provided (e.g. when called for older runs
-    without the column), all gens are plotted as accepted.
+    Accepted generations (the newly-trained net became the incumbent) are drawn
+    as filled markers on the climbing line; rejected generations are hollow
+    markers showing their *provisional* candidate Elo — the benchmark did not
+    advance, so the next candidate is still measured against the same incumbent.
+    The ``accepted`` flag is read straight from the rolling-Elo table (it's
+    self-contained — no join with ArenaData needed).
     """
-    df = elo_data.sort_values("generation").copy()
-    baseline = int(df["baseline_rating"].iloc[0])
-
-    if arena_data is not None and not arena_data.empty:
-        # The 'accepted' column is read straight off arena_data when present;
-        # the threshold passed here is only used by the fallback path for
-        # older runs without the column persisted.
-        mask = accepted_mask(arena_data, update_threshold=0.5)
-        accepted_lookup = pd.Series(
-            mask.values,
-            index=arena_data["generation"].astype(int).values,
-        )
-        df["accepted"] = df["generation"].astype(int).map(accepted_lookup).fillna(True).astype(bool)
-    else:
-        df["accepted"] = True
+    df = rolling_elo_data.sort_values("generation").copy()
+    df["accepted"] = df["accepted"].astype(bool)
+    anchor = float(df["incumbent_elo"].iloc[0])
 
     fig = go.Figure()
     # Single connecting line through all gens, regardless of accept/reject.
     fig.add_trace(
         go.Scatter(
             x=df["generation"],
-            y=df["elo_rating"],
+            y=df["rolling_elo"],
             mode="lines",
             name="",
             showlegend=False,
@@ -633,45 +618,46 @@ def make_elo_plot(
             hoverinfo="skip",
         )
     )
-    # Accepted-gen markers (filled).
+    hover_columns = ["elo_delta", "score_rate", "wins", "losses", "draws"]
+    # Accepted-gen markers (filled) — the candidate became the new incumbent.
     accepted_df = df[df["accepted"]]
     fig.add_trace(
         go.Scatter(
             x=accepted_df["generation"],
-            y=accepted_df["elo_rating"],
+            y=accepted_df["rolling_elo"],
             mode="markers",
-            name="Accepted (newly-trained net)",
+            name="Accepted (new incumbent)",
             marker={"size": 9, "color": _COLORS["accent"], "symbol": "circle"},
-            customdata=accepted_df[["elo_diff", "score_rate", "wins", "losses", "draws"]].values,
+            customdata=accepted_df[hover_columns].values,
             hovertemplate=(
                 "Gen %{x} (accepted) — Elo: %{y:.0f} "
-                "(%{customdata[0]:+.0f} vs baseline)<br>"
+                "(%{customdata[0]:+.0f} vs incumbent)<br>"
                 "Score: %{customdata[1]:.3f} "
                 "(W%{customdata[2]} L%{customdata[3]} D%{customdata[4]})"
                 "<extra></extra>"
             ),
         )
     )
-    # Rejected-gen markers (open) — these re-evaluate the previous accepted net.
+    # Rejected-gen markers (open) — provisional candidate Elo; benchmark held.
     rejected_df = df[~df["accepted"]]
     if not rejected_df.empty:
         fig.add_trace(
             go.Scatter(
                 x=rejected_df["generation"],
-                y=rejected_df["elo_rating"],
+                y=rejected_df["rolling_elo"],
                 mode="markers",
-                name="Rejected (re-evaluation of prev best)",
+                name="Rejected (provisional; benchmark held)",
                 marker={
                     "size": 9,
                     "color": _COLORS["accent"],
                     "symbol": "circle-open",
                     "line": {"width": 2, "color": _COLORS["accent"]},
                 },
-                customdata=rejected_df[["elo_diff", "score_rate", "wins", "losses", "draws"]].values,
+                customdata=rejected_df[hover_columns].values,
                 hovertemplate=(
-                    "Gen %{x} (rejected — rating shown is the reverted "
-                    "previous-best net) — Elo: %{y:.0f} "
-                    "(%{customdata[0]:+.0f} vs baseline)<br>"
+                    "Gen %{x} (rejected — provisional candidate Elo, "
+                    "benchmark not advanced) — Elo: %{y:.0f} "
+                    "(%{customdata[0]:+.0f} vs incumbent)<br>"
                     "Score: %{customdata[1]:.3f} "
                     "(W%{customdata[2]} L%{customdata[3]} D%{customdata[4]})"
                     "<extra></extra>"
@@ -679,11 +665,11 @@ def make_elo_plot(
             )
         )
     fig.add_hline(
-        y=baseline,
+        y=anchor,
         line_dash="dash",
         line_color=_COLORS["neutral"],
         line_width=1,
-        annotation_text=f"Baseline (gen 0) = {baseline}",
+        annotation_text=f"Anchor (start) = {anchor:.0f}",
         annotation_position="bottom right",
         annotation_font_size=10,
         annotation_font_color=_COLORS["neutral"],
@@ -691,7 +677,7 @@ def make_elo_plot(
     fig.update_layout(
         xaxis_title="Generation",
         yaxis_title="Elo rating",
-        title="Elo vs Frozen Gen-0 Baseline (saturates once net ≫ gen-0)",
+        title="Rolling Arena-Derived Elo (non-saturating; anchored at start)",
         xaxis={"dtick": 1 if df["generation"].max() < 40 else 5},
     )
     return _apply_defaults(fig)

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import datetime
+import json
 import time
 from typing import TYPE_CHECKING
 
@@ -36,6 +37,32 @@ from alphablokus.reporting.charts import (
     make_value_calibration_plot,
 )
 from alphablokus.reporting.pentobi_ladder import build_pentobi_ladder_section
+
+
+def _anchor_caption(config: RunConfig) -> str:
+    """One-line description of the rolling-Elo anchor from ``Nets/elo_anchor.json``.
+
+    Tells the reader what "Elo = anchor" means for this run (a scratch run's
+    random-init net vs a warm-start donor). Empty string when the file is absent
+    (older runs) so the caller can omit it.
+    """
+    anchor_path = config.net_directory / "elo_anchor.json"
+    if not anchor_path.exists():
+        return ""
+    try:
+        anchor = json.loads(anchor_path.read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return ""
+    rating = anchor.get("anchor_rating")
+    source = anchor.get("source")
+    if source == "warm_start":
+        sha = (anchor.get("weights_sha256") or "")[:12]
+        return (
+            f"<strong>Anchor:</strong> warm-started from a donor net pinned at Elo {rating} "
+            f"(weights sha256 <code>{sha}…</code>). Cross-run curves splice on that hash — "
+            "match it to a checkpoint whose pooled Elo is known."
+        )
+    return f"<strong>Anchor:</strong> random-init net at Elo {rating} (scratch run)."
 
 
 def _load_metrics(directory: Path) -> pd.DataFrame:
@@ -257,7 +284,7 @@ def create_html_report(config: RunConfig) -> None:
     learning_rate_data = (
         _load_metrics(config.learning_rate_directory) if config.learning_rate_directory.exists() else None
     )
-    elo_data = _load_metrics(config.elo_ratings_directory) if config.elo_ratings_directory.exists() else None
+    rolling_elo_data = _load_metrics(config.rolling_elo_directory) if config.rolling_elo_directory.exists() else None
     # Pool BayesElo ratings: a single file written by scripts/tournament_elo.py,
     # absent for runs that never ran the post-hoc tournament.
     tournament_ratings_path = config.tournament_directory / "tournament_ratings.parquet"
@@ -298,7 +325,7 @@ def create_html_report(config: RunConfig) -> None:
         if learning_rate_data is not None and not learning_rate_data.empty
         else None
     )
-    fig_elo = make_elo_plot(elo_data, arena_data) if elo_data is not None and not elo_data.empty else None
+    fig_elo = make_elo_plot(rolling_elo_data) if rolling_elo_data is not None and not rolling_elo_data.empty else None
     fig_tournament_elo = (
         make_tournament_elo_plot(tournament_data) if tournament_data is not None and not tournament_data.empty else None
     )
@@ -358,37 +385,44 @@ def create_html_report(config: RunConfig) -> None:
             "<section>",
             "<h2>Strength vs Fixed Baselines</h2>",
         ]
+        parts.append(
+            '<p class="section-desc">'
+            "Two Elo views. <strong>Pool Elo (BayesElo)</strong> — when present "
+            "— is the rigorous, non-saturating strength curve (a sparse "
+            "round-robin among the run's checkpoints, fit to one shared scale). "
+            "<strong>Rolling arena-derived Elo</strong> is the live per-generation "
+            "companion, derived from the accept/reject arena at zero extra cost; "
+            "it's a rough <em>chained</em> estimate — trust it for the live trend, "
+            "read the pool curve for the rating."
+            "</p>"
+        )
         if fig_tournament_elo is not None:
             parts.append(
                 '<p class="section-desc">'
-                "<strong>Pool Elo (BayesElo)</strong> is the canonical strength "
-                "curve: a sparse round-robin among the run's saved checkpoints, "
-                "fit so every checkpoint shares one rating scale. It keeps rising "
-                "until genuine convergence, where the vs-gen-0 number below "
-                "flatlines once the net beats gen-0 ~100% of the time (the ±1200 "
-                "clamp). Read the pool curve; treat vs-gen-0 as an early-training "
-                "signal only.</p>"
+                "<strong>Pool Elo (BayesElo)</strong>: every checkpoint shares "
+                "one rating scale, so this keeps rising until genuine convergence "
+                "— it can separate gen 41 from gen 43 where a saturating metric "
+                "flatlines. This is the DeepMind methodology and the curve to read."
+                "</p>"
             )
             parts.append(_chart(fig_tournament_elo))
-        parts.append(
-            '<p class="section-desc">'
-            "External strength measurements: the active network (after the "
-            "accept/reject decision) plays a fixed gen-0 opponent. Filled "
-            "markers = accepted gen (rating is for the just-trained net); "
-            "open markers = rejected gen (rating is for the reverted "
-            "previous-best net — so two adjacent open markers measure the "
-            "<em>same</em> network and differ only by 20-game sampling "
-            "noise). Minimax (TTT only) is the absolute "
-            '"is this optimal?" signal.<br>'
-            "<strong>Caveat:</strong> at high MCTS sim counts the search "
-            "dominates the network signal, so the trained-net-vs-random "
-            "gap is squeezed and per-gen swings are dominated by the "
-            "small (20-game) sample. Treat the absolute level as noisy; "
-            "trust the trend over many gens. The reliable training-progress "
-            "signals are <em>policy agreement</em> and <em>value loss</em>."
-            "</p>"
-        )
         if fig_elo is not None:
+            rolling_caption = (
+                '<p class="section-desc">'
+                "<strong>Rolling arena-derived Elo</strong>: each generation the "
+                "candidate is rated against the current arena incumbent "
+                "(<code>candidate = incumbent + 400·log10(s/(1−s))</code>) and the "
+                "incumbent rolls forward on acceptance, so — unlike the retired "
+                "frozen-gen-0 metric — it never saturates at the ±1200 clamp. "
+                "Filled markers = accepted (new incumbent); open markers = "
+                "rejected (provisional candidate Elo, benchmark held). It's a "
+                "chained estimate: noisy per step on ~100 games, so read the trend."
+            )
+            anchor_caption = _anchor_caption(config)
+            if anchor_caption:
+                rolling_caption += "<br>" + anchor_caption
+            rolling_caption += "</p>"
+            parts.append(rolling_caption)
             parts.append(_chart(fig_elo))
         if fig_minimax is not None:
             parts.append(_chart(fig_minimax))

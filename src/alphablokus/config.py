@@ -595,11 +595,6 @@ class RunConfig:
         return self.run_directory / "ValueCalibration"
 
     @property
-    def elo_ratings_directory(self) -> Path:
-        """Directory for per-generation Elo rating measured against the frozen gen-0 baseline."""
-        return self.run_directory / "EloRatings"
-
-    @property
     def rolling_elo_directory(self) -> Path:
         """Directory for the per-generation rolling arena-derived Elo.
 
