@@ -7,7 +7,7 @@ warm-start run from the strongest net trained for one generation at the peak LR 
 LR schedule is actually right for a gated self-play regime with a non-stationary objective, (2) fixes
 three LR-semantics defects found while grounding that decision (none of which the `eta_min` stopgap
 addresses), and (3) defines the A/B that picks the production default. Companion evidence:
-[`../research/blokus-cloud-60-analysis.md`](../research/blokus-cloud-60-analysis.md) §3.
+[`../../research/blokus-cloud-60-analysis.md`](../../research/blokus-cloud-60-analysis.md) §3.
 
 ---
 
@@ -117,7 +117,7 @@ SGDR are deliberately not implemented.
 | L4 | Warm start = weights-only: `load_model` gets a fresh optimizer + scheduler at the config LR (`--resume` keeps full restore) | 1.5 h | High | ✅ |
 | L5 | Pluggable `lr_scheduler`: `"constant"`/`null`, `"cosine"`, `"step"` (+ `lr_milestones`, `lr_gamma`) in `_create_scheduler` | 1.5 h | High | ✅ |
 | L6 | A/B run configs: identical warm-start recipe, scheduler-only delta (constant vs floored cosine, optional step arm) | 30 min | Medium | ✅ |
-| L7 | Run the A/B; judge by head-to-head arena + pool-Elo slope + Pentobi ladder; write `docs/research/lr-schedule-ab.md`; set the production default | ~13 h GPU + 1 h analysis | Medium | Protocol documented (§L7); run deferred (needs GPU/pods) |
+| L7 | Run the A/B; judge by head-to-head arena + pool-Elo slope + Pentobi ladder; write `docs/research/lr-schedule-ab.md`; set the production default | ~13 h GPU + 1 h analysis | Medium | Superseded by the blokus_cloud_v3 constant-LR run (2026-07-06) |
 
 Execution order is dependency order: L2–L4 make any schedule's behaviour observable and its warm-start
 semantics correct *before* the comparison, otherwise the A/B measures accidents again. L1 is
