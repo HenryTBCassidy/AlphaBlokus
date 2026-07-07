@@ -11,6 +11,13 @@ changed and no GPUs were rented for this doc.
 **[extrapolated]** — derived from measured numbers by a stated model;
 **[verify]** — confirm at rental/decision time (prices drift; v3's diagnostics aren't in yet).
 
+> **⚠ Superseded in part by the [v3 post-mortem addendum](#addendum-2026-07-07--blokus_cloud_v3-post-mortem)
+> (2026-07-07).** v3's data arrived and *inverted* this doc's diagnosis: the value head is healthy
+> and the **policy** is what's stuck, with ~zero external transfer of the run's internal gains.
+> §1's Phase-1 "more games at large" call is **retracted**, the `xl` trigger fires on its letter
+> but not its spirit, and the recommendation is revised (addendum A6). §§2–5 (cost model,
+> architecture A vs B) stand, with measured corrections in addendum A5.
+
 ---
 
 ## TL;DR
@@ -260,6 +267,9 @@ only thing it costs is ~2 extra days of calendar — during which no human atten
 
 ## 6. Recommendation
 
+> **Superseded by the addendum's A6** (2026-07-07) — phases 1–2 below assumed the 60-run's
+> value-starvation diagnosis, which v3 falsified. Kept for the record.
+
 **Phased, each phase gated, ready to fire when v3's pool Elo lands:**
 
 | Phase | Trigger | Action | Cost | Effort |
@@ -277,3 +287,170 @@ cheap form is small, and phase 3 names the moment it starts paying.
 **Do-not-do list:** don't rent an H100 (worse $/result on this workload); don't build B-full to
 speed up a 3.5-day run; don't touch the live v3 pod — every action above starts *after* its
 end-of-run pool Elo is read.
+
+---
+
+# Addendum (2026-07-07) — blokus_cloud_v3 post-mortem
+
+`blokus_cloud_v3` finished: 40 generations, constant LR 1e-3 (verified flat in the
+`LearningRate` parquets — the 60-run's LR confound is genuinely gone), weights-only warm start
+from `blokus_cloud_60`'s gen-57 net, 24.3 h on the RunPod 5090 (~$24), 21/40 candidates accepted.
+Everything below is parsed programmatically from `temp/runs/blokus/blokus_cloud_v3/`
+(run log, `Tournament/`, metric parquets) and `temp/benchmarks/v3_final_ladder_L1-9.html`;
+nothing is eyeballed. This addendum revisits each claim of the main doc against that data.
+
+## A1. What v3 measured [all measured]
+
+**Pentobi ladder — flat at Level 4.** Final gen-40 net (100 games/level, 400 sims) vs the
+starting gen-57 net and the mid-run check:
+
+| Net | L1 | L2 | L3 | L4 | L5 | L6 | L7 | L8 | L9 | Headline |
+|---|---|---|---|---|---|---|---|---|---|---|
+| gen-57 donor (40 g/level) | 80 | 75 | 60 | 55 | 45 | 20 | — | — | — | L4 |
+| v3 gen-14 (40 g/level) | 80 | 75 | 60 | 55 | 45 | 20 | — | — | — | L4 |
+| v3 gen-40 final (100 g/level) | 77 | 71 | 61 | 53 | 47 | 40 | 16 | 20 | 21 | L4 |
+
+L5 sat at 45–47% in every ladder we have (needs >50%; the final CI is [38%, 57%]). Two reads
+worth separating: (i) L1–L5 did not move at all across 40 generations; (ii) L6 improved 20% → 40%
+— the one ladder cell that moved, though CIs overlap ([10,35] vs [31,50]). And the L6→L7 cliff
+(40% → 16%) marks where Pentobi's deeper search regime starts — levels 7–9 are a different
+opponent class, near-flat at 16–21%.
+
+**Training losses (end-of-generation values parsed from the tqdm bars).** Value loss:
+0.525 → minimum 0.363–0.385 (gens 32–37), ending 0.419 — *better* than the 60-run's 0.46
+finish, on the same 60k buffer the main doc's §1 prescribed. Policy loss: a round trip —
+0.493 (gen 1) → 0.669 peak (gen 13) → 0.476–0.488 (gens 32–37) → 0.554 (gen 40). Flat-to-
+oscillating; never below its warm-start level. **The 60-run's pattern is inverted: value healthy,
+policy stuck.**
+
+**Eval-set entropy rose all run**: 1.21 → 1.69 nats — the opposite of the 60-run's sharpening
+(4.10 → 1.59). The improvement operator is *diffusing* the policy, not sharpening it. Top-1
+agreement with the (this-run, gen-1) eval set stayed 89–100% throughout — the net is not
+drifting far from its warm-start search targets.
+
+**Pool BayesElo (anchor gen0 = the gen-57 donor, = 0):** rose noisily to +240 (gen 40), peaking
++286 (gen 32), with real non-monotonic excursions (gen 1 = −71, gens 24–25 ≈ +81 after a 5-gen
+rejection streak).
+
+**Arena and tournament games are heavily quantized.** 14 of the 19 rejections scored *exactly*
+50–50–0 (P ≈ 8% each under independent games — 14/14 is impossible by chance); four acceptances
+were 100–0–0 sweeps. The pool tournament shows the same structure at 30 games/pairing: many
+exact 15–15–0 and 30–0–0 results, and **gen32 vs gen40 was 30 draws out of 30**. Eval-time play
+is deterministic-per-(seed, colour) (`temp=0`; `opening_temp`/`opening_moves` exist in
+`evaluation/players.py` but default to 0 **[verify how arena pairings are seeded before trusting
+close gate scores]**), so between near-equal nets the colour/seed decides and mirrored pairs
+split — the gate and the tournament lose most of their resolution exactly where we need it.
+
+## A2. Question A — the value-starvation premise is falsified; Phase 1 is retracted
+
+The main doc's §1 recommended "more games at `large`" *specifically to fix value-head data
+starvation*. v3 — which already ran the 60-analysis's buffer fix (60k games) — shows the value
+head comfortably healthy (0.36–0.42) while the policy is what stopped improving. Whatever
+capped v3, it was not a shortage of independent value labels. **Phase 1 ("more games at large,
+~$32–40") is retracted as a strength lever.** More games would buy more of a curriculum that is
+demonstrably no longer teaching anything Pentobi-relevant (A4). What replaces it is in A6.
+
+## A3. Question C first (it gates B) — the gen-32 "peak" is not evidence of regression
+
+The pooled ratings say gen 32 = +286 > gen 40 = +240. The raw pairings say the two nets are
+**directly indistinguishable — 30/30 draws head-to-head**; the −46 gap is entirely graph-inferred
+through quantized third-party results (gen 32 beat gen 36 30–0 where gen 40 beat it 26–4, etc.),
+and with mirrored deterministic games a 30-game pairing carries ~15 independent openings of
+information. Δ46 Elo is inside that noise floor. The loss curves do wobble over the final
+generations (policy 0.476 → 0.554, value 0.363 → 0.419 across gens 36–40, through two rejection
+streaks whose reverts staled the buffer onto one incumbent's games) — mild late instability is
+plausible but unproven.
+
+**Consequences:** no checkpoint-selection change (gen 32 and gen 40 are equivalent within
+measurement; `best.pth.tar` is fine). The run-length lesson is real though: nothing measurable
+was gained after ~gen 32 — the last 8 generations were ~5 h/$5 spent inside the noise. The §6
+stop rule ("stop when curves flatten across two benchmark windows") is reaffirmed, with the
+addition that pool-Elo differences under ~±50 at 30-games/pairing should be read as ties, and
+the tournament/gate should get opening diversification before we lean on either again (A6-P0).
+
+## A4. Question B — the xl trigger fires on its letter and fails on its spirit
+
+The pre-registered signal (§1) was: *policy loss flattening* AND *ladder stalled across two
+runs*. Mechanically both hold: policy loss is flat-to-rising at a healthy constant LR, and both
+the 60-run and v3 ended at L4. Read literally, this doc's own rule says "go xl".
+
+I don't think that's the honest read. The trigger was designed to detect **capacity saturation**
+— a net that can no longer fit what self-play is teaching. v3 shows no underfitting signature
+anywhere: value loss at its best-ever (0.36), top-1 eval agreement 89–100%, and the policy-loss
+levels aren't even comparable to the 60-run's (different Gumbel targets: n=128/considered-32 vs
+n=64/16; and in a non-stationary self-play regime rising CE can mean *harder targets*, not a
+worse net). What v3 actually exhibits is the signature of a **self-play curriculum ceiling**:
+
+- **Internal gains stopped transferring.** The pooled +240 is the generous number; the *direct*
+  head-to-head of gen 40 vs the gen-57 anchor is 15–8–7 ≈ 62% ≈ **+83 Elo** (wide CI at 30
+  games). Somewhere between +83 and +240 of internal, in-lineage improvement bought **0 pp** on
+  L1–L5. Even the conservative +83 should have moved L5 by ~+11 pp if it transferred — the
+  point estimate moved +2 pp. The prompt-level framing "+240 bought zero" overstates the
+  numerator, but the decoupling itself is real and is the key fact.
+- **That decoupling is the classic in-lineage exploitation pathology**, not a capacity symptom.
+  A capacity-bound net fails to improve *internally* too; v3's lineage kept finding wins against
+  its own ancestors (26–4 over gen 17, sweeps over mid-run nets) while gaining nothing against
+  an out-of-distribution opponent. Bigger nets are, if anything, better at memorising lineage
+  quirks — `xl` inherits this failure mode at 2× the price.
+- **The same-capacity net was climbing recently.** This exact 192×12 architecture went L3 → L4
+  late in the 60-run and its donor kept accepting candidates at 55–76%. The *recipe* stopped
+  extracting improvement, at the same parameter count where improvement was recently cheap.
+- **The operator is diffusing, not sharpening.** Entropy rising 1.21 → 1.69 nats across 40
+  generations of "improvement" means the n=128-over-top-32 Gumbel targets are, on net, flatter
+  than the policy they're meant to improve. That is an improvement-operator statement, not a
+  capacity statement (and Blokus's ~400-branch opening vs DeepMind's 800–1,600 sims says the
+  same thing from first principles — §"deepmind-run-configs" and the 60-analysis both flagged
+  operator thinness as the growth-rate bottleneck, rec #2, which v2/v3 only half-took: sims
+  64→128 but still a thin considered set, and the plateau arrived anyway).
+
+**Verdict: capacity is *not confirmed*. `xl` is demoted** from "Phase 2, fires on this signal"
+to "after the recipe levers, and only alongside a genuine underfitting signature" (A6-P4). One
+honest hedge: L6 moving 20% → 40% while L1–L5 sat still is a small counter-signal that *some*
+general improvement occurred; it keeps "real gain hidden by ladder noise" alive as a minority
+read. The next run should tighten it (A6-P0 makes the gate/tournament informative; rerunning
+the donor's ladder at 100 games/level would pin the baseline CI).
+
+## A5. Question D — cost model corrections; architecture verdict unchanged
+
+The §2 model predicted ~23.5 min/gen for v3's recipe; v3 measured **37.2 min/gen** (steady
+state: self-play 1,353 s / training 760 s / arena 65 s = 61% / 34% / 3%). Two attributable
+misses, both instructive [measured]:
+
+1. **Training 2.7× the model** (760 s vs ~280 s): v3 ran `dataloader_workers: 0` — the
+   workaround for the JAX-fork DataLoader crash — which starves the training GPU. The fix
+   (spawn-context workers, [`../plans/archive/harden-long-runs.md`](../plans/archive/harden-long-runs.md))
+   is worth ~21% of total wall-clock at `large` and more at `xl`. Until it lands, every cost
+   table in §§2–5 should be scaled by ~1.33–1.6×.
+2. **Self-play 1.33× the model** (1,353 s vs ~1,020 s): the model scaled mctx cost with sims
+   only (n 64→128 ⇒ 2×); v3 also doubled `gumbel_max_considered` 16→32, and root-candidate
+   width costs real time too. Corrected rule of thumb: self-play cost ≈ linear in n × mild
+   in considered-set width (measured composite: 2.65× for 2× sims + 2× considered).
+
+Re-priced `xl` on one 5090 (10k games/gen): ~79 min/gen with `workers=0`, ~60 min/gen once the
+DataLoader fix lands → **100 gens ≈ $99–130 (~4–5.5 days)** [extrapolated], vs the original $82.
+The architecture conclusions are unaffected in structure: still single-5090 (the H100 $/result
+argument only strengthens as training share grows), still no async build. One number moves:
+at v3's measured 61% self-play share the synchronous-sharding Amdahl cap drops to ~2.6×
+(back to ~3.3× once training is fixed) — B-lite buys slightly less than §4 claimed until
+harden-long-runs lands. IDEAS I6 unchanged.
+
+## A6. Revised recommendation (supersedes §6 phases 1–2)
+
+The lever is the **improvement operator and the curriculum**, not net size and not game count.
+Phased, cheapest and most-diagnostic first; every phase stays on the validated 1×5090 + `large`
+stack:
+
+| Phase | What | Why / gate | Cost | Effort |
+|---|---|---|---|---|
+| P0 | **Make the measurements informative + reclaim wall-clock.** (a) Opening diversification for arena + pool tournament (`opening_temp`/`opening_moves` already exist in `evaluation/players.py` — likely config-only **[verify]**); (b) land the spawn-context DataLoader fix (harden-long-runs); (c) rerun the gen-57 donor ladder at 100 games/level to pin the baseline. | 14 exact-50/50 gates and a 30/30-draw pairing mean we currently can't see <~50-Elo effects — every later phase is judged through this instrument. | ~$3–5 | ~1 day |
+| P1 | **Thicken the improvement operator at `large`**: Gumbel n 128→512, `gumbel_max_considered` 32→64 (toward DeepMind's 800-sim regime), ~40-gen continuation from gen-40 via `--resume`. Optionally A/B one arm of jax-PUCT self-play (it trained the *stronger* net head-to-head in the backend A/B, 60.5%). | The one lever the 60-analysis ranked as the growth bottleneck (rec #2) that v3 only half-took — and the entropy-diffusion finding points straight at target quality. Gate: L5 > 50% or pool-Elo slope clearly positive through P0's instrument. | ~$35–45 (~2.9× self-play cost/gen) | config only |
+| P2 | **Break the lineage: opponent + opening diversity in self-play.** Fraction of self-play games vs a pool of past checkpoints (AlphaGo's RL pool — the known cure for in-lineage exploitation), plus a self-play opening-temperature schedule. | Directly attacks the +internal/0-external decoupling. Gate: transfer reappears (ladder moves with pool Elo). | ~$30–50/run | ~2–4 days |
+| P3 | **External teacher: Pentobi seeding/distillation** (SL on Pentobi games or Pentobi-anchored targets — [`cloud-training-recommendation.md`](cloud-training-recommendation.md) §7.4 already named this the biggest lever if tabula-rasa stalls). | If P1+P2 still don't move L5–L6, the curriculum needs information self-play cannot generate. | compute trivial; data-gen + code real | ~1–2 weeks |
+| P4 | **`xl`** — only alongside a genuine underfitting signature (value or policy loss stuck *high* while the P0-instrumented gate shows healthy acceptance) after P1–P3. Pricing per A5: ~$99–130 per 100 gens. | Capacity spend is wasted while the operator/curriculum is the binding constraint — v3 is the demonstration. | ~$99–130 | config only |
+
+**Bottom line, stated plainly:** v3 falsified this doc's premise in the most useful way — it
+cleared the two suspects the 60-run left standing (LR schedule, value starvation) and exposed
+the one it couldn't see: an improvement operator too thin, and a curriculum too narrow, to push
+a Level-4 net further from its own games alone. `xl` would have been ~$100 spent training a
+bigger net on the same dead-end curriculum. Architecture A (one 5090) remains the right vehicle
+for whichever run comes next; nothing in v3 changes the multi-GPU verdict.
