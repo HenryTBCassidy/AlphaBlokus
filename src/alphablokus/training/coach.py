@@ -497,12 +497,16 @@ class Coach:
             nnet=self.pnet,
             mcts_config=self.config.mcts_config,
             temp=0.0,
+            opening_temp=self.config.arena_opening_temp,
+            opening_moves=self.config.arena_opening_moves,
         )
         new_player = NetworkPlayer(
             game=self.game,
             nnet=self.nnet,
             mcts_config=self.config.mcts_config,
             temp=0.0,
+            opening_temp=self.config.arena_opening_temp,
+            opening_moves=self.config.arena_opening_moves,
         )
         arena = Arena(prev_player, new_player, self.game)
         pwins, nwins, draws, records = arena.play_games(
@@ -597,6 +601,8 @@ class Coach:
             nnet=self.nnet,
             mcts_config=self.config.mcts_config,
             temp=0.0,
+            opening_temp=self.config.arena_opening_temp,
+            opening_moves=self.config.arena_opening_moves,
         )
         assert self._oracle is not None  # caller-guarded in _evaluate_strength_vs_baselines
         oracle_player = self._oracle.make_player()

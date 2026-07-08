@@ -429,6 +429,22 @@ class RunConfig:
     # climb to ~800-1200+ at full training.
     elo_baseline_rating: int = 400
 
+    # Opening-diversification for arena/Elo eval games. ``arena_opening_temp``
+    # is the play temperature applied to the first ``arena_opening_moves`` of a
+    # player's own plies (then it reverts to deterministic argmax); it samples
+    # from the MCTS visit distribution, so it picks among moves search already
+    # rated well rather than random blunders. Both default to 0 = today's exact
+    # behaviour (fully deterministic per (seed, colour)). >0 injects opening
+    # diversity so near-equal nets don't split *exactly* 50/50 by colour — the
+    # v3 gate-resolution problem (14/19 arena rejections scored exactly 50-50,
+    # see docs/research/xl-training-scaleup.md addendum). Applied symmetrically
+    # to *both* arena players (plan S1 option 1 — diversify the gate too), so it
+    # is fair. Production candidate: ~1.0 for ~6 plies, but that flip is gated on
+    # the S3 validation control (docs/plans/p0-instrument-and-dataloader.md);
+    # keep at 0 until S3 passes.
+    arena_opening_temp: float = 0.0
+    arena_opening_moves: int = 0
+
     # TTT-specific: games per generation to play vs a perfect-play minimax
     # opponent. Only used when ``game == "tictactoe"``. 0 disables.
     minimax_games_per_gen: int = 20

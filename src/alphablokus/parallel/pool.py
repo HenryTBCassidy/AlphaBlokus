@@ -95,6 +95,23 @@ PHASE_ARENA = 1
 PHASE_ELO = 2
 
 
+def _opening_schedule_for_phase(config: RunConfig, phase: int) -> tuple[float, int]:
+    """Opening-diversification ``(opening_temp, opening_moves)`` for a phase.
+
+    The two-player worker is shared across arena and (tournament) Elo games, so
+    it reads the opening schedule from whichever config block owns the phase:
+    :data:`PHASE_ARENA` uses ``config.arena_opening_*`` (the accept/reject gate),
+    :data:`PHASE_ELO` uses ``config.tournament.opening_*`` (the pool tournament).
+    Both default to ``(0.0, 0)`` = fully deterministic play — today's behaviour —
+    so this is inert until a config opts in. Applied symmetrically to both
+    players by the caller (plan S1 option 1: diversify the gate too). See
+    docs/plans/p0-instrument-and-dataloader.md S1/S2.
+    """
+    if phase == PHASE_ARENA:
+        return config.arena_opening_temp, config.arena_opening_moves
+    return 0.0, 0
+
+
 def derive_episode_seed(
     base_seed: int,
     generation: int,
@@ -382,17 +399,25 @@ def _worker_play_two_player_game(
     base_seed, generation, episode_idx, a_first, record, top_k, phase = task
     _seed_worker_rngs(derive_episode_seed(base_seed, generation, episode_idx, phase))
 
+    # Opening diversification is applied symmetrically to both players so the
+    # pairing stays fair; the schedule is inert (0, 0) unless the phase's config
+    # block opts in. See ``_opening_schedule_for_phase``.
+    opening_temp, opening_moves = _opening_schedule_for_phase(_WORKER_CONFIG, phase)
     player_a = NetworkPlayer(
         game=_WORKER_GAME,
         nnet=_WORKER_NNET_A,
         mcts_config=_WORKER_CONFIG.mcts_config,
         temp=0.0,
+        opening_temp=opening_temp,
+        opening_moves=opening_moves,
     )
     player_b = NetworkPlayer(
         game=_WORKER_GAME,
         nnet=_WORKER_NNET_B,
         mcts_config=_WORKER_CONFIG.mcts_config,
         temp=0.0,
+        opening_temp=opening_temp,
+        opening_moves=opening_moves,
     )
 
     if a_first:
