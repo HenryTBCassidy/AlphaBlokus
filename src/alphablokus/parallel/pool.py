@@ -109,6 +109,8 @@ def _opening_schedule_for_phase(config: RunConfig, phase: int) -> tuple[float, i
     """
     if phase == PHASE_ARENA:
         return config.arena_opening_temp, config.arena_opening_moves
+    if phase == PHASE_ELO:
+        return config.tournament.opening_temp, config.tournament.opening_moves
     return 0.0, 0
 
 

@@ -191,7 +191,24 @@ class TournamentConfig:
 
     # Games each checkpoint pair plays. Arena rounds this down to even and swaps
     # colours at halftime, so >= 2. More games = tighter ratings, more compute.
+    # With opening diversity ON (below) each of these games is independent, so
+    # the pairing carries ~``games_per_pairing`` distinct results; with it OFF
+    # the mirrored deterministic colour-swap pairs collapse to ~half that (the
+    # 30/30-draw pairings that made the pool-Elo curve unresolvable below ~50
+    # Elo — docs/research/xl-training-scaleup.md addendum A3).
     games_per_pairing: int = 30
+
+    # Opening-diversification for tournament pairings — mirrors the arena gate's
+    # ``RunConfig.arena_opening_*``. ``opening_temp`` is the play temperature for
+    # the first ``opening_moves`` of a player's own plies (then deterministic
+    # argmax), sampled from the MCTS visit distribution. Both default to 0 =
+    # today's fully-deterministic pairings. Set >0 (production candidate: match
+    # the gate at ~1.0 / ~6 plies, so gate and tournament measure play from the
+    # same distribution) to give the BayesElo fit non-degenerate W/L/D counts and
+    # so resolution below ~50 Elo. The flip is gated on the S3 validation control
+    # (docs/plans/p0-instrument-and-dataloader.md); keep at 0 until S3 passes.
+    opening_temp: float = 0.0
+    opening_moves: int = 0
 
     # Each checkpoint plays the checkpoints these many generations behind it.
     # Exponential spacing keeps the comparison graph connected at O(K·log K)

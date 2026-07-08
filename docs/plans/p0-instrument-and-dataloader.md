@@ -23,7 +23,7 @@ Companion docs: [`../guides/PLAN-FORMAT.md`](../guides/PLAN-FORMAT.md),
 | # | Item | Effort | Priority | Files | Done |
 |---|------|--------|----------|-------|------|
 | S1 | Opening-diversification config fields + plumb into the arena gate + Elo eval | 1.5 h | High | `config.py`, `training/coach.py` | ✅ |
-| S2 | Plumb opening diversification into the pool BayesElo tournament | 1 h | High | `config.py`, `evaluation/tournament_run.py` | |
+| S2 | Plumb opening diversification into the pool BayesElo tournament | 1 h | High | `config.py`, `evaluation/tournament_run.py` | ✅ |
 | S3 | Validation gate — prove opening diversity measures strength, not opening-luck | 1.5 h | High | (control run + analysis) | |
 | S4 | Make `dataloader_workers > 0` reliable (fix the memmap+forkserver deadlock) + validate | 3 h | Medium | `games/base_wrapper.py`, `config.py` | |
 | S5 | Re-baseline the gen-57 donor ladder at 100 games/level (execution) | ~1 h run | Medium | (box run; results doc) | |
