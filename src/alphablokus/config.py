@@ -159,16 +159,26 @@ class TrainingPerfConfig:
     prefetch_factor: int = 2  # batches each worker keeps ready (used only when workers > 0)
 
     # multiprocessing start method for the DataLoader's worker processes (used
-    # only when ``dataloader_workers > 0``). The default **fork** deadlocks here:
-    # self-play (JAX) and training (torch) share one process, so JAX's threads
-    # are live when the loader forks workers — that is what killed the
-    # pin-memory thread at gen 59 of blokus_cloud_60. "forkserver" (default)
-    # forks workers from a clean helper process that never loaded JAX; "spawn"
-    # cold-starts a fresh interpreter (heavier, always available); "fork"
-    # restores the old behaviour. An unavailable method falls back to "spawn".
-    # Inert when ``dataloader_workers == 0`` (the Mac/CPU default), so default
-    # behaviour there is unchanged. See docs/plans/archive/harden-long-runs.md H1.
-    dataloader_context: Literal["forkserver", "spawn", "fork"] = "forkserver"
+    # only when ``dataloader_workers > 0``). Both remaining alternatives to the
+    # unsafe **fork** start workers from a clean process (self-play JAX + torch
+    # share this process, so forking its live threads killed the pin-memory
+    # thread at gen 59 of blokus_cloud_60). "spawn" (default since P0/S4)
+    # cold-starts a fully fresh interpreter per worker — no inherited
+    # fork/forkserver state at all, which is the cleanest avoidance of the
+    # torch-DataLoader × JAX-loaded-process hazard: "forkserver" *deadlocked*
+    # the memmap DataLoader at v3 gen-4 (hung between "Starting Training" and
+    # "Epoch 1/1"; an intermittent worker-startup race) — the reason
+    # dataloader_workers was pinned to 0 as a workaround. "forkserver" forks
+    # workers from a warm helper that never loaded JAX (lighter than spawn but
+    # hit the above race); "fork" restores the old unsafe behaviour. An
+    # unavailable method falls back to "spawn". Inert when
+    # ``dataloader_workers == 0`` (the default), so default behaviour is
+    # unchanged. NOTE: spawn resolves the deadlock in principle but the
+    # multi-generation GPU validation (plan S4) has not run yet — treat
+    # workers>0 as unproven until then. See
+    # docs/plans/p0-instrument-and-dataloader.md S4 and
+    # docs/plans/archive/harden-long-runs.md H1.
+    dataloader_context: Literal["forkserver", "spawn", "fork"] = "spawn"
 
     # Per-batch metric cadence. 1 (default) = today's behaviour: a CUDA sync
     # (.item()) and a metrics row every batch. N>1 accumulates losses on-device

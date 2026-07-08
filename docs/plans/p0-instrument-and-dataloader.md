@@ -25,11 +25,13 @@ Companion docs: [`../guides/PLAN-FORMAT.md`](../guides/PLAN-FORMAT.md),
 | S1 | Opening-diversification config fields + plumb into the arena gate + Elo eval | 1.5 h | High | `config.py`, `training/coach.py` | ✅ |
 | S2 | Plumb opening diversification into the pool BayesElo tournament | 1 h | High | `config.py`, `evaluation/tournament_run.py` | ✅ |
 | S3 | Validation gate — prove opening diversity measures strength, not opening-luck | 1.5 h | High | (control run + analysis) | |
-| S4 | Make `dataloader_workers > 0` reliable (fix the memmap+forkserver deadlock) + validate | 3 h | Medium | `games/base_wrapper.py`, `config.py` | |
+| S4 | Make `dataloader_workers > 0` reliable (fix the memmap+forkserver deadlock) + validate | 3 h | Medium | `games/base_wrapper.py`, `config.py` | Code ✅ — box validation pending |
 | S5 | Re-baseline the gen-57 donor ladder at 100 games/level (execution) | ~1 h run | Medium | (box run; results doc) | |
 | S6 | Tests + docs | 1 h | High | `tests/`, `config.py` docstrings, addendum | |
 
 Execution order: S1→S2 build the instrument, then **S3 validates it — a hard gate: the production opening-diversity defaults are not trusted, and P1 must not rely on the diversified gate/tournament, until S3 passes.** S4 (perf fix) and S5 (baseline run) are independent and parallelisable; S6 last. S4 is the higher-risk row (escape hatch in its section).
+
+> **Status (2026-07-08):** S1, S2 and the *code* of S4 have landed on `feat/p0-instrument-and-dataloader` (S6 tests + docs follow in the same PR). Everything is **off by default** — the new opening-diversity fields default to 0 (today's exact behaviour) and `dataloader_context` now defaults to `"spawn"` but is inert while `dataloader_workers == 0` (the committed configs are all pinned to 0). **S3** (the validation control), **S4's** multi-generation GPU validation, and **S5** (the re-baseline ladder) are GPU-box tasks — not yet run. The production opening-diversity defaults (~1.0 / 6 plies) and `dataloader_workers > 0` must not be enabled until S3 / S4-validation pass.
 
 ---
 

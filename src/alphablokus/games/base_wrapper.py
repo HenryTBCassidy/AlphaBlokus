@@ -462,7 +462,14 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 # Never fork workers from this (JAX-loaded, multithreaded)
                 # process — that deadlocked/killed the pin-memory thread at
                 # gen 59 of blokus_cloud_60. forkserver/spawn start workers from
-                # a clean process. See docs/plans/archive/harden-long-runs.md H1.
+                # a clean process. The default is now "spawn" (P0/S4): the memmap
+                # DataLoader *deadlocked* under "forkserver" at v3 gen-4 (hung
+                # between "Starting Training" and "Epoch 1/1" — an intermittent
+                # worker-startup race), which is why dataloader_workers was pinned
+                # to 0; spawn's fully fresh interpreter has no inherited
+                # fork/forkserver state to race on. NOT yet validated on the box
+                # (plan S4). See docs/plans/p0-instrument-and-dataloader.md S4 and
+                # docs/plans/archive/harden-long-runs.md H1.
                 worker_kwargs["multiprocessing_context"] = resolve_dataloader_context(perf.dataloader_context)
         # Built once so persistent workers survive across epochs; iterating a
         # shuffle=True loader reshuffles each epoch exactly as the old

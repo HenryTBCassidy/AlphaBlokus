@@ -220,17 +220,18 @@ def test_lazy_dataset_round_trips_through_pickle(blokus_game: BlokusDuoGame) -> 
 
 
 def test_default_dataloader_context_is_non_fork(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
-    """The default forkserver context trains identically to the in-process path.
+    """The default spawn context trains identically to the in-process path.
 
-    ``dataloader_context`` defaults to "forkserver", so a worker-backed run no
-    longer forks the JAX-loaded parent. The shuffle permutation and per-epoch
-    base seed still come from the main process, so weights stay bit-identical.
+    ``dataloader_context`` defaults to "spawn" (P0/S4 — forkserver deadlocked the
+    memmap DataLoader at v3 gen-4), so a worker-backed run no longer forks the
+    JAX-loaded parent. The shuffle permutation and per-epoch base seed still come
+    from the main process, so weights stay bit-identical.
     """
-    assert TrainingPerfConfig().dataloader_context == "forkserver"
+    assert TrainingPerfConfig().dataloader_context == "spawn"
     baseline_weights, _ = _train_with_perf(ttt_game, test_config, TrainingPerfConfig())
     workers_weights, _ = _train_with_perf(
         ttt_game,
         test_config,
-        TrainingPerfConfig(dataloader_workers=2, prefetch_factor=2, dataloader_context="forkserver"),
+        TrainingPerfConfig(dataloader_workers=2, prefetch_factor=2, dataloader_context="spawn"),
     )
     _assert_identical_weights(baseline_weights, workers_weights)
