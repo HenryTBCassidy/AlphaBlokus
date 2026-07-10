@@ -704,6 +704,7 @@ class MetricsCollector:
         pvc_argmax_match: float,
         pvc_spearman: float,
         eval_set_size: int,
+        value_symmetry_mae: float | None = None,
     ) -> None:
         """Record policy–value consistency on the frozen eval set.
 
@@ -720,23 +721,30 @@ class MetricsCollector:
         so a healthy net plateaus *below* perfect agreement. A late drop or a
         persistently low level flags a value/policy imbalance (see
         docs/plans/archive/policy-value-consistency-metric.md).
+
+        ``value_symmetry_mae`` (optional) is ``mean|V(s) − V(reflect(s))|`` over
+        the eval set — the value head should be invariant under the game's
+        symmetry group, so this sits near 0; a rising value means the value head
+        isn't respecting the symmetry.
         """
-        self._policy_value_consistency_records.append(
-            {
-                "generation": generation,
-                "epoch": epoch,
-                "pvc_argmax_match": pvc_argmax_match,
-                "pvc_spearman": pvc_spearman,
-                "eval_set_size": eval_set_size,
-            }
-        )
-        self._publish(
-            {
-                "pvc/argmax_match": pvc_argmax_match,
-                "pvc/spearman": pvc_spearman,
-                "generation": generation,
-            }
-        )
+        record = {
+            "generation": generation,
+            "epoch": epoch,
+            "pvc_argmax_match": pvc_argmax_match,
+            "pvc_spearman": pvc_spearman,
+            "eval_set_size": eval_set_size,
+        }
+        if value_symmetry_mae is not None:
+            record["value_symmetry_mae"] = value_symmetry_mae
+        self._policy_value_consistency_records.append(record)
+        payload: dict[str, Any] = {
+            "pvc/argmax_match": pvc_argmax_match,
+            "pvc/spearman": pvc_spearman,
+            "generation": generation,
+        }
+        if value_symmetry_mae is not None:
+            payload["pvc/value_symmetry_mae"] = value_symmetry_mae
+        self._publish(payload)
 
     def log_rolling_elo(
         self,

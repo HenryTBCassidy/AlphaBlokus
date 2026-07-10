@@ -871,17 +871,20 @@ def make_policy_value_consistency_plot(pvc_data: pd.DataFrame) -> go.Figure:
     the policy sees than one-ply value. A late drop or a persistently low level
     is the red flag (value head lagging, or policy chasing lines the value head
     doesn't support).
+
+    When present, ``value_symmetry_mae`` (``mean|V(s) − V(reflect(s))|``) is
+    overlaid on a secondary axis — it should hug 0; a rising value means the
+    value head isn't respecting the game's symmetry.
     """
     df = pvc_data.copy()
-    agg = (
-        df.groupby("generation")
-        .agg(
-            argmax_match_mean=("pvc_argmax_match", "mean"),
-            spearman_mean=("pvc_spearman", "mean"),
-        )
-        .reset_index()
-        .sort_values("generation")
-    )
+    agg_spec = {
+        "argmax_match_mean": ("pvc_argmax_match", "mean"),
+        "spearman_mean": ("pvc_spearman", "mean"),
+    }
+    has_value_symmetry = "value_symmetry_mae" in df.columns and df["value_symmetry_mae"].notna().any()
+    if has_value_symmetry:
+        agg_spec["value_symmetry_mae_mean"] = ("value_symmetry_mae", "mean")
+    agg = df.groupby("generation").agg(**agg_spec).reset_index().sort_values("generation")
 
     fig = go.Figure()
     fig.add_trace(
@@ -904,6 +907,18 @@ def make_policy_value_consistency_plot(pvc_data: pd.DataFrame) -> go.Figure:
             hovertemplate="Gen %{x} — Spearman: %{y:.3f}<extra></extra>",
         )
     )
+    if has_value_symmetry:
+        fig.add_trace(
+            go.Scatter(
+                x=agg["generation"],
+                y=agg["value_symmetry_mae_mean"],
+                mode="lines+markers",
+                name="Value-symmetry MAE (→ 0)",
+                line={"width": 2, "color": _COLORS["secondary"], "dash": "dot"},
+                yaxis="y2",
+                hovertemplate="Gen %{x} — value-symmetry MAE: %{y:.4f}<extra></extra>",
+            )
+        )
     fig.add_hline(
         y=0.0,
         line_width=1,
@@ -912,13 +927,22 @@ def make_policy_value_consistency_plot(pvc_data: pd.DataFrame) -> go.Figure:
         annotation_text="No rank correlation",
         annotation_position="bottom right",
     )
-    fig.update_layout(
-        xaxis_title="Generation",
-        yaxis_title="Agreement (argmax fraction / Spearman ρ)",
-        yaxis_range=[-1.05, 1.05],
-        title="Policy–Value Consistency (one-ply lookahead)",
-        xaxis={"dtick": 1 if agg["generation"].max() < 40 else 5},
-    )
+    layout: dict = {
+        "xaxis_title": "Generation",
+        "yaxis_title": "Agreement (argmax fraction / Spearman ρ)",
+        "yaxis_range": [-1.05, 1.05],
+        "title": "Policy–Value Consistency (one-ply lookahead)",
+        "xaxis": {"dtick": 1 if agg["generation"].max() < 40 else 5},
+    }
+    if has_value_symmetry:
+        layout["yaxis2"] = {
+            "title": "Value-symmetry MAE",
+            "overlaying": "y",
+            "side": "right",
+            "rangemode": "tozero",
+            "showgrid": False,
+        }
+    fig.update_layout(**layout)
     return _apply_defaults(fig)
 
 

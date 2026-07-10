@@ -590,6 +590,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                         pvc_argmax_match=pvc["pvc_argmax_match"],
                         pvc_spearman=pvc["pvc_spearman"],
                         eval_set_size=len(eval_set),
+                        value_symmetry_mae=self._compute_value_symmetry_mae(eval_set),
                     )
 
         # Reclaim the on-disk memmap scratch (a whole buffer's worth, ~GBs) so it

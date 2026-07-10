@@ -58,7 +58,7 @@ existing symmetry diagnostic.)
 | S1 | Compute PVC in the eval-set diagnostics (`_compute_policy_value_consistency`) | 2 h | High | `games/base_wrapper.py` | ✅ |
 | S2 | Metrics schema + wire into the per-gen eval block | 1 h | High | `storage/metrics.py`, `games/base_wrapper.py` | ✅ |
 | S3 | Report chart (PVC over generations, with the caveat caption) | 1 h | Medium | `reporting/charts.py`, `reporting/report.py` | ✅ |
-| S4 | Optional `value_symmetry_mae` sub-metric | 45 min | Low | `games/base_wrapper.py`, `storage/metrics.py` | |
+| S4 | Optional `value_symmetry_mae` sub-metric | 45 min | Low | `games/base_wrapper.py`, `storage/metrics.py` | ✅ |
 | S5 | Tests + docs | 1.5 h | High | `tests/`, `docs/05-EVALUATION.md` | |
 
 ---
@@ -114,6 +114,15 @@ below 100%; watch for a late drop or persistently low level (value/policy imbala
 **Target.** In the same eval pass, compute `mean|V(s) − V(reflect(s))|` using the game's order-2
 symmetry (`get_symmetries`). Log it (`pvc/value_symmetry_mae`) and add to the symmetry diagnostic
 chart (policy symmetry KL is already there). Low priority — do only if S1–S3 land cleanly.
+
+**As built.** Included. Compute is `BaseNNetWrapper._compute_value_symmetry_mae` (a static
+`_value_symmetry_mae` core so it's testable with a scripted predictor); the identity variant is
+excluded game-agnostically by `state_key` equality rather than assuming its list position. Logged as
+an optional `value_symmetry_mae` column on the PVC record + W&B `pvc/value_symmetry_mae`. **Charted on
+the PVC plot's secondary y-axis** (not the symmetry-KL chart as the plan suggested): the PVC chart
+already reads the PVC parquet, so this keeps the sub-metric self-contained on one figure instead of
+cross-wiring the PVC table into the policy-symmetry chart. The value MAE and the policy-symmetry KL
+answer the same "is the net respecting the symmetry?" question for the two heads respectively.
 
 ---
 
