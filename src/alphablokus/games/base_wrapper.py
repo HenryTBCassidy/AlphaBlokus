@@ -18,7 +18,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler, MultiStepLR
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
-from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper
+from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper, IPolicyValuePredictor
 from alphablokus.storage.sparse_policy import as_dense
 
 # Ceiling on the eval set the per-epoch diagnostics accept. The eval set holds
@@ -26,6 +26,12 @@ from alphablokus.storage.sparse_policy import as_dense
 # Blokus's (n, 17837) targets) but it would OOM if someone scaled it toward
 # buffer size, so the bound is enforced, not assumed (oom-hardening O9).
 MAX_EVAL_SET_POSITIONS = 2_000
+
+# Policy–Value Consistency (PVC) candidate set: the top-K policy moves per
+# position that get a one-ply value lookahead. K bounds the child-eval cost and
+# focuses the metric where the policy actually puts mass (see
+# docs/plans/archive/policy-value-consistency-metric.md §"Design choices").
+PVC_TOP_K = 8
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
@@ -723,6 +729,212 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 top5_hits += 1
 
         return top1_hits / n, top5_hits / n
+
+    def _compute_policy_value_consistency(self, eval_set: EvalSet) -> dict[str, float] | None:
+        """Policy–value consistency of the current net on the eval set.
+
+        For each frozen eval position (current player to move) this asks whether
+        the **policy head** agrees with a one-ply lookahead through the **value
+        head**. For candidate move ``a`` leading to child ``s'`` the one-ply
+        value is the negamax ``Q₁(a) = −V(s')`` (after our move it is the
+        opponent's turn, so their value negates to ours); terminal children use
+        the true game result instead of ``V``. Two agreement measures over the
+        top-:data:`PVC_TOP_K` policy moves are aggregated over the set:
+
+        - ``pvc_argmax_match``: fraction of positions where the policy's best
+          candidate is also the ``Q₁``-best candidate.
+        - ``pvc_spearman``: mean Spearman rank correlation between ``π`` and
+          ``Q₁`` across the candidates.
+
+        Positions with fewer than two legal moves are skipped (rank correlation
+        is undefined on a single item). Returns ``None`` when the eval set
+        predates compact-board persistence (nothing to rebuild children from),
+        mirroring :meth:`_compute_mcts_agreement`.
+
+        **Reading it (bake into any caption):** perfect agreement is *not*
+        expected — the policy is trained on multi-ply MCTS visits while ``Q₁``
+        is a single ply, so a healthy net plateaus *below* 100%. A late drop or
+        a persistently low level is the red flag (value head lagging, or policy
+        chasing lines the value head doesn't support).
+        """
+        if eval_set.compact_boards is None or len(eval_set) == 0:
+            return None
+        self.nnet.eval()
+        return self._policy_value_consistency(self.game, self, eval_set.compact_boards, PVC_TOP_K)
+
+    def _compute_value_symmetry_mae(self, eval_set: EvalSet) -> float | None:
+        """Mean ``|V(s) − V(reflect(s))|`` over the eval set (value-head symmetry).
+
+        The value of a position is invariant under the game's symmetry group, so
+        a well-behaved value head returns the same ``V`` for a board and each of
+        its symmetric variants; this mean absolute deviation should sit near 0.
+        A rising value means the value head is not respecting the order-2
+        symmetry (policy symmetry is already tracked as a KL in the symmetry
+        diagnostic). Returns ``None`` when the eval set has no compact boards.
+        """
+        if eval_set.compact_boards is None or len(eval_set) == 0:
+            return None
+        self.nnet.eval()
+        return self._value_symmetry_mae(self.game, self, eval_set.compact_boards)
+
+    @staticmethod
+    def _policy_value_consistency(
+        game: IGame,
+        predictor: IPolicyValuePredictor,
+        compact_boards: np.ndarray,
+        top_k: int,
+    ) -> dict[str, float] | None:
+        """Core PVC computation, decoupled from any wrapper state for testing.
+
+        Takes the game and an :class:`IPolicyValuePredictor` explicitly so a
+        scripted predictor can drive it with known policy/value outputs. Returns
+        ``None`` when no position has enough legal moves to score.
+        """
+        argmax_matches: list[float] = []
+        spearmans: list[float] = []
+        for compact in compact_boards:
+            board = game.board_from_compact(compact)
+            candidates = BaseNNetWrapper._one_ply_q_values(game, predictor, board, top_k)
+            if candidates is None:
+                continue
+            _, probs, q1_values = candidates
+            argmax_matches.append(float(int(np.argmax(probs)) == int(np.argmax(q1_values))))
+            rho = BaseNNetWrapper._spearman(probs, q1_values)
+            if not np.isnan(rho):
+                spearmans.append(rho)
+
+        if not argmax_matches:
+            return None
+        return {
+            "pvc_argmax_match": float(np.mean(argmax_matches)),
+            "pvc_spearman": float(np.mean(spearmans)) if spearmans else float("nan"),
+        }
+
+    @staticmethod
+    def _one_ply_q_values(
+        game: IGame,
+        predictor: IPolicyValuePredictor,
+        board: IBoard,
+        top_k: int,
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+        """One-ply negamax values for the top-``top_k`` policy moves of ``board``.
+
+        ``board`` must be canonical (player-1 perspective), as produced by
+        :meth:`IGame.board_from_compact`. Returns three aligned arrays —
+        ``(candidate_actions, candidate_policy_probs, q1_values)`` — ordered by
+        descending policy probability, or ``None`` when the board has fewer than
+        two legal moves (rank correlation is undefined on a single candidate).
+
+        ``Q₁(a) = −V(s')`` for a non-terminal child ``s'`` (evaluated in the
+        opponent's canonical frame, then negated back to the mover's
+        perspective) and ``Q₁(a) = −result`` for a terminal child, where
+        ``result`` is ``get_game_ended`` in the opponent's frame — the same
+        negamax sign, so winning moves score ``+1``.
+        """
+        policy, _ = predictor.predict(board)
+        valids = game.valid_move_masking(board, 1)
+        num_legal = int(np.count_nonzero(valids))
+        if num_legal < 2:
+            return None
+
+        masked = np.where(valids > 0, np.asarray(policy, dtype=np.float64), -np.inf)
+        k = min(top_k, num_legal)
+        candidate_actions = np.argsort(masked)[::-1][:k].astype(int)
+        candidate_probs = np.asarray(policy, dtype=np.float64)[candidate_actions]
+
+        q1_values = np.empty(k, dtype=np.float64)
+        pending_children: list[IBoard] = []
+        pending_slots: list[int] = []
+        for slot, action in enumerate(candidate_actions):
+            next_board, next_player = game.get_next_state(board, 1, int(action))
+            result = game.get_game_ended(next_board, next_player)
+            if result != 0.0:
+                # Terminal child: use the true result, in the opponent's frame,
+                # negated to the mover's perspective (same sign as −V below).
+                q1_values[slot] = -float(result)
+            else:
+                pending_children.append(game.get_canonical_form(next_board, next_player))
+                pending_slots.append(slot)
+
+        if pending_children:
+            _, child_values = predictor.predict_batch(pending_children)
+            for slot, value in zip(pending_slots, child_values, strict=True):
+                q1_values[slot] = -float(value)
+
+        return candidate_actions, candidate_probs, q1_values
+
+    @staticmethod
+    def _value_symmetry_mae(
+        game: IGame,
+        predictor: IPolicyValuePredictor,
+        compact_boards: np.ndarray,
+    ) -> float | None:
+        """Core value-symmetry MAE, decoupled from wrapper state for testing."""
+        action_size = game.get_action_size()
+        dummy_pi = np.zeros(action_size, dtype=np.float64)
+
+        originals: list[IBoard] = []
+        variants: list[IBoard] = []
+        variant_owner: list[int] = []
+        for compact in compact_boards:
+            board = game.board_from_compact(compact)
+            owner = len(originals)
+            originals.append(board)
+            for variant_board, _ in game.get_symmetries(board, dummy_pi):
+                # Filter the identity by state equality — game-agnostic, since
+                # games don't agree on where the identity sits in the list.
+                if variant_board.state_key == board.state_key:
+                    continue
+                variants.append(variant_board)
+                variant_owner.append(owner)
+
+        if not variants:
+            return None
+
+        _, original_values = predictor.predict_batch(originals)
+        _, variant_values = predictor.predict_batch(variants)
+        deviations = [
+            abs(float(original_values[owner]) - float(value))
+            for owner, value in zip(variant_owner, variant_values, strict=True)
+        ]
+        return float(np.mean(deviations))
+
+    @staticmethod
+    def _spearman(x: np.ndarray, y: np.ndarray) -> float:
+        """Spearman rank correlation between two 1-D arrays.
+
+        Implemented on numpy alone (no scipy dependency): the Pearson
+        correlation of average-ranked values, so ties are handled correctly.
+        Returns ``NaN`` when either input has fewer than two items or zero rank
+        variance (correlation undefined), so callers exclude it from the mean
+        rather than poisoning the average.
+        """
+        if len(x) < 2 or len(y) < 2:
+            return float("nan")
+        rank_x = BaseNNetWrapper._average_ranks(x)
+        rank_y = BaseNNetWrapper._average_ranks(y)
+        if rank_x.std() == 0.0 or rank_y.std() == 0.0:
+            return float("nan")
+        return float(np.corrcoef(rank_x, rank_y)[0, 1])
+
+    @staticmethod
+    def _average_ranks(values: np.ndarray) -> np.ndarray:
+        """Return 1-based ranks of ``values``, averaging ranks within ties."""
+        order = np.argsort(values, kind="mergesort")
+        ranks = np.empty(len(values), dtype=np.float64)
+        ranks[order] = np.arange(1, len(values) + 1, dtype=np.float64)
+        sorted_values = values[order]
+        start = 0
+        while start < len(values):
+            end = start
+            while end + 1 < len(values) and sorted_values[end + 1] == sorted_values[start]:
+                end += 1
+            if end > start:
+                # 0-based positions start..end map to 1-based ranks start+1..end+1.
+                mean_rank = (start + end + 2) / 2.0
+                ranks[order[start : end + 1]] = mean_rank
+            start = end + 1
+        return ranks
 
     def _inference_autocast(self) -> AbstractContextManager:
         """fp16 autocast context for the forward pass, or a no-op.
