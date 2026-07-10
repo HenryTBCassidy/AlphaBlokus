@@ -141,6 +141,7 @@ class MetricsCollector:
     _training_entropy_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _policy_accuracy_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _value_calibration_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _policy_value_consistency_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _rolling_elo_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _minimax_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _arena_replay_records: list[dict] = field(default_factory=list, init=False, repr=False)
@@ -292,6 +293,10 @@ class MetricsCollector:
         # Headline scalar ``learning_quality/symmetry_kl_mean`` is the mean
         # across all reference positions for that generation.
         self._wandb_run.define_metric("learning_quality/*", step_metric="generation")
+
+        # Policy–value consistency (one-ply lookahead agreement between the two
+        # heads) — one point per generation.
+        self._wandb_run.define_metric("pvc/*", step_metric="generation")
 
     def _publish(self, payload: dict) -> None:
         """Mirror a metrics payload to W&B if a run is active.
@@ -692,6 +697,55 @@ class MetricsCollector:
                 }
             )
 
+    def log_policy_value_consistency(
+        self,
+        generation: int,
+        epoch: int,
+        pvc_argmax_match: float,
+        pvc_spearman: float,
+        eval_set_size: int,
+        value_symmetry_mae: float | None = None,
+    ) -> None:
+        """Record policy–value consistency on the frozen eval set.
+
+        Two agreement series between the policy head and a one-ply value
+        lookahead (``Q₁(a) = −V(child)``), over each position's top-K policy
+        moves:
+
+        - ``pvc_argmax_match``: fraction of positions where the policy's best
+          move is also the ``Q₁``-best move.
+        - ``pvc_spearman``: mean Spearman rank correlation between ``π`` and
+          ``Q₁`` across the candidate moves.
+
+        Read as a **trend**, not a target: the policy sees deeper than one ply,
+        so a healthy net plateaus *below* perfect agreement. A late drop or a
+        persistently low level flags a value/policy imbalance (see
+        docs/plans/archive/policy-value-consistency-metric.md).
+
+        ``value_symmetry_mae`` (optional) is ``mean|V(s) − V(reflect(s))|`` over
+        the eval set — the value head should be invariant under the game's
+        symmetry group, so this sits near 0; a rising value means the value head
+        isn't respecting the symmetry.
+        """
+        record = {
+            "generation": generation,
+            "epoch": epoch,
+            "pvc_argmax_match": pvc_argmax_match,
+            "pvc_spearman": pvc_spearman,
+            "eval_set_size": eval_set_size,
+        }
+        if value_symmetry_mae is not None:
+            record["value_symmetry_mae"] = value_symmetry_mae
+        self._policy_value_consistency_records.append(record)
+        payload: dict[str, Any] = {
+            "pvc/argmax_match": pvc_argmax_match,
+            "pvc/spearman": pvc_spearman,
+            "generation": generation,
+        }
+        if value_symmetry_mae is not None:
+            payload["pvc/value_symmetry_mae"] = value_symmetry_mae
+        self._publish(payload)
+
     def log_rolling_elo(
         self,
         generation: int,
@@ -1074,6 +1128,16 @@ class MetricsCollector:
             )
             count += len(self._value_calibration_records)
             self._value_calibration_records.clear()
+
+        if self._policy_value_consistency_records:
+            self._write_partition(
+                pd.DataFrame(self._policy_value_consistency_records),
+                config.policy_value_consistency_directory,
+                generation,
+                "consistency.parquet",
+            )
+            count += len(self._policy_value_consistency_records)
+            self._policy_value_consistency_records.clear()
 
         if self._rolling_elo_records:
             self._write_partition(

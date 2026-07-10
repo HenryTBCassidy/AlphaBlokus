@@ -28,6 +28,7 @@ from alphablokus.reporting.charts import (
     make_network_entropy_plot,
     make_per_gen_loss_curves,
     make_policy_accuracy_plot,
+    make_policy_value_consistency_plot,
     make_profiling_plot,
     make_resource_usage_plot,
     make_symmetry_diagnostic_plot,
@@ -280,6 +281,11 @@ def create_html_report(config: RunConfig) -> None:
     value_calibration_data = (
         _load_metrics(config.value_calibration_directory) if config.value_calibration_directory.exists() else None
     )
+    policy_value_consistency_data = (
+        _load_metrics(config.policy_value_consistency_directory)
+        if config.policy_value_consistency_directory.exists()
+        else None
+    )
     # Optional — only populated once LR logging landed (L2); older runs omit it.
     learning_rate_data = (
         _load_metrics(config.learning_rate_directory) if config.learning_rate_directory.exists() else None
@@ -318,6 +324,11 @@ def create_html_report(config: RunConfig) -> None:
     fig_value_calibration = (
         make_value_calibration_plot(value_calibration_data, config.game)
         if value_calibration_data is not None and not value_calibration_data.empty
+        else None
+    )
+    fig_policy_value_consistency = (
+        make_policy_value_consistency_plot(policy_value_consistency_data)
+        if policy_value_consistency_data is not None and not policy_value_consistency_data.empty
         else None
     )
     fig_learning_rate = (
@@ -434,6 +445,7 @@ def create_html_report(config: RunConfig) -> None:
         fig_network_entropy is not None
         or fig_policy_accuracy is not None
         or fig_value_calibration is not None
+        or fig_policy_value_consistency is not None
         or fig_symmetry is not None
     ):
         parts = [
@@ -452,6 +464,20 @@ def create_html_report(config: RunConfig) -> None:
             parts.append(_chart(fig_policy_accuracy))
         if fig_value_calibration is not None:
             parts.append(_chart(fig_value_calibration))
+        if fig_policy_value_consistency is not None:
+            parts.append(
+                '<p class="section-desc" style="margin-top:18px;">'
+                "<strong>Policy–Value Consistency</strong> asks whether the policy "
+                "head agrees with a one-ply value lookahead (<code>Q₁(a) = −V(child)</code>) "
+                "on each held-out position. Read it as a <em>trend, not a target</em>: "
+                "the policy is trained on multi-ply MCTS search while Q₁ is a single "
+                "ply, so a healthy net rises early then plateaus <em>below</em> 100% — "
+                "the residual is roughly how much deeper the policy sees than one-ply "
+                "value. Watch for a late drop or a persistently low level (value head "
+                "lagging, or policy chasing lines the value head doesn't support), "
+                "not for 100%.</p>"
+            )
+            parts.append(_chart(fig_policy_value_consistency))
         if fig_symmetry is not None:
             parts.append(_chart(fig_symmetry))
         parts.append("</section>")
