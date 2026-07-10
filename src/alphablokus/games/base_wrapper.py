@@ -582,6 +582,15 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                     bucket_means=diagnostics["calib_means"],
                     bucket_counts=diagnostics["calib_counts"],
                 )
+                pvc = self._compute_policy_value_consistency(eval_set)
+                if pvc is not None:
+                    metrics.log_policy_value_consistency(
+                        generation=generation,
+                        epoch=epoch,
+                        pvc_argmax_match=pvc["pvc_argmax_match"],
+                        pvc_spearman=pvc["pvc_spearman"],
+                        eval_set_size=len(eval_set),
+                    )
 
         # Reclaim the on-disk memmap scratch (a whole buffer's worth, ~GBs) so it
         # is not left behind or swept into the per-generation object-store sync.

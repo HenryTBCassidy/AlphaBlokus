@@ -56,7 +56,7 @@ existing symmetry diagnostic.)
 | # | Item | Effort | Priority | Files | Done |
 |---|------|--------|----------|-------|------|
 | S1 | Compute PVC in the eval-set diagnostics (`_compute_policy_value_consistency`) | 2 h | High | `games/base_wrapper.py` | ✅ |
-| S2 | Metrics schema + wire into the per-gen eval block | 1 h | High | `storage/metrics.py`, `games/base_wrapper.py` | |
+| S2 | Metrics schema + wire into the per-gen eval block | 1 h | High | `storage/metrics.py`, `games/base_wrapper.py` | ✅ |
 | S3 | Report chart (PVC over generations, with the caveat caption) | 1 h | Medium | `reporting/charts.py`, `reporting/report.py` | |
 | S4 | Optional `value_symmetry_mae` sub-metric | 45 min | Low | `games/base_wrapper.py`, `storage/metrics.py` | |
 | S5 | Tests + docs | 1.5 h | High | `tests/`, `docs/05-EVALUATION.md` | |

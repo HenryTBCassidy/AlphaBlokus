@@ -702,6 +702,19 @@ class RunConfig:
         """
         return self.run_directory / "SymmetryDiagnostic"
 
+    @property
+    def policy_value_consistency_directory(self) -> Path:
+        """Directory for the per-generation policy–value consistency (PVC) diagnostic.
+
+        Stores the argmax-match rate and Spearman rank correlation between the
+        policy head and a one-ply value lookahead on the frozen eval set (plus
+        the optional value-symmetry MAE). Written by
+        :meth:`MetricsCollector.log_policy_value_consistency`; rendered as the
+        report's PVC curve. Absent for runs predating this metric. See
+        ``docs/plans/archive/policy-value-consistency-metric.md``.
+        """
+        return self.run_directory / "PolicyValueConsistency"
+
 
 def load_args(config_path: str | Path) -> RunConfig:
     """
