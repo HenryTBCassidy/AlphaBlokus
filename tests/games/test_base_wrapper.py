@@ -8,13 +8,18 @@ from typing import TYPE_CHECKING
 import numpy as np
 import pytest
 
+from alphablokus.games.base_wrapper import PVC_TOP_K, BaseNNetWrapper
 from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
+from alphablokus.interfaces import IPolicyValuePredictor
 from alphablokus.storage.metrics import EvalSet, MetricsCollector
 from alphablokus.storage.sparse_policy import sparsify
 
 if TYPE_CHECKING:
+    from numpy.typing import NDArray
+
     from alphablokus.config import RunConfig
     from alphablokus.games.tictactoe.game import TicTacToeGame
+    from alphablokus.interfaces import IBoard
 
 
 def _lr_sequence(config: RunConfig, game: TicTacToeGame, steps: int) -> list[float]:
@@ -301,3 +306,247 @@ def test_mcts_agreement_is_computed_and_logged(ttt_game: TicTacToeGame, test_con
     assert records, "no policy-accuracy records logged"
     assert all("mcts_top1_accuracy" in r and "mcts_top5_accuracy" in r for r in records)
     assert all(0.0 <= r["mcts_top1_accuracy"] <= 1.0 for r in records)
+
+
+# ── Policy–Value Consistency (S1/S4) ───────────────────────────────────────
+
+
+class _ScriptedPredictor(IPolicyValuePredictor):
+    """A predictor with hand-set policy/value outputs keyed by board state.
+
+    Not a mock of *game logic* (the real ``TicTacToeGame`` drives all rules) —
+    only the network surface is scripted, which is exactly what lets us assert
+    the PVC negamax/terminal/ranking maths against known-good outputs.
+    """
+
+    def __init__(
+        self,
+        action_size: int,
+        *,
+        policy_by_key: dict[bytes, NDArray],
+        value_by_key: dict[bytes, float],
+        default_value: float = 0.0,
+    ) -> None:
+        self._action_size = action_size
+        self._policy_by_key = policy_by_key
+        self._value_by_key = value_by_key
+        self._default_value = default_value
+
+    def predict(self, board: IBoard) -> tuple[NDArray, float]:
+        key = board.state_key
+        policy = self._policy_by_key.get(key)
+        if policy is None:
+            policy = np.full(self._action_size, 1.0 / self._action_size, dtype=np.float64)
+        return policy, self._value_by_key.get(key, self._default_value)
+
+    def predict_batch(self, boards) -> tuple[list[NDArray], list[float]]:  # type: ignore[no-untyped-def]
+        results = [self.predict(board) for board in boards]
+        return [p for p, _ in results], [v for _, v in results]
+
+
+def _descending_policy_over(game: TicTacToeGame, legal: NDArray) -> NDArray:
+    """Policy that assigns strictly descending probability to ``legal`` in order."""
+    policy = np.zeros(game.get_action_size(), dtype=np.float64)
+    weights = np.arange(len(legal), 0, -1, dtype=np.float64)
+    policy[legal] = weights / weights.sum()
+    return policy
+
+
+def test_spearman_agree_reverse_and_undefined() -> None:
+    """The rank-correlation helper: +1 agree, −1 reverse, NaN when undefined."""
+    assert BaseNNetWrapper._spearman(np.array([3.0, 2.0, 1.0]), np.array([9.0, 5.0, 1.0])) == pytest.approx(1.0)
+    assert BaseNNetWrapper._spearman(np.array([3.0, 2.0, 1.0]), np.array([1.0, 5.0, 9.0])) == pytest.approx(-1.0)
+    # Ties are averaged, so identical-with-ties still correlates perfectly.
+    assert BaseNNetWrapper._spearman(np.array([1.0, 1.0, 2.0]), np.array([4.0, 4.0, 9.0])) == pytest.approx(1.0)
+    # Fewer than two items, or zero variance, is undefined → NaN (excluded, not poisoning).
+    assert np.isnan(BaseNNetWrapper._spearman(np.array([1.0]), np.array([1.0])))
+    assert np.isnan(BaseNNetWrapper._spearman(np.array([1.0, 1.0, 1.0]), np.array([1.0, 2.0, 3.0])))
+
+
+def _non_terminal_ttt_board(game: TicTacToeGame) -> tuple[IBoard, NDArray]:
+    """A canonical, non-terminal TTT board and its legal actions.
+
+    Player 1 (+1) to move with no immediate winning move, so *every* child is
+    non-terminal and the scripted value head fully controls Q₁.
+    """
+    compact = np.array([[1, -1, 0], [0, 0, 1], [-1, 0, 0]], dtype=np.int8)
+    board = game.board_from_compact(compact)
+    legal = np.flatnonzero(game.valid_move_masking(board, 1))
+    assert len(legal) >= 2
+    for action in legal:
+        child, child_player = game.get_next_state(board, 1, int(action))
+        assert game.get_game_ended(child, child_player) == 0.0, "test board must have no terminal children"
+    return board, legal
+
+
+def test_one_ply_q_values_negamax_ranks_best_child_top(ttt_game: TicTacToeGame) -> None:
+    """Q₁ = −V(child): the move into the worst child-value ranks best for the mover."""
+    board, legal = _non_terminal_ttt_board(ttt_game)
+    policy = _descending_policy_over(ttt_game, legal)
+
+    # Give the LAST legal move (lowest policy prob) the most negative child value,
+    # so its Q₁ = −V is the largest — the one-ply-best move despite low prior.
+    value_by_key: dict[bytes, float] = {}
+    best_action = int(legal[-1])
+    for rank, action in enumerate(legal):
+        child, child_player = ttt_game.get_next_state(board, 1, int(action))
+        canonical_child = ttt_game.get_canonical_form(child, child_player)
+        value_by_key[canonical_child.state_key] = -2.0 if int(action) == best_action else float(rank)
+
+    predictor = _ScriptedPredictor(
+        ttt_game.get_action_size(),
+        policy_by_key={board.state_key: policy},
+        value_by_key=value_by_key,
+    )
+    result = BaseNNetWrapper._one_ply_q_values(ttt_game, predictor, board, PVC_TOP_K)
+    assert result is not None
+    candidate_actions, _, q1_values = result
+    assert int(candidate_actions[int(np.argmax(q1_values))]) == best_action
+
+
+def test_one_ply_q_values_terminal_child_uses_result_not_value(ttt_game: TicTacToeGame) -> None:
+    """A winning move scores Q₁ = +1 from the true result, ignoring the value head."""
+    # Player 1 (+1) has an immediate winning move; value head is set adversarially.
+    compact = np.array([[1, 1, 0], [-1, -1, 0], [0, 0, 0]], dtype=np.int8)
+    board = ttt_game.board_from_compact(compact)
+    legal = np.flatnonzero(ttt_game.valid_move_masking(board, 1))
+
+    winning_actions = [
+        int(a) for a in legal if ttt_game.get_game_ended(*ttt_game.get_next_state(board, 1, int(a))) != 0.0
+    ]
+    assert len(winning_actions) == 1, "expected exactly one immediate winning move"
+    winning_action = winning_actions[0]
+
+    # Every child (incl. the winning one) gets a misleading value; the winning
+    # move is terminal so its Q₁ must come from the result (+1), not −V.
+    predictor = _ScriptedPredictor(
+        ttt_game.get_action_size(),
+        policy_by_key={board.state_key: _descending_policy_over(ttt_game, legal)},
+        value_by_key={},
+        default_value=0.5,  # would give Q₁ = −0.5 if V were (wrongly) used
+    )
+    result = BaseNNetWrapper._one_ply_q_values(ttt_game, predictor, board, PVC_TOP_K)
+    assert result is not None
+    candidate_actions, _, q1_values = result
+    winning_slot = int(np.flatnonzero(candidate_actions == winning_action)[0])
+    assert q1_values[winning_slot] == pytest.approx(1.0)
+    # ...and it is the top move by Q₁ (a win beats any non-terminal −0.5).
+    assert int(np.argmax(q1_values)) == winning_slot
+
+
+def test_policy_value_consistency_perfect_agreement(ttt_game: TicTacToeGame) -> None:
+    """Policy ranking == Q₁ ranking → argmax-match 1, Spearman +1."""
+    board, legal = _non_terminal_ttt_board(ttt_game)
+    policy = _descending_policy_over(ttt_game, legal)
+
+    value_by_key: dict[bytes, float] = {}
+    num = len(legal)
+    for rank, action in enumerate(legal):
+        child, child_player = ttt_game.get_next_state(board, 1, int(action))
+        canonical_child = ttt_game.get_canonical_form(child, child_player)
+        # Q₁ = −V descending in the same order as the policy → V = rank − num.
+        value_by_key[canonical_child.state_key] = float(rank - num)
+
+    predictor = _ScriptedPredictor(
+        ttt_game.get_action_size(),
+        policy_by_key={board.state_key: policy},
+        value_by_key=value_by_key,
+    )
+    compacts = np.array([board.to_compact()])
+    result = BaseNNetWrapper._policy_value_consistency(ttt_game, predictor, compacts, PVC_TOP_K)
+    assert result is not None
+    assert result["pvc_argmax_match"] == pytest.approx(1.0)
+    assert result["pvc_spearman"] == pytest.approx(1.0)
+
+
+def test_policy_value_consistency_reversed(ttt_game: TicTacToeGame) -> None:
+    """Policy ranking reversed vs Q₁ → argmax-match 0, Spearman −1."""
+    board, legal = _non_terminal_ttt_board(ttt_game)
+    policy = _descending_policy_over(ttt_game, legal)
+
+    value_by_key: dict[bytes, float] = {}
+    for rank, action in enumerate(legal):
+        child, child_player = ttt_game.get_next_state(board, 1, int(action))
+        canonical_child = ttt_game.get_canonical_form(child, child_player)
+        # Q₁ = −V ascending while policy descends → perfect anti-correlation.
+        value_by_key[canonical_child.state_key] = float(-(rank + 1))
+
+    predictor = _ScriptedPredictor(
+        ttt_game.get_action_size(),
+        policy_by_key={board.state_key: policy},
+        value_by_key=value_by_key,
+    )
+    compacts = np.array([board.to_compact()])
+    result = BaseNNetWrapper._policy_value_consistency(ttt_game, predictor, compacts, PVC_TOP_K)
+    assert result is not None
+    assert result["pvc_argmax_match"] == pytest.approx(0.0)
+    assert result["pvc_spearman"] == pytest.approx(-1.0)
+
+
+def test_policy_value_consistency_skips_positions_below_two_moves(ttt_game: TicTacToeGame) -> None:
+    """A full (single legal move) board is skipped; all-skipped → None (no crash, no NaN)."""
+    # Classic drawn, full board: the only legal action is pass ⇒ < 2 candidates.
+    full = np.array([[1, -1, 1], [1, -1, -1], [-1, 1, 1]], dtype=np.int8)
+    board = ttt_game.board_from_compact(full)
+    assert int(np.count_nonzero(ttt_game.valid_move_masking(board, 1))) == 1
+
+    predictor = _ScriptedPredictor(ttt_game.get_action_size(), policy_by_key={}, value_by_key={})
+    result = BaseNNetWrapper._policy_value_consistency(ttt_game, predictor, np.array([full]), PVC_TOP_K)
+    assert result is None
+
+
+def test_value_symmetry_mae_matches_hand_computed(ttt_game: TicTacToeGame) -> None:
+    """MAE = mean|V(s) − V(reflect(s))| with the identity excluded."""
+    # Asymmetric board so its symmetric variants are genuinely different states.
+    compact = np.array([[1, -1, 0], [0, 0, 0], [0, 0, 0]], dtype=np.int8)
+    board = ttt_game.board_from_compact(compact)
+
+    # V=+1 for the source only; every other state defaults to −1, so each
+    # non-identity variant contributes |1 − (−1)| = 2.
+    predictor = _ScriptedPredictor(
+        ttt_game.get_action_size(),
+        policy_by_key={},
+        value_by_key={board.state_key: 1.0},
+        default_value=-1.0,
+    )
+    mae = BaseNNetWrapper._value_symmetry_mae(ttt_game, predictor, np.array([compact]))
+    assert mae == pytest.approx(2.0)
+
+
+def test_value_symmetry_mae_none_for_fully_symmetric_position(ttt_game: TicTacToeGame) -> None:
+    """The empty board is its own image under every symmetry ⇒ no variants ⇒ None."""
+    empty = np.zeros((ttt_game.N, ttt_game.N), dtype=np.int8)
+    predictor = _ScriptedPredictor(ttt_game.get_action_size(), policy_by_key={}, value_by_key={})
+    assert BaseNNetWrapper._value_symmetry_mae(ttt_game, predictor, np.array([empty])) is None
+
+
+def test_pvc_computed_and_logged_end_to_end(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """A real wrapper computes valid PVC + value-symmetry ranges and persists them."""
+    wrapper = NNetWrapper(ttt_game, test_config)
+    compacts = _ttt_eval_positions(ttt_game, 4)
+    eval_set = _make_eval_set(ttt_game, compacts, with_compact=True)
+
+    pvc = wrapper._compute_policy_value_consistency(eval_set)
+    assert pvc is not None
+    assert 0.0 <= pvc["pvc_argmax_match"] <= 1.0
+    assert np.isnan(pvc["pvc_spearman"]) or -1.0 <= pvc["pvc_spearman"] <= 1.0
+    mae = wrapper._compute_value_symmetry_mae(eval_set)
+    assert mae is not None and mae >= 0.0
+
+    examples = [(compact, sparsify(_uniform_over_legal(ttt_game, compact)), 0.0) for compact in compacts]
+    metrics = MetricsCollector(config=test_config)
+    wrapper.train(examples, generation=1, metrics=metrics, eval_set=eval_set)
+
+    records = metrics._policy_value_consistency_records
+    assert records, "no policy-value-consistency records logged"
+    assert all("pvc_argmax_match" in r and "pvc_spearman" in r for r in records)
+    assert all("value_symmetry_mae" in r for r in records)
+
+
+def test_pvc_returns_none_without_compact_boards(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """No compact boards ⇒ no children to build ⇒ the diagnostic is skipped."""
+    wrapper = NNetWrapper(ttt_game, test_config)
+    compacts = _ttt_eval_positions(ttt_game, 4)
+    eval_set = _make_eval_set(ttt_game, compacts, with_compact=False)
+    assert wrapper._compute_policy_value_consistency(eval_set) is None
+    assert wrapper._compute_value_symmetry_mae(eval_set) is None

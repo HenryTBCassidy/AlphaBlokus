@@ -118,6 +118,19 @@ For the validation game we have a *perfect* reference. When `game == "tictactoe"
 
 A trained network should be *equivariant* under the game's symmetry group: mirroring the board should mirror its policy. Every generation (when `symmetry_diagnostic_positions > 0`, default 100) we take a fixed, seeded set of reference positions and, for each non-identity symmetry, compute the KL divergence between the network's policy on the symmetric board and the symmetric image of its policy on the original. **Zero is perfect.** A rising or persistently-high KL means the network has baked in directional biases that augmentation should be averaging out. The reference set is the same every generation, so the per-gen trend is comparable.
 
+### Policy–Value Consistency (PVC)
+
+The policy and value heads are trained on the same self-play but with different targets, so they can drift apart — v3 plateaued externally while its policy kept improving internally, and we had no signal that *decomposed* the two heads. PVC gives that decomposition: does the policy agree with a one-ply lookahead through the value head?
+
+For each frozen eval position `s` (current player to move) we take the top-K (default 8) legal moves by policy probability. For candidate move `a` leading to child `s'`, the one-ply value is the negamax `Q₁(a) = −V(s')` (after our move it's the opponent's turn, so their value negates to ours); terminal children use the true game result (mover's perspective) instead of `V`. Two agreement measures are aggregated over the eval set each generation:
+
+- **`pvc_argmax_match`** (0–1) — fraction of positions where the policy's best candidate is also the `Q₁`-best candidate.
+- **`pvc_spearman`** (−1 to 1) — mean Spearman rank correlation between `π` and `Q₁` across the candidates. Positions with fewer than two legal moves are excluded (rank correlation is undefined), so a sparse late-game board can't poison the mean.
+
+**Read it as a trend, not a target.** Perfect agreement is *not* expected and disagreement is often *correct*: the policy is trained on the MCTS *visit* distribution, which reflects **multi-ply** search, while `Q₁` is only **one ply** of value. A move that looks weak one-ply but is best after deep search — the policy rightly likes it, `Q₁` doesn't. So a healthy net rises early (both heads improving and becoming consistent) then **plateaus below 100%** — the residual ≈ how much deeper the policy sees than one-ply value. The red flag is a **late drop or a persistently low level**: the value head lagging (it can't evaluate the states the policy leads to) or the policy chasing lines the value head doesn't support (the v3 decoupling). Diagnostic only — it does not change training, search, or the loss.
+
+**Value-symmetry MAE** (optional companion) — `mean|V(s) − V(reflect(s))|` over the eval set. The value of a position is invariant under the game's symmetry group, so this should hug 0; a rising value means the *value* head isn't respecting the symmetry (the policy head's equivariance is already tracked by the symmetry-KL diagnostic above). Rendered on the PVC chart's secondary axis.
+
 ### Game Length Analysis
 
 As the network improves, game characteristics should change:

@@ -2,7 +2,7 @@
 
 Add a per-generation diagnostic that measures how well the **policy head** and the **value head**
 agree, via a one-ply lookahead on the frozen eval set. Pure instrumentation — it does **not**
-change training. Motivated by the v3 post-mortem ([`../research/xl-training-scaleup.md`](../research/xl-training-scaleup.md)):
+change training. Motivated by the v3 post-mortem ([`../../research/xl-training-scaleup.md`](../../research/xl-training-scaleup.md)):
 v3's policy kept improving internally while external strength plateaued, and we had no signal that
 *decomposed* the two heads. PVC gives that decomposition — are the heads mutually consistent, or is
 one lagging?
@@ -21,8 +21,8 @@ So read PVC as a **trend**: rising early (both heads improving + becoming consis
 persistently low level** is the red flag — value head lagging (can't evaluate the states the policy
 leads to) or policy chasing lines the value head doesn't support (the v3 decoupling).
 
-Companion docs: [`../guides/PLAN-FORMAT.md`](../guides/PLAN-FORMAT.md),
-[`../guides/STYLE-GUIDE.md`](../guides/STYLE-GUIDE.md).
+Companion docs: [`../../guides/PLAN-FORMAT.md`](../../guides/PLAN-FORMAT.md),
+[`../../guides/STYLE-GUIDE.md`](../../guides/STYLE-GUIDE.md).
 
 ---
 
@@ -59,7 +59,7 @@ existing symmetry diagnostic.)
 | S2 | Metrics schema + wire into the per-gen eval block | 1 h | High | `storage/metrics.py`, `games/base_wrapper.py` | ✅ |
 | S3 | Report chart (PVC over generations, with the caveat caption) | 1 h | Medium | `reporting/charts.py`, `reporting/report.py` | ✅ |
 | S4 | Optional `value_symmetry_mae` sub-metric | 45 min | Low | `games/base_wrapper.py`, `storage/metrics.py` | ✅ |
-| S5 | Tests + docs | 1.5 h | High | `tests/`, `docs/05-EVALUATION.md` | |
+| S5 | Tests + docs | 1.5 h | High | `tests/`, `docs/05-EVALUATION.md` | ✅ |
 
 ---
 
