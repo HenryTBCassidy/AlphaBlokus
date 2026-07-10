@@ -210,8 +210,27 @@ def _play_pairing(
             enable()
     nnet_a.load_checkpoint(filename=str(path_a))
     nnet_b.load_checkpoint(filename=str(path_b))
-    player_a = NetworkPlayer(game=game, nnet=nnet_a, mcts_config=search_config, temp=0.0)
-    player_b = NetworkPlayer(game=game, nnet=nnet_b, mcts_config=search_config, temp=0.0)
+    # Opening diversification applied symmetrically to both checkpoints (inert at
+    # the (0, 0) default). >0 de-correlates the mirrored colour-swap pairs so the
+    # BayesElo fit gets non-degenerate W/L/D counts. See ``TournamentConfig``.
+    opening_temp = config.tournament.opening_temp
+    opening_moves = config.tournament.opening_moves
+    player_a = NetworkPlayer(
+        game=game,
+        nnet=nnet_a,
+        mcts_config=search_config,
+        temp=0.0,
+        opening_temp=opening_temp,
+        opening_moves=opening_moves,
+    )
+    player_b = NetworkPlayer(
+        game=game,
+        nnet=nnet_b,
+        mcts_config=search_config,
+        temp=0.0,
+        opening_temp=opening_temp,
+        opening_moves=opening_moves,
+    )
     a_wins, b_wins, draws, _ = Arena(player_a, player_b, game).play_games(num_games)
     return a_wins, b_wins, draws
 

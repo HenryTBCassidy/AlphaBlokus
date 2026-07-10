@@ -42,6 +42,7 @@
       "channels_last": true,
       "compile": true,
       "dataloader_workers": 8,
+      "dataloader_context": "spawn",
       "pin_memory": true,
       "persistent_workers": true,
       "prefetch_factor": 4,

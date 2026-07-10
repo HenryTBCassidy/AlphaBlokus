@@ -159,16 +159,26 @@ class TrainingPerfConfig:
     prefetch_factor: int = 2  # batches each worker keeps ready (used only when workers > 0)
 
     # multiprocessing start method for the DataLoader's worker processes (used
-    # only when ``dataloader_workers > 0``). The default **fork** deadlocks here:
-    # self-play (JAX) and training (torch) share one process, so JAX's threads
-    # are live when the loader forks workers — that is what killed the
-    # pin-memory thread at gen 59 of blokus_cloud_60. "forkserver" (default)
-    # forks workers from a clean helper process that never loaded JAX; "spawn"
-    # cold-starts a fresh interpreter (heavier, always available); "fork"
-    # restores the old behaviour. An unavailable method falls back to "spawn".
-    # Inert when ``dataloader_workers == 0`` (the Mac/CPU default), so default
-    # behaviour there is unchanged. See docs/plans/archive/harden-long-runs.md H1.
-    dataloader_context: Literal["forkserver", "spawn", "fork"] = "forkserver"
+    # only when ``dataloader_workers > 0``). Both remaining alternatives to the
+    # unsafe **fork** start workers from a clean process (self-play JAX + torch
+    # share this process, so forking its live threads killed the pin-memory
+    # thread at gen 59 of blokus_cloud_60). "spawn" (default since P0/S4)
+    # cold-starts a fully fresh interpreter per worker — no inherited
+    # fork/forkserver state at all, which is the cleanest avoidance of the
+    # torch-DataLoader × JAX-loaded-process hazard: "forkserver" *deadlocked*
+    # the memmap DataLoader at v3 gen-4 (hung between "Starting Training" and
+    # "Epoch 1/1"; an intermittent worker-startup race) — the reason
+    # dataloader_workers was pinned to 0 as a workaround. "forkserver" forks
+    # workers from a warm helper that never loaded JAX (lighter than spawn but
+    # hit the above race); "fork" restores the old unsafe behaviour. An
+    # unavailable method falls back to "spawn". Inert when
+    # ``dataloader_workers == 0`` (the default), so default behaviour is
+    # unchanged. NOTE: spawn resolves the deadlock in principle but the
+    # multi-generation GPU validation (plan S4) has not run yet — treat
+    # workers>0 as unproven until then. See
+    # docs/plans/p0-instrument-and-dataloader.md S4 and
+    # docs/plans/archive/harden-long-runs.md H1.
+    dataloader_context: Literal["forkserver", "spawn", "fork"] = "spawn"
 
     # Per-batch metric cadence. 1 (default) = today's behaviour: a CUDA sync
     # (.item()) and a metrics row every batch. N>1 accumulates losses on-device
@@ -191,7 +201,24 @@ class TournamentConfig:
 
     # Games each checkpoint pair plays. Arena rounds this down to even and swaps
     # colours at halftime, so >= 2. More games = tighter ratings, more compute.
+    # With opening diversity ON (below) each of these games is independent, so
+    # the pairing carries ~``games_per_pairing`` distinct results; with it OFF
+    # the mirrored deterministic colour-swap pairs collapse to ~half that (the
+    # 30/30-draw pairings that made the pool-Elo curve unresolvable below ~50
+    # Elo — docs/research/xl-training-scaleup.md addendum A3).
     games_per_pairing: int = 30
+
+    # Opening-diversification for tournament pairings — mirrors the arena gate's
+    # ``RunConfig.arena_opening_*``. ``opening_temp`` is the play temperature for
+    # the first ``opening_moves`` of a player's own plies (then deterministic
+    # argmax), sampled from the MCTS visit distribution. Both default to 0 =
+    # today's fully-deterministic pairings. Set >0 (production candidate: match
+    # the gate at ~1.0 / ~6 plies, so gate and tournament measure play from the
+    # same distribution) to give the BayesElo fit non-degenerate W/L/D counts and
+    # so resolution below ~50 Elo. The flip is gated on the S3 validation control
+    # (docs/plans/p0-instrument-and-dataloader.md); keep at 0 until S3 passes.
+    opening_temp: float = 0.0
+    opening_moves: int = 0
 
     # Each checkpoint plays the checkpoints these many generations behind it.
     # Exponential spacing keeps the comparison graph connected at O(K·log K)
@@ -428,6 +455,22 @@ class RunConfig:
     # kids'-tournament starting range; gives the converged model room to
     # climb to ~800-1200+ at full training.
     elo_baseline_rating: int = 400
+
+    # Opening-diversification for arena/Elo eval games. ``arena_opening_temp``
+    # is the play temperature applied to the first ``arena_opening_moves`` of a
+    # player's own plies (then it reverts to deterministic argmax); it samples
+    # from the MCTS visit distribution, so it picks among moves search already
+    # rated well rather than random blunders. Both default to 0 = today's exact
+    # behaviour (fully deterministic per (seed, colour)). >0 injects opening
+    # diversity so near-equal nets don't split *exactly* 50/50 by colour — the
+    # v3 gate-resolution problem (14/19 arena rejections scored exactly 50-50,
+    # see docs/research/xl-training-scaleup.md addendum). Applied symmetrically
+    # to *both* arena players (plan S1 option 1 — diversify the gate too), so it
+    # is fair. Production candidate: ~1.0 for ~6 plies, but that flip is gated on
+    # the S3 validation control (docs/plans/p0-instrument-and-dataloader.md);
+    # keep at 0 until S3 passes.
+    arena_opening_temp: float = 0.0
+    arena_opening_moves: int = 0
 
     # TTT-specific: games per generation to play vs a perfect-play minimax
     # opponent. Only used when ``game == "tictactoe"``. 0 disables.
