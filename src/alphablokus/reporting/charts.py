@@ -853,6 +853,75 @@ def make_policy_accuracy_plot(
     return _apply_defaults(fig)
 
 
+def make_policy_value_consistency_plot(pvc_data: pd.DataFrame) -> go.Figure:
+    """Policy–value consistency (PVC) over generations.
+
+    Two agreement series between the policy head and a one-ply value lookahead
+    (``Q₁(a) = −V(child)``) on the frozen held-out set, each a mean across the
+    generation's training epochs:
+
+    - **Argmax-match** (0–1): fraction of positions where the policy's best move
+      is also the ``Q₁``-best move.
+    - **Spearman** (−1 to 1): mean rank correlation between ``π`` and ``Q₁``
+      across each position's top-K candidate moves.
+
+    Read it as a **trend, not a target**. The policy is trained on multi-ply
+    MCTS visits while ``Q₁`` is a single ply, so a healthy net rises early then
+    plateaus *below* perfect agreement — the residual is roughly how much deeper
+    the policy sees than one-ply value. A late drop or a persistently low level
+    is the red flag (value head lagging, or policy chasing lines the value head
+    doesn't support).
+    """
+    df = pvc_data.copy()
+    agg = (
+        df.groupby("generation")
+        .agg(
+            argmax_match_mean=("pvc_argmax_match", "mean"),
+            spearman_mean=("pvc_spearman", "mean"),
+        )
+        .reset_index()
+        .sort_values("generation")
+    )
+
+    fig = go.Figure()
+    fig.add_trace(
+        go.Scatter(
+            x=agg["generation"],
+            y=agg["argmax_match_mean"],
+            mode="lines+markers",
+            name="Argmax-match (policy top = Q₁ top)",
+            line={"width": 2.5, "color": _COLORS["primary"]},
+            hovertemplate="Gen %{x} — argmax-match: %{y:.3f}<extra></extra>",
+        )
+    )
+    fig.add_trace(
+        go.Scatter(
+            x=agg["generation"],
+            y=agg["spearman_mean"],
+            mode="lines+markers",
+            name="Spearman (π vs Q₁ ranking)",
+            line={"width": 2.5, "color": _COLORS["tertiary"]},
+            hovertemplate="Gen %{x} — Spearman: %{y:.3f}<extra></extra>",
+        )
+    )
+    fig.add_hline(
+        y=0.0,
+        line_width=1,
+        line_dash="dash",
+        line_color=_COLORS["neutral"],
+        annotation_text="No rank correlation",
+        annotation_position="bottom right",
+    )
+    fig.update_layout(
+        xaxis_title="Generation",
+        yaxis_title="Agreement (argmax fraction / Spearman ρ)",
+        yaxis_range=[-1.05, 1.05],
+        title="Policy–Value Consistency (one-ply lookahead)",
+        xaxis={"dtick": 1 if agg["generation"].max() < 40 else 5},
+    )
+    return _apply_defaults(fig)
+
+
 def make_value_calibration_plot(
     calibration_data: pd.DataFrame,
     game_name: str,
