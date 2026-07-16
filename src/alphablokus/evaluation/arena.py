@@ -8,6 +8,7 @@ import numpy as np
 from loguru import logger
 from tqdm import tqdm
 
+from alphablokus.evaluation.players import sample_opening_prefix
 from alphablokus.interfaces import RESIGN_ACTION, IBoard, IGame
 
 if TYPE_CHECKING:
@@ -85,6 +86,7 @@ class Arena:
         verbose: bool = False,
         record: bool = False,
         top_k: int = 5,
+        forced_opening: tuple[int, ...] = (),
     ) -> tuple[GameResult, GameRecord | None]:
         """
         Execute one complete game between the two players.
@@ -102,6 +104,13 @@ class Arena:
             top_k: How many candidate actions to retain per move when
                 ``record=True``. Only NetworkPlayer-style players expose a
                 policy; for others the lists will be empty.
+            forced_opening: An optional scripted opening prefix. For the first
+                ``len(forced_opening)`` plies the game replays ``forced_opening``
+                verbatim — applied to *whichever* side is to move — instead of
+                consulting the player to move. Used by :meth:`play_games_paired`
+                so the two colour-swapped games of a pair share an identical
+                opening (the first-mover advantage then cancels). Forced plies
+                record an empty top-K policy (the player was not searched).
 
         Returns:
             ``(outcome, record)``. ``record`` is None if ``record=False``.
@@ -133,7 +142,13 @@ class Arena:
             current_player = players[cur_player]
 
             canonical_board = self.game.get_canonical_form(board, cur_player)
-            action = current_player(canonical_board)
+
+            # Forced opening: replay the shared scripted prefix for its length,
+            # bypassing the player to move (so a colour-swapped pair plays the
+            # identical opening). These plies are legal by construction (sampled
+            # from real play) and never a resignation, so no policy is recorded.
+            forced = move_count <= len(forced_opening)
+            action = forced_opening[move_count - 1] if forced else current_player(canonical_board)
 
             # A player may resign instead of moving (e.g. Pentobi's GTP genmove returns
             # "resign"). Score it immediately as a loss for the resigner — before the
@@ -159,11 +174,16 @@ class Arena:
             valids = self.game.valid_move_masking(canonical_board, 1)
 
             if record:
-                top_actions, top_probs, played_prob = _extract_top_k(
-                    current_player,
-                    top_k,
-                    played_action=int(action),
-                )
+                if forced:
+                    top_actions: list[int] = []
+                    top_probs: list[float] = []
+                    played_prob = 0.0
+                else:
+                    top_actions, top_probs, played_prob = _extract_top_k(
+                        current_player,
+                        top_k,
+                        played_action=int(action),
+                    )
                 recorded_moves.append(
                     MoveRecord(
                         player=cur_player,
@@ -281,6 +301,92 @@ class Arena:
 
         # Swap back so the Arena ends in its original state.
         self.player1, self.player2 = self.player2, self.player1
+        return one_won, two_won, draws, records
+
+    def play_games_paired(
+        self,
+        num: int,
+        prefix_sampler: Player,
+        opening_moves: int,
+        verbose: bool = False,
+        record: bool = False,
+        top_k: int = 5,
+    ) -> tuple[int, int, int, list[GameRecord]]:
+        """Play colour-swapped *paired* games to cancel the first-mover advantage.
+
+        ``num`` is split into ``num // 2`` pairs. For each pair we sample one
+        shared opening prefix (``opening_moves`` plies from ``prefix_sampler``,
+        see :func:`alphablokus.evaluation.players.sample_opening_prefix`) and
+        play it out to completion **twice** — once with ``player1`` as White and
+        once with ``player2`` as White — both replaying that identical prefix.
+        Because both sides play the same opening from both colours, the ~96%
+        first-mover advantage cancels within each pair, so the returned score
+        reflects true net-strength differential rather than a colour coin-flip
+        (plateau-investigation §2 B8).
+
+        **Scoring — paired win-differential (rule (a)).** Each pair contributes
+        ``candidate_wins − incumbent_wins ∈ {−2,−1,0,+1,+2}``. Aggregated
+        linearly across pairs and mapped to ``[0, 1]``, this is algebraically
+        identical to the ordinary score ``(p2_wins + 0.5·draws) / total`` tallied
+        over all ``2·num_pairs`` games — summation is linear, so the higher
+        resolution comes from the *variance reduction* of shared-opening pairing,
+        not from a different arithmetic. We therefore return plain integer game
+        tallies and let the existing acceptance/Elo score rule compute rule (a)
+        unchanged. (Rule (b), pair-outcome win/split/loss, would *not* reduce to
+        the game tally; we deliberately chose (a) — see
+        docs/plans/fix-arena-colour-pinning.md S1.)
+
+        Args:
+            num: Total games (rounded down to an even ``num // 2`` pairs × 2).
+            prefix_sampler: Player used to sample each pair's shared opening
+                prefix (typically the incumbent at a >0 opening temperature).
+            opening_moves: Plies in each sampled prefix (0 disables the prefix —
+                pairs then play deterministic clones, still colour-cancelled).
+            verbose: Whether to display each game state.
+            record: If True, also return a list of ``GameRecord`` (one per game),
+                tagged with ``player1_was_white`` exactly as :meth:`play_games`.
+            top_k: How many top moves to record per move when ``record=True``.
+
+        Returns:
+            ``(player1_wins, player2_wins, draws, records)`` tallied over the
+            paired games, from player1's perspective — same shape as
+            :meth:`play_games`.
+        """
+        num_pairs = int(num / 2)
+        one_won = 0
+        two_won = 0
+        draws = 0
+        records: list[GameRecord] = []
+
+        for _ in tqdm(range(num_pairs), desc="Arena.playGamesPaired"):
+            prefix = sample_opening_prefix(self.game, prefix_sampler, opening_moves)
+
+            # Game A: player1 plays White, replaying the shared prefix.
+            result_a, rec_a = self.play_game(verbose=verbose, record=record, top_k=top_k, forced_opening=prefix)
+            if result_a == 1:
+                one_won += 1
+            elif result_a == -1:
+                two_won += 1
+            else:
+                draws += 1
+            if rec_a is not None:
+                records.append(GameRecord(moves=rec_a.moves, outcome=rec_a.outcome, player1_was_white=True))
+
+            # Game B: swap colours, replay the SAME prefix. play_game now reports
+            # from the swapped player1's (original player2's) perspective, so flip
+            # back to original player1's frame — mirroring play_games' second half.
+            self.player1, self.player2 = self.player2, self.player1
+            result_b, rec_b = self.play_game(verbose=verbose, record=record, top_k=top_k, forced_opening=prefix)
+            self.player1, self.player2 = self.player2, self.player1  # restore original orientation
+            if result_b == -1:
+                one_won += 1
+            elif result_b == 1:
+                two_won += 1
+            else:
+                draws += 1
+            if rec_b is not None:
+                records.append(GameRecord(moves=rec_b.moves, outcome=-rec_b.outcome, player1_was_white=False))
+
         return one_won, two_won, draws, records
 
 

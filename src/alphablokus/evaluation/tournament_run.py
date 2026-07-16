@@ -199,6 +199,13 @@ def _play_pairing(
             record=False,
             top_k=0,
             desc="Tournament",
+            # Colour-cancelled pairings when paired play is on (S2): the pool
+            # BayesElo fit then gets net-strength differentials instead of
+            # colour coin-flips. Prefix sampled by net A at the tournament's
+            # opening schedule.
+            paired=config.paired_arena,
+            opening_moves=config.tournament.opening_moves,
+            opening_temp=config.tournament.opening_temp,
         )
         return a_wins, b_wins, draws
 
@@ -231,7 +238,23 @@ def _play_pairing(
         opening_temp=opening_temp,
         opening_moves=opening_moves,
     )
-    a_wins, b_wins, draws, _ = Arena(player_a, player_b, game).play_games(num_games)
+    arena = Arena(player_a, player_b, game)
+    if config.paired_arena:
+        # Colour-cancelled pairings (S2): prefix sampled from net A at the
+        # tournament's opening temperature, replayed colour-swapped per pair.
+        prefix_sampler = NetworkPlayer(
+            game=game,
+            nnet=nnet_a,
+            mcts_config=search_config,
+            temp=opening_temp,
+        )
+        a_wins, b_wins, draws, _ = arena.play_games_paired(
+            num_games,
+            prefix_sampler=prefix_sampler,
+            opening_moves=opening_moves,
+        )
+        return a_wins, b_wins, draws
+    a_wins, b_wins, draws, _ = arena.play_games(num_games)
     return a_wins, b_wins, draws
 
 

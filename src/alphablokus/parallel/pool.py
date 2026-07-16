@@ -43,7 +43,7 @@ from loguru import logger
 from tqdm import tqdm
 
 from alphablokus.evaluation.arena import Arena, GameRecord
-from alphablokus.evaluation.players import NetworkPlayer
+from alphablokus.evaluation.players import NetworkPlayer, sample_opening_prefix
 from alphablokus.parallel.inference_channel import (
     ChannelHandles,
     ChannelSpec,
@@ -105,7 +105,7 @@ def _opening_schedule_for_phase(config: RunConfig, phase: int) -> tuple[float, i
     Both default to ``(0.0, 0)`` = fully deterministic play — today's behaviour —
     so this is inert until a config opts in. Applied symmetrically to both
     players by the caller (plan S1 option 1: diversify the gate too). See
-    docs/plans/p0-instrument-and-dataloader.md S1/S2.
+    docs/plans/archive/trustworthy-measurements.md S1/S2.
     """
     if phase == PHASE_ARENA:
         return config.arena_opening_temp, config.arena_opening_moves
@@ -140,6 +140,26 @@ def derive_episode_seed(
     seq = np.random.SeedSequence([base_seed, generation, episode_idx, phase])
     # ``generate_state`` returns ``uint32`` — coerce to plain int because
     # ``torch.manual_seed`` rejects numpy scalar types.
+    return int(seq.generate_state(1, dtype=np.uint32)[0])
+
+
+def derive_pair_prefix_seed(
+    base_seed: int,
+    generation: int,
+    pair_idx: int,
+    phase: int,
+) -> int:
+    """Seed for a paired pair's *shared opening prefix* (arena paired play, S2).
+
+    Both colour-swapped games of pair ``pair_idx`` derive their prefix from this
+    seed and sample it with net A, so they independently reconstruct the byte
+    identical prefix in whichever worker picks them up. Salted differently from
+    :func:`derive_episode_seed` so the prefix RNG stream never collides with the
+    game's playout tie-break stream.
+    """
+    # 0x4F50 == b"OP" (opening prefix) — an arbitrary salt distinct from the
+    # playout seed's argument tuple.
+    seq = np.random.SeedSequence([base_seed, generation, pair_idx, phase, 0x4F50])
     return int(seq.generate_state(1, dtype=np.uint32)[0])
 
 
@@ -449,6 +469,87 @@ def _worker_play_two_player_game(
     return a_outcome_int, rebased
 
 
+def _worker_play_paired_game(
+    task: tuple[int, int, int, bool, bool, int, int, int, float],
+) -> tuple[int, GameRecord | None]:
+    """Play one game of a colour-swapped *pair* inside a worker process (S2).
+
+    Args:
+        task: 9-tuple of ``(base_seed, generation, pair_idx, a_first, record,
+            top_k, phase, opening_moves, opening_temp)``.
+
+            - ``pair_idx``: the pair this game belongs to. Both games of a pair
+              (``a_first`` True and False) share this index, hence the same
+              prefix seed, hence the same sampled opening — the crux of paired
+              play.
+            - ``opening_moves`` / ``opening_temp``: length and sampling
+              temperature of the shared opening prefix, drawn from net A (the
+              incumbent by the arena A=prev convention).
+
+            Remaining fields match :func:`_worker_play_two_player_game`.
+
+    Returns:
+        ``(a_outcome, record_or_none)`` — outcome from net A's perspective, same
+        contract as :func:`_worker_play_two_player_game`, so the orchestrator
+        sums results identically. Colour cancellation happens across the pair,
+        not within a single game.
+    """
+    assert _WORKER_CONFIG is not None, "_worker_init_two_nets must run before this task"
+    assert _WORKER_GAME is not None
+    assert _WORKER_NNET_A is not None
+    assert _WORKER_NNET_B is not None
+
+    base_seed, generation, pair_idx, a_first, record, top_k, phase, opening_moves, opening_temp = task
+
+    # 1. Sample the shared opening prefix from net A. Seeded from the pair's
+    #    prefix seed (identical across the pair's two games), and net A's weights
+    #    are identical in both workers, so both games reconstruct the same prefix.
+    _seed_worker_rngs(derive_pair_prefix_seed(base_seed, generation, pair_idx, phase))
+    prefix_sampler = NetworkPlayer(
+        game=_WORKER_GAME,
+        nnet=_WORKER_NNET_A,
+        mcts_config=_WORKER_CONFIG.mcts_config,
+        temp=opening_temp,
+    )
+    prefix = sample_opening_prefix(_WORKER_GAME, prefix_sampler, opening_moves)
+
+    # 2. Deterministic playout (temp 0; the shared prefix — not per-player
+    #    opening diversification — supplies the opening variety). Re-seed from the
+    #    pair's game seed so tie-breaks are reproducible.
+    _seed_worker_rngs(derive_episode_seed(base_seed, generation, pair_idx, phase))
+    player_a = NetworkPlayer(
+        game=_WORKER_GAME,
+        nnet=_WORKER_NNET_A,
+        mcts_config=_WORKER_CONFIG.mcts_config,
+        temp=0.0,
+    )
+    player_b = NetworkPlayer(
+        game=_WORKER_GAME,
+        nnet=_WORKER_NNET_B,
+        mcts_config=_WORKER_CONFIG.mcts_config,
+        temp=0.0,
+    )
+
+    if a_first:
+        arena = Arena(player_a, player_b, _WORKER_GAME)
+        raw_outcome, raw_record = arena.play_game(record=record, top_k=top_k, forced_opening=prefix)
+        a_outcome = raw_outcome  # raw_outcome +1 = player1 = A won
+    else:
+        arena = Arena(player_b, player_a, _WORKER_GAME)
+        raw_outcome, raw_record = arena.play_game(record=record, top_k=top_k, forced_opening=prefix)
+        a_outcome = -raw_outcome  # raw_outcome +1 = player1 = B won; flip for A
+
+    a_outcome_int = int(a_outcome) if a_outcome != 0 else 0
+    if raw_record is None:
+        return a_outcome_int, None
+    rebased = GameRecord(
+        moves=raw_record.moves,
+        outcome=a_outcome_int,
+        player1_was_white=a_first,
+    )
+    return a_outcome_int, rebased
+
+
 def run_self_play_episodes_parallel(
     config: RunConfig,
     generation: int,
@@ -589,12 +690,24 @@ def run_two_player_games_parallel(
     record: bool = False,
     top_k: int = 5,
     desc: str = "Two-player games",
+    paired: bool = False,
+    opening_moves: int = 0,
+    opening_temp: float = 0.0,
 ) -> tuple[int, int, int, list[GameRecord]]:
     """Run ``num_games`` two-net games across a worker pool.
 
     Used by both **arena** (``phase=PHASE_ARENA``, ``record=True``) and
     **Elo** (``phase=PHASE_ELO``, ``record=False``). Each worker loads
     both checkpoints once at pool init and plays one game per task.
+
+    When ``paired`` is True (S2), games are played as ``num_games // 2``
+    colour-swapped **pairs** that each share one opening prefix (``opening_moves``
+    plies sampled from net A at ``opening_temp``), so the first-mover advantage
+    cancels within a pair — the parallel equivalent of
+    :meth:`alphablokus.evaluation.arena.Arena.play_games_paired`. The two games
+    of a pair share one prefix seed (:func:`derive_pair_prefix_seed`) so they
+    replay the identical opening regardless of which worker runs each. Default
+    ``paired=False`` keeps the unpaired A-first/B-first split unchanged.
 
     **Caller-defined role convention**: the orchestrator is agnostic
     about which network is "the new net" vs "the opponent" — it just
@@ -646,17 +759,31 @@ def run_two_player_games_parallel(
 
     base_seed = config.seed if config.seed is not None else 0
     half = num_games // 2
-    # First ``half`` games: A goes first. Next ``half``: B goes first.
-    # Episode indices stay 0..2*half-1 so seeds are unique per game.
-    tasks = [(base_seed, generation, ep_idx, True, record, top_k, phase) for ep_idx in range(half)]
-    tasks += [(base_seed, generation, ep_idx, False, record, top_k, phase) for ep_idx in range(half, 2 * half)]
+    worker_fn: Callable[..., tuple[int, GameRecord | None]]
+    tasks: list[tuple]
+    if paired:
+        # ``half`` pairs; each pair is two colour-swapped tasks sharing one
+        # ``pair_idx`` (hence one prefix seed). Interleaved so a pair's two games
+        # tend to run close together, but correctness doesn't depend on order.
+        tasks = []
+        for pair_idx in range(half):
+            tasks.append((base_seed, generation, pair_idx, True, record, top_k, phase, opening_moves, opening_temp))
+            tasks.append((base_seed, generation, pair_idx, False, record, top_k, phase, opening_moves, opening_temp))
+        worker_fn = _worker_play_paired_game
+    else:
+        # First ``half`` games: A goes first. Next ``half``: B goes first.
+        # Episode indices stay 0..2*half-1 so seeds are unique per game.
+        tasks = [(base_seed, generation, ep_idx, True, record, top_k, phase) for ep_idx in range(half)]
+        tasks += [(base_seed, generation, ep_idx, False, record, top_k, phase) for ep_idx in range(half, 2 * half)]
+        worker_fn = _worker_play_two_player_game
 
     logger.info(
-        "Spawning {} worker(s) for {} two-player games (gen {}, phase {})",
+        "Spawning {} worker(s) for {} two-player games (gen {}, phase {}, paired={})",
         num_workers,
         len(tasks),
         generation,
         phase,
+        paired,
     )
 
     a_wins = 0
@@ -674,7 +801,7 @@ def run_two_player_games_parallel(
         ) as pool,
         tqdm(total=len(tasks), desc=f"{desc} gen {generation}") as bar,
     ):
-        for a_outcome, rec in pool.map(_worker_play_two_player_game, tasks, chunksize=1):
+        for a_outcome, rec in pool.map(worker_fn, tasks, chunksize=1):
             if a_outcome > 0:
                 a_wins += 1
             elif a_outcome < 0:

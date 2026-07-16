@@ -17,6 +17,54 @@ result, so visualisations always agree with the training-time decision.
 
 from __future__ import annotations
 
+from typing import Literal
+
+GateMode = Literal["threshold", "regression_guard", "always"]
+
+
+def is_accepted(
+    mode: GateMode,
+    new_wins: int,
+    prev_wins: int,
+    draws: int,
+    threshold: float,
+    guard_floor: float,
+) -> bool:
+    """Dispatch the arena-acceptance decision by ``gate_mode``.
+
+    Three policies, selected by :attr:`alphablokus.config.RunConfig.gate_mode`.
+    All read the same chess-style ``score = (new_wins + 0.5·draws) / total``
+    (:func:`acceptance_score`) the arena produced (colour-cancelled when paired
+    play is on — that is what makes the conservative guard trustworthy):
+
+    - ``threshold``: today's AlphaGo-Zero rule — accept iff ``score >=
+      threshold`` (``RunConfig.update_threshold``, e.g. 0.55). The default, so
+      existing configs are unchanged.
+    - ``regression_guard``: accept **unless clearly worse** — reject only when
+      ``score < guard_floor`` (e.g. 0.48), otherwise adopt. Turns the gate from
+      an improvement filter into a regression guard: with a rolling buffer a
+      mediocre accepted net self-corrects within a few generations, whereas a
+      frozen incumbent never does (plateau-investigation R2). This is the fix
+      for the stationary 0/17 loop.
+    - ``always``: AlphaZero-style — always adopt the candidate. The pool
+      tournament + ``accepted_*.pth.tar`` checkpoints remain the offline
+      strength record.
+
+    ``threshold`` / ``regression_guard`` reject when no arena games were played
+    (score undefined); ``always`` adopts regardless.
+    """
+    if mode == "always":
+        return True
+    total_games = new_wins + prev_wins + draws
+    if total_games == 0:
+        return False
+    score = acceptance_score(new_wins, prev_wins, draws)
+    if mode == "threshold":
+        return score >= threshold
+    if mode == "regression_guard":
+        return score >= guard_floor
+    raise ValueError(f"Unknown gate_mode {mode!r}; expected 'threshold', 'regression_guard', or 'always'.")
+
 
 def is_accepted_score_rule(
     new_wins: int,

@@ -13,7 +13,7 @@ import torch
 from loguru import logger
 from numpy.typing import NDArray
 
-from alphablokus.evaluation.arena import Arena
+from alphablokus.evaluation.arena import Arena, GameRecord
 from alphablokus.evaluation.elo import compute_elo
 from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper
@@ -44,6 +44,29 @@ TrainingExample: TypeAlias = tuple[IBoard, int, NDArray, float | None]  # (board
 # read by ``alphablokus --resume`` to continue a crashed run in place. Lives in the
 # run's log directory (already created early in ``main``).
 PROGRESS_MARKER_FILENAME = "progress.json"
+
+
+def _colour_split(records: list[GameRecord]) -> tuple[int, int]:
+    """Count decisive arena games won by White vs Black across ``records``.
+
+    ``GameRecord.outcome`` is from player1's perspective and
+    ``player1_was_white`` says which colour player1 played, so a game is a White
+    win iff ``(outcome > 0 and player1_was_white)`` or
+    ``(outcome < 0 and not player1_was_white)``; the other decisive games are
+    Black wins. Draws (``outcome == 0``) count as neither. Logged per generation
+    (S4) so first-mover pinning — the failure that froze ``blokus_search_harder``
+    — is visible in the report instead of latent in the raw replays.
+    """
+    white_wins = 0
+    black_wins = 0
+    for rec in records:
+        if rec.outcome > 0:
+            white_wins += 1 if rec.player1_was_white else 0
+            black_wins += 0 if rec.player1_was_white else 1
+        elif rec.outcome < 0:
+            white_wins += 0 if rec.player1_was_white else 1
+            black_wins += 1 if rec.player1_was_white else 0
+    return white_wins, black_wins
 
 
 def read_progress_marker(config: RunConfig) -> dict | None:
@@ -315,12 +338,15 @@ class Coach:
 
             arena_end = time.perf_counter()
             accepted = self._should_accept_new_network(nwins, pwins, draws)
+            white_wins, black_wins = _colour_split(game_records)
             self.metrics.log_arena(
                 generation,
                 wins=nwins,
                 losses=pwins,
                 draws=draws,
                 accepted=accepted,
+                white_wins=white_wins,
+                black_wins=black_wins,
             )
             self.metrics.log_timing(generation, CycleStage.ARENA, arena_end - arena_start)
 
@@ -509,11 +535,30 @@ class Coach:
             opening_moves=self.config.arena_opening_moves,
         )
         arena = Arena(prev_player, new_player, self.game)
-        pwins, nwins, draws, records = arena.play_games(
-            self.config.num_arena_matches,
-            record=True,
-            top_k=top_k_to_record,
-        )
+        if self.config.paired_arena:
+            # Paired colour-swapped gate: each pair shares one opening prefix
+            # sampled from the incumbent (self.pnet) at ``arena_opening_temp``, so
+            # the first-mover advantage cancels within the pair (S1/S2). Player1 =
+            # prev, player2 = new, so the returned tally maps to (pwins, nwins).
+            prefix_sampler = NetworkPlayer(
+                game=self.game,
+                nnet=self.pnet,
+                mcts_config=self.config.mcts_config,
+                temp=self.config.arena_opening_temp,
+            )
+            pwins, nwins, draws, records = arena.play_games_paired(
+                self.config.num_arena_matches,
+                prefix_sampler=prefix_sampler,
+                opening_moves=self.config.arena_opening_moves,
+                record=True,
+                top_k=top_k_to_record,
+            )
+        else:
+            pwins, nwins, draws, records = arena.play_games(
+                self.config.num_arena_matches,
+                record=True,
+                top_k=top_k_to_record,
+            )
         return nwins, pwins, draws, records
 
     def _run_arena_parallel(
@@ -563,6 +608,13 @@ class Coach:
             record=True,
             top_k=top_k_to_record,
             desc="Arena",
+            # Paired colour-swapped play (S2): each pair shares one opening prefix
+            # sampled by net A (= prev/incumbent) at ``arena_opening_temp``, so the
+            # two colour-swapped games cancel the first-mover advantage. Inert when
+            # ``paired_arena`` is False (unpaired path, unchanged).
+            paired=self.config.paired_arena,
+            opening_moves=self.config.arena_opening_moves,
+            opening_temp=self.config.arena_opening_temp,
         )
         return new_wins, prev_wins, draws, records
 
@@ -768,18 +820,21 @@ class Coach:
     ) -> bool:
         """Decide whether to accept the newly trained network.
 
-        Thin wrapper around :func:`alphablokus.evaluation.acceptance.is_accepted_score_rule`.
-        Single source of truth lives there so reporting code can never
-        diverge from the training-time decision — see ``evaluation/acceptance.py``
-        for the full rationale.
+        Thin wrapper around :func:`alphablokus.evaluation.acceptance.is_accepted`,
+        which dispatches on ``config.gate_mode`` (``threshold`` |
+        ``regression_guard`` | ``always``). Single source of truth lives there so
+        reporting code can never diverge from the training-time decision — see
+        ``evaluation/acceptance.py`` for the full rationale.
         """
-        from alphablokus.evaluation.acceptance import is_accepted_score_rule
+        from alphablokus.evaluation.acceptance import is_accepted
 
-        return is_accepted_score_rule(
+        return is_accepted(
+            mode=self.config.gate_mode,
             new_wins=new_wins,
             prev_wins=prev_wins,
             draws=draws,
             threshold=self.config.update_threshold,
+            guard_floor=self.config.guard_floor,
         )
 
     def save_self_play_history(self, file_index: int) -> None:
