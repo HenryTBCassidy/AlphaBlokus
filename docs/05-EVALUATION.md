@@ -61,15 +61,15 @@ After each training generation, the new network plays the previous best in an ar
 
 ```
 New network vs Old network
-  - num_arena_matches games (e.g., 40)
+  - num_arena_matches games (e.g., 100)
   - Half the games each colour (controls for first-move advantage)
   - Full MCTS for both players, temperature 0
-  - Accept new if score ≥ update_threshold, where
-        score = (wins + 0.5·draws) / (wins + losses + draws)   (e.g., 0.55)
+  - Accept per the gate mode (below); score = (wins + 0.5·draws) / (wins + losses + draws)
 ```
 
 Track per generation:
 - Win/loss/draw counts
+- **White-win / Black-win counts** (per-colour split — see the colour-pinning note)
 - Win rate with confidence intervals
 - Acceptance/rejection decision
 - Number of consecutive acceptances/rejections
@@ -78,6 +78,21 @@ Track per generation:
 - Many consecutive rejections → training may have stalled, consider adjusting learning rate or MCTS parameters
 - 100% win rate for new network → generations too far apart in strength, reduce training epochs
 - ~50% win rate → network not improving meaningfully per generation
+- **Exact-0.500 scores or sub-binomial score variance, or a white-win rate ≫ 50%** → the gate is *colour-pinned* (see below). The report raises an automatic red-flag banner for these.
+
+#### Paired colour-swapped arena (`paired_arena`)
+
+Alternating colours across independent games does **not** actually control for the first-move advantage when one colour dominates: in Blokus Duo ~96% of decisive deterministic games are won by White (the first mover), so between near-equal nets each side banks ~50 near-guaranteed points and the score is pinned to ~0.50 ± a few Black upsets — no candidate that is merely *somewhat* better can clear a 0.55 (or even 0.52) threshold. This froze `blokus_search_harder` at 0/17 accepted (docs/research/plateau-investigation.md §2 B8).
+
+With `paired_arena: true`, the gate instead plays `num_arena_matches / 2` **pairs**. Each pair samples one opening prefix (`arena_opening_moves` plies from the incumbent at `arena_opening_temp`), then plays it out **twice — colours swapped — replaying the identical prefix**. The first-mover advantage cancels *within* the pair, so the score measures net-strength differential (does the candidate win as Black from openings where the incumbent lost as Black?) rather than a colour coin-flip. Scoring uses **rule (a), paired win-differential**: each pair contributes `candidate_wins − incumbent_wins ∈ {−2..+2}`; aggregated linearly and mapped to `[0,1]` this is algebraically the ordinary `(wins + 0.5·draws)/total` over the paired games — the resolution gain is the *variance reduction* of shared-opening pairing, not different arithmetic. The pool tournament (Tier 2) uses the same paired construction when `paired_arena` is on. Default `false` preserves the unpaired path.
+
+#### Gate mode (`gate_mode`)
+
+The acceptance policy is config-selectable:
+
+- **`threshold`** (default): accept iff `score ≥ update_threshold` (AlphaGo-Zero, e.g. 0.55). Kept as the default so existing configs are unchanged.
+- **`regression_guard`**: accept **unless clearly worse** — reject only if `score < guard_floor` (default 0.48); otherwise adopt. The 0.55 gate was the *direct* cause of the stationary loop (every DeepMind successor dropped it); with a rolling buffer a mediocre accepted net self-corrects within a few generations, whereas a frozen incumbent never does. Only trustworthy alongside `paired_arena` (colour-cancelled score).
+- **`always`**: AlphaZero-style, always adopt the candidate; the pool tournament + `accepted_*.pth.tar` checkpoints remain the offline strength record.
 
 ### Elo: a two-tier scheme
 
