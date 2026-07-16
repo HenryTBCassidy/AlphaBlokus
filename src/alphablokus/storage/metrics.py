@@ -407,23 +407,35 @@ class MetricsCollector:
         losses: int,
         draws: int,
         accepted: bool | None = None,
+        white_wins: int | None = None,
+        black_wins: int | None = None,
     ) -> None:
         """Record arena evaluation results for a generation.
 
-        ``accepted`` reports whether the new network passed the
-        ``update_threshold`` acceptance test. When supplied we maintain a
-        running ``arena/acceptance_rate`` over the run — the most useful
-        "is training producing improvements?" headline.
+        ``accepted`` reports whether the new network passed the acceptance test.
+        When supplied we maintain a running ``arena/acceptance_rate`` over the
+        run — the most useful "is training producing improvements?" headline.
+
+        ``white_wins`` / ``black_wins`` are the per-colour decisive-game counts
+        across the generation's arena games (from ``GameRecord.player1_was_white``;
+        see :func:`alphablokus.training.coach._colour_split`). Logging them
+        permanently (S4) surfaces first-mover pinning — the failure mode that
+        froze ``blokus_search_harder`` (96% of decisive games won by White would
+        have been visible three runs earlier). ``None`` for callers that don't
+        pass a colour split (e.g. older code paths); the columns are then omitted.
         """
-        self._arena_records.append(
-            {
-                "generation": generation,
-                "wins": wins,
-                "losses": losses,
-                "draws": draws,
-                "accepted": accepted,
-            }
-        )
+        record: dict[str, Any] = {
+            "generation": generation,
+            "wins": wins,
+            "losses": losses,
+            "draws": draws,
+            "accepted": accepted,
+        }
+        if white_wins is not None:
+            record["white_wins"] = white_wins
+        if black_wins is not None:
+            record["black_wins"] = black_wins
+        self._arena_records.append(record)
         total = wins + losses + draws
         win_rate = wins / total if total > 0 else 0.0
         payload = {
@@ -433,6 +445,11 @@ class MetricsCollector:
             "arena/win_rate": win_rate,
             "generation": generation,
         }
+        if white_wins is not None and black_wins is not None:
+            decisive = white_wins + black_wins
+            payload["arena/white_wins"] = white_wins
+            payload["arena/black_wins"] = black_wins
+            payload["arena/white_win_rate"] = white_wins / decisive if decisive > 0 else 0.0
         if accepted is not None:
             self._arena_attempts += 1
             if accepted:

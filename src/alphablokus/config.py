@@ -176,7 +176,7 @@ class TrainingPerfConfig:
     # unchanged. NOTE: spawn resolves the deadlock in principle but the
     # multi-generation GPU validation (plan S4) has not run yet — treat
     # workers>0 as unproven until then. See
-    # docs/plans/p0-instrument-and-dataloader.md S4 and
+    # docs/plans/archive/trustworthy-measurements.md S4 and
     # docs/plans/archive/harden-long-runs.md H1.
     dataloader_context: Literal["forkserver", "spawn", "fork"] = "spawn"
 
@@ -212,11 +212,12 @@ class TournamentConfig:
     # ``RunConfig.arena_opening_*``. ``opening_temp`` is the play temperature for
     # the first ``opening_moves`` of a player's own plies (then deterministic
     # argmax), sampled from the MCTS visit distribution. Both default to 0 =
-    # today's fully-deterministic pairings. Set >0 (production candidate: match
-    # the gate at ~1.0 / ~6 plies, so gate and tournament measure play from the
-    # same distribution) to give the BayesElo fit non-degenerate W/L/D counts and
-    # so resolution below ~50 Elo. The flip is gated on the S3 validation control
-    # (docs/plans/p0-instrument-and-dataloader.md); keep at 0 until S3 passes.
+    # today's fully-deterministic pairings. Set >0 (match the gate's validated
+    # temp 1.0 / 4 plies, so gate and tournament measure play from the same
+    # distribution) to give the BayesElo fit non-degenerate W/L/D counts and so
+    # resolution below ~50 Elo. The S3 validation control passed at 1.0 / 4 plies
+    # (docs/plans/archive/trustworthy-measurements.md S3); code default stays 0
+    # (per-config opt-in).
     opening_temp: float = 0.0
     opening_moves: int = 0
 
@@ -466,11 +467,46 @@ class RunConfig:
     # v3 gate-resolution problem (14/19 arena rejections scored exactly 50-50,
     # see docs/research/xl-training-scaleup.md addendum). Applied symmetrically
     # to *both* arena players (plan S1 option 1 — diversify the gate too), so it
-    # is fair. Production candidate: ~1.0 for ~6 plies, but that flip is gated on
-    # the S3 validation control (docs/plans/p0-instrument-and-dataloader.md);
-    # keep at 0 until S3 passes.
+    # is fair. The code default stays 0 (per-config
+    # opt-in); the *validated* production setting is temp 1.0 / 4 plies — the S3
+    # control passed at those values (known-gap 64%, null 49-51; see
+    # docs/plans/archive/trustworthy-measurements.md S3), and they are set in
+    # run_configurations/blokus_cloud_v2.json.
     arena_opening_temp: float = 0.0
     arena_opening_moves: int = 0
+
+    # Paired colour-swapped arena play. When True, the accept/reject gate (and,
+    # when ``tournament.run_at_end``, the pool tournament) plays *pairs* of
+    # colour-swapped games that share one sampled opening prefix, so the ~96%
+    # first-mover advantage cancels within each pair and the score reflects true
+    # net-strength differential instead of a colour coin-flip. ``num_arena_matches``
+    # is then split into ``num_arena_matches / 2`` shared-opening pairs (× 2
+    # games). The shared prefix is ``arena_opening_moves`` plies sampled from the
+    # incumbent at ``arena_opening_temp`` (set both > 0, e.g. 4 / 1.0, so the
+    # prefix is diverse). Default False preserves the unpaired ``play_games``
+    # path exactly. See docs/plans/fix-arena-colour-pinning.md S1/S2 and
+    # docs/research/plateau-investigation.md §2 B8.
+    paired_arena: bool = False
+
+    # Arena-acceptance policy (docs/plans/fix-arena-colour-pinning.md S3):
+    #
+    # - ``threshold`` (default): accept iff the arena score >= ``update_threshold``
+    #   — the AlphaGo-Zero rule, unchanged. Kept as the default so existing
+    #   configs behave exactly as before.
+    # - ``regression_guard``: accept unless the candidate is *clearly worse*
+    #   (score < ``guard_floor``); otherwise adopt. Turns the gate into a
+    #   regression guard rather than an improvement filter — the fix for the
+    #   colour-pinned 0.55 gate that froze ``blokus_search_harder`` (0/17
+    #   accepted). Only trustworthy alongside ``paired_arena`` (colour-cancelled
+    #   score).
+    # - ``always``: AlphaZero-style, always adopt the candidate.
+    gate_mode: Literal["threshold", "regression_guard", "always"] = "threshold"
+
+    # Regression-guard floor: with ``gate_mode == "regression_guard"`` a
+    # candidate is rejected only when its (colour-cancelled) arena score falls
+    # below this. 0.48 tolerates ordinary near-parity noise while still rejecting
+    # a genuine regression. Ignored by the other gate modes.
+    guard_floor: float = 0.48
 
     # TTT-specific: games per generation to play vs a perfect-play minimax
     # opponent. Only used when ``game == "tictactoe"``. 0 disables.

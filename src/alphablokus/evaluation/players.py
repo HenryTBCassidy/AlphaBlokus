@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, TypeAlias
 
 import numpy as np
 
-from alphablokus.interfaces import IBoard, IGame, IPolicyValuePredictor
+from alphablokus.interfaces import RESIGN_ACTION, IBoard, IGame, IPolicyValuePredictor
 
 if TYPE_CHECKING:
     from alphablokus.config import MCTSConfig
@@ -30,6 +30,50 @@ if TYPE_CHECKING:
 
 Player: TypeAlias = Callable[[IBoard], int]
 """Function signature for a player: takes a canonical board and returns an action index."""
+
+
+def sample_opening_prefix(game: IGame, sampler: Player, num_moves: int) -> tuple[int, ...]:
+    """Sample a shared ``num_moves``-ply opening prefix for paired arena play.
+
+    Plays the game forward from the initial position for up to ``num_moves``
+    plies, drawing each ply from ``sampler`` (typically a :class:`NetworkPlayer`
+    configured with a >0 play temperature, so it samples from the incumbent's
+    MCTS visit distribution rather than playing deterministically). The captured
+    action sequence is then replayed verbatim by both halves of a colour-swapped
+    pair (see :meth:`alphablokus.evaluation.arena.Arena.play_games_paired`), so
+    the first-mover advantage cancels exactly.
+
+    The prefix is *game-level* — one action per global ply, applied to whichever
+    side is to move — so it is robust to Blokus's non-strict alternation (a
+    player may move twice in a row when the opponent has no legal move). Callers
+    that need a deterministic prefix seed the global RNG before calling.
+
+    Args:
+        game: The game whose rules drive the forward simulation.
+        sampler: The player asked to choose each opening ply.
+        num_moves: Number of plies to sample (``<= 0`` returns an empty prefix).
+
+    Returns:
+        The sampled action sequence (may be shorter than ``num_moves`` if the
+        game ends early or the sampler resigns).
+    """
+    if num_moves <= 0:
+        return ()
+    if hasattr(sampler, "startGame"):
+        sampler.startGame()
+    board = game.initialise_board()
+    cur_player = 1
+    actions: list[int] = []
+    for _ in range(num_moves):
+        if game.get_game_ended(board, cur_player) != 0:
+            break
+        canonical_board = game.get_canonical_form(board, cur_player)
+        action = int(sampler(canonical_board))
+        if action == RESIGN_ACTION:
+            break
+        actions.append(action)
+        board, cur_player = game.get_next_state(board, cur_player, action)
+    return tuple(actions)
 
 
 class RandomPlayer:

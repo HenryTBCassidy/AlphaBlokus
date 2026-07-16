@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
 import time
 from typing import TYPE_CHECKING, Any
@@ -15,6 +16,28 @@ from alphablokus.training.coach import PROGRESS_MARKER_FILENAME, Coach, read_pro
 
 if TYPE_CHECKING:
     from alphablokus.config import RunConfig
+
+RESOLVED_CONFIG_FILENAME = "config.resolved.json"
+
+
+def persist_resolved_config(config: RunConfig) -> None:
+    """Write the fully-resolved ``RunConfig`` to ``<run>/config.resolved.json`` (S4).
+
+    Two of three recent runs ran with a config that differed from the committed
+    JSON (net-preset resolution, a swapped ``*_volume.json``, LR schedule); the
+    post-mortem had to reconstruct what actually ran from the parquets
+    (plateau-investigation §1). Dumping the resolved dataclass — presets expanded,
+    every default filled in — at launch makes the ground truth unambiguous. Paths
+    are stringified; tuples become JSON arrays. Best-effort: a serialisation
+    failure must never sink a training launch.
+    """
+    path = config.run_directory / RESOLVED_CONFIG_FILENAME
+    try:
+        payload = dataclasses.asdict(config)
+        path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
+        logger.info("Wrote resolved run config to {}", path)
+    except Exception as err:  # pragma: no cover - defensive; never blocks a run
+        logger.warning("Could not persist resolved config to {} ({}); continuing.", path, err)
 
 
 def restore_run_from_object_store(config: RunConfig, client: Any | None = None) -> None:
@@ -81,6 +104,11 @@ def main() -> None:
         return
 
     args.run_directory.mkdir(parents=True, exist_ok=True)
+
+    # Persist the fully-resolved config at launch so what actually ran is never
+    # ambiguous again (S4b). Written every launch (fresh + resume) so a resumed
+    # run records the config it resumed under too.
+    persist_resolved_config(args)
 
     # Add rotating file sink alongside default stderr
     log_dir = args.log_directory
