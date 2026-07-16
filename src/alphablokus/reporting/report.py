@@ -66,6 +66,82 @@ def _anchor_caption(config: RunConfig) -> str:
     return f"<strong>Anchor:</strong> random-init net at Elo {rating} (scratch run)."
 
 
+def _arena_red_flag_banner(arena_data: pd.DataFrame) -> str:
+    """A warning banner when the arena gate shows colour-pinning symptoms (S4c).
+
+    Three cheap, independent checks over the per-generation arena tallies — all
+    signatures of the failure diagnosed in docs/research/plateau-investigation.md:
+
+    1. **Exact-0.500 scores.** A generation whose ``score = (wins + 0.5·draws) /
+       total`` lands *exactly* on 0.500 is almost always a colour-split artefact
+       (mirrored deterministic clones), not a genuine dead heat.
+    2. **Sub-binomial score variance.** If the spread of per-generation scores is
+       far tighter than independent Bernoulli games at the observed mean would
+       give, something systematic (colour) is deciding games, not net strength.
+    3. **White-win skew.** When the per-colour split is logged, a white-win rate
+       far above 50% means the first mover, not the better net, is winning.
+
+    Returns an HTML banner string, or ``""`` when nothing fires (or too few
+    generations to judge variance).
+    """
+    if arena_data is None or arena_data.empty:
+        return ""
+    df = arena_data.copy()
+    total = df["wins"] + df["losses"] + df["draws"]
+    played = total > 0
+    if not played.any():
+        return ""
+    df = df[played]
+    total = total[played]
+    scores = (df["wins"] + 0.5 * df["draws"]) / total
+
+    flags: list[str] = []
+
+    exact_half = int((scores.sub(0.5).abs() < 1e-9).sum())
+    if exact_half > 0:
+        flags.append(
+            f"<strong>{exact_half}</strong> generation(s) scored <strong>exactly 0.500</strong> — "
+            "the signature of colour-split clones, not a true tie."
+        )
+
+    if len(scores) >= 4:
+        mean_p = float(scores.mean())
+        mean_n = float(total.mean())
+        sigma0 = (mean_p * (1.0 - mean_p) / mean_n) ** 0.5 if 0.0 < mean_p < 1.0 and mean_n > 0 else 0.0
+        observed_std = float(scores.std(ddof=1))
+        if sigma0 > 0 and observed_std < 0.5 * sigma0:
+            flags.append(
+                f"per-generation score variance is <strong>sub-binomial</strong> "
+                f"(observed σ={observed_std:.3f} vs binomial σ₀≈{sigma0:.3f}) — game outcomes "
+                "are not independent draws in net strength; something systematic is deciding them."
+            )
+
+    if "white_wins" in df.columns and "black_wins" in df.columns:
+        decisive = (df["white_wins"] + df["black_wins"]).sum()
+        white = df["white_wins"].sum()
+        if decisive > 0:
+            white_rate = white / decisive
+            if white_rate >= 0.85:
+                flags.append(
+                    f"White won <strong>{white_rate:.0%}</strong> of decisive arena games — "
+                    "the gate is <strong>colour-pinned</strong> (first-mover advantage swamps net strength)."
+                )
+
+    if not flags:
+        return ""
+    items = "".join(f"<li>{f}</li>" for f in flags)
+    return (
+        '<div style="border:2px solid #d9822b;background:#fdf3e7;color:#5a3a10;'
+        'border-radius:8px;padding:14px 18px;margin:18px 0;">'
+        "<strong>⚠ Arena measurement red flags</strong>"
+        f'<ul style="margin:8px 0 4px 0;">{items}</ul>'
+        '<span style="font-size:0.9em;">Enable <code>paired_arena</code> + a '
+        "<code>regression_guard</code> gate to measure net-strength differential "
+        "instead of a colour coin-flip — see docs/plans/fix-arena-colour-pinning.md.</span>"
+        "</div>"
+    )
+
+
 def _load_metrics(directory: Path) -> pd.DataFrame:
     """Read a hive-partitioned metrics directory and normalise the generation column.
 
@@ -376,6 +452,7 @@ def create_html_report(config: RunConfig) -> None:
         update_threshold=config.update_threshold,
     )
     config_html = _make_config_table(config)
+    arena_red_flags_html = _arena_red_flag_banner(arena_data)
 
     learning_rate_html = ""
     if fig_learning_rate is not None:
@@ -531,6 +608,7 @@ def create_html_report(config: RunConfig) -> None:
     score &mdash; wins plus half of draws &mdash; reaches {config.update_threshold:.0%}
     (the black tick on each bar), not on raw wins alone.
 </p>
+{arena_red_flags_html}
 {_chart(fig_arena)}
 </section>
 
