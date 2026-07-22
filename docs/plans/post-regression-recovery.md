@@ -27,7 +27,7 @@ the box as the final step before any paid run.
 | P3 | Keep-best + drift circuit-breaker library (`evaluation/ladder_selection.py`) | 2 h | High | ✅ |
 | P4 | Mini-ladder runner (`scripts/mini_ladder.py`): L3–L6 × 50 games × 400 sims per checkpoint, history + alarm | 2 h | High | ✅ |
 | P5 | Author `run_configurations/blokus_xl_scratch.json` (launch gated on P8) | 30 min | High | ✅ (config; launch gated) |
-| P6 | Capacity-probe script (`scripts/capacity_probe.py`): supervised `large` vs `xl` fit on a frozen buffer, game-level held-out split | 3 h | High | |
+| P6 | Capacity-probe script (`scripts/capacity_probe.py`): supervised `large` vs `xl` fit on a frozen buffer, game-level held-out split | 3 h | High | ✅ (script; run = P8) |
 | P7 | Re-crown v3 gen-40 as project best + wire the mini-ladder runbook on the box | 1 h (box) | High | |
 | P8 | **Run the capacity probe on the box — the P9-vs-P10 gate** | ~½ day box GPU, $0 | High | |
 | P9 | Paid run: `xl` from scratch on a rented 5090 (launch iff P8 fires or is ambiguous) | ~$100–130, 4–5 days | Gated | |
