@@ -220,7 +220,15 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         # checkpoints are interchangeable between compiled and eager runs.
         self._forward_net: nn.Module = self._maybe_compile()
 
-        self.optimizer = optim.Adam(self.nnet.parameters(), lr=self.net_config.learning_rate)
+        # AdamW, not Adam: decoupled weight decay (default 1e-4, on for every
+        # run) is the AGZ/AZ L2 term this loop was missing — without it a
+        # converged net drifts under continued self-play training
+        # (docs/research/regression-and-next-steps.md §1.3).
+        self.optimizer = optim.AdamW(
+            self.nnet.parameters(),
+            lr=self.net_config.learning_rate,
+            weight_decay=self.net_config.weight_decay,
+        )
         self.scheduler: LRScheduler | None = self._create_scheduler()
 
     def _maybe_compile(self) -> nn.Module:
@@ -1065,6 +1073,13 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         self.nnet.load_state_dict(checkpoint["state_dict"])
         if "optimizer_state_dict" in checkpoint:
             self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
+            # ``load_state_dict`` overwrites param-group hyperparameters with
+            # the saved ones, so a checkpoint written before the AdamW change
+            # (param groups carrying ``weight_decay=0.0``) would silently turn
+            # the decay back off on --resume / arena reject-reload. Re-assert
+            # the configured value; the Adam moments themselves are compatible.
+            for group in self.optimizer.param_groups:
+                group["weight_decay"] = self.net_config.weight_decay
 
         if self.scheduler is None:
             return

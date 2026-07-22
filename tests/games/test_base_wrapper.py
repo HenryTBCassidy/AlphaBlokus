@@ -550,3 +550,38 @@ def test_pvc_returns_none_without_compact_boards(ttt_game: TicTacToeGame, test_c
     eval_set = _make_eval_set(ttt_game, compacts, with_compact=False)
     assert wrapper._compute_policy_value_consistency(eval_set) is None
     assert wrapper._compute_value_symmetry_mae(eval_set) is None
+
+
+def test_optimizer_is_adamw_with_configured_weight_decay(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """The optimizer is AdamW and applies ``NetConfig.weight_decay`` (default 1e-4, on).
+
+    Decoupled weight decay is the AGZ/AZ L2 term the loop was missing — the
+    ``blokus_paired_gate_rerun`` drift post-mortem made it default-on
+    (docs/research/regression-and-next-steps.md §1.3).
+    """
+    import torch
+
+    wrapper = NNetWrapper(ttt_game, test_config)
+    assert isinstance(wrapper.optimizer, torch.optim.AdamW)
+    assert test_config.net_config.weight_decay == 1e-4  # the intentional default
+    assert all(group["weight_decay"] == 1e-4 for group in wrapper.optimizer.param_groups)
+
+
+def test_load_checkpoint_reasserts_configured_weight_decay(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """Loading a pre-AdamW checkpoint must not silently disable weight decay.
+
+    ``optimizer.load_state_dict`` overwrites param-group hyperparameters with
+    the saved ones; a checkpoint written before the change carries
+    ``weight_decay=0.0``, which --resume / arena reject-reload would otherwise
+    re-adopt.
+    """
+    wrapper = NNetWrapper(ttt_game, test_config)
+    # Simulate a legacy (plain-Adam) checkpoint: zero the saved group's decay.
+    for group in wrapper.optimizer.param_groups:
+        group["weight_decay"] = 0.0
+    wrapper.save_checkpoint(filename="legacy.pth.tar")
+
+    fresh = NNetWrapper(ttt_game, test_config)
+    fresh.load_checkpoint(filename="legacy.pth.tar")
+    expected = test_config.net_config.weight_decay
+    assert all(group["weight_decay"] == expected for group in fresh.optimizer.param_groups)
