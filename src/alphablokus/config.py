@@ -262,13 +262,29 @@ class NetConfig:
     layers for board-state processing) and its training process.
     """
 
-    learning_rate: float  # Learning rate for the optimizer
+    # Learning rate for the optimizer. Rule of thumb (post-regression-recovery
+    # P2): from-scratch runs peak at 1e-3 (cosine, floored via ``lr_eta_min``);
+    # warm-start *continuations* of a converged net run constant ~2.5e-4 —
+    # constant 1e-3 at the operator's fixed point is all diffusion, no signal
+    # (docs/research/regression-and-next-steps.md §1.3).
+    learning_rate: float
     dropout: float  # Dropout probability for regularisation (0 to 1)
     epochs: int  # Number of full passes over the replay buffer per generation
     batch_size: int  # Number of positions per training batch
     cuda: bool  # Whether to use CUDA for GPU acceleration
     num_filters: int  # Number of convolutional filters per layer (power of 2)
     num_residual_blocks: int  # Number of residual blocks in the network
+
+    # Decoupled (AdamW) weight decay, applied by the optimizer every step.
+    # Default 1e-4 — **on for every run**, matching AlphaGo Zero / AlphaZero's
+    # L2 c=1e-4. Deliberately an intentional behaviour change for existing
+    # configs (2026-07-22): training without it let a converged net drift —
+    # ``blokus_paired_gate_rerun``'s policy symmetry KL rose 0.64 → 1.24 and its
+    # value head overfit to 0.24 MSE over 20 accepted generations, regressing
+    # the ladder L4 → L3 (docs/research/regression-and-next-steps.md §1.3).
+    # Set 0.0 only to reproduce a pre-change run bit-for-bit.
+    weight_decay: float = 1e-4
+
     # LR schedule: None / "constant" = constant at ``learning_rate``,
     # "cosine" = CosineAnnealingLR (floored by ``lr_eta_min``),
     # "step" = MultiStepLR (see ``lr_milestones`` / ``lr_gamma``).

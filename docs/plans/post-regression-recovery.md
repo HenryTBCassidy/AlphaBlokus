@@ -22,7 +22,7 @@ the box as the final step before any paid run.
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| P1 | Training hygiene: `optim.Adam` → `AdamW`, `NetConfig.weight_decay` default 1e-4 (on), re-asserted on checkpoint load | 1 h | High | |
+| P1 | Training hygiene: `optim.Adam` → `AdamW`, `NetConfig.weight_decay` default 1e-4 (on), re-asserted on checkpoint load | 1 h | High | ✅ |
 | P2 | Continuation-config hygiene: `epochs: 1`, `learning_rate: 2.5e-4` in the warm-start continuation config; document the LR-for-continuation rule | 30 min | High | |
 | P3 | Keep-best + drift circuit-breaker library (`evaluation/ladder_selection.py`) | 2 h | High | |
 | P4 | Mini-ladder runner (`scripts/mini_ladder.py`): L3–L6 × 50 games × 400 sims per checkpoint, history + alarm | 2 h | High | |
