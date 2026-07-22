@@ -25,7 +25,7 @@ the box as the final step before any paid run.
 | P1 | Training hygiene: `optim.Adam` → `AdamW`, `NetConfig.weight_decay` default 1e-4 (on), re-asserted on checkpoint load | 1 h | High | ✅ |
 | P2 | Continuation-config hygiene: `epochs: 1`, `learning_rate: 2.5e-4` in the warm-start continuation config; document the LR-for-continuation rule | 30 min | High | ✅ |
 | P3 | Keep-best + drift circuit-breaker library (`evaluation/ladder_selection.py`) | 2 h | High | ✅ |
-| P4 | Mini-ladder runner (`scripts/mini_ladder.py`): L3–L6 × 50 games × 400 sims per checkpoint, history + alarm | 2 h | High | |
+| P4 | Mini-ladder runner (`scripts/mini_ladder.py`): L3–L6 × 50 games × 400 sims per checkpoint, history + alarm | 2 h | High | ✅ |
 | P5 | Author `run_configurations/blokus_xl_scratch.json` (launch gated on P8) | 30 min | High | |
 | P6 | Capacity-probe script (`scripts/capacity_probe.py`): supervised `large` vs `xl` fit on a frozen buffer, game-level held-out split | 3 h | High | |
 | P7 | Re-crown v3 gen-40 as project best + wire the mini-ladder runbook on the box | 1 h (box) | High | |
