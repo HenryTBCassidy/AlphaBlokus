@@ -31,9 +31,10 @@
   },
   "net_config": {
     "preset": "large",
-    "learning_rate": 0.001,
+    "learning_rate": 0.00025,
+    "weight_decay": 0.0001,
     "dropout": 0.3,
-    "epochs": 2,
+    "epochs": 1,
     "batch_size": 1024,
     "cuda": true,
     "lr_scheduler": "constant",
