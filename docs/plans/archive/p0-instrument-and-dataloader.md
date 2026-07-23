@@ -24,9 +24,9 @@ Companion docs: [`../guides/PLAN-FORMAT.md`](../guides/PLAN-FORMAT.md),
 |---|------|--------|----------|-------|------|
 | S1 | Opening-diversification config fields + plumb into the arena gate + Elo eval | 1.5 h | High | `config.py`, `training/coach.py` | ✅ |
 | S2 | Plumb opening diversification into the pool BayesElo tournament | 1 h | High | `config.py`, `evaluation/tournament_run.py` | ✅ |
-| S3 | Validation gate — prove opening diversity measures strength, not opening-luck | 1.5 h | High | (control run + analysis) | |
+| S3 | Validation gate — prove opening diversity measures strength, not opening-luck | 1.5 h | High | (control run + analysis) | ✅ (known-gap control ~64% vs null ~49–51 → diversity measures strength; note: blind to colour-pinning, which `fix-arena-colour-pinning.md` then fixed) |
 | S4 | Make `dataloader_workers > 0` reliable (fix the memmap+forkserver deadlock) + validate | 3 h | Medium | `games/base_wrapper.py`, `config.py` | ✅ (validated on box: 8 gens, workers=8+spawn, no deadlock) |
-| S5 | Re-baseline the gen-57 donor ladder at 100 games/level (execution) | ~1 h run | Medium | (box run; results doc) | |
+| S5 | Re-baseline the gen-57 donor ladder at 100 games/level (execution) | ~1 h run | Medium | (box run; results doc) | ✅ (gen-57 donor re-laddered: L4 ≈ 48%, weighted ≈ 0.205) |
 | S6 | Tests + docs | 1 h | High | `tests/`, `config.py` docstrings, addendum | ✅ |
 
 Execution order: S1→S2 build the instrument, then **S3 validates it — a hard gate: the production opening-diversity defaults are not trusted, and P1 must not rely on the diversified gate/tournament, until S3 passes.** S4 (perf fix) and S5 (baseline run) are independent and parallelisable; S6 last. S4 is the higher-risk row (escape hatch in its section).
