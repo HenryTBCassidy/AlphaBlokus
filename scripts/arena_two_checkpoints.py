@@ -51,6 +51,12 @@ def main() -> None:
     parser.add_argument("--blocks", type=int, default=4)
     parser.add_argument("--opening-temp", type=float, default=1.0)
     parser.add_argument("--opening-moves", type=int, default=4)
+    parser.add_argument(
+        "--paired",
+        action=argparse.BooleanOptionalAction,
+        default=False,
+        help="Colour-swapped paired play (shared opening prefix per pair) — cancels first-mover advantage.",
+    )
     parser.add_argument("--cuda", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--out", type=Path, default=None)
     args = parser.parse_args()
@@ -86,28 +92,58 @@ def main() -> None:
         ),
     )
 
-    players = []
+    nnets = []
     for checkpoint in (args.net_a, args.net_b):
         nnet = NNetWrapper(game, config)
         nnet.load_checkpoint(filename=str(checkpoint.resolve()))
-        players.append(
-            NetworkPlayer(
-                game,
-                nnet,
-                config.mcts_config,
-                temp=0.0,
-                opening_temp=args.opening_temp,
-                opening_moves=args.opening_moves,
-            )
+        nnets.append(nnet)
+
+    # In paired mode the shared opening prefix is the ONLY diversification, so
+    # the two competitors play deterministically (temp 0, no per-player opening
+    # schedule) after it; the prefix is sampled from a separate temp>0 sampler.
+    # In unpaired mode we keep the legacy per-player opening schedule.
+    player_opening_temp = 0.0 if args.paired else args.opening_temp
+    player_opening_moves = 0 if args.paired else args.opening_moves
+    players = [
+        NetworkPlayer(
+            game,
+            nnet,
+            config.mcts_config,
+            temp=0.0,
+            opening_temp=player_opening_temp,
+            opening_moves=player_opening_moves,
         )
+        for nnet in nnets
+    ]
 
     arena = Arena(players[0], players[1], game)
-    a_wins, b_wins, draws, _records = arena.play_games(args.games)
+    if args.paired:
+        # Sample each pair's opening prefix from net A's visit distribution at
+        # ``opening_temp`` (a distinct temp>0 player — the competitors are temp 0).
+        prefix_sampler = NetworkPlayer(game, nnets[0], config.mcts_config, temp=args.opening_temp)
+        a_wins, b_wins, draws, records = arena.play_games_paired(
+            args.games, prefix_sampler=prefix_sampler, opening_moves=args.opening_moves, record=True
+        )
+    else:
+        a_wins, b_wins, draws, records = arena.play_games(args.games, record=True)
+
+    # Colour split — the diagnostic the old gate was blind to. ``outcome`` is
+    # from net A's perspective; ``player1_was_white`` is net A's colour that game.
+    a_white_wins = sum(1 for r in records if r.outcome > 0 and r.player1_was_white)
+    a_black_wins = sum(1 for r in records if r.outcome > 0 and not r.player1_was_white)
+    b_white_wins = sum(1 for r in records if r.outcome < 0 and not r.player1_was_white)
+    b_black_wins = sum(1 for r in records if r.outcome < 0 and r.player1_was_white)
+    white_wins = a_white_wins + b_white_wins
+    black_wins = a_black_wins + b_black_wins
+    decisive = white_wins + black_wins
+    white_win_rate = white_wins / decisive if decisive else 0.0
+
     low, high = _wilson(a_wins + 0.5 * draws, args.games)
     logger.info(
-        "{} vs {}: {}-{}-{} → {} score rate {:.1%} (95% CI {:.1%}–{:.1%})",
+        "{} vs {} [{}]: {}-{}-{} → {} score {:.1%} (95% CI {:.1%}–{:.1%})",
         args.label_a,
         args.label_b,
+        "paired" if args.paired else "unpaired",
         a_wins,
         b_wins,
         draws,
@@ -115,6 +151,15 @@ def main() -> None:
         (a_wins + 0.5 * draws) / args.games,
         low,
         high,
+    )
+    logger.info(
+        "colour split: White won {:.1%} of {} decisive games | {} wins-as-Black {} vs {} wins-as-Black {}",
+        white_win_rate,
+        decisive,
+        args.label_a,
+        a_black_wins,
+        args.label_b,
+        b_black_wins,
     )
     out = args.out or REPO_ROOT / "temp" / "benchmarks" / f"arena_{args.label_a}_vs_{args.label_b}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -125,13 +170,21 @@ def main() -> None:
                 "net_b": str(args.net_b),
                 "label_a": args.label_a,
                 "label_b": args.label_b,
+                "paired": args.paired,
                 "games": args.games,
                 "sims": args.sims,
+                "opening_temp": args.opening_temp,
+                "opening_moves": args.opening_moves,
                 "a_wins": a_wins,
                 "b_wins": b_wins,
                 "draws": draws,
                 "a_score_rate": (a_wins + 0.5 * draws) / args.games,
                 "wilson_95": [low, high],
+                "white_win_rate": white_win_rate,
+                "a_white_wins": a_white_wins,
+                "a_black_wins": a_black_wins,
+                "b_white_wins": b_white_wins,
+                "b_black_wins": b_black_wins,
             },
             indent=2,
         )
