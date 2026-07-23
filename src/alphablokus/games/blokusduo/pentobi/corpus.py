@@ -11,13 +11,17 @@ canonical compact board (side-to-move perspective, the same int8 14x14 placement
 self-play buffer holds), the played action as a **one-hot sparse policy** (behavioural
 cloning target; label smoothing is a training-time concern), the **game outcome from the
 side to move** (+1 win / -1 loss / 0 draw), the signed **final score margin** from the
-side to move, and the side to move itself. Random-opening-prefix plies are *never*
+side to move, and the side to move itself. Opening-prefix plies are *never*
 harvested — they diversify the start position but are not expert moves.
 
 **Diversity.** Pentobi at a fixed level is near-deterministic, so a naive corpus is a
 pile of near-identical games. Two mechanisms, both first-class here: per-game engine
-seeds (``set_random_seed``) and a uniformly random opening prefix of ``k`` plies played
-by both sides before Pentobi takes over. :func:`compute_diversity` quantifies the result
+seeds (``set_random_seed``) and a **deterministic stratified opening prefix** of ``k``
+plies played by both sides before Pentobi takes over. The prefix is the game's *key*,
+built by :class:`OpeningPrefixBuilder`: game ``i``'s first ply is an interleaved sweep
+of the legal first moves (``enum[i mod N_first]``), later plies are keyed by
+``(base_seed, game_id)``, and a realised-set collision guard makes repeated prefixes
+impossible, not merely improbable. :func:`compute_diversity` quantifies the result
 (unique games / opening prefixes / positions) so a corpus can be *proven* diverse rather
 than assumed to be.
 
@@ -37,6 +41,7 @@ from typing import TYPE_CHECKING, Protocol, TypeAlias
 import numpy as np
 import pyarrow as pa
 import pyarrow.parquet as pq
+from loguru import logger
 
 from alphablokus.games.blokusduo.pentobi.gtp import PentobiGtp
 from alphablokus.games.blokusduo.pentobi.translation import PASS, PentobiMoveTranslator
@@ -201,6 +206,89 @@ def sample_random_action(
     return int(rng.choice(placements))
 
 
+# --------------------------------------------------------------------------- #
+# Deterministic opening keys
+# --------------------------------------------------------------------------- #
+
+#: Redraw attempts before declaring the collision loop broken. With a ~414^4 prefix
+#: space and <=50k games even a single redraw is effectively never needed.
+_MAX_PREFIX_ATTEMPTS = 1000
+
+
+class OpeningPrefixBuilder:
+    """Deterministic, stratified, collision-free opening prefixes keyed by game id.
+
+    The opening prefix is the game's *key*, not a per-game random draw (plan D5). Game
+    ``i``'s first ply enumerates the initial position's legal placements in a fixed
+    canonical order (ascending action index) and takes ``enum[i mod N_first]`` — an
+    interleaved sweep, so consecutive games land on distinct first moves, coverage of
+    all ``N_first`` (414 in Blokus Duo) first moves is even, and any truncation of a
+    run is still a uniform slice of the opening space (a lexicographic enumeration
+    would reach only ~120 of 414 first moves at 50k games and bias truncated runs).
+    Plies 2..k are drawn from an RNG seeded purely by ``(base_seed, game_id, attempt)``
+    with ``attempt`` starting at 0; if the finished prefix collides with one already
+    realised, ``attempt`` is bumped and plies 2..k redrawn — zero repeated openings is
+    a hard guarantee, not a probability.
+
+    Prefixes must be built for every ``game_id`` in ascending order from 0 (enforced):
+    the collision guard is defined over that walk, so a resumed run rebuilds the
+    identical keys by replaying the same walk and each game's prefix stays a pure
+    function of ``(base_seed, game_id)`` for a given command line.
+    """
+
+    def __init__(self, game: BlokusDuoGame, *, base_seed: int, num_plies: int) -> None:
+        self._game = game
+        self._base_seed = base_seed
+        self._num_plies = num_plies
+        self._realised: set[tuple[int, ...]] = set()
+        self._next_game_id = 0
+        self._initial_board = game.initialise_board()
+        legal = np.flatnonzero(game.valid_move_masking(self._initial_board, 1))
+        self._first_moves = tuple(int(a) for a in legal if a != game.action_codec.pass_action_index)
+
+    @property
+    def first_moves(self) -> tuple[int, ...]:
+        """Canonical (ascending action-index) enumeration of legal first placements."""
+        return self._first_moves
+
+    def prefix_for(self, game_id: int) -> tuple[int, ...]:
+        """Build game ``game_id``'s opening prefix (call in ascending order from 0).
+
+        Raises:
+            ValueError: If called out of order — the collision guard is only defined
+                over the full ascending walk from game 0.
+            CorpusGenerationError: If no unique prefix is found within the attempt cap
+                (unreachable at corpus scale; guards a broken keying change).
+        """
+        if game_id != self._next_game_id:
+            raise ValueError(f"prefixes must be built in order: expected game_id {self._next_game_id}, got {game_id}")
+        self._next_game_id += 1
+        if self._num_plies == 0:
+            return ()
+        first = self._first_moves[game_id % len(self._first_moves)]
+        if self._num_plies == 1:
+            return (first,)  # the pure sweep; repeats past N_first are the cycle, by design
+        for attempt in range(_MAX_PREFIX_ATTEMPTS):
+            prefix = self._draw(first, game_id, attempt)
+            if prefix not in self._realised:
+                self._realised.add(prefix)
+                if attempt:
+                    logger.debug("game {}: opening prefix collision resolved at attempt {}", game_id, attempt)
+                return prefix
+        raise CorpusGenerationError(f"game {game_id}: no unique opening prefix in {_MAX_PREFIX_ATTEMPTS} attempts")
+
+    def _draw(self, first: int, game_id: int, attempt: int) -> tuple[int, ...]:
+        """One deterministic draw of plies 2..k on top of the stratified first ply."""
+        rng = np.random.default_rng((self._base_seed, game_id, attempt))
+        board, player = self._game.get_next_state(self._initial_board, 1, first)
+        actions = [first]
+        for _ in range(self._num_plies - 1):
+            action = sample_random_action(self._game, board, player, rng)
+            actions.append(action)
+            board, player = self._game.get_next_state(board, player, action)
+        return tuple(actions)
+
+
 def parse_gtp_score(score: str) -> int:
     """Parse a GTP ``final_score`` string into a margin for our White.
 
@@ -259,30 +347,28 @@ def play_corpus_game(
     *,
     game_id: int,
     pentobi_seed: int,
-    opening_random_plies: int,
-    opening_rng: np.random.Generator,
+    opening_actions: Sequence[int],
 ) -> CorpusGame:
     """Play one corpus game and harvest an example per expert ply.
 
-    The first ``opening_random_plies`` plies are sampled uniformly among legal
-    placements (diversifying the start position) and relayed to the source via
-    ``observe``; every subsequent ply is the source's own move, validated against our
-    rules engine before being recorded. The final margin is cross-checked against the
-    source's view when it has one.
+    The opening prefix ``opening_actions`` — the game's deterministic key, built by
+    :class:`OpeningPrefixBuilder` — is played first (legality-checked and relayed to
+    the source via ``observe``, never harvested); every subsequent ply is the source's
+    own move, validated against our rules engine before being recorded. The final
+    margin is cross-checked against the source's view when it has one.
 
     Raises:
-        CorpusGenerationError: On any desync — an illegal source move, a score
-            disagreement, or a game exceeding the hard ply cap.
+        CorpusGenerationError: On any desync — an illegal opening or source move, a
+            score disagreement, or a game exceeding the hard ply cap.
     """
     source.begin_game(pentobi_seed)
     board = game.initialise_board()
     player = 1
 
-    opening_actions: list[int] = []
-    for _ in range(opening_random_plies):
-        action = sample_random_action(game, board, player, opening_rng)
+    for ply_index, action in enumerate(opening_actions):
+        if not game.valid_move_masking(board, player)[action]:
+            raise CorpusGenerationError(f"game {game_id} opening ply {ply_index}: action {action} is illegal here")
         source.observe(board, player, action)
-        opening_actions.append(action)
         board, player = game.get_next_state(board, player, action)
 
     plies: list[HarvestedPly] = []
@@ -493,6 +579,7 @@ class DiversityReport:
     unique_games: int  # distinct full action sequences
     unique_positions: int  # distinct stored (canonical board, side-to-move) grids
     unique_openings_by_prefix: dict[int, int]  # prefix length -> distinct prefixes
+    unique_opening_prefixes: int  # distinct realised full opening keys (must equal num_games)
 
     @property
     def unique_game_fraction(self) -> float:
@@ -514,6 +601,7 @@ class DiversityReport:
             "unique_positions": self.unique_positions,
             "unique_position_fraction": self.unique_position_fraction,
             "unique_openings_by_prefix": {str(k): v for k, v in self.unique_openings_by_prefix.items()},
+            "unique_opening_prefixes": self.unique_opening_prefixes,
         }
 
 
@@ -521,6 +609,7 @@ def compute_diversity(
     sequences: Sequence[tuple[int, ...]],
     position_keys: Sequence[bytes],
     prefix_lengths: Sequence[int] = PREFIX_LENGTHS,
+    opening_prefixes: Sequence[tuple[int, ...]] = (),
 ) -> DiversityReport:
     """Compute diversity metrics from full game sequences + stored position keys.
 
@@ -528,6 +617,8 @@ def compute_diversity(
         sequences: One full action-index sequence per game (opening + expert plies).
         position_keys: One hashable key per *stored* position (canonical board bytes).
         prefix_lengths: Opening depths at which to count distinct prefixes.
+        opening_prefixes: One realised full opening key per game (the deterministic
+            stratified prefixes) — distinct count must equal the game count.
     """
     return DiversityReport(
         num_games=len(sequences),
@@ -535,6 +626,7 @@ def compute_diversity(
         unique_games=len(set(sequences)),
         unique_positions=len(set(position_keys)),
         unique_openings_by_prefix={k: len({s[:k] for s in sequences}) for k in prefix_lengths},
+        unique_opening_prefixes=len(set(opening_prefixes)),
     )
 
 
@@ -542,6 +634,7 @@ def analyze_corpus(directory: Path) -> DiversityReport:
     """Read every shard in ``directory`` and compute the corpus diversity report."""
     sequences: list[tuple[int, ...]] = []
     position_keys: list[bytes] = []
+    opening_prefixes: list[tuple[int, ...]] = []
     for path in corpus_shards(directory):
         meta = read_shard_meta(path)
         table = pq.read_table(path, columns=["board", "action"])
@@ -552,8 +645,34 @@ def analyze_corpus(directory: Path) -> DiversityReport:
         for g, size in zip(meta.games, meta.game_sizes, strict=True):
             expert_actions = tuple(int(a) for a in actions[cursor : cursor + size])
             sequences.append(g.opening_actions + expert_actions)
+            opening_prefixes.append(g.opening_actions)
             cursor += size
-    return compute_diversity(sequences, position_keys)
+    return compute_diversity(sequences, position_keys, opening_prefixes=opening_prefixes)
+
+
+def collect_opening_prefixes(directory: Path) -> list[tuple[int, ...]]:
+    """Every game's realised opening prefix across all shards (footer reads only)."""
+    return [g.opening_actions for path in corpus_shards(directory) for g in read_shard_meta(path).games]
+
+
+def assert_unique_openings(directory: Path) -> int:
+    """Assert the corpus's realised opening-prefix set has zero duplicates.
+
+    The end-of-run diversity guarantee for deterministically keyed corpora: reads only
+    shard footers, raises on any repeated full opening prefix, and returns the distinct
+    prefix count (== the game count when the assertion holds).
+
+    Raises:
+        CorpusGenerationError: If any two games share an opening prefix.
+    """
+    prefixes = collect_opening_prefixes(directory)
+    distinct = len(set(prefixes))
+    if distinct != len(prefixes):
+        raise CorpusGenerationError(
+            f"{len(prefixes) - distinct} duplicate opening prefixes across {len(prefixes)} games in {directory} "
+            f"— the deterministic opening keying is broken",
+        )
+    return distinct
 
 
 # --------------------------------------------------------------------------- #

@@ -8,6 +8,7 @@ on the box instead (the pilot's ``validate`` subcommand replays every stored row
 
 from __future__ import annotations
 
+from collections import Counter
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -19,8 +20,10 @@ from alphablokus.games.blokusduo.pentobi.corpus import (
     POLICY_KIND,
     CorpusGame,
     CorpusGenerationError,
+    OpeningPrefixBuilder,
     RandomMoveSource,
     analyze_corpus,
+    assert_unique_openings,
     compute_diversity,
     corpus_shards,
     iter_corpus_examples,
@@ -46,16 +49,20 @@ def game() -> BlokusDuoGame:
     return BlokusDuoGame(pieces_config_path=_PIECES)
 
 
+# Blokus Duo's known opening branching factor: 414 legal first placements per player.
+_N_FIRST_MOVES = 414
+
+
 def _play_games(game: BlokusDuoGame, n: int, *, opening_random_plies: int = 4, seed: int = 0) -> list[CorpusGame]:
     source = RandomMoveSource(game)
+    builder = OpeningPrefixBuilder(game, base_seed=seed, num_plies=opening_random_plies)
     return [
         play_corpus_game(
             game,
             source,
             game_id=g,
             pentobi_seed=seed + g,
-            opening_random_plies=opening_random_plies,
-            opening_rng=np.random.default_rng((seed, g)),
+            opening_actions=builder.prefix_for(g),
         )
         for g in range(n)
     ]
@@ -107,8 +114,7 @@ def test_play_corpus_game_rejects_source_score_mismatch(game: BlokusDuoGame) -> 
             LyingSource(game),
             game_id=0,
             pentobi_seed=0,
-            opening_random_plies=0,
-            opening_rng=np.random.default_rng(0),
+            opening_actions=(),
         )
 
 
@@ -119,6 +125,83 @@ def test_parse_gtp_score() -> None:
     assert parse_gtp_score("0") == 0
     with pytest.raises(CorpusGenerationError):
         parse_gtp_score("resign")
+
+
+# --------------------------------------------------------------------------- #
+# Deterministic opening keys
+# --------------------------------------------------------------------------- #
+
+
+def test_first_ply_enumeration_exhaustive_and_interleaved(game: BlokusDuoGame) -> None:
+    """Game i's first ply is enum[i mod 414] — an interleaved sweep: the enumeration
+    matches the legal first placements exactly, any 414-game window hits 414 distinct
+    first moves, and 2x414 games cover every first move exactly twice."""
+    builder = OpeningPrefixBuilder(game, base_seed=0, num_plies=1)
+    mask = game.valid_move_masking(game.initialise_board(), 1)
+    legal = {int(a) for a in np.flatnonzero(mask)} - {game.action_codec.pass_action_index}
+    assert len(builder.first_moves) == _N_FIRST_MOVES
+    assert set(builder.first_moves) == legal
+
+    firsts = [builder.prefix_for(g)[0] for g in range(2 * _N_FIRST_MOVES)]
+    assert firsts == [builder.first_moves[g % _N_FIRST_MOVES] for g in range(2 * _N_FIRST_MOVES)]
+    assert len(set(firsts[:_N_FIRST_MOVES])) == _N_FIRST_MOVES  # spread: no repeat until the sweep completes
+    assert set(firsts) == legal  # exhaustive coverage of all 414 first moves
+    assert set(Counter(firsts).values()) == {2}  # perfectly even after two full cycles
+
+
+def test_opening_prefixes_deterministic_and_unique_past_cycle_boundary(game: BlokusDuoGame) -> None:
+    """Two independent builders reproduce identical prefixes; zero duplicates even for
+    games 414+ whose stratified first ply repeats games 0+ (plies 2..k must differ)."""
+    n = _N_FIRST_MOVES + 20
+    a = OpeningPrefixBuilder(game, base_seed=0, num_plies=2)
+    b = OpeningPrefixBuilder(game, base_seed=0, num_plies=2)
+    prefixes_a = [a.prefix_for(g) for g in range(n)]
+    prefixes_b = [b.prefix_for(g) for g in range(n)]
+    assert prefixes_a == prefixes_b
+    assert all(len(p) == 2 for p in prefixes_a)
+    assert len(set(prefixes_a)) == n
+
+
+def test_opening_prefix_collision_redraws_deterministically(game: BlokusDuoGame) -> None:
+    """A realised-set collision bumps the attempt sub-seed and redraws plies 2..k only:
+    the redraw keeps the stratified first ply and equals the attempt-1 draw exactly."""
+    probe = OpeningPrefixBuilder(game, base_seed=0, num_plies=3)
+    attempt0 = probe._draw(probe.first_moves[0], 0, 0)
+    attempt1 = probe._draw(probe.first_moves[0], 0, 1)
+    assert attempt0 != attempt1
+
+    builder = OpeningPrefixBuilder(game, base_seed=0, num_plies=3)
+    builder._realised.add(attempt0)  # force game 0's natural draw to collide
+    prefix = builder.prefix_for(0)
+    assert prefix == attempt1
+    assert prefix[0] == attempt0[0]  # first ply untouched — stratification survives the redraw
+
+
+def test_opening_prefix_builder_enforces_ascending_walk(game: BlokusDuoGame) -> None:
+    """The collision guard is defined over the full walk from game 0 — skipping raises."""
+    builder = OpeningPrefixBuilder(game, base_seed=0, num_plies=4)
+    builder.prefix_for(0)
+    with pytest.raises(ValueError, match="in order"):
+        builder.prefix_for(2)
+
+
+def test_resume_reproduces_identical_opening_actions(game: BlokusDuoGame) -> None:
+    """Same (base_seed, game_id) → byte-identical opening_actions on regeneration,
+    exactly the resume contract (a rerun rebuilds the missing games' keys)."""
+    games = _play_games(game, 4)
+    builder = OpeningPrefixBuilder(game, base_seed=0, num_plies=4)
+    prefixes = [builder.prefix_for(g) for g in range(4)]
+    source = RandomMoveSource(game)
+    for game_id in (1, 3):  # regenerate a couple of game_ids as a resume would
+        regenerated = play_corpus_game(
+            game, source, game_id=game_id, pentobi_seed=game_id, opening_actions=prefixes[game_id]
+        )
+        original = games[game_id]
+        assert regenerated.opening_actions == original.opening_actions
+        assert (
+            np.asarray(regenerated.opening_actions, dtype=np.int32).tobytes()
+            == np.asarray(original.opening_actions, dtype=np.int32).tobytes()
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -205,11 +288,13 @@ def test_compute_diversity_counts() -> None:
     """Known sequences → known uniqueness numbers (clones detected, diversity counted)."""
     sequences = [(1, 2, 3, 4), (1, 2, 3, 4), (1, 2, 9, 9), (5, 6, 7, 8)]
     position_keys = [b"a", b"a", b"b", b"c"]
-    report = compute_diversity(sequences, position_keys, prefix_lengths=(1, 2, 4))
+    openings = [(1, 2), (1, 2), (1, 2), (5, 6)]
+    report = compute_diversity(sequences, position_keys, prefix_lengths=(1, 2, 4), opening_prefixes=openings)
     assert report.num_games == 4
     assert report.unique_games == 3  # one exact clone pair
     assert report.unique_game_fraction == 0.75
     assert report.unique_openings_by_prefix == {1: 2, 2: 2, 4: 3}
+    assert report.unique_opening_prefixes == 2
     assert report.num_positions == 4
     assert report.unique_positions == 3
 
@@ -227,4 +312,32 @@ def test_analyze_corpus_over_shards(game: BlokusDuoGame, tmp_path: Path) -> None
     report = analyze_corpus(tmp_path)
     assert report.num_games == 4
     assert report.unique_games == 4  # distinct seeds + random play → no clones
+    assert report.unique_opening_prefixes == 4  # deterministic keys: one distinct prefix per game
     assert report.num_positions == sum(len(g.plies) for g in games)
+
+
+def test_zero_duplicate_openings_across_shard_boundary(game: BlokusDuoGame, tmp_path: Path) -> None:
+    """The corpus-level uniqueness assertion holds globally across shards, and a
+    repeated game (duplicated prefix) in another shard trips it."""
+    games = _play_games(game, 6)
+    for index, chunk in enumerate((games[:3], games[3:])):
+        write_shard(
+            tmp_path / shard_filename(index), chunk, policy_size=game.get_action_size(), level=9, opening_random_plies=4
+        )
+    assert assert_unique_openings(tmp_path) == 6
+    assert analyze_corpus(tmp_path).unique_opening_prefixes == 6
+
+    dup_dir = tmp_path / "dup"
+    dup_dir.mkdir()
+    write_shard(
+        dup_dir / shard_filename(0), games[:3], policy_size=game.get_action_size(), level=9, opening_random_plies=4
+    )
+    write_shard(  # games[2] recurs in the second shard → a cross-shard duplicate prefix
+        dup_dir / shard_filename(1),
+        [games[2], *games[4:]],
+        policy_size=game.get_action_size(),
+        level=9,
+        opening_random_plies=4,
+    )
+    with pytest.raises(CorpusGenerationError, match="duplicate opening prefixes"):
+        assert_unique_openings(dup_dir)

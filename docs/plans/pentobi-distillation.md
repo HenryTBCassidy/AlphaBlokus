@@ -151,7 +151,7 @@ whose outcomes carry more value signal.
 
 ## D5. Full corpus generation run
 
-**Prerequisite (small generator change before this run):** switch the opening prefix from a
+**Prerequisite (done 2026-07-23 — small generator change before this run):** switch the opening prefix from a
 per-game uniform-random draw to the **deterministic stratified key** locked above — game `i` →
 `first_piece = enum[i mod 414]`, interleaved, prefix built to depth 4; keep the per-game Pentobi
 seed. Shards stay a pure function of `(seed, game_id)` so resume is unchanged; add a diversity

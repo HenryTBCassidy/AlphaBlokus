@@ -19,13 +19,16 @@ Usage::
     uv run python -m scripts.pentobi_corpus validate --data temp/corpus_l9
 
 **Diversity mechanisms.** ``--seed`` gives every game a distinct engine seed
-(``set_random_seed`` per game). ``--opening-random-plies k`` additionally plays the
-first ``k`` plies uniformly at random among legal placements before Pentobi takes over
-(``k=0`` disables — used for the seed-variation-only A/B). Harvested examples come from
-Pentobi's plies only.
+(``set_random_seed`` per game). ``--opening-random-plies k`` additionally plays a
+**deterministic stratified opening key** of ``k`` plies before Pentobi takes over:
+game ``i``'s first ply sweeps the legal first moves interleaved (``enum[i mod 414]``),
+plies 2..k are keyed by ``(seed, game_id)``, repeats are impossible by construction,
+and zero duplicate prefixes is asserted at end of run (``k=0`` disables — used for the
+seed-variation-only A/B). Harvested examples come from Pentobi's plies only.
 
-**Determinism/resume contract.** Game ``g`` always uses engine seed ``seed + g`` and
-opening RNG ``default_rng((seed, g))``, and always lands in shard ``g // games_per_shard``
+**Determinism/resume contract.** Game ``g`` always uses engine seed ``seed + g``, its
+opening prefix is a pure function of ``(seed, g)`` (rebuilt every run by walking the
+key builder over all game ids), and it always lands in shard ``g // games_per_shard``
 — so a rerun of the same command regenerates exactly the missing shards and nothing else.
 
 Pentobi is CPU-only: ``--workers`` should be ~the machine's physical core count
@@ -41,14 +44,16 @@ import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
 
-import numpy as np
 from loguru import logger
 
 from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.pentobi.corpus import (
     CorpusGame,
+    OpeningPrefixBuilder,
     PentobiMoveSource,
     analyze_corpus,
+    assert_unique_openings,
+    collect_opening_prefixes,
     corpus_shards,
     play_corpus_game,
     shard_filename,
@@ -63,6 +68,7 @@ def _generate_shard(
     out_dir: str,
     shard_index: int,
     game_ids: list[int],
+    openings: list[tuple[int, ...]],
     level: int,
     base_seed: int,
     opening_random_plies: int,
@@ -70,22 +76,22 @@ def _generate_shard(
 ) -> tuple[int, int, int, float]:
     """Worker entry point: play one shard's games and write its parquet file.
 
-    Plain picklable args only (spawn start method). Returns
+    Plain picklable args only (spawn start method); ``openings`` carries each game's
+    pre-built deterministic opening key, aligned with ``game_ids``. Returns
     ``(shard_index, games, positions, seconds)``.
     """
     t0 = time.perf_counter()
     game = BlokusDuoGame(pieces_config_path=default_pieces_path())
     games: list[CorpusGame] = []
     with PentobiMoveSource(game, level, binary=binary) as source:
-        for game_id in game_ids:
+        for game_id, opening in zip(game_ids, openings, strict=True):
             games.append(
                 play_corpus_game(
                     game,
                     source,
                     game_id=game_id,
                     pentobi_seed=base_seed + game_id,
-                    opening_random_plies=opening_random_plies,
-                    opening_rng=np.random.default_rng((base_seed, game_id)),
+                    opening_actions=opening,
                 ),
             )
     rows = write_shard(
@@ -108,6 +114,16 @@ def generate(args: argparse.Namespace) -> None:
     for stale in out_dir.glob("*.tmp"):
         stale.unlink()  # torn shards from a killed run — regenerated below
 
+    game = BlokusDuoGame(pieces_config_path=default_pieces_path())
+    builder = OpeningPrefixBuilder(game, base_seed=args.seed, num_plies=args.opening_random_plies)
+    openings = [builder.prefix_for(game_id) for game_id in range(args.num_games)]
+    logger.info(
+        "Built {} deterministic opening keys (depth {}, interleaved sweep of {} legal first moves).",
+        len(openings),
+        args.opening_random_plies,
+        len(builder.first_moves),
+    )
+
     shards: dict[int, list[int]] = {}
     for game_id in range(args.num_games):
         shards.setdefault(game_id // args.games_per_shard, []).append(game_id)
@@ -117,6 +133,7 @@ def generate(args: argparse.Namespace) -> None:
         logger.info("Resume: {} of {} shards already complete — skipping them.", done, len(shards))
     if not pending:
         logger.info("Nothing to do.")
+        _verify_opening_diversity(out_dir, args.opening_random_plies)
         return
 
     logger.info(
@@ -140,6 +157,7 @@ def generate(args: argparse.Namespace) -> None:
                 str(out_dir),
                 index,
                 game_ids,
+                [openings[g] for g in game_ids],
                 args.level,
                 args.seed,
                 args.opening_random_plies,
@@ -170,6 +188,26 @@ def generate(args: argparse.Namespace) -> None:
         total_rows / elapsed * 3600,
         args.workers,
     )
+    _verify_opening_diversity(out_dir, args.opening_random_plies)
+
+
+def _verify_opening_diversity(out_dir: Path, opening_random_plies: int) -> None:
+    """End-of-run diversity guarantee: zero duplicate opening prefixes across the corpus.
+
+    The hard assertion only applies at prefix depth >= 2 — at depth 1 the stratified
+    sweep cycles by design past the 414 first moves, and at depth 0 every prefix is
+    empty (the seed-variation-only A/B mode).
+    """
+    if opening_random_plies >= 2:
+        distinct = assert_unique_openings(out_dir)
+        logger.info("Opening keys verified: {} games, {} distinct prefixes, zero duplicates.", distinct, distinct)
+    else:
+        prefixes = collect_opening_prefixes(out_dir)
+        logger.info(
+            "Opening prefixes: {} distinct across {} games (no uniqueness guarantee at depth <2).",
+            len(set(prefixes)),
+            len(prefixes),
+        )
 
 
 def analyze(args: argparse.Namespace) -> None:
@@ -206,12 +244,15 @@ def main() -> None:
     gen.add_argument("--num-games", type=int, required=True, help="Total games (across all shards)")
     gen.add_argument("--workers", type=int, default=4, help="Worker processes (~physical cores; Pentobi is CPU-only)")
     gen.add_argument("--level", type=int, default=9, help="Pentobi level for both sides (default 9)")
-    gen.add_argument("--seed", type=int, default=0, help="Base seed: game g uses engine seed seed+g")
+    gen.add_argument(
+        "--seed", type=int, default=0, help="Base seed: game g uses engine seed seed+g and opening key f(seed, g)"
+    )
     gen.add_argument(
         "--opening-random-plies",
         type=int,
         default=4,
-        help="Uniform-random legal plies before Pentobi takes over (0 = seed variation only)",
+        help="Opening key depth k: deterministic stratified plies before Pentobi takes over — game i's first ply "
+        "sweeps the legal first moves interleaved, plies 2..k are keyed by (seed, game_id) (0 = seed variation only)",
     )
     gen.add_argument(
         "--games-per-shard",
