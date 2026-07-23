@@ -99,6 +99,49 @@ Shape and dtype information is stored in the parquet file's schema metadata (not
 
 ---
 
+## Pentobi Distillation Corpus — Expert Training Data
+
+**Writer:** `write_shard()` in `alphablokus/games/blokusduo/pentobi/corpus.py` (driven by `scripts/pentobi_corpus.py generate`)
+**Path:** `<corpus_dir>/corpus_{shard:05d}.parquet`
+**Partitioning:** Fixed-size shards (`--games-per-shard`, default 10 games) — the resume and parallelism unit
+**Granularity:** One row per **expert ply** (position before each Pentobi move; random opening-prefix plies are never harvested)
+
+### Schema
+
+A strict **superset** of the SelfPlayHistory schema: the first four columns are byte-identical in meaning (and carry the same `board_kind`/`policy_kind` markers, asserted equal to `SelfPlayStore`'s in tests), so a trainer can decode either source with shared code.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `board` | `bytes` | Canonical compact board (int8 14×14 placement grid, side-to-move perspective) |
+| `policy_indices` | `bytes` | `int32` — exactly one entry: the action index Pentobi played |
+| `policy_values` | `bytes` | `float32` — exactly `[1.0]` (**one-hot** behavioural-cloning target; label smoothing is applied at training time, not stored) |
+| `value` | `float` | Game outcome from the side to move: +1 win / −1 loss / 0 draw |
+| `margin` | `int32` | Final score margin from the side to move (`(white_score − black_score) × player`) |
+| `player` | `int8` | Side to move: +1 White, −1 Black |
+| `game_id` | `int64` | Globally unique game id (deterministic: game `g` of a run always has id `g`) |
+| `ply` | `int32` | 0-based ply index within the full game (opening plies count, so harvested plies start at `opening_random_plies`) |
+| `action` | `int32` | The played action index (denormalised copy of `policy_indices` for cheap analysis) |
+
+### File-Level Metadata
+
+`board_kind`/`board_shape`/`board_dtype`/`policy_kind`/`policy_size`/`game_sizes` exactly as SelfPlayHistory, plus:
+
+| Key | Example Value | Description |
+|-----|---------------|-------------|
+| `dataset_kind` | `"pentobi_distill_v1"` | Corpus format marker (`read_shard_meta` refuses files without it) |
+| `level` | `"9"` | Pentobi level both sides played at |
+| `opening_random_plies` | `"4"` | Random opening-prefix length `k` (0 = seed variation only) |
+| `games_meta` | JSON | Per-game provenance: `game_id`, `pentobi_seed`, `opening_actions`, `white_score`, `black_score` |
+
+### Notes
+
+- Read with `iter_corpus_examples()` (yields the same `(board, (indices, values), value)` tuples as the self-play pipeline) or `read_shard_meta()`/`analyze_corpus()` for provenance and diversity metrics; `validate_shard()` replays every game through the rules engine and checks every stored row.
+- Symmetry augmentation is **not** stored — apply `IGame.get_symmetries` at training time (the stored board rebuilds via `board_from_compact`, and the one-hot policy transposes to the one-hot of `transpose_action`).
+- Shards are written atomically (`.tmp` → rename), so any file matching the final name is complete; `generate` skips existing shards on rerun (resume) and each game's seeds are a pure function of `(--seed, game_id)`.
+- Design + generation strategy: `docs/plans/pentobi-distillation.md`.
+
+---
+
 ## Metrics Tables (Hive-Partitioned)
 
 The remaining **13 datasets** (TrainingData, ArenaData, Timings, SelfPlayProfiling, ResourceUsage, TrainingThroughput, TrainingEntropy, PolicyAccuracy, ValueCalibration, EloRatings, MinimaxResults, SymmetryDiagnostic, ArenaReplays) are all written by `MetricsCollector.flush()` using the same pattern:

@@ -54,6 +54,7 @@ class PentobiGtp:
         threads: int = 1,
         seed: int | None = None,
         game: str = "duo",
+        noresign: bool = False,
     ) -> None:
         path = Path(binary).expanduser() if binary else find_pentobi_gtp()
         if path is None or not path.exists():
@@ -64,6 +65,10 @@ class PentobiGtp:
         argv = [str(path), "--game", game, "--level", str(level), "--quiet", "--threads", str(threads)]
         if seed is not None:
             argv += ["--seed", str(seed)]
+        if noresign:
+            # Corpus generation needs games played to the final position: a resign
+            # forfeits the true score margin the value/margin labels are built from.
+            argv += ["--noresign"]
         # stderr → DEVNULL: --quiet already silences logging; discarding stderr removes
         # any chance of a full-pipe deadlock. GTP errors arrive on stdout as "? ...".
         self._proc = subprocess.Popen(
