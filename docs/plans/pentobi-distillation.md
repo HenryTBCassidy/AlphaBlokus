@@ -21,7 +21,19 @@ reusable corpus of Pentobi L9 games. Phases 2–3 (separate branches) build the 
   **side-to-move** are stored alongside.
 - **Diversity is mandatory and proven, not assumed** — Pentobi at L9 is near-deterministic, so a
   naive corpus is a pile of clones (see D3 for the measured verdict on seed variation vs the
-  random-opening-prefix method).
+  opening-prefix method).
+- **Opening prefixes are deterministic stratified keys, not per-game random draws** (Henry,
+  2026-07-23). The prefix is the game's key: game `i` selects its opening deterministically by
+  enumerating the legal-opening space **stratified/interleaved** (`first_piece = enum[i mod 414]`,
+  cycling — never lexicographic, which would only cover ~120 of the 414 first moves at 50k games
+  and bias any truncated run). This *guarantees* zero repeated openings and even coverage. A
+  per-game Pentobi `set_random_seed` is **retained on top** to decorrelate continuations
+  (`game = f(deterministic_prefix, pentobi_seed)`). This is an engineering/robustness win
+  (clean sharding, exact resume, reproducibility, zero-collision guarantee), **not** a data-quality
+  change vs uniform-random — at 50k games random already collides with ~4% probability across the
+  whole corpus (prefix space ≈ 414⁴ ≈ 3×10¹⁰). Prefix *depth* (4 plies) and *distribution*
+  (uniform over all legal openings, incl. weak ones — the realistic-opening-bias question) are the
+  real quality levers and are deferred to a possible v2 corpus, not decided here.
 - The corpus is a **one-time reusable asset** (parquet shards, schema in
   [`../07-DATA-STORAGE.md`](../07-DATA-STORAGE.md) § Pentobi Distillation Corpus), consumed by
   every future run.
@@ -138,6 +150,13 @@ whose outcomes carry more value signal.
   corpus and the generation log).
 
 ## D5. Full corpus generation run
+
+**Prerequisite (small generator change before this run):** switch the opening prefix from a
+per-game uniform-random draw to the **deterministic stratified key** locked above — game `i` →
+`first_piece = enum[i mod 414]`, interleaved, prefix built to depth 4; keep the per-game Pentobi
+seed. Shards stay a pure function of `(seed, game_id)` so resume is unchanged; add a diversity
+assertion that the realised opening set has zero duplicates. Needs its own unit test in
+`test_corpus.py` (enumeration is exhaustive + interleaved, no repeats across a shard boundary).
 
 **Target: 50,000 games ≈ 1.5 M stored positions ≈ 3.0 M after 2× symmetry augmentation**
 (`generate --num-games 50000 --level 9 --seed 0 --opening-random-plies 4`). At the measured
