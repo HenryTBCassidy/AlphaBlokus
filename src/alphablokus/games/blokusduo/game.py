@@ -169,6 +169,16 @@ class BlokusDuoGame(IGame[BlokusDuoBoard]):
             return 1
         return -1
 
+    def final_scores(self, board: BlokusDuoBoard) -> tuple[int, int]:
+        """Return ``(white_score, black_score)`` for a (typically terminal) board.
+
+        Public accessor over the scoring rule (see :meth:`_calculate_score`) for
+        consumers that need the actual score margin rather than just win/loss —
+        e.g. the Pentobi distillation corpus, whose value labels store the final
+        margin alongside the outcome.
+        """
+        return self._calculate_score(board, 1), self._calculate_score(board, -1)
+
     def get_canonical_form(self, board: BlokusDuoBoard, player: PlayerSide) -> BlokusDuoBoard:
         """Convert the board to canonical form (player 1 perspective).
 
