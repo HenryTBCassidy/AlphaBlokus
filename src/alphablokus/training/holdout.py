@@ -8,22 +8,30 @@ out-of-sample: can a bigger net fit the *same frozen data* better on positions
 it never trained on? (docs/research/regression-and-next-steps.md §3.1/§3.4,
 docs/plans/post-regression-recovery.md P6.)
 
-Two pieces live here so ``scripts/capacity_probe.py`` stays a thin CLI:
+Three pieces live here so ``scripts/capacity_probe.py`` and
+``scripts/distill_sl.py`` stay thin CLIs:
 
 - :func:`split_games_holdout` — split **by game**, never by position: positions
   within a game are strongly correlated (shared trajectory, shared outcome
   label, symmetry-augmented pairs), so a position-level split leaks the
-  held-out answers into training.
+  held-out answers into training. Generic over the game item type so both
+  self-play ``GameExamples`` and the distillation corpus's per-game row groups
+  split through the same code.
 - :func:`evaluate_holdout` — mean policy cross-entropy / KL and value MSE of a
   predictor over held-out examples. Typed against a structural protocol
   (anything with ``predict_encoded``) so this framework module never imports
   ``games.*``.
+- :func:`evaluate_imitation_diagnostics` — the SL-distillation extras (plan
+  ``docs/plans/pentobi-distillation.md`` D7): held-out top-1 accuracy against
+  the expert's move (legal-restricted argmax) and value calibration split by
+  side-to-move (colour-conditional — Blokus outcomes are heavily
+  colour-skewed, so a pooled calibration curve hides a per-colour bias).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol
+from typing import TYPE_CHECKING, Protocol, TypeVar
 
 import numpy as np
 
@@ -34,11 +42,19 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
-    from alphablokus.selfplay.episode import GameExamples, ProcessedExample
+    from alphablokus.selfplay.episode import ProcessedExample
 
 # Probabilities are clipped here before the log so a zero predicted mass on a
 # target action contributes a large-but-finite CE instead of inf.
 _LOG_EPS = 1e-12
+
+# The game-shaped item a holdout split partitions — self-play ``GameExamples``
+# or any other per-game grouping (e.g. the distillation corpus's row groups).
+TGameItem = TypeVar("TGameItem")
+
+# Value-head reliability diagram resolution: predicted v ∈ [-1, 1] in 10 buckets
+# (matches the training-loop calibration diagnostic in ``games/base_wrapper.py``).
+_CALIBRATION_BUCKETS = 10
 
 
 class SupportsEncodedPrediction(Protocol):
@@ -77,14 +93,15 @@ class HoldoutMetrics:
 
 
 def split_games_holdout(
-    games: Sequence[GameExamples],
+    games: Sequence[TGameItem],
     holdout_fraction: float,
     seed: int,
-) -> tuple[list[GameExamples], list[GameExamples]]:
-    """Split self-play games into (train, holdout) at **game** granularity.
+) -> tuple[list[TGameItem], list[TGameItem]]:
+    """Split games into (train, holdout) at **game** granularity.
 
     Args:
-        games: Per-game example lists (``SelfPlayStore.load_games`` shape).
+        games: One item per game — self-play ``GameExamples`` lists
+            (``SelfPlayStore.load_games`` shape) or any other per-game grouping.
         holdout_fraction: Fraction of *games* to hold out, in ``[0, 1)``. A
             non-zero fraction holds out at least one game.
         seed: RNG seed — the same (games, fraction, seed) always yields the
@@ -153,4 +170,138 @@ def evaluate_holdout(
         target_entropy=target_entropy,
         value_mse=mse_sum / n,
         n_positions=n,
+    )
+
+
+@dataclass(frozen=True)
+class ColourValueCalibration:
+    """Value-head calibration over the held-out positions of one side-to-move.
+
+    Attributes:
+        player: Side to move this row conditions on (+1 White, -1 Black).
+        n_positions: Held-out positions with this side to move.
+        mean_predicted: Mean predicted value over those positions.
+        mean_outcome: Mean actual outcome — ``mean_predicted − mean_outcome``
+            is the colour's calibration bias in one number.
+        value_mse: Value MSE restricted to this colour.
+        bucket_centers: Centres of the 10 reliability buckets over predicted
+            v ∈ [-1, 1] (same binning as the training-loop diagnostic).
+        bucket_mean_outcomes: Mean actual outcome per bucket; ``None`` for an
+            empty bucket (kept ``None`` rather than NaN so the row serialises
+            to strict JSON).
+        bucket_counts: Positions per bucket.
+    """
+
+    player: int
+    n_positions: int
+    mean_predicted: float
+    mean_outcome: float
+    value_mse: float
+    bucket_centers: tuple[float, ...]
+    bucket_mean_outcomes: tuple[float | None, ...]
+    bucket_counts: tuple[int, ...]
+
+
+@dataclass(frozen=True)
+class ImitationDiagnostics:
+    """Held-out imitation metrics for SL distillation (plan D7).
+
+    Attributes:
+        top1_accuracy: Fraction of positions where the predictor's best *legal*
+            move is the expert's move. Legal-restricted on purpose: an illegal
+            high-prior action never plays, so it should not cost the net a hit
+            it would score at the board.
+        n_positions: Held-out positions evaluated.
+        calibration: One :class:`ColourValueCalibration` per side-to-move
+            present, ordered by ``player`` ascending (Black -1 first).
+    """
+
+    top1_accuracy: float
+    n_positions: int
+    calibration: tuple[ColourValueCalibration, ...]
+
+
+def evaluate_imitation_diagnostics(
+    predictor: SupportsEncodedPrediction,
+    examples: Sequence[ProcessedExample],
+    expert_actions: Sequence[int],
+    players: Sequence[int],
+    *,
+    encode_fn: Callable[[NDArray], NDArray],
+    batch_size: int = 512,
+) -> ImitationDiagnostics:
+    """Held-out top-1 accuracy vs the expert + colour-conditional value calibration.
+
+    ``examples`` must be index-aligned with ``expert_actions`` and ``players``
+    (the unaugmented output of the corpus dataloader has exactly this alignment).
+    Each example's sparse policy support doubles as the position's **legal set**
+    (label smoothing spreads over exactly the legal moves), so top-1 accuracy is
+    computed as the argmax of the predicted policy *restricted to that support*
+    — no move generation happens here, keeping this module game-free.
+
+    Args:
+        predictor: Anything with ``predict_encoded`` (e.g. a net wrapper).
+        examples: Held-out ``(compact_board, sparse_policy, value)`` tuples with
+            smoothed (legal-support) sparse policies.
+        expert_actions: The expert's action index per position.
+        players: Side to move per position (+1 / -1).
+        encode_fn: ``IGame.encode_compact`` for the game the boards came from.
+        batch_size: Forward-pass batch size (memory knob only).
+    """
+    if not examples:
+        raise ValueError("evaluate_imitation_diagnostics needs at least one example")
+    if not (len(examples) == len(expert_actions) == len(players)):
+        raise ValueError(
+            f"misaligned inputs: {len(examples)} examples, {len(expert_actions)} expert actions, "
+            f"{len(players)} players",
+        )
+
+    top1_hits = 0
+    predicted_values = np.empty(len(examples), dtype=np.float64)
+    for start in range(0, len(examples), batch_size):
+        batch = examples[start : start + batch_size]
+        planes = np.stack([encode_fn(board) for board, _pi, _value in batch])
+        policies, values = predictor.predict_encoded(planes)
+        predicted_values[start : start + len(batch)] = values.astype(np.float64)
+        for row, (_board, pi, _value) in enumerate(batch):
+            support = pi[0] if isinstance(pi, tuple) else np.flatnonzero(pi)
+            best_legal = int(support[int(np.argmax(policies[row][support]))])
+            top1_hits += int(best_legal == int(expert_actions[start + row]))
+
+    player_arr = np.asarray(players, dtype=np.int64)
+    outcomes = np.array([value for _board, _pi, value in examples], dtype=np.float64)
+    calibration = tuple(
+        _colour_calibration(colour, predicted_values[player_arr == colour], outcomes[player_arr == colour])
+        for colour in sorted(set(player_arr.tolist()))
+    )
+    return ImitationDiagnostics(
+        top1_accuracy=top1_hits / len(examples),
+        n_positions=len(examples),
+        calibration=calibration,
+    )
+
+
+def _colour_calibration(
+    player: int,
+    predicted: NDArray[np.float64],
+    outcomes: NDArray[np.float64],
+) -> ColourValueCalibration:
+    """Reliability diagram + summary stats for one side-to-move's positions."""
+    edges = np.linspace(-1.0, 1.0, _CALIBRATION_BUCKETS + 1)
+    bucket_idx = np.clip(np.digitize(predicted, edges) - 1, 0, _CALIBRATION_BUCKETS - 1)
+    mean_outcomes: list[float | None] = []
+    counts: list[int] = []
+    for bucket in range(_CALIBRATION_BUCKETS):
+        mask = bucket_idx == bucket
+        counts.append(int(mask.sum()))
+        mean_outcomes.append(float(outcomes[mask].mean()) if counts[-1] else None)
+    return ColourValueCalibration(
+        player=player,
+        n_positions=len(predicted),
+        mean_predicted=float(predicted.mean()),
+        mean_outcome=float(outcomes.mean()),
+        value_mse=float(((predicted - outcomes) ** 2).mean()),
+        bucket_centers=tuple(((edges[:-1] + edges[1:]) / 2.0).tolist()),
+        bucket_mean_outcomes=tuple(mean_outcomes),
+        bucket_counts=tuple(counts),
     )
