@@ -49,7 +49,7 @@ reusable corpus of Pentobi L9 games. Phases 2–3 (separate branches) build the 
 | D3 | **Diversity A/B at L9**: seed-variation-only vs random-opening-prefix, quantified | 2 h box CPU | High | ✅ |
 | D4 | L9 pilot (~190 games): correctness validation + throughput measurement | 2 h box CPU | High | ✅ |
 | D5 | **Full corpus generation run** (execute the D4 recommendation after human review) | see D5 | High | |
-| D6 | Corpus dataloader: shard streaming, symmetry augmentation, label smoothing | 1 day | High | |
+| D6 | Corpus dataloader: shard streaming, symmetry augmentation, label smoothing | 1 day | High | ✅ |
 | D7 | SL distillation trainer: policy CE + value MSE fine-tune of the best net (+ from-scratch arm) | 2 days | High | |
 | D8 | SL evaluation gate: mini-ladder the distilled net | ½ day + box | High | |
 | D9 | RL warm-start from the distilled base (continuation hygiene: AdamW, epochs 1, LR 2.5e-4) | ½ day + run | High | |
@@ -182,7 +182,7 @@ rate that is ~2,840 worker-hours (13600KF-core basis). Options:
 Gate: human reviews this recommendation before anything is rented (stage 1 needs no sign-off
 beyond starting the box job).
 
-## D6. Corpus dataloader (Phase 2)
+## D6. Corpus dataloader (Phase 2) ✅
 
 Stream `iter_corpus_examples` shards into the training batch pipeline: densify the one-hot policy
 per batch (shared `sparse_policy.densify`), apply **label smoothing** at batch time (start
@@ -191,6 +191,19 @@ as the cheap first cut), apply the order-2 symmetry (`IGame.get_symmetries`) as 
 rebuild net input via `encode_compact` lazily (exactly `_LazyPolicyDataset`'s trick). Weighted
 sampling across shards; held-out split at *game* granularity (reuse the capacity-probe's
 game-level split so no position of a held-out game leaks).
+
+**Built** (Phase 2 branch): `src/alphablokus/games/blokusduo/pentobi/distill.py`.
+`load_corpus_games` groups shard rows per game (cursor walk over `game_sizes`, `game_id`
+cross-checked); `smooth_policy` re-targets the one-hot as `(1−ε)·one_hot + ε·uniform(legal)`
+**kept sparse with support = the legal set** (the legal-only path, not the uniform-over-all cut),
+so smoothed targets flow through the existing sparse machinery and `_LazyPolicyDataset` unchanged;
+`build_training_examples` interleaves each example's main-diagonal twin (transposed compact grid +
+`transpose_action`-mapped support — the twin costs no second move-generation call); `sample_games`
+subsamples uniformly over the pooled game list (shards weighted by their game counts);
+`split_games_holdout` was made generic (`TypeVar`) so the corpus's per-game row groups split
+through the capacity probe's exact game-level splitter. Engine-free tests in
+`tests/games/blokusduo/pentobi/test_distill.py` drive a real-schema `RandomMoveSource` corpus
+through load → smooth → augment → split → one real `train()` step on a tiny CPU net.
 
 ## D7. SL distillation trainer (Phase 2)
 
