@@ -50,7 +50,7 @@ reusable corpus of Pentobi L9 games. Phases 2–3 (separate branches) build the 
 | D4 | L9 pilot (~190 games): correctness validation + throughput measurement | 2 h box CPU | High | ✅ |
 | D5 | **Full corpus generation run** (execute the D4 recommendation after human review) | see D5 | High | |
 | D6 | Corpus dataloader: shard streaming, symmetry augmentation, label smoothing | 1 day | High | ✅ |
-| D7 | SL distillation trainer: policy CE + value MSE fine-tune of the best net (+ from-scratch arm) | 2 days | High | |
+| D7 | SL distillation trainer: policy CE + value MSE fine-tune of the best net (+ from-scratch arm) | 2 days | High | ✅ |
 | D8 | SL evaluation gate: mini-ladder the distilled net | ½ day + box | High | |
 | D9 | RL warm-start from the distilled base (continuation hygiene: AdamW, epochs 1, LR 2.5e-4) | ½ day + run | High | |
 | D10 | Continuous Pentobi-mix: corpus examples blended into the RL replay buffer | 1–2 days | Medium | |
@@ -205,7 +205,7 @@ through the capacity probe's exact game-level splitter. Engine-free tests in
 `tests/games/blokusduo/pentobi/test_distill.py` drive a real-schema `RandomMoveSource` corpus
 through load → smooth → augment → split → one real `train()` step on a tiny CPU net.
 
-## D7. SL distillation trainer (Phase 2)
+## D7. SL distillation trainer (Phase 2) ✅
 
 Fine-tune the current best net (v3 gen-40) on the corpus: policy CE against the smoothed one-hot,
 value MSE against the outcome (margin is stored for a later margin-aware experiment — do not
@@ -214,6 +214,17 @@ CE. Also run a **from-scratch arm** (same net size) — v3's operator-ceiling hi
 fresh net may imitate better than a converged one; the two arms cost one config each on the box
 GPU (supervised training on ~2–4 M positions is hours, not days). Track held-out top-1 accuracy
 vs Pentobi moves and value calibration.
+
+**Built** (Phase 2 branch): `scripts/distill_sl.py`, mirroring the capacity probe's harness.
+Arms `warm` (v3 gen-40 weights via `load_weights` — fresh AdamW at `--lr`, default 1e-4 constant,
+weight decay at the config default) and `scratch` (fresh init, same net size), both trained
+through the unmodified `BaseNNetWrapper.train` on identical data. Early stop on held-out policy
+CE (`--patience`/`--min-delta`); every CE improvement checkpoints the arm to
+`--ckpt-dir/distill_<arm>.pth.tar`, so the D8 ladder always has both arms' best nets. Held-out
+diagnostics per epoch via `training/holdout.py::evaluate_imitation_diagnostics`: **top-1 accuracy
+vs Pentobi's move** (argmax restricted to the legal set — the smoothed target's support) and
+**value calibration split by side-to-move** (10-bucket reliability rows + mean-bias per colour).
+Curves + best metrics land in `--out` JSON; the verdict is deliberately D8's, not this script's.
 
 ## D8. SL evaluation gate (Phase 2)
 
