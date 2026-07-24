@@ -16,6 +16,15 @@ Decisions already made (Henry, 2026-07-22): weight decay defaults **on** for all
 not an option — intentional behaviour change); the capacity probe is a runnable script executed on
 the box as the final step before any paid run.
 
+**Archived 2026-07-23 — outcome.** P1–P6 landed (PR #51). **P8's capacity probe ran on the box and
+returned a tie** — `xl` fit gen-40's data no better than `large`, so the plateau is *not* net size.
+That resolves the gate: **P9 (`xl` from scratch) is dropped** (config kept for a later
+capacity-justified moment), and **P10 (Pentobi distillation) is promoted to its own plan,
+[`pentobi-distillation.md`](pentobi-distillation.md)**, which supersedes P10 here. Carried forward:
+P7 (re-crown v3 gen-40 as best net + box mini-ladder runbook) as box housekeeping, and **P11
+(colour-conditional value calibration) folds into the distillation value-head work** (the 75% White
+skew is flagged there). Everything else in this plan is done.
+
 ---
 
 ## Checklist
@@ -29,7 +38,7 @@ the box as the final step before any paid run.
 | P5 | Author `run_configurations/blokus_xl_scratch.json` (launch gated on P8) | 30 min | High | ✅ (config; launch gated) |
 | P6 | Capacity-probe script (`scripts/capacity_probe.py`): supervised `large` vs `xl` fit on a frozen buffer, game-level held-out split | 3 h | High | ✅ (script; run = P8) |
 | P7 | Re-crown v3 gen-40 as project best + wire the mini-ladder runbook on the box | 1 h (box) | High | |
-| P8 | **Run the capacity probe on the box — the P9-vs-P10 gate** | ~½ day box GPU, $0 | High | |
+| P8 | **Run the capacity probe on the box — the P9-vs-P10 gate** | ~½ day box GPU, $0 | High | ✅ (tie: `xl` no better than `large` → P9 dropped, P10 → `pentobi-distillation.md`) |
 | P9 | Paid run: `xl` from scratch on a rented 5090 (launch iff P8 fires or is ambiguous) | ~$100–130, 4–5 days | Gated | |
 | P10 | Pentobi distillation: L7–L9 game generation + SL fine-tune + RL continue (iff P8 shows a clear tie) | 1–2 weeks eng | Gated | |
 | P11 | Colour-conditional value calibration: thread side-to-move through `ProcessedExample` → store → eval set | ~1 day | Medium | |
