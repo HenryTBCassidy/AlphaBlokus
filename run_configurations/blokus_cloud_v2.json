@@ -56,9 +56,9 @@
     "mode": "online"
   },
   "object_store": {
-    "bucket": "REPLACE_ME-alphablokus-runs",
+    "bucket": "alphablokus-runs",
     "prefix": null,
-    "endpoint_url": "https://REPLACE_ME.r2.cloudflarestorage.com",
+    "endpoint_url": "https://b11a6671951153cb8e58da51ee451fb0.r2.cloudflarestorage.com",
     "region": null
   },
   "selfplay_backend": "jax",
