@@ -6,7 +6,7 @@
 
 No human games, no handcrafted heuristics. The system learns Blokus Duo — a two-player territorial game on a 14×14 board with 21 polyomino pieces per player and a 17,837-action space — entirely through self-play, following [AlphaZero](https://www.science.org/doi/10.1126/science.aar6404). The benchmark opponent is [Pentobi](https://pentobi.sourceforge.io/) (MCTS + RAVE, the strongest open-source Blokus engine); the goal is to beat it at its maximum difficulty, level 9.
 
-**Status (July 2026) — work in progress, training at scale.** The current best network beats Pentobi convincingly at levels 1–2, holds a winning record through level 4, is statistically even at level 5, and clearly loses at level 6. Training is now scaling on cloud GPUs (RTX 5090 via RunPod) with a larger network and 10,000 self-play games per generation; a continuation run is in flight and the results below will be refreshed when it completes.
+**Status (July 2026) — work in progress.** The current best network beats Pentobi convincingly at levels 1–2, holds a winning record through level 4, is statistically even at level 5, and clearly loses at level 6. Pure self-play has scaled on cloud GPUs (RTX 5090 via RunPod) with a larger network and ~10,000 self-play games per generation, but plateaued at level 4. The current direction is to break that plateau by distilling from Pentobi — supervised imitation of expert-level games, then continued self-play beyond the teacher, following the [AlphaGo](https://www.nature.com/articles/nature16961) bootstrap.
 
 ## Results vs Pentobi
 
