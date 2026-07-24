@@ -7,8 +7,17 @@ running_args
 todo.txt
 **/__pycache__/
 .DS_Store
-local/
 wandb/
+
+# Secrets — real values must never be committed. Machine-local secrets live in local/;
+# only the template + README ship. The catch-alls below stop a stray secret file
+# (e.g. a root-level secrets.txt) being staged from anywhere in the tree.
+local/*
+!local/README.md
+!local/secrets.env.example
+*.env
+secrets.txt
+*.pem
 
 # Generated HTML reports (research docs are .md; the rendered HTML is a build artifact)
 docs/research/*.html

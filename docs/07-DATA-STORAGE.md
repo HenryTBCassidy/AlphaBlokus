@@ -438,7 +438,7 @@ Omit the `wandb` block entirely (or set it to `null`) to disable W&B without cod
 
 ### Authentication
 
-W&B uses the API key in `~/.netrc` (written by `wandb login`). The project's API key for Henry's account lives at `local/wandb_api_key.txt` (gitignored, never committed). On a fresh machine, copy it across via `scp` and run `wandb login --relogin` once.
+W&B uses the API key in `~/.netrc` (written by `wandb login`). The project's API key for Henry's account lives as the `WANDB_API_KEY` entry in `local/secrets.env` (gitignored, never committed; see `docs/guides/CLOUD-TRAINING.md` → "Secrets"). On a fresh machine, copy that file across via `scp` and run `wandb login --relogin` once.
 
 ### Lifecycle
 

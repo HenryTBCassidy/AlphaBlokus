@@ -122,17 +122,18 @@ uv run pytest -q                          # confirm tests pass
 The W&B CLI's `wandb login` doesn't reliably accept `WANDB_API_KEY` from env on this stack — use the Python API instead. From the dev machine:
 
 ```bash
-# Copy key to Windows home (ends up at C:\Users\<windows-user>\)
-scp local/wandb_api_key.txt <gpu-host>:wandb_api_key.txt
+# Copy the secrets file to Windows home (ends up at C:\Users\<windows-user>\)
+scp local/secrets.env <gpu-host>:secrets.env
 
-# Login from WSL via Python (CLI path is fragile)
+# Login from WSL via Python (CLI path is fragile); pull WANDB_API_KEY out of the KEY=VALUE file
 KEY_B64=$(echo "import wandb; from pathlib import Path; \
-  print('ok:', wandb.login(key=Path('/mnt/c/Users/<windows-user>/wandb_api_key.txt').read_text().strip(), relogin=True))" \
+  key=next(l.split('=',1)[1].strip() for l in Path('/mnt/c/Users/<windows-user>/secrets.env').read_text().splitlines() if l.startswith('WANDB_API_KEY=')); \
+  print('ok:', wandb.login(key=key, relogin=True))" \
   | base64)
 ssh <gpu-host> "wsl -d Ubuntu -- bash -lc 'source /home/<wsl-user>/.local/bin/env && echo $KEY_B64 | base64 -d | uv run --project /home/<wsl-user>/AlphaBlokus python -'"
 
-# Delete the temp key file
-ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "rm /mnt/c/Users/<windows-user>/wandb_api_key.txt"'
+# Delete the temp secrets file
+ssh <gpu-host> 'wsl -d Ubuntu -- bash -lc "rm /mnt/c/Users/<windows-user>/secrets.env"'
 ```
 
 The credentials land in WSL's `~/.netrc` and are persistent across restarts.

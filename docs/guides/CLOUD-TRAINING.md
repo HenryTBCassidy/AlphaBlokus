@@ -67,6 +67,31 @@ S3 sync had been skipped "to keep it simple." Do not repeat that.
 
 ---
 
+## Secrets
+
+All API credentials live in **one** gitignored file, `local/secrets.env` (`KEY=VALUE` form), holding
+the R2/AWS keys, `WANDB_API_KEY`, and `RUNPOD_API_KEY`. Copy it from the committed template and fill
+in the real values:
+
+```bash
+cp local/secrets.env.example local/secrets.env    # then edit in the real keys
+```
+
+Load it into the environment **for the command that needs it** — never `cat`/print it (that leaks the
+values into logs or an assistant transcript). Shell state doesn't persist between commands, so source
+it in the same invocation:
+
+```bash
+set -a; source local/secrets.env; set +a
+export AWS_CA_BUNDLE="$HOME/.corp-ca-bundle.pem"   # Mac only: Netskope intercepts TLS, so S3/R2 calls need the corp CA
+```
+
+- Only *secrets* go here. Non-secret config (R2 endpoint/bucket, W&B project) belongs in the run
+  config JSON.
+- SSH identities are **not** kept here — they live in `~/.ssh/` (OS-managed), outside the repo.
+- Tree-wide `.gitignore` rules (`local/*`, `*.env`, `secrets.txt`, `*.pem`) stop a stray secret file
+  being staged from anywhere — but the source-never-print discipline above is the real guard.
+
 ## 0. One-time setup
 
 - **Object storage** (any S3-compatible bucket — Cloudflare R2, Backblaze B2, AWS S3, RunPod's
@@ -85,7 +110,8 @@ S3 sync had been skipped "to keep it simple." Do not repeat that.
 ```
 
   `prefix` defaults to `runs/<game-group>/<run_name>` — the same layout as `temp/` locally.
-  Credentials are env-only (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`); never in JSON.
+  Credentials are env-only (`AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY`); never in JSON — see
+  **Secrets** above.
 
 ## 1. Rent the box
 
@@ -123,6 +149,8 @@ against the recommendation doc's §3 table; pick the preset accordingly (edit
 ## 4. Launch the run
 
 ```bash
+set -a; source local/secrets.env; set +a   # loads the keys into the env; -e passes them through
+
 docker run -d --name blokus --gpus all --shm-size=2g \
   -v alphablokus-runs:/app/temp \
   -e AWS_ACCESS_KEY_ID -e AWS_SECRET_ACCESS_KEY -e WANDB_API_KEY \
@@ -176,6 +204,8 @@ renders a "Pentobi Ladder" section (green = level beaten at >50%). Loop over
 Everything mirrors to the bucket continuously, so from any machine with the creds:
 
 ```bash
+set -a; source local/secrets.env; set +a
+export AWS_CA_BUNDLE="$HOME/.corp-ca-bundle.pem"   # Mac only (Netskope TLS)
 uv run python - <<'EOF'
 from alphablokus.config import load_args
 from alphablokus.storage.object_store import create_object_store
