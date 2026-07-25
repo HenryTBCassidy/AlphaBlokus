@@ -49,6 +49,7 @@ from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
+from alphablokus.calibration import parse_net_sizes
 from alphablokus.config import RunConfig, load_args
 from alphablokus.games.blokusduo.pentobi.corpus import corpus_shards
 from alphablokus.games.blokusduo.pentobi.distill import (
@@ -80,14 +81,21 @@ def _arm_config(base: RunConfig, args: argparse.Namespace) -> RunConfig:
     ``epochs: 1`` because ``train()`` is called once per SL epoch so held-out
     evaluation (and the early-stop decision) runs between passes; constant LR at
     the script's ``--lr`` (default 1e-4 — a fine-tune rate, not the self-play
-    peak). Net size, AdamW weight decay, and the perf knobs stay the config's.
+    peak). AdamW weight decay and the perf knobs stay the config's; net size is
+    the config's unless ``--net-size <F>x<B>`` overrides it (the sizing sweep).
     """
+    num_filters = base.net_config.num_filters
+    num_residual_blocks = base.net_config.num_residual_blocks
+    if args.net_size:
+        _, num_filters, num_residual_blocks = parse_net_sizes(args.net_size)[0]
     net_config = replace(
         base.net_config,
         learning_rate=args.lr,
         epochs=1,
         batch_size=args.batch_size,
         lr_scheduler="constant",
+        num_filters=num_filters,
+        num_residual_blocks=num_residual_blocks,
     )
     return replace(base, net_config=net_config)
 
@@ -230,6 +238,11 @@ def main() -> None:
     parser.add_argument("--corpus", type=Path, required=True, help="Corpus directory of corpus_*.parquet shards")
     parser.add_argument("--arms", default="warm,scratch", help=f"Comma list from {KNOWN_ARMS} (default warm,scratch)")
     parser.add_argument("--warm-start", default=None, help="Checkpoint path for the warm arm (v3 gen-40)")
+    parser.add_argument(
+        "--net-size",
+        default=None,
+        help="Override net size as <F>x<B> (e.g. 160x10) for the sizing sweep; scratch arm only.",
+    )
     parser.add_argument("--epsilon", type=float, default=0.1, help="Label-smoothing mass over legal moves")
     parser.add_argument(
         "--augment",
@@ -256,6 +269,13 @@ def main() -> None:
         raise SystemExit(f"Unknown arms {unknown}; expected a subset of {KNOWN_ARMS}.")
     if "warm" in arm_names and not args.warm_start:
         raise SystemExit("--warm-start <checkpoint> is required for the warm arm.")
+    if args.net_size:
+        parse_net_sizes(args.net_size)  # validate the F×B spec early
+        if "warm" in arm_names:
+            raise SystemExit(
+                "--net-size resizes the net, incompatible with the warm arm (v3 gen-40 weights are 192x12); "
+                "use --arms scratch for the sizing sweep."
+            )
 
     config = load_args(args.config)
     if config.game != "blokusduo":
