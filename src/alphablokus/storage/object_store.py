@@ -113,6 +113,13 @@ class ObjectStore:
                 return True
         return False
 
+    def remote_files(self) -> list[tuple[str, int]]:
+        """Public listing of every (run-relative path, size) under the prefix.
+
+        Used to verify an upload landed before a caller declares data safe.
+        """
+        return [(key[len(self._prefix) + 1 :], size) for key, size in self._list_remote()]
+
     def _list_remote(self) -> list[tuple[str, int]]:
         """All (key, size) pairs under the prefix, following pagination."""
         results: list[tuple[str, int]] = []
