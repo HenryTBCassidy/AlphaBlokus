@@ -182,6 +182,12 @@ rate that is ~2,840 worker-hours (13600KF-core basis). Options:
 Gate: human reviews this recommendation before anything is rented (stage 1 needs no sign-off
 beyond starting the box job).
 
+**On completion — turnkey wrap-up:** `scripts/corpus_wrapup.py` runs the four completion steps as
+one command — `validate` + `analyze` on the box, rsync the shards to the laptop mirror, then
+**sync to R2 with a verify-before-done gate** (never declares the corpus safe until every file is
+confirmed present in the bucket). Source `local/secrets.env` + export `AWS_CA_BUNDLE` first, then
+`uv run --extra s3 python scripts/corpus_wrapup.py --config run_configurations/blokus_cloud_v2.json`.
+
 ## D6. Corpus dataloader (Phase 2) ✅
 
 Stream `iter_corpus_examples` shards into the training batch pipeline: densify the one-hot policy
@@ -228,9 +234,32 @@ Curves + best metrics land in `--out` JSON; the verdict is deliberately D8's, no
 
 ## D8. SL evaluation gate (Phase 2)
 
-Mini-ladder (`scripts/mini_ladder.py`, L3–L6 × 50 games × 400 sims) both arms + the v3 gen-40
-baseline. **Gate (research R5): +10 pp at any of L5–L7 after SL alone.** If neither arm moves the
-ladder, distillation data or recipe is wrong — stop and diagnose before any RL spend.
+Mini-ladder (`scripts/mini_ladder.py`, **L1–L9** × 50 games × 400 sims) the chosen net + the v3
+gen-40 baseline. Full sweep, not the resolvable band only: L8–L9 track the actual goal and L1–L2
+are a cheap regression floor. **Gate (research R5): +10 pp at any of L5–L7 after SL alone.** If the
+net doesn't move the ladder, the distillation data or recipe is wrong — stop and diagnose before
+any RL spend.
+
+### Phase B execution — net-sizing sweep → gate
+
+The net we distil into is chosen empirically, not from the arbitrary presets — full analysis and the
+candidate table in [`../research/distillation-net-sizing.md`](../research/distillation-net-sizing.md).
+Two axes, both on the box GPU:
+
+- **Accuracy (which size captures L9):** per-candidate SL fit via `distill_sl.py --net-size <F>x<B>
+  --arms scratch` (the `--net-size` override reshapes the net from one base config), read held-out
+  top-1-vs-Pentobi. Run **endpoints first** (the ceiling `256x16` and floor `96x6`), then **bisect
+  toward the knee** of the monotone-saturating curve via the cost-matched shape triangle
+  (`192x6` / `128x14` / `160x10`). ~4–6 of the 8 candidates, hours each.
+- **Speed (the cost of that size):** one command —
+  `uv run python -m scripts.benchmarks.cloud_calibration --config <cfg> --sizes 96x6,128x8,192x6,128x14,160x10,192x12,256x8,256x16`.
+
+**Decision rule:** smallest candidate within ~1 pp top-1 of the ceiling at acceptable games/s.
+**Caveat (do not skip):** this sweep runs on the **stage-1 13k corpus (~390k positions)** — a
+data-limited regime that pulls the knee *artificially small* (every candidate is overparameterised).
+So the pick here is **provisional**: it's the net for *this* gate. If D8 passes and we scale the
+corpus to 50k, **re-run the top 2–3 candidates on the larger corpus** before committing the final
+RL net — a bigger net may only earn its keep with more data.
 
 ## D9. RL warm-start from the distilled base (Phase 3)
 
