@@ -55,6 +55,7 @@ in the trainer is the relief valve.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from itertools import zip_longest
 from typing import TYPE_CHECKING, Any
 
 import numpy as np
@@ -315,15 +316,43 @@ def split_opening_units(
             mass[unit] = mass.get(unit, 0.0) + weight
     if not mass or fraction <= 0.0:
         return set()
+    if len(mass) < 2:
+        logger.warning("only {} opening unit(s): cannot hold one out without emptying training", len(mass))
+        return set()
+
     ordered = sorted(mass, key=lambda unit: (-mass[unit], unit))
     rng = np.random.default_rng(seed)
-    holdout: set[bytes] = set()
+    # Interleave a shuffle of each mass stratum, so the walk below alternates heavy and
+    # light subtrees instead of consuming the biggest (or the smallest) ones first.
     stratum_size = max(1, len(ordered) // _HOLDOUT_STRATA)
+    strata: list[list[bytes]] = []
     for start in range(0, len(ordered), stratum_size):
-        stratum = ordered[start : start + stratum_size]
-        take = int(np.ceil(fraction * len(stratum)))
-        for index in rng.choice(len(stratum), size=min(take, len(stratum)), replace=False):
-            holdout.add(stratum[int(index)])
+        stratum = list(ordered[start : start + stratum_size])
+        rng.shuffle(stratum)  # type: ignore[arg-type]  # list[bytes] is a valid sequence
+        strata.append(stratum)
+    walk = [unit for row in zip_longest(*strata) for unit in row if unit is not None]
+
+    # Take whole units until the target *mass* is reached. Selecting a fraction of the
+    # units in every stratum (the previous rule) collapses at small unit counts — with
+    # five strata of one unit each, ``ceil`` takes all five and the training set is
+    # empty. Accumulating mass instead is exact at scale and degrades to "one unit" at
+    # the granularity limit, never to "everything".
+    target = fraction * sum(mass.values())
+    holdout: set[bytes] = set()
+    accumulated = 0.0
+    for unit in walk[:-1]:  # never the whole corpus: at least one unit always trains
+        if accumulated >= target:
+            break
+        holdout.add(unit)
+        accumulated += mass[unit]
+    realised = accumulated / sum(mass.values())
+    if realised > 2.0 * fraction:
+        logger.warning(
+            "holdout is {:.1%} of mass against a {:.1%} target — only {} opening units to choose from",
+            realised,
+            fraction,
+            len(mass),
+        )
     return holdout
 
 
@@ -442,24 +471,28 @@ def mix_examples(
     mixed output** (normalised here), so "openings at 5%" means what it says: an opening
     row must not be a 1-in-160,000 sampling event.
 
-    The pool with the least headroom is used in full and the others are resampled to hit
-    their share (with replacement when a pool must be upweighted, without when it must be
-    trimmed), so nothing is silently discarded and the result is deterministic in ``seed``.
+    **Under-represented pools are repeated; nothing is discarded.** The output is sized by
+    the pool that is *largest* relative to its share (``max(len / share)``): that pool is
+    used in full, and every other pool is resampled **up** to its share with replacement.
+    Sizing by the smallest such ratio instead would make the tiny opening pool the binding
+    constraint and trim the game rows down to match it — at the shipped 5% default that
+    discards ~88% of a corpus which costs days of engine time to produce. "Openings at 5%"
+    must mean "openings repeated until they are 5%", never "everything else thrown away".
+
+    Deterministic in ``seed``.
     """
     active = {name: pool for name, pool in pools.items() if pool and weights.get(name, 0.0) > 0.0}
     if not active:
         return []
     total_weight = sum(weights[name] for name in active)
     shares = {name: weights[name] / total_weight for name in active}
-    scale = min(len(pool) / shares[name] for name, pool in active.items())
+    scale = max(len(pool) / shares[name] for name, pool in active.items())
     rng = np.random.default_rng(seed)
     mixed: list[CorpusExample] = []
     for name, pool in active.items():
         target = int(round(scale * shares[name]))
-        if target <= len(pool):
-            picks = rng.choice(len(pool), size=target, replace=False)
-        else:
-            picks = rng.choice(len(pool), size=target, replace=True)
+        replace = target > len(pool)
+        picks = rng.choice(len(pool), size=target, replace=replace)
         mixed.extend(pool[int(index)] for index in picks)
     return [mixed[int(index)] for index in rng.permutation(len(mixed))]
 

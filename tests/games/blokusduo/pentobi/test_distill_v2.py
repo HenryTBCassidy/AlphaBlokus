@@ -22,6 +22,7 @@ from alphablokus.games.blokusduo.pentobi.corpus_v2 import (
     write_game_shard,
 )
 from alphablokus.games.blokusduo.pentobi.distill import (
+    _HOLDOUT_STRATA,
     build_training_examples,
     load_corpus_games_v2,
     load_opening_examples,
@@ -209,7 +210,12 @@ def test_holdout_unit_choice_is_deterministic_and_stratified() -> None:
     assert first == split_opening_units(units, weights, fraction=0.2, seed=11)
     assert 0 < len(first) < len(units)
     ranks = sorted(units.index(unit) for unit in first)
-    assert min(ranks) < 10 < max(ranks)  # not all from one end of the mass distribution
+    # Drawn from more than one mass stratum — i.e. not all from one end of the
+    # distribution. (Asserted as "spans strata" rather than against a fixed rank: the
+    # split now stops as soon as the target *mass* is reached, so exactly which ranks it
+    # lands on depends on the masses, but it always alternates between strata.)
+    stratum = len(units) // _HOLDOUT_STRATA
+    assert len({rank // stratum for rank in ranks}) > 1
     assert split_opening_units(units, weights, fraction=0.0, seed=11) == set()
     assert split_opening_units([None, None], [1.0, 1.0], fraction=0.5, seed=1) == set()
 
@@ -276,3 +282,49 @@ def test_mix_examples_is_deterministic_and_drops_zero_weight_sources() -> None:
     only_a = mix_examples({"a": pool_a, "b": pool_b}, {"a": 1.0, "b": 0.0}, seed=1)
     assert all(int(example[0][0]) < 1000 for example in only_a)
     assert mix_examples({"a": []}, {"a": 1.0}, seed=1) == []
+
+
+def test_holdout_never_swallows_the_whole_corpus() -> None:
+    """At small unit counts the split must degrade to one unit, never to everything.
+
+    The pilot plan and the ablation arms both run at a few hundred games over a handful
+    of distinct openings. A per-stratum ``ceil`` takes every unit once each stratum holds
+    one, which hands the trainer an empty training set — silently, because an empty list
+    is a perfectly valid list.
+    """
+    for count in (2, 3, 5, 8, 12, 20, 40, 100, 300):
+        units = [bytes([index % 251, index // 251]) for index in range(count)]
+        weights = [1.0 + (index % 7) for index in range(count)]
+        holdout = split_opening_units(units, weights, 0.05, seed=0)
+        assert len(holdout) < count, f"{count} units: held out all of them"
+        assert holdout, f"{count} units: held out nothing"
+
+
+def test_holdout_mass_approaches_the_requested_fraction_at_scale() -> None:
+    """Granularity dominates when units are few; the target is met once they are many."""
+    units = [bytes([index % 251, index // 251]) for index in range(400)]
+    weights = [1.0 + (index % 7) for index in range(400)]
+    holdout = split_opening_units(units, weights, 0.10, seed=0)
+    held = sum(weight for unit, weight in zip(units, weights, strict=True) if unit in holdout)
+    assert 0.09 <= held / sum(weights) <= 0.13
+
+
+def test_holdout_is_empty_when_there_is_only_one_opening() -> None:
+    """One unit cannot be split: holding it out would leave nothing to train on."""
+    assert split_opening_units([b"only"], [10.0], 0.5, seed=0) == set()
+
+
+def test_mixing_repeats_the_small_pool_rather_than_discarding_the_large_one() -> None:
+    """"Openings at 5%" must mean repeating openings, not deleting 95% of the games.
+
+    Sizing the mix by the *smallest* pool-to-share ratio makes the 1.6k opening rows the
+    binding constraint on 260k game rows, throwing away ~88% of a corpus that costs days
+    of engine time. Every game row must survive.
+    """
+    games = [(np.zeros(1, np.int8), (np.array([0], np.int32), np.array([1.0], np.float32)), 0.0)] * 2_000
+    openings = [(np.ones(1, np.int8), (np.array([1], np.int32), np.array([1.0], np.float32)), 1.0)] * 20
+    mixed = mix_examples({"games": games, "opening": openings}, {"games": 0.95, "opening": 0.05}, seed=0)
+
+    opening_rows = sum(1 for board, _, _ in mixed if board[0] == 1)
+    assert len(mixed) - opening_rows == len(games)  # nothing discarded
+    assert 0.045 <= opening_rows / len(mixed) <= 0.055  # and the share is honoured
