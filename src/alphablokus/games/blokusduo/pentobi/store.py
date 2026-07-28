@@ -227,6 +227,7 @@ class NodeRecord:
     root_visits: int | None
     search_value: float | None
     search_seconds: float | None
+    searched_at: str | None
     outcome_mean: float | None
     outcome_count: int
 
@@ -1441,6 +1442,7 @@ def _node_from_row(row: sqlite3.Row) -> NodeRecord:
         root_visits=None if row["root_visits"] is None else int(row["root_visits"]),
         search_value=None if row["search_value"] is None else float(row["search_value"]),
         search_seconds=None if row["search_seconds"] is None else float(row["search_seconds"]),
+        searched_at=None if row["searched_at"] is None else str(row["searched_at"]),
         outcome_mean=None if row["outcome_mean"] is None else float(row["outcome_mean"]),
         outcome_count=int(row["outcome_count"]),
     )
