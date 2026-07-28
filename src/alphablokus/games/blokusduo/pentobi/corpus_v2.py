@@ -554,6 +554,141 @@ def iter_shard_playouts(directory: Path) -> Iterator[ReconcileEntry]:
 
 
 # --------------------------------------------------------------------------- #
+# Diagnostics
+# --------------------------------------------------------------------------- #
+
+#: Ply buckets the diagnostics report splits rows into (lower bound, label).
+_PLY_BUCKETS = ((0, "0-3"), (4, "4-7"), (8, "8-15"), (16, "16+"))
+
+
+@dataclass(frozen=True)
+class CorpusReport:
+    """What v2 is actually claiming, measured — the ``analyze`` output."""
+
+    num_games: int
+    num_game_rows: int
+    num_opening_rows: int
+    opening_row_fraction: float
+    rows_by_ply_bucket: dict[str, int]
+    mean_target_entropy_by_bucket: dict[str, float]
+    mean_effective_moves_by_bucket: dict[str, float]
+    mean_tail_mass: float
+    duplicate_position_rate: float
+    duplicate_position_rate_mirrored: float
+    unique_starts: int
+    mean_games_per_start: float
+    white_win_rate: float
+    draw_rate: float
+    mean_absolute_margin: float
+
+    def to_dict(self) -> dict[str, object]:
+        """JSON-serialisable form (for logs and the analysis CLI)."""
+        return {
+            "num_games": self.num_games,
+            "num_game_rows": self.num_game_rows,
+            "num_opening_rows": self.num_opening_rows,
+            "opening_row_fraction": self.opening_row_fraction,
+            "rows_by_ply_bucket": self.rows_by_ply_bucket,
+            "mean_target_entropy_by_bucket": self.mean_target_entropy_by_bucket,
+            "mean_effective_moves_by_bucket": self.mean_effective_moves_by_bucket,
+            "mean_tail_mass": self.mean_tail_mass,
+            "duplicate_position_rate": self.duplicate_position_rate,
+            "duplicate_position_rate_mirrored": self.duplicate_position_rate_mirrored,
+            "unique_starts": self.unique_starts,
+            "mean_games_per_start": self.mean_games_per_start,
+            "white_win_rate": self.white_win_rate,
+            "draw_rate": self.draw_rate,
+            "mean_absolute_margin": self.mean_absolute_margin,
+        }
+
+
+def analyze_corpus(games_dir: Path, opening_dir: Path | None = None) -> CorpusReport:
+    """Measure the v2 claims: target richness, row mix, duplication, outcome balance.
+
+    The metrics that matter here are the ones v1 failed on. **Target entropy** and
+    **effective moves** (``exp(H)``) say whether the stored policy is more than a one-hot
+    — the whole point of v2. The **opening row fraction** exposes the row-mix problem the
+    trainer has to correct: a game harvests ~26 rows while a whole opening node is one
+    row, so openings are a fraction of a percent by count despite being the strategic
+    edge. **Duplicate-position rate** (raw and mirror-collapsed) is the cost of sharing
+    strong openings across games — v1 measured 0% because every game had a unique random
+    opening. The **White win rate** is expected to be *less* skewed than v1's 96%,
+    precisely because flattened allocation plays unbalanced starts.
+    """
+    entropies: dict[str, list[float]] = {label: [] for _, label in _PLY_BUCKETS}
+    rows_by_bucket: dict[str, int] = {label: 0 for _, label in _PLY_BUCKETS}
+    boards: list[bytes] = []
+    mirrored: set[bytes] = set()
+    tail_masses: list[float] = []
+    starts: dict[str, int] = {}
+    white_wins = draws = 0
+    margins: list[int] = []
+    num_games = 0
+    for path in game_shards(games_dir):
+        meta = read_game_shard_meta(path)
+        num_games += len(meta.games)
+        for game_meta in meta.games:
+            starts[game_meta.board_key] = starts.get(game_meta.board_key, 0) + 1
+            white_wins += int(game_meta.white_margin > 0)
+            draws += int(game_meta.white_margin == 0)
+            margins.append(abs(game_meta.white_margin))
+        table = pq.read_table(path, columns=["board", "policy_values", "tail_mass", "ply"])
+        for board_bytes, values_bytes, tail_mass, ply in zip(
+            table.column("board").to_pylist(),
+            table.column("policy_values").to_pylist(),
+            table.column("tail_mass").to_pylist(),
+            table.column("ply").to_pylist(),
+            strict=True,
+        ):
+            bucket = _ply_bucket(int(ply))
+            rows_by_bucket[bucket] += 1
+            entropies[bucket].append(_entropy(np.frombuffer(values_bytes, dtype=np.float32)))
+            tail_masses.append(float(tail_mass))
+            boards.append(board_bytes)
+            mirrored.add(_mirror_key(board_bytes, meta.board_shape[0]))
+    opening_rows = sum(read_opening_meta(path).num_rows for path in opening_shards(opening_dir or games_dir))
+    total_rows = len(boards) + opening_rows
+    return CorpusReport(
+        num_games=num_games,
+        num_game_rows=len(boards),
+        num_opening_rows=opening_rows,
+        opening_row_fraction=opening_rows / total_rows if total_rows else 0.0,
+        rows_by_ply_bucket=rows_by_bucket,
+        mean_target_entropy_by_bucket={k: float(np.mean(v)) if v else 0.0 for k, v in entropies.items()},
+        mean_effective_moves_by_bucket={k: float(np.mean(np.exp(v))) if v else 0.0 for k, v in entropies.items()},
+        mean_tail_mass=float(np.mean(tail_masses)) if tail_masses else 0.0,
+        duplicate_position_rate=1.0 - len(set(boards)) / len(boards) if boards else 0.0,
+        duplicate_position_rate_mirrored=1.0 - len(mirrored) / len(boards) if boards else 0.0,
+        unique_starts=len(starts),
+        mean_games_per_start=num_games / len(starts) if starts else 0.0,
+        white_win_rate=white_wins / num_games if num_games else 0.0,
+        draw_rate=draws / num_games if num_games else 0.0,
+        mean_absolute_margin=float(np.mean(margins)) if margins else 0.0,
+    )
+
+
+def _ply_bucket(ply: int) -> str:
+    label = _PLY_BUCKETS[0][1]
+    for lower, name in _PLY_BUCKETS:
+        if ply >= lower:
+            label = name
+    return label
+
+
+def _entropy(values: NDArray[np.float32]) -> float:
+    """Shannon entropy of a target in nats (``exp(H)`` is its effective move count)."""
+    positive = np.asarray(values, dtype=np.float64)
+    positive = positive[positive > 0]
+    return float(-(positive * np.log(positive)).sum())
+
+
+def _mirror_key(board_bytes: bytes, board_size: int) -> bytes:
+    """Mirror-collapsed position key, for the duplicate-rate diagnostic."""
+    grid = np.frombuffer(board_bytes, dtype=np.int8).reshape(board_size, board_size)
+    return min(board_bytes, np.ascontiguousarray(grid.T).tobytes())
+
+
+# --------------------------------------------------------------------------- #
 # Validation
 # --------------------------------------------------------------------------- #
 

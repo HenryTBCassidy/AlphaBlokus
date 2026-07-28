@@ -18,6 +18,7 @@ from alphablokus.games.blokusduo.pentobi.corpus import CorpusGenerationError
 from alphablokus.games.blokusduo.pentobi.corpus_v2 import (
     CorpusSchemaError,
     GameShardMeta,
+    analyze_corpus,
     build_soft_target,
     game_shard_filename,
     game_shards,
@@ -284,6 +285,40 @@ def test_opening_shard_validates_against_the_store(
     (path,) = export_opening_dataset(store, tmp_path / "opening")
     assert validate_opening_shard(path, game) > 0
     assert validate_opening_shard(path, game, store) == len(store.nodes(status="searched"))
+
+
+def test_analyze_measures_target_richness_and_row_mix(
+    store: SearchSpaceStore,
+    game: BlokusDuoGame,
+    tmp_path: Path,
+) -> None:
+    """The diagnostics report the things v1 failed on, not just row counts.
+
+    Target entropy above zero is the direct measure of "we kept more than a one-hot"; the
+    opening-row fraction is the row-mix problem V9's sampling weights have to correct.
+    """
+    games = _generate(store, game, budget=60, games=3)
+    games_dir = tmp_path / "games"
+    games_dir.mkdir()
+    write_game_shard(games_dir / game_shard_filename(0), games, meta=_shard_meta(store, game, games))
+    opening_dir = tmp_path / "opening"
+    export_opening_dataset(store, opening_dir)
+
+    report = analyze_corpus(games_dir, opening_dir)
+    assert report.num_games == 3
+    assert report.num_game_rows == sum(len(g.plies) for g in games)
+    assert report.num_opening_rows == len(store.nodes(status="searched"))
+    assert 0.0 < report.opening_row_fraction < 1.0
+    assert sum(report.rows_by_ply_bucket.values()) == report.num_game_rows
+    assert max(report.mean_target_entropy_by_bucket.values()) > 0.0  # not a pile of one-hots
+    assert max(report.mean_effective_moves_by_bucket.values()) > 1.0
+    assert 0.0 <= report.mean_tail_mass < 1.0
+    assert 0.0 <= report.duplicate_position_rate <= 1.0
+    assert report.duplicate_position_rate_mirrored >= report.duplicate_position_rate
+    assert report.unique_starts >= 1
+    assert report.mean_games_per_start == pytest.approx(3 / report.unique_starts)
+    assert 0.0 <= report.white_win_rate <= 1.0
+    assert report.to_dict()["num_games"] == 3
 
 
 def test_shard_footers_reconcile_the_playout_registry(

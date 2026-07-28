@@ -46,8 +46,8 @@ would be self-defeating.
 | V4 | Phase A — `plan`: budget-proportional allocation (`w ∝ p^(1/T)`, split floor R), emergent depth, search-on-demand mapping, mirror-pair merging, book-line floors | 1 day | High | ✅ |
 | V5 | Phase B — `generate`: fulfilment-driven scheduling against the active plan, prefix replay, harvest **every** ply, full-strength continuations | ½ day | High | ✅ |
 | V6 | Schema v2 (games shards + `export-opening` parquet, plan provenance in footers), validator, `docs/07-DATA-STORAGE.md` | ½ day | High | ✅ |
-| V7 | CLI + diagnostics: v2 subcommands, plan-fulfilment/coverage report, opening-vs-midgame row ratio, target-entropy / duplicate-position metrics | 3 h | High | |
-| V8 | `link` pass: aggregate playout outcomes up the DAG into `outcome_mean`/`outcome_count` | 2 h | Medium | |
+| V7 | CLI + diagnostics: v2 subcommands, plan-fulfilment/coverage report, opening-vs-midgame row ratio, target-entropy / duplicate-position metrics | 3 h | High | ✅ |
+| V8 | `link` pass: aggregate playout outcomes up the DAG into `outcome_mean`/`outcome_count` | 2 h | Medium | ✅ |
 | V9 | Trainer: soft-target load path, target temperature τ, **opening-subtree holdout split** (fixes a latent leak), opening-value target choice, source mix weights | 1 day | High | |
 | V10 | L9 pilot on the box (plan at B=1,000 + ~200 games): validate, measure, freeze knobs | 4 h box | High | |
 | V11 | **Book-strength measurement**: enable the opening book, verify engagement, book-on L9 vs book-off L9, spell out benchmark consequences | 4 h box | Medium | |
@@ -485,9 +485,11 @@ and box RAM.
 
 ## V7. CLI + diagnostics
 
-`scripts/pentobi_corpus.py` gains `plan` (V4), `export-opening` + `link` + `coverage` (V3/V8),
-and keeps `generate` / `validate` / `analyze`, with `analyze` extended to report what v2 is
-actually claiming:
+The v2 subcommands ship as **`scripts/pentobi_corpus_v2.py`** (`plan`, `generate`, `export-opening`,
+`link`, `coverage`, `analyze`, `validate`) rather than as new subcommands on the v1 script: the two
+generators give `generate`/`validate`/`analyze` incompatible meanings and arguments, and v1's shards
+stay on disk (and its CLI usable) as the mid-game supplement. `analyze` reports what v2 is actually
+claiming:
 
 - the store's coverage report (store D-f): plan fulfilment, mapping debt, nodes/starts by
   emergent depth, distinct first moves / canonical first positions (vs 414 / 212, and the

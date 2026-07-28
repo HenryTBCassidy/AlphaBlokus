@@ -200,15 +200,27 @@ class RandomSearchSource(ISearchSource):
 # --------------------------------------------------------------------------- #
 
 
-def witness_prefix(game: BlokusDuoGame, actions: Sequence[int]) -> list[tuple[int, int]]:
-    """Turn a witness path into ``(player, action)`` pairs by replaying it."""
+def replay_witness(
+    game: BlokusDuoGame,
+    actions: Sequence[int],
+) -> tuple[BlokusDuoBoard, int, list[tuple[int, int]]]:
+    """Replay a witness path: returns the position, the side to move, and the prefix pairs.
+
+    The prefix pairs are ``(player, action)`` — what a source needs to put its own engine
+    into the same position with ``play``.
+    """
     board = game.initialise_board()
     player = 1
     prefix: list[tuple[int, int]] = []
     for action in actions:
         prefix.append((player, int(action)))
         board, player = game.get_next_state(board, player, int(action))
-    return prefix
+    return board, player, prefix
+
+
+def witness_prefix(game: BlokusDuoGame, actions: Sequence[int]) -> list[tuple[int, int]]:
+    """The ``(player, action)`` pairs of a witness path."""
+    return replay_witness(game, actions)[2]
 
 
 def search_node(store: SearchSpaceStore, source: ISearchSource, node_id: int) -> int:
