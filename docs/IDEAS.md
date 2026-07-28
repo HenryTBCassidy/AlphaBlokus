@@ -17,6 +17,7 @@ Status legend: **Idea** (raw, unexamined) · **Researching** (actively being inv
 | I4 | [Continuous (non-gated) training](#i4-continuous-non-gated-training) | Promoted | First step (rolling game-sized replay buffer + compact storage, full-pass training) promoted to [`plans/archive/replay-buffer-refactor.md`](plans/archive/replay-buffer-refactor.md); full async actor/learner stays parked |
 | I5 | [Parallel Pentobi benchmark](#i5-parallel-pentobi-benchmark) | Promoted (shipped) | The Pentobi benchmark now fans games across a `spawn` worker pool (`--workers N`), each with its own net + engine — the GPU sat ~2% idle serially ([`plans/archive/parallel-pentobi-benchmark.md`](plans/archive/parallel-pentobi-benchmark.md)) |
 | I6 | [Sharded multi-GPU self-play](#i6-sharded-multi-gpu-self-play) | Idea | Split the jax self-play phase across N GPUs — one pinned producer process per card streaming games into the coach's `sink`, serial loop unchanged; a wall-clock lever for when single-card runs exceed ~a week ([`research/xl-training-scaleup.md`](research/xl-training-scaleup.md) §4) |
+| I7 | [Error-seeking exploration](#i7-error-seeking-exploration) | Idea | Generate data preferentially where a player is **confidently wrong** rather than uniformly — seed self-play from positions Pentobi misjudges, weight training by prior-vs-search disagreement. Measured 2026-07-28: Pentobi puts 92.9% of its ply-2 search on a reply ranked 35th of 315 |
 
 > Ideas already captured elsewhere (not duplicated here): the conv policy head (F4) and the cross-worker inference server (F5) are done — see the [optimisation menu](plans/archive/full-cycle-optimisation.md#optimisation-menu); MCTS tree reuse, Cython move-gen and cached-valid-moves are in that plan's [Considered and set aside](plans/archive/full-cycle-optimisation.md#considered-and-set-aside) section; mixed-precision / fp16 inference is in its Out-of-scope list. Dirichlet root noise is **implemented** (`dirichlet_epsilon`/`dirichlet_alpha` in `MCTSConfig`, default-off).
 
@@ -149,3 +150,65 @@ foundation if [I4](#i4-continuous-non-gated-training)'s parked async actor-learn
 
 **Related:** [I4](#i4-continuous-non-gated-training) (the async end-state), [I3](#i3-shared-state-self-play-workers)
 (the CPU-era ancestor of the same instinct), `docs/research/xl-training-scaleup.md` (the costing).
+
+---
+
+## I7. Error-seeking exploration
+
+**The observation.** While scoping the [v2 corpus](plans/pentobi-corpus-v2.md) we measured something
+directly exploitable: at ply 2, Pentobi L9 commits **92.9% of its search visits** to a reply that an
+independent evaluation ranks **35th of 315**, 0.072 below the best available — roughly 5× the
+measurement noise (σ ≈ 0.014). A second opening showed the same pattern more mildly (73.9% of visits
+on the 7th-best reply). It is *confidently* wrong, not merely uncertain, and the blind spot is
+findable with one extra search per candidate. Evidence: `local/probes/reply_eval.txt`.
+
+That suggests a general principle the current design only exploits passively: **spend generation
+effort where a player is wrong, not uniformly over the space.** Two applications, in increasing
+ambition:
+
+1. **Seed self-play from positions Pentobi misjudges** (Henry, 2026-07-28). Rather than starting RL
+   self-play from the standard position, start a fraction of games from the openings where Pentobi's
+   own choice is measurably suboptimal. Those are precisely the positions where our net can build an
+   advantage the teacher will not defend well — and, since Pentobi is the benchmark, the positions
+   worth being strong in.
+2. **Weight training by disagreement.** Upweight positions where the policy prior and the search
+   result diverge most; these are where the prior has the most to learn.
+3. **Steer the opening DAG toward disagreement.** An alternative expansion policy to the
+   visit-proportional one in the v2 plan: expand where shallow and deep judgements disagree, rather
+   than where Pentobi is confident.
+
+**"How do you know you are confidently wrong?"** You cannot, from the model alone — that is what a
+blind spot *is*. You need an external referee, and the useful insight is that several cheap ones
+already exist. In increasing cost:
+
+| Referee | Signal | Cost | Prior art |
+|---|---|---|---|
+| **Prior vs search** | The policy prior's top move differs from the move the search picks after N sims | **Free** — both already computed every move of self-play | KataGo's policy-surprise sample weighting |
+| **Value vs outcome** | Predicted +0.8, lost the game | **Free** — known at game end | [Prioritised experience replay](https://arxiv.org/abs/1511.05952) (Schaul et al. 2015) samples by TD error |
+| **Seed disagreement** | Two searches of the same position pick different moves | One extra search | Observed here: two L9 ply-1 searches disagreed on the best first move |
+| **Shallow vs deep** | Play the move, search the *resulting* position, compare its backed-up value against siblings | One search per candidate (~23 s at L9) | The method used for the measurement above |
+| **Cross-agent** | Our net and Pentobi disagree, and the game says who was right | Free at eval time | — |
+
+The distinction that matters: **uncertainty** is a flat distribution or high variance across
+referees; **confident wrongness** is a *peaked* distribution plus large error against the referee.
+The second is rarer, more valuable, and the thing worth hunting. Uncertainty sampling finds the
+former; only a referee finds the latter.
+
+**The risk, and it is a real one.** [Wang et al. 2022](https://arxiv.org/abs/2211.00241) trained
+adversarial policies that beat superhuman Go AIs including KataGo — by finding blind spots and
+playing objectively *terrible* Go that the victim misevaluated. Optimising against a specific
+opponent's errors produces a net that beats *that opponent*, not a net that plays well. Our stated
+goal is literally "beat Pentobi level 9", so that trade may be acceptable — but it should be a
+conscious choice, and general strength (pooled self-play Elo, and the full L1–L9 ladder rather than
+the top rungs alone) needs watching as the tell.
+
+**Status.** Not committed. The v2 corpus already collects the raw material passively — every stored
+position carries Pentobi's full distribution *and* an outcome-grounded value label, so the
+disagreement is queryable after the fact (the store's `edge_disagreement` view). The natural first
+step is the base-rate probe already scheduled as V2 of the v2 plan: thirty nodes across depths 2–6
+tell us whether ply-2's blunder is a systematic property or two unlucky positions. If the rate is
+high, this graduates to a plan; if it is low, there is nothing to hunt.
+
+**Related:** [`plans/pentobi-corpus-v2.md`](plans/pentobi-corpus-v2.md) (V2's base-rate probe, V16's
+net-in-the-loop phase), [`research/corpus-generation-literature.md`](research/corpus-generation-literature.md)
+§8 (why visit distributions are not move-quality distributions).
