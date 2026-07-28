@@ -27,12 +27,12 @@ Executed as row V3 of [`pentobi-corpus-v2.md`](pentobi-corpus-v2.md).
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| S1 | `pentobi/store.py`: schema DDL, `SearchSpaceStore` open/create, symmetry-canonical node keys, insert/lookup, content-derived seeds; engine-free tests | 3 h | High | |
-| S2 | Search recording: `record_search` (node fields + full ranked child list as edges, actions mapped to the key frame, mirror-pair merging); fixture-driven tests | 2 h | High | |
-| S3 | Allocation planning: pure-function allocator (DAG, budget, T, R) → per-node planned games, search-on-demand mapping, mirror-pair weight merging, book-path force-insert; `plans`/`plan_nodes` persistence; tests | 4 h | High | |
-| S4 | Playout registry: fulfilment-ordered scheduling against the active plan, done-marking, reconcile-from-shard-footers; tests | 2 h | High | |
-| S5 | `export-opening`: DB → `opening/*.parquet` with `dag_hash` stamp; `link` outcome aggregation (recursive CTE); tests | 3 h | High | |
-| S6 | Coverage report (`coverage` CLI): the metric set below + registration of the v1 corpus in `corpora` | 2 h | High | |
+| S1 | `pentobi/store.py`: schema DDL, `SearchSpaceStore` open/create, symmetry-canonical node keys, insert/lookup, content-derived seeds; engine-free tests | 3 h | High | ✅ |
+| S2 | Search recording: `record_search` (node fields + full ranked child list as edges, actions mapped to the key frame, mirror-pair merging); fixture-driven tests | 2 h | High | ✅ |
+| S3 | Allocation planning: pure-function allocator (DAG, budget, T, R) → per-node planned games, search-on-demand mapping, mirror-pair weight merging, book-path force-insert; `plans`/`plan_nodes` persistence; tests | 4 h | High | ✅ |
+| S4 | Playout registry: fulfilment-ordered scheduling against the active plan, done-marking, reconcile-from-shard-footers; tests | 2 h | High | ✅ |
+| S5 | `export-opening`: DB → `opening/*.parquet` with `dag_hash` stamp; `link` outcome aggregation (recursive CTE); tests | 3 h | High | ✅ |
+| S6 | Coverage report (`coverage` CLI): the metric set below + registration of the v1 corpus in `corpora` | 2 h | High | ✅ |
 
 ---
 

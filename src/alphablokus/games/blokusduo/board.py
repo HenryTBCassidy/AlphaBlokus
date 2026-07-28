@@ -196,6 +196,18 @@ class BlokusDuoBoard(IBoard):
         player's entire remaining hand out to a terminal — rare in a bounded
         diagnostic search and immaterial to the legal-move set.
 
+        **Starting squares survive the canonical sign flip.** ``canonical()``
+        swaps the two players' opening-move sets along with everything else, but
+        a bare grid cannot say which colour originally moved first — and it
+        matters whenever a player has yet to place a piece, because their only
+        legal moves are the ones covering *their* starting square. The move
+        order is recoverable from the counts: the player holding more placed
+        pieces moved first. So a grid where the negative player has placed more
+        (a canonical position with the second mover to play and nothing of
+        theirs on the board yet, i.e. any depth-1 opening node) gets the two
+        opening-move sets swapped. Positions where both have placed — every
+        mid-game position — are unaffected.
+
         Args:
             compact: Canonical int8 placement grid from ``to_compact``.
             piece_manager: Shared piece definitions (from the game).
@@ -205,8 +217,12 @@ class BlokusDuoBoard(IBoard):
         ppb = np.asarray(compact, dtype=np.int8).reshape(cls.N, cls.N)
         board_2d = np.sign(ppb).astype(np.int8)
         all_ids = frozenset(range(1, 22))
-        white_remaining = all_ids - {int(v) for v in np.unique(ppb[ppb > 0])}
-        black_remaining = all_ids - {int(-v) for v in np.unique(ppb[ppb < 0])}
+        white_placed = {int(v) for v in np.unique(ppb[ppb > 0])}
+        black_placed = {int(-v) for v in np.unique(ppb[ppb < 0])}
+        white_remaining = all_ids - white_placed
+        black_remaining = all_ids - black_placed
+        if len(black_placed) > len(white_placed):
+            initial_actions = {1: initial_actions[-1], -1: initial_actions[1]}
         return cls._from_state(
             piece_placement_board=ppb,
             white_remaining=white_remaining,
