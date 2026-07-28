@@ -395,8 +395,12 @@ def play_planned_game(
                 search_value=float(result.search_value if result.search_value is not None else 0.0),
             ),
         )
-        board, player = game.get_next_state(board, player, action)
+        # Relay *before* advancing: ``get_next_state`` flips ``player`` to the opponent,
+        # and the source needs the colour that actually played the move (v1's
+        # ``play_corpus_game`` orders these the same way). Relaying the flipped colour
+        # desyncs the engine's board from ours on the very first continuation ply.
         source.advance(board, player, action)
+        board, player = game.get_next_state(board, player, action)
         ply += 1
 
     white_score, black_score = game.final_scores(board)

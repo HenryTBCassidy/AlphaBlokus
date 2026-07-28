@@ -17,16 +17,25 @@ from alphablokus.games.blokusduo.pentobi.corpus import CorpusGenerationError
 from alphablokus.games.blokusduo.pentobi.harvest import (
     RandomSearchSource,
     map_plan,
+    play_planned_game,
     read_book_lines,
     search_node,
     witness_prefix,
 )
-from alphablokus.games.blokusduo.pentobi.store import PlanParameters, SearchSpaceStore, node_seed
+from alphablokus.games.blokusduo.pentobi.store import (
+    PlanParameters,
+    PlayoutJob,
+    SearchSpaceStore,
+    canonical_key,
+    node_seed,
+)
 from alphablokus.games.blokusduo.pieces import default_pieces_path
 
 if TYPE_CHECKING:
-    from collections.abc import Iterator
+    from collections.abc import Iterator, Sequence
     from pathlib import Path
+
+    from alphablokus.games.blokusduo.board import BlokusDuoBoard
 
 _BOOK = """(
 ;GM[Blokus Duo]
@@ -174,3 +183,101 @@ def test_an_illegal_book_line_is_rejected(game: BlokusDuoGame, tmp_path: Path) -
     path.write_text("(\n;GM[Blokus Duo]\n(\n ;B[a1,a2,a3,a4,a5]TE[1]\n)\n)\n")  # nowhere near (4, 4)
     with pytest.raises(CorpusGenerationError, match="illegal"):
         read_book_lines(path, game)
+
+
+# --------------------------------------------------------------------------- #
+# Phase B
+# --------------------------------------------------------------------------- #
+
+
+class BoardTrackingSearchSource(RandomSearchSource):
+    """A source that keeps its **own** board, the way ``pentobi-gtp`` does.
+
+    :class:`RandomSearchSource` ignores everything handed to ``advance``, so a caller
+    could relay moves under the wrong colour — or not at all — and no test would notice.
+    The real engine tracks the position itself and rejects a move that is illegal for the
+    colour it is told, which is exactly the failure this double reproduces on CI.
+    """
+
+    def __init__(self, game: BlokusDuoGame, *, breadth: int = 4, seed: int = 0) -> None:
+        super().__init__(game, breadth=breadth, seed=seed)
+        self._own_game = game
+        self._board = game.initialise_board()
+        self._to_move = 1
+        self.relayed: list[tuple[int, int]] = []
+
+    def begin_position(self, seed: int, prefix: Sequence[tuple[int, int]]) -> None:
+        super().begin_position(seed, prefix)
+        self._board = self._own_game.initialise_board()
+        self._to_move = 1
+        for player, action in prefix:
+            self.advance(self._board, player, action)
+
+    def advance(self, board: BlokusDuoBoard, player: int, action: int) -> None:
+        """Apply the move as the *stated* colour, rejecting it if that is illegal."""
+        self.relayed.append((player, action))
+        if player != self._to_move:
+            raise AssertionError(
+                f"move {action} relayed as player {player:+d} but it is {self._to_move:+d} to move",
+            )
+        if not self._own_game.valid_move_masking(self._board, player)[action]:
+            raise AssertionError(f"move {action} is illegal for player {player:+d}")
+        self._board, self._to_move = self._own_game.get_next_state(self._board, player, action)
+
+    def final_white_margin(self) -> int | None:
+        white, black = self._own_game.final_scores(self._board)
+        return white - black
+
+
+def _root_job(game: BlokusDuoGame) -> PlayoutJob:
+    compact = np.asarray(game.get_canonical_form(game.initialise_board(), 1).to_compact(), dtype=np.int8)
+    return PlayoutJob(
+        node_id=1,
+        replica=0,
+        game_id=0,
+        engine_seed=0,
+        board_key=canonical_key(compact)[0],
+        witness_actions=(),
+    )
+
+
+def test_continuation_moves_are_relayed_under_the_colour_that_played_them(game: BlokusDuoGame) -> None:
+    """The engine must be told *who* moved, not who moves next.
+
+    Relaying a move under the opponent's colour desyncs the engine's board from ours
+    immediately: real ``pentobi-gtp`` either rejects the move outright or silently
+    diverges, and every game in the run fails. The bug is invisible to a source that
+    ignores its arguments, so this asserts the relayed stream directly as well.
+    """
+    source = BoardTrackingSearchSource(game)
+    harvested = play_planned_game(game, source, _root_job(game))
+
+    assert harvested.plies, "the game produced no harvested plies"
+    expected = [(ply.player, ply.action) for ply in harvested.plies]
+    assert source.relayed == expected
+
+
+def test_a_planned_game_replays_its_witness_prefix_under_the_right_colours(
+    game: BlokusDuoGame,
+    store: SearchSpaceStore,
+) -> None:
+    """The prefix is replayed into the engine before play resumes — also colour-checked."""
+    root = store.root_node()
+    search_node(store, RandomSearchSource(game, breadth=4), root)
+    edge = store.edges(root)[0]
+    child = store.expand_child(root, edge.action)
+    record = store.node(child)
+    job = PlayoutJob(
+        node_id=child,
+        replica=0,
+        game_id=0,
+        engine_seed=0,
+        board_key=record.board_key,
+        witness_actions=record.witness_actions,
+    )
+    source = BoardTrackingSearchSource(game)
+    harvested = play_planned_game(game, source, job)
+
+    prefix = witness_prefix(game, record.witness_actions)
+    assert source.relayed[: len(prefix)] == prefix
+    assert harvested.plies[0].ply == len(record.witness_actions)
