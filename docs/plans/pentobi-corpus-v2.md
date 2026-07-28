@@ -48,7 +48,7 @@ would be self-defeating.
 | V6 | Schema v2 (games shards + `export-opening` parquet, plan provenance in footers), validator, `docs/07-DATA-STORAGE.md` | ½ day | High | ✅ |
 | V7 | CLI + diagnostics: v2 subcommands, plan-fulfilment/coverage report, opening-vs-midgame row ratio, target-entropy / duplicate-position metrics | 3 h | High | ✅ |
 | V8 | `link` pass: aggregate playout outcomes up the DAG into `outcome_mean`/`outcome_count` | 2 h | Medium | ✅ |
-| V9 | Trainer: soft-target load path, target temperature τ, **opening-subtree holdout split** (fixes a latent leak), opening-value target choice, source mix weights | 1 day | High | |
+| V9 | Trainer: soft-target load path, target temperature τ, **opening-subtree holdout split** (fixes a latent leak), opening-value target choice, source mix weights | 1 day | High | ✅ |
 | V10 | L9 pilot on the box (plan at B=1,000 + ~200 games): validate, measure, freeze knobs | 4 h box | High | |
 | V11 | **Book-strength measurement**: enable the opening book, verify engagement, book-on L9 vs book-off L9, spell out benchmark consequences | 4 h box | Medium | |
 | V12 | Stage-1 v2 corpus generation on the box — **(B = 10,000, T = 2, R = 2)**, ~3-day run — + `corpus_wrapup.py` to R2 (verify-before-done; the store DB syncs with the shards) | 3 days box | High | |
@@ -689,6 +689,39 @@ Only once SL distillation demonstrably works:
 Scoped properly when V15 passes.
 
 ---
+
+## Implementation notes (2026-07-28, V1/V3–V9 landed)
+
+Things the build changed or discovered that the design above did not anticipate. Everything else
+was implemented as specified.
+
+1. **A single surviving child made the allocator non-terminating** — fixed by requiring two
+   survivors to split (see the clarification under V4's allocation rule). This is a genuine gap in
+   the rule as written, not a shortcut.
+2. **`BlokusDuoBoard.from_compact` could not rebuild a depth-1 opening position.** Canonicalisation
+   flips signs so the side to move reads as player 1, but starting squares are fixed to *colours*:
+   after White's first move, Black's only legal placements cover (9, 9), while the rebuilt board
+   tried White's (4, 4) and produced **zero legal moves**. Every depth-1 opening row would have been
+   untrainable and unvalidatable. `from_compact` now infers the move order from the piece counts
+   (the player with more placed pieces moved first) and swaps the opening-move sets accordingly;
+   mid-game positions — every v1 row — are unaffected. Regression test in `tests/.../test_board.py`.
+3. **`nodes` gained a `book_terminal` flag** beyond the store design's DDL. `source` cannot express
+   "this position ends a book line *and* was reached by search": whichever insert lands first wins
+   the column, so the book floor would silently vanish at any position Pentobi also searches.
+4. **`MoveValueEntry` keeps `value_count`** (a fourth field beyond the design's three). It is the
+   only discriminator between a visited child's search value and an unvisited child's prior
+   (fact 5), and consumers need to tell them apart.
+5. **`record_search`'s legality check is a desync guard, not a frame proof.** It rejects children
+   that are illegal at the node's witness position, which catches a search recorded against the
+   wrong node whenever that produces an illegal move — but a position and its mirror share much of
+   their legal set, so it cannot *prove* frame correctness. The frame invariant is pinned instead by
+   a test that reaches one position from both mirrored move orders and asserts byte-identical stored
+   edges.
+6. **The v2 CLI is a separate script** (`scripts/pentobi_corpus_v2.py`) — see V7.
+7. **Not done, and deliberately left for V14:** the SL trainer's *arms* (τ sweep, opening-value arm,
+   mix-weight arm). V9's knobs all exist as `distill_sl.py` flags (`--tau`, `--opening-value`,
+   `--opening-mix`, `--v1-corpus`/`--v1-mix`), and a v2 corpus is auto-detected, but nothing sweeps
+   them yet.
 
 ## Resolved decisions (2026-07-28, second pass)
 
