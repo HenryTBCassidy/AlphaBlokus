@@ -40,7 +40,7 @@ would be self-defeating.
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| V1 | GTP layer: `reg_genmove` / `move_values` + `MoveValues` parser (strip `[PIECE]`, signed values) + fixture tests; make `--nobook` an explicit `PentobiGtp` flag | 2 h | High | |
+| V1 | GTP layer: `reg_genmove` / `move_values` + `MoveValues` parser (strip `[PIECE]`, signed values) + fixture tests; make `--nobook` an explicit `PentobiGtp` flag | 2 h | High | ✅ |
 | V2 | **Confidently-wrong base-rate probe** (top-8 children of ~30 allocated nodes independently evaluated) + residual engine probes (argmax-vs-`genmove`, pass/terminal edge cases, drive-pattern overhead) | 4 h box | High | |
 | V3 | Search-space store: execute [`corpus-search-space-store.md`](corpus-search-space-store.md) S1–S6 (SQLite DAG + allocation plans + playout registry + export + coverage) | 1.5 days | High | |
 | V4 | Phase A — `plan`: budget-proportional allocation (`w ∝ p^(1/T)`, split floor R), emergent depth, search-on-demand mapping, mirror-pair merging, book-line floors | 1 day | High | |
