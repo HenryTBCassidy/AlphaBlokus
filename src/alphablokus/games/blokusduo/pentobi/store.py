@@ -1319,14 +1319,24 @@ class SearchSpaceStore:
         The soft policy target is the node's top-``top_k`` children by visits,
         renormalised to sum to 1; ``tail_mass`` records exactly what the truncation
         dropped. Everything is in the node's key frame, matching the stored board.
+
+        Nodes with no children are **skipped**: ``search_node`` legitimately records a
+        childless leaf when the engine returns an empty ``move_values`` (the side to move
+        can only pass), but such a row would carry an empty policy, and the validator
+        rightly rejects a target that does not sum to 1. There is no training signal in a
+        position with no moves, so it does not belong in the dataset.
         """
         plan = self.active_plan()
         allocations = {a.node_id: a for a in (self.plan_allocations(plan.plan_id) if plan else [])}
         weights = self.reach_weights()
         for record in self.nodes(status="searched"):
             edges = self.edges(record.node_id)[:top_k]
+            if not edges:
+                continue
             visits = np.array([edge.visits for edge in edges], dtype=np.float64)
             total = float(visits.sum())
+            if total <= 0.0:
+                continue
             kept = total / record.root_visits if record.root_visits else 0.0
             allocation = allocations.get(record.node_id)
             parents = self._connection.execute(

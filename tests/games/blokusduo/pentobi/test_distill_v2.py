@@ -38,6 +38,7 @@ from alphablokus.games.blokusduo.pieces import default_pieces_path
 from alphablokus.storage.sparse_policy import densify
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
     from pathlib import Path
 
     from alphablokus.games.blokusduo.pentobi.distill import CorpusGameRows
@@ -84,6 +85,12 @@ def corpus(game: BlokusDuoGame, tmp_path_factory: pytest.TempPathFactory) -> Pat
         store.link()
         export_opening(store, directory / "opening")
     return directory
+
+
+@pytest.fixture
+def store(game: BlokusDuoGame, tmp_path: Path) -> Iterator[SearchSpaceStore]:
+    with SearchSpaceStore(tmp_path / "store.sqlite", game, level=9) as opened:
+        yield opened
 
 
 @pytest.fixture(scope="module")
@@ -315,7 +322,7 @@ def test_holdout_is_empty_when_there_is_only_one_opening() -> None:
 
 
 def test_mixing_repeats_the_small_pool_rather_than_discarding_the_large_one() -> None:
-    """"Openings at 5%" must mean repeating openings, not deleting 95% of the games.
+    """ "Openings at 5%" must mean repeating openings, not deleting 95% of the games.
 
     Sizing the mix by the *smallest* pool-to-share ratio makes the 1.6k opening rows the
     binding constraint on 260k game rows, throwing away ~88% of a corpus that costs days
@@ -328,3 +335,37 @@ def test_mixing_repeats_the_small_pool_rather_than_discarding_the_large_one() ->
     opening_rows = sum(1 for board, _, _ in mixed if board[0] == 1)
     assert len(mixed) - opening_rows == len(games)  # nothing discarded
     assert 0.045 <= opening_rows / len(mixed) <= 0.055  # and the share is honoured
+
+
+def test_opening_units_resolve_across_shard_boundaries(corpus: Path, game: BlokusDuoGame) -> None:
+    """A node's depth-1 ancestor is usually in a different shard from the node itself.
+
+    Resolving ancestry one shard at a time leaves most rows with no holdout unit, and a
+    unit-less row always trains — so the opening rows of held-out subtrees leak straight
+    into training, which is the exact failure the subtree split exists to prevent.
+    """
+    single = load_opening_examples(opening_shards(corpus / "opening"), game)[1]
+
+    fragmented = corpus / "opening_fragmented"
+    with SearchSpaceStore(corpus / "store.sqlite", game, level=9) as store:
+        export_opening(store, fragmented, rows_per_shard=3)
+    assert len(opening_shards(fragmented)) > 1, "fixture did not actually fragment"
+    split = load_opening_examples(opening_shards(fragmented), game)[1]
+
+    # Only the root (depth 0) legitimately has no unit, however the rows are sharded.
+    assert sum(unit is None for unit in split) == sum(unit is None for unit in single) == 1
+    assert sorted(u for u in split if u) == sorted(u for u in single if u)
+
+
+def test_a_childless_searched_node_is_not_exported(store: SearchSpaceStore, game: BlokusDuoGame) -> None:
+    """An empty ``move_values`` records a leaf; it must not become an invalid row.
+
+    ``search_node`` deliberately tolerates a childless search (the side to move can only
+    pass). Exporting it anyway produces a row whose policy is empty, which the validator
+    then rejects — aborting validation for the whole corpus over a position that carries
+    no training signal at all.
+    """
+    root = store.root_node()
+    store.record_search(root, [], validate=False)
+    assert store.node(root).is_searched
+    assert list(store.iter_opening_rows()) == []

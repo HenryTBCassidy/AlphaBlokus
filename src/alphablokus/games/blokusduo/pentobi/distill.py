@@ -328,7 +328,7 @@ def split_opening_units(
     strata: list[list[bytes]] = []
     for start in range(0, len(ordered), stratum_size):
         stratum = list(ordered[start : start + stratum_size])
-        rng.shuffle(stratum)  # type: ignore[arg-type]  # list[bytes] is a valid sequence
+        rng.shuffle(stratum)
         strata.append(stratum)
     walk = [unit for row in zip_longest(*strata) for unit in row if unit is not None]
 
@@ -522,13 +522,24 @@ def load_opening_examples(
         ``(examples, units)`` — index-aligned, with the symmetry twin (when ``augment``)
         directly after its original and sharing its unit.
     """
+    # Resolve ancestry across *all* shards first. A node's depth-1 ancestor is very often
+    # in a different shard from the node itself, and a per-shard walk simply fails to find
+    # it — every such row then gets ``unit = None`` and trains unconditionally, which is
+    # precisely the leak the subtree split exists to prevent. Cheap: four columns, and
+    # parquet is columnar.
+    ancestry_rows: dict[str, list[Any]] = {"node_id": [], "parent_id": [], "depth": [], "board": []}
+    for path in paths:
+        table = pq.read_table(path, columns=list(ancestry_rows))
+        for name in ancestry_rows:
+            ancestry_rows[name].extend(table.column(name).to_pylist())
+    ancestry = _opening_units(ancestry_rows)
+
     examples: list[CorpusExample] = []
     units: list[bytes | None] = []
     for path in paths:
         meta = read_opening_meta(path)
         table = pq.read_table(path)
         rows = {name: table.column(name).to_pylist() for name in table.column_names}
-        ancestry = _opening_units(rows)
         for index in range(table.num_rows):
             compact = (
                 np.frombuffer(rows["board"][index], dtype=np.dtype(meta.board_dtype)).reshape(meta.board_shape).copy()
