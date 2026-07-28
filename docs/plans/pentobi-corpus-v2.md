@@ -326,6 +326,13 @@ Instead the whole **game budget** is handed to the root and split recursively:
 3. Recurse into each surviving child. A child not yet in the store is **searched on demand**
    (content-derived seed) — mapping exactly as far as the plan needs and no further.
 
+*Implementation clarification (2026-07-28, V3):* rule 2 needs **two** survivors, not one. With a
+single survivor the child inherits the parent's whole budget undiminished and splits again on the
+same terms, so the walk follows one forced line to the end of the game and never terminates (the
+`allocation_sim.py` numbers above avoided this only via its `depth_cap`). Requiring two survivors
+caps each child at `b − R`, which bounds the descent, and costs nothing: splitting into one piece
+moves the same games one ply deeper for no extra coverage.
+
 Total games are conserved; depth, opening count, and the effective width of the first-move fan all
 **emerge** from `(budget, T, R)`. The plan — every node's budget share and planned games — is
 persisted (`plan_nodes`), reproducible (a pure function of DAG content + parameters, store D-e),

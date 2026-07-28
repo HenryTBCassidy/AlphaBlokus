@@ -466,7 +466,13 @@ def allocate_budget(
        opinion, flattened, never an independent evaluation — drop children whose
        renormalised share of ``b`` is below ``R``, renormalise over the survivors, and
        recurse. Dropping only ever *raises* the survivors' budgets, so one pass suffices.
-    3. A node the walk wants to split but which has not been searched joins the
+    3. **Fewer than two survivors ⇒ the node is a playout start.** The v2 plan's rule
+       only says "if none survive"; a *single* survivor would inherit the parent's whole
+       budget undiminished and split again on the same terms, walking one forced line to
+       the end of the game and never terminating. Requiring two survivors makes each
+       child's budget at most ``b − R``, which bounds the descent, and costs nothing: a
+       split into one piece moves the same games one ply deeper for no extra coverage.
+    4. A node the walk wants to split but which has not been searched joins the
        **mapping queue** and is treated as a provisional start, so a plan computed
        against an incomplete DAG is still a usable (if shallow) plan.
 
@@ -507,7 +513,7 @@ def allocate_budget(
                 starts[node_id] = starts.get(node_id, 0.0) + node_budget
                 continue
             shares = _surviving_children(children_of(node_id), node_budget, exponent, floor)
-            if not shares:
+            if len(shares) < 2:
                 starts[node_id] = starts.get(node_id, 0.0) + node_budget
                 continue
             for action, child_budget in shares:
@@ -923,7 +929,9 @@ class SearchSpaceStore:
 
         Book lines (:meth:`insert_book_paths`) get a floor of ``R`` games at each line's
         terminal node. The floor is **reserved out of the budget first**, so the total
-        planned games still equal ``budget`` exactly.
+        planned games still equal ``budget`` exactly — which also means ``budget_share``
+        is measured against the full budget and the root's share sits just below 1 when
+        book floors are reserved.
         """
         book_terminals = [record.node_id for record in self._book_terminals()]
         reserved = params.min_replicas * len(book_terminals)
