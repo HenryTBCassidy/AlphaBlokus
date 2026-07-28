@@ -293,9 +293,42 @@ def test_scheduling_is_an_even_proportional_slice_of_the_plan(
     for job in jobs:
         scheduled[job.node_id] = scheduled.get(job.node_id, 0) + 1
     assert set(scheduled) <= set(planned)
-    fulfilments = [scheduled.get(node_id, 0) / count for node_id, count in planned.items()]
-    assert max(fulfilments) - min(fulfilments) <= 0.5  # no node runs far ahead of the rest
+    # Every node sits within one of its own steps of the run's overall fulfilment. A
+    # node's fulfilment can only move in jumps of 1/planned, so that is the tightest
+    # bound available — and it is the one that discriminates: scheduling one replica per
+    # node per pass (equal *count* rather than equal *fraction*) drives a 2-game start to
+    # 100% while a 32-game start sits at 6%, which this rejects and a flat ±0.5 does not.
+    target = len(jobs) / sum(planned.values())
+    for node_id, count in planned.items():
+        fulfilment = scheduled.get(node_id, 0) / count
+        assert abs(fulfilment - target) <= 1.0 / count + 1e-9, (
+            f"node {node_id}: {fulfilment:.2f} against an overall {target:.2f} (planned {count})"
+        )
     assert all(scheduled[node_id] <= planned[node_id] for node_id in scheduled)
+
+
+def test_scheduling_shares_out_evenly_across_very_uneven_targets(
+    store: SearchSpaceStore,
+    game: BlokusDuoGame,
+) -> None:
+    """The stage-1 shape is 2–32 games per start; both ends must advance together.
+
+    Ordering by games-already-played instead of by *fraction* of the target completes the
+    small starts first, so a run stopped early over-represents the flattened tail and
+    under-represents Pentobi's preferred lines — backwards from the allocation's intent.
+    """
+    plan_id = _planned_store(store, game, budget=400)
+    planned = {a.node_id: a.planned_games for a in store.plan_allocations(plan_id) if a.planned_games > 0}
+    smallest, largest = min(planned.values()), max(planned.values())
+    assert largest >= 2 * smallest, "fixture is not uneven enough to be a meaningful test"
+
+    jobs = store.schedule(sum(planned.values()) // 2)
+    scheduled: dict[int, int] = {}
+    for job in jobs:
+        scheduled[job.node_id] = scheduled.get(job.node_id, 0) + 1
+    small = [scheduled.get(n, 0) / c for n, c in planned.items() if c == smallest]
+    large = [scheduled.get(n, 0) / c for n, c in planned.items() if c == largest]
+    assert abs(sum(small) / len(small) - sum(large) / len(large)) <= 1.0 / smallest
 
 
 def test_scheduling_never_repeats_a_node_replica_pair(store: SearchSpaceStore, game: BlokusDuoGame) -> None:

@@ -36,6 +36,7 @@ recorded. It never talks to the engine — searches are handed to it as
 
 from __future__ import annotations
 
+import heapq
 import json
 import sqlite3
 from dataclasses import dataclass
@@ -804,6 +805,21 @@ class SearchSpaceStore:
             int(row["action"]): row["child_id"]
             for row in self._connection.execute("SELECT action, child_id FROM edges WHERE parent_id = ?", (node_id,))
         }
+        # Book edges the engine did not report must survive the replace. The 44 curated
+        # lines are force-inserted precisely because Pentobi may not favour them, so
+        # deleting them here would orphan their children from the graph the moment their
+        # parent is searched (and the root always is): the child keeps its games via
+        # ``nodes.book_terminal`` but drops out of ``reach_weights``, out of ``link``'s
+        # aggregation, and out of the export's ancestry, silently.
+        merged_actions = {action for action, _, _ in merged}
+        preserved = [
+            (int(row["action"]), row["child_id"], row["child_value"])
+            for row in self._connection.execute(
+                "SELECT action, child_id, child_value FROM edges WHERE parent_id = ? AND source = 'book'",
+                (node_id,),
+            )
+            if int(row["action"]) not in merged_actions
+        ]
         self._connection.execute("DELETE FROM edges WHERE parent_id = ?", (node_id,))
         self._connection.executemany(
             "INSERT INTO edges (parent_id, action, rank, visits, visit_share, child_value, child_id, source) "
@@ -820,6 +836,14 @@ class SearchSpaceStore:
                     source,
                 )
                 for rank, (action, visits, value) in enumerate(merged)
+            ],
+        )
+        self._connection.executemany(
+            "INSERT INTO edges (parent_id, action, rank, visits, visit_share, child_value, child_id, source) "
+            "VALUES (?, ?, ?, 0, 0.0, ?, ?, 'book')",
+            [
+                (node_id, action, len(merged) + offset, value, child_id)
+                for offset, (action, child_id, value) in enumerate(preserved)
             ],
         )
         top_value = merged[0][2] if merged else None
@@ -1088,49 +1112,49 @@ class SearchSpaceStore:
             "GROUP BY pn.node_id HAVING existing < planned",
             (plan.plan_id,),
         ).fetchall()
-        candidates = sorted(
-            (
-                (int(row["existing"]) / int(row["planned"]), hash64(bytes(row["board_key"])), int(row["node_id"]))
-                for row in rows
-            ),
-        )
         next_game_id = self._next_game_id()
         jobs: list[PlayoutJob] = []
-        # One replica per node per pass, re-sorting between passes, so a small batch
-        # spreads across nodes instead of filling the first node's quota.
+        # A heap re-keyed on **fulfilment fraction** after every assignment. Walking a
+        # once-sorted list and taking one replica per node per pass is equal-*count*
+        # water-filling, not equal-*fraction*: with 2–32 games per start it drives every
+        # 2-game start to 100% while a 32-game mainline sits at 6%, so a truncated run
+        # over-represents the flattened tail — the reverse of what the allocation is for.
+        planned_by_node = {int(row["node_id"]): int(row["planned"]) for row in rows}
         remaining = {
             int(row["node_id"]): (int(row["planned"]) - int(row["existing"]), int(row["last_replica"]) + 1)
             for row in rows
         }
-        while len(jobs) < batch_size:
-            progressed = False
-            for _, _, node_id in candidates:
-                if len(jobs) >= batch_size:
-                    break
-                deficit, replica = remaining[node_id]
-                if deficit <= 0:
-                    continue
-                record = self.node(node_id)
-                seed = playout_seed(record.board_key, replica)
-                self._connection.execute(
-                    "INSERT INTO playouts (node_id, replica, engine_seed, game_id, status) VALUES (?, ?, ?, ?, ?)",
-                    (node_id, replica, seed, next_game_id, "planned"),
-                )
-                jobs.append(
-                    PlayoutJob(
-                        node_id=node_id,
-                        replica=replica,
-                        game_id=next_game_id,
-                        engine_seed=seed,
-                        board_key=record.board_key,
-                        witness_actions=record.witness_actions,
-                    ),
-                )
-                remaining[node_id] = (deficit - 1, replica + 1)
-                next_game_id += 1
-                progressed = True
-            if not progressed:
-                break
+        heap = [
+            (int(row["existing"]) / int(row["planned"]), hash64(bytes(row["board_key"])), int(row["node_id"]))
+            for row in rows
+        ]
+        heapq.heapify(heap)
+        while heap and len(jobs) < batch_size:
+            _, tiebreak, node_id = heapq.heappop(heap)
+            deficit, replica = remaining[node_id]
+            if deficit <= 0:
+                continue
+            record = self.node(node_id)
+            seed = playout_seed(record.board_key, replica)
+            self._connection.execute(
+                "INSERT INTO playouts (node_id, replica, engine_seed, game_id, status) VALUES (?, ?, ?, ?, ?)",
+                (node_id, replica, seed, next_game_id, "planned"),
+            )
+            jobs.append(
+                PlayoutJob(
+                    node_id=node_id,
+                    replica=replica,
+                    game_id=next_game_id,
+                    engine_seed=seed,
+                    board_key=record.board_key,
+                    witness_actions=record.witness_actions,
+                ),
+            )
+            remaining[node_id] = (deficit - 1, replica + 1)
+            next_game_id += 1
+            if deficit - 1 > 0:
+                done = planned_by_node[node_id] - (deficit - 1)
+                heapq.heappush(heap, (done / planned_by_node[node_id], tiebreak, node_id))
         self._connection.commit()
         return jobs
 

@@ -375,3 +375,39 @@ def test_expand_child_extends_the_witness_path(store: SearchSpaceStore, game: Bl
     child_board, child_player = store.board_at(child_id)
     key, frame = canonical_key(np.asarray(game.get_canonical_form(child_board, child_player).to_compact(), np.int8))
     assert (key, frame) == (child.board_key, child.key_frame)
+
+
+def test_searching_a_node_preserves_book_edges_the_engine_did_not_report(
+    store: SearchSpaceStore,
+    game: BlokusDuoGame,
+) -> None:
+    """A book line must survive its parent being searched.
+
+    ``record_search`` replaces a node's edge list wholesale. The 44 curated lines are
+    force-inserted *because* Pentobi may not favour them, so any book move outside the
+    engine's reported children would be deleted the moment the root is searched — which
+    always happens. The child node keeps its games floor via ``book_terminal``, so the
+    loss is silent: it simply drops out of the graph, contributing nothing to reach
+    weights, to ``link``'s outcome aggregation, or to the export's ancestry.
+    """
+    root = store.root_node()
+    legal = [
+        int(action)
+        for action in np.flatnonzero(game.valid_move_masking(game.initialise_board(), 1))
+        if action != game.action_codec.pass_action_index
+    ]
+    book_action, searched = legal[0], legal[1:5]
+    (terminal,) = store.insert_book_paths([[book_action]])
+
+    store.record_search(root, [SearchChild(action=action, visits=100, value=0.6) for action in searched])
+
+    edges = {edge.action: edge for edge in store.edges(root)}
+    key_action = store.to_key_frame(store.node(root), book_action)
+    assert key_action in edges, "the book edge was deleted by the search that followed it"
+    assert edges[key_action].source == "book"
+    assert edges[key_action].child_id == terminal
+    assert store.node(terminal).book_terminal
+    # ...and the searched children are all present too, ranked ahead of it.
+    for action in searched:
+        assert store.to_key_frame(store.node(root), action) in edges
+    assert edges[key_action].rank >= len(searched)
