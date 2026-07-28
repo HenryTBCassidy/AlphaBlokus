@@ -44,8 +44,8 @@ would be self-defeating.
 | V2 | **Confidently-wrong base-rate probe** (top-8 children of ~30 allocated nodes independently evaluated) + residual engine probes (argmax-vs-`genmove`, pass/terminal edge cases, drive-pattern overhead) | 4 h box | High | |
 | V3 | Search-space store: execute [`corpus-search-space-store.md`](corpus-search-space-store.md) S1–S6 (SQLite DAG + allocation plans + playout registry + export + coverage) | 1.5 days | High | ✅ |
 | V4 | Phase A — `plan`: budget-proportional allocation (`w ∝ p^(1/T)`, split floor R), emergent depth, search-on-demand mapping, mirror-pair merging, book-line floors | 1 day | High | ✅ |
-| V5 | Phase B — `generate`: fulfilment-driven scheduling against the active plan, prefix replay, harvest **every** ply, full-strength continuations | ½ day | High | |
-| V6 | Schema v2 (games shards + `export-opening` parquet, plan provenance in footers), validator, `docs/07-DATA-STORAGE.md` | ½ day | High | |
+| V5 | Phase B — `generate`: fulfilment-driven scheduling against the active plan, prefix replay, harvest **every** ply, full-strength continuations | ½ day | High | ✅ |
+| V6 | Schema v2 (games shards + `export-opening` parquet, plan provenance in footers), validator, `docs/07-DATA-STORAGE.md` | ½ day | High | ✅ |
 | V7 | CLI + diagnostics: v2 subcommands, plan-fulfilment/coverage report, opening-vs-midgame row ratio, target-entropy / duplicate-position metrics | 3 h | High | |
 | V8 | `link` pass: aggregate playout outcomes up the DAG into `outcome_mean`/`outcome_count` | 2 h | Medium | |
 | V9 | Trainer: soft-target load path, target temperature τ, **opening-subtree holdout split** (fixes a latent leak), opening-value target choice, source mix weights | 1 day | High | |

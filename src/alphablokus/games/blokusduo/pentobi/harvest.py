@@ -30,17 +30,31 @@ import numpy as np
 from loguru import logger
 
 from alphablokus.games.blokusduo.pentobi.corpus import CorpusGenerationError, parse_gtp_score
+from alphablokus.games.blokusduo.pentobi.corpus_v2 import SoftTarget, build_soft_target
 from alphablokus.games.blokusduo.pentobi.gtp import PentobiGtp
-from alphablokus.games.blokusduo.pentobi.store import SearchChild, children_from_move_values, node_seed
+from alphablokus.games.blokusduo.pentobi.store import (
+    STORE_K,
+    SearchChild,
+    canonical_key,
+    children_from_move_values,
+    node_seed,
+)
 from alphablokus.games.blokusduo.pentobi.translation import PASS, PentobiMoveTranslator
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
     from pathlib import Path
 
+    from numpy.typing import NDArray
+
     from alphablokus.games.blokusduo.board import BlokusDuoBoard
     from alphablokus.games.blokusduo.game import BlokusDuoGame
-    from alphablokus.games.blokusduo.pentobi.store import PlanDraft, PlanParameters, SearchSpaceStore
+    from alphablokus.games.blokusduo.pentobi.store import (
+        PlanDraft,
+        PlanParameters,
+        PlayoutJob,
+        SearchSpaceStore,
+    )
 
 # Our White (+1) is Pentobi Color(0) = GTP "b"; Black (-1) is "w" (harness mapping H2).
 _GTP_COLOR = {1: "b", -1: "w"}
@@ -48,6 +62,10 @@ _GTP_COLOR = {1: "b", -1: "w"}
 #: Safety bound on the plan/map loop. Each round maps one more level of the plan, and a
 #: 10k-game plan is ~7 levels deep, so this only ever fires on a bug.
 _MAX_MAPPING_ROUNDS = 64
+
+#: Hard ply cap: 42 placements plus every legal interleaving of forced passes fits well
+#: under this, so exceeding it means the loop lost sync with the rules engine.
+_MAX_PLIES = 200
 
 
 @dataclass(frozen=True)
@@ -252,6 +270,140 @@ def map_plan(
             search_node(store, source, node_id)
             searched += 1
     raise CorpusGenerationError(f"plan mapping did not converge in {max_rounds} rounds")
+
+
+# --------------------------------------------------------------------------- #
+# Phase B: playing planned games out and harvesting every ply
+# --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class HarvestedPly:
+    """One harvested ply: the position, the expert's whole preference, and its choice."""
+
+    ply: int  # 0-based ply index in the full game (the witness prefix counts)
+    player: int  # side to move: +1 White, -1 Black
+    action: int  # the move actually played
+    top_action: int  # argmax(visits) — equal to ``action`` on a full-strength continuation
+    compact_board: NDArray[np.int8]  # canonical (side-to-move) 14x14 placement grid
+    target: SoftTarget  # the soft policy target, as-played frame
+    search_value: float  # the top child's value for the side to move
+
+
+@dataclass(frozen=True)
+class HarvestedGame:
+    """One finished v2 game: its identity in the DAG, its plies, and its result."""
+
+    game_id: int
+    node_id: int
+    board_key: bytes
+    replica: int
+    engine_seed: int
+    witness_actions: tuple[int, ...]
+    plies: tuple[HarvestedPly, ...]
+    white_score: int
+    black_score: int
+
+    @property
+    def white_margin(self) -> int:
+        """Final score margin for White (positive = White won)."""
+        return self.white_score - self.black_score
+
+    @property
+    def actions(self) -> tuple[int, ...]:
+        """The complete game: the replayed witness prefix plus every played ply."""
+        return self.witness_actions + tuple(ply.action for ply in self.plies)
+
+
+def play_planned_game(
+    game: BlokusDuoGame,
+    source: ISearchSource,
+    job: PlayoutJob,
+    *,
+    top_k: int = STORE_K,
+) -> HarvestedGame:
+    """Play one planned game from its start node and harvest **every** ply.
+
+    The witness prefix is *replayed*, not searched: those plies' targets already live in
+    the DAG as opening rows, so re-searching them would be pure waste. From the start
+    position on, every ply is ``reg_genmove`` → ``move_values`` → harvest → play the
+    engine's own ``argmax(visits)``.
+
+    **Continuations are full strength — no temperature, no move sampling.** Temperature
+    would weaken the very play being distilled, and deliberate deviation belongs in the
+    allocation (where it gets a plan entry and a harvested label), not in an unlabelled
+    in-game coin flip. Per-game seed variation supplies the continuation diversity.
+
+    Desync guards, all non-negotiable: the replayed prefix must be legal and must land on
+    the start node's own position; every engine move is legality-checked against our
+    rules engine; the engine's ``final_score`` is cross-checked against
+    ``BlokusDuoGame.final_scores``; and a hard ply cap catches a runaway loop.
+
+    Raises:
+        CorpusGenerationError: On any of those desyncs.
+    """
+    board = game.initialise_board()
+    player = 1
+    for index, action in enumerate(job.witness_actions):
+        if not game.valid_move_masking(board, player)[action]:
+            raise CorpusGenerationError(f"game {job.game_id} witness ply {index}: action {action} is illegal here")
+        board, player = game.get_next_state(board, player, action)
+    compact = np.asarray(game.get_canonical_form(board, player).to_compact(), dtype=np.int8)
+    if canonical_key(compact)[0] != job.board_key:
+        raise CorpusGenerationError(f"game {job.game_id}: the replayed witness path does not reach its start node")
+
+    source.begin_position(job.engine_seed, witness_prefix(game, job.witness_actions))
+    plies: list[HarvestedPly] = []
+    ply = len(job.witness_actions)
+    while game.get_game_ended(board, player) == 0:
+        if ply >= _MAX_PLIES:
+            raise CorpusGenerationError(f"game {job.game_id} exceeded {_MAX_PLIES} plies — loop desync")
+        result = source.search(board, player)
+        mask = game.valid_move_masking(board, player)
+        if not result.children:
+            # No search tree: the side to move is forced to pass. Nothing to harvest, and
+            # Pentobi has no ``play <c> pass`` — we just advance our own board.
+            if not mask[game.action_codec.pass_action_index]:
+                raise CorpusGenerationError(f"game {job.game_id} ply {ply}: empty move_values but moves are available")
+            board, player = game.get_next_state(board, player, game.action_codec.pass_action_index)
+            ply += 1
+            continue
+        target = build_soft_target(result.children, top_k)
+        action = target.top_action
+        if not mask[action]:
+            raise CorpusGenerationError(f"game {job.game_id} ply {ply}: engine move {action} is illegal here")
+        plies.append(
+            HarvestedPly(
+                ply=ply,
+                player=player,
+                action=action,
+                top_action=action,
+                compact_board=np.asarray(game.get_canonical_form(board, player).to_compact(), dtype=np.int8),
+                target=target,
+                search_value=float(result.search_value if result.search_value is not None else 0.0),
+            ),
+        )
+        board, player = game.get_next_state(board, player, action)
+        source.advance(board, player, action)
+        ply += 1
+
+    white_score, black_score = game.final_scores(board)
+    source_margin = source.final_white_margin()
+    if source_margin is not None and source_margin != white_score - black_score:
+        raise CorpusGenerationError(
+            f"game {job.game_id}: engine margin {source_margin} != rules-engine margin {white_score - black_score}",
+        )
+    return HarvestedGame(
+        game_id=job.game_id,
+        node_id=job.node_id,
+        board_key=job.board_key,
+        replica=job.replica,
+        engine_seed=job.engine_seed,
+        witness_actions=job.witness_actions,
+        plies=tuple(plies),
+        white_score=white_score,
+        black_score=black_score,
+    )
 
 
 # --------------------------------------------------------------------------- #

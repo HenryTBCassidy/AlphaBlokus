@@ -40,8 +40,16 @@ if TYPE_CHECKING:
 
     from numpy.typing import NDArray
 
+    from alphablokus.games.blokusduo.game import BlokusDuoGame
     from alphablokus.games.blokusduo.pentobi.corpus import CorpusExample
-    from alphablokus.games.blokusduo.pentobi.store import OpeningRow, PlanRecord, SearchSpaceStore
+    from alphablokus.games.blokusduo.pentobi.harvest import HarvestedGame
+    from alphablokus.games.blokusduo.pentobi.store import (
+        OpeningRow,
+        PlanRecord,
+        ReconcileEntry,
+        SearchChild,
+        SearchSpaceStore,
+    )
 
 #: Marks every v2 shard, opening and games alike.
 DATASET_KIND = "pentobi_distill_v2"
@@ -71,6 +79,50 @@ _OPENING_SCHEMA_FIELDS = [
 
 class CorpusSchemaError(ValueError):
     """Raised when a v2 shard's contents contradict its schema or the rules engine."""
+
+
+@dataclass(frozen=True)
+class SoftTarget:
+    """One position's soft policy target: the expert's preferences, top-K, normalised."""
+
+    indices: NDArray[np.int32]  # actions, visit-descending
+    values: NDArray[np.float32]  # visit shares over the kept children, summing to 1
+    child_values: NDArray[np.float32]  # Pentobi's per-child value, aligned to the indices
+    tail_mass: float  # visit mass the top-K truncation dropped
+
+    @property
+    def top_action(self) -> int:
+        """``argmax(visits)`` — the move a full-strength continuation plays."""
+        return int(self.indices[0])
+
+
+def build_soft_target(children: Sequence[SearchChild], top_k: int = 32) -> SoftTarget:
+    """Turn a search's children into the stored policy target.
+
+    Children are ranked by visits (ties by action, so the target is deterministic), the
+    top ``top_k`` are kept and renormalised, and what the truncation dropped is recorded
+    rather than quietly lost — measured ≈ 0.036 of the mass at ply 1 and 0.017 at ply 2,
+    with top-32 ≥ 96.7% everywhere the walk measured.
+
+    A search whose children are all unvisited (no tree, only priors) yields a uniform
+    target over them; that is honest about carrying no preference information, and the
+    validator's ``support ⊆ legal`` check still applies.
+    """
+    if not children:
+        raise CorpusSchemaError("cannot build a soft target from an empty move_values response")
+    ranked = sorted(children, key=lambda child: (-child.visits, child.action))[:top_k]
+    total = sum(child.visits for child in children)
+    kept = sum(child.visits for child in ranked)
+    if kept > 0:
+        values = np.array([child.visits / kept for child in ranked], dtype=np.float32)
+    else:
+        values = np.full(len(ranked), 1.0 / len(ranked), dtype=np.float32)
+    return SoftTarget(
+        indices=np.array([child.action for child in ranked], dtype=np.int32),
+        values=values,
+        child_values=np.array([child.value for child in ranked], dtype=np.float32),
+        tail_mass=float(1.0 - kept / total) if total > 0 else 0.0,
+    )
 
 
 @dataclass(frozen=True)
@@ -290,6 +342,335 @@ def iter_opening_examples(
                     blend_k=blend_k,
                 )
                 yield board, (indices, values), value
+
+
+# --------------------------------------------------------------------------- #
+# The games dataset
+# --------------------------------------------------------------------------- #
+
+_GAME_SCHEMA_FIELDS = [
+    pa.field("board", pa.binary()),
+    pa.field("policy_indices", pa.binary()),
+    pa.field("policy_values", pa.binary()),
+    pa.field("child_values", pa.binary()),
+    pa.field("tail_mass", pa.float32()),
+    pa.field("search_value", pa.float32()),
+    pa.field("value", pa.float64()),
+    pa.field("margin", pa.int32()),
+    pa.field("player", pa.int8()),
+    pa.field("game_id", pa.int64()),
+    pa.field("ply", pa.int32()),
+    pa.field("action", pa.int32()),
+    pa.field("top_action", pa.int32()),
+]
+
+
+@dataclass(frozen=True)
+class GameShardGameMeta:
+    """One game's provenance in a shard footer — enough to rebuild the playout registry."""
+
+    game_id: int
+    node_id: int
+    board_key: str  # hex of the start node's key
+    replica: int
+    engine_seed: int
+    witness_actions: tuple[int, ...]
+    white_score: int
+    black_score: int
+    plies: int
+
+    @property
+    def white_margin(self) -> int:
+        return self.white_score - self.black_score
+
+
+@dataclass(frozen=True)
+class GameShardMeta:
+    """A games shard's footer, decoded."""
+
+    level: int
+    policy_size: int
+    board_shape: tuple[int, ...]
+    board_dtype: str
+    dag_hash: str
+    plan_id: int | None
+    budget: int | None
+    temperature: float | None
+    min_replicas: int | None
+    game_sizes: tuple[int, ...]
+    games: tuple[GameShardGameMeta, ...]
+
+
+def game_shard_filename(index: int) -> str:
+    """Canonical games-shard filename (unchanged from v1, so tooling keeps working)."""
+    return f"corpus_{index:05d}.parquet"
+
+
+def game_shards(directory: Path) -> list[Path]:
+    """All final (non-``.tmp``) games shards in ``directory``, sorted by index."""
+    return sorted(directory.glob("corpus_*.parquet"))
+
+
+def write_game_shard(path: Path, games: Sequence[HarvestedGame], *, meta: GameShardMeta) -> int:
+    """Write one games shard atomically; returns rows written.
+
+    Rows are one per harvested ply, games laid out back to back in play order (the
+    footer's ``game_sizes`` is the cursor), matching v1 so the grouping walk in the
+    dataloader is unchanged.
+    """
+    metadata = {
+        "dataset_kind": DATASET_KIND,
+        "board_kind": BOARD_KIND,
+        "board_shape": ",".join(str(d) for d in meta.board_shape),
+        "board_dtype": meta.board_dtype,
+        "policy_kind": POLICY_KIND,
+        "policy_size": str(meta.policy_size),
+        "level": str(meta.level),
+        "dag_hash": meta.dag_hash,
+        "plan": json.dumps(
+            {
+                "plan_id": meta.plan_id,
+                "budget": meta.budget,
+                "temperature": meta.temperature,
+                "min_replicas": meta.min_replicas,
+            },
+        ),
+        "game_sizes": ",".join(str(len(g.plies)) for g in games),
+        "games_meta": json.dumps(
+            [
+                {
+                    "game_id": g.game_id,
+                    "node_id": g.node_id,
+                    "board_key": g.board_key.hex(),
+                    "replica": g.replica,
+                    "engine_seed": g.engine_seed,
+                    "witness_actions": list(g.witness_actions),
+                    "white_score": g.white_score,
+                    "black_score": g.black_score,
+                    "plies": len(g.plies),
+                }
+                for g in games
+            ],
+        ),
+    }
+    schema = pa.schema(_GAME_SCHEMA_FIELDS, metadata={k.encode(): v.encode() for k, v in metadata.items()})
+    columns: dict[str, list[object]] = {name: [] for name in schema.names}
+    for harvested in games:
+        winner = int(np.sign(harvested.white_margin))
+        for ply in harvested.plies:
+            columns["board"].append(ply.compact_board.tobytes())
+            columns["policy_indices"].append(ply.target.indices.astype(np.int32).tobytes())
+            columns["policy_values"].append(ply.target.values.astype(np.float32).tobytes())
+            columns["child_values"].append(ply.target.child_values.astype(np.float32).tobytes())
+            columns["tail_mass"].append(ply.target.tail_mass)
+            columns["search_value"].append(ply.search_value)
+            columns["value"].append(float(winner * ply.player))
+            columns["margin"].append(harvested.white_margin * ply.player)
+            columns["player"].append(ply.player)
+            columns["game_id"].append(harvested.game_id)
+            columns["ply"].append(ply.ply)
+            columns["action"].append(ply.action)
+            columns["top_action"].append(ply.top_action)
+    table = pa.Table.from_pydict(columns, schema=schema)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    pq.write_table(table, tmp)
+    tmp.rename(path)
+    return table.num_rows
+
+
+def read_game_shard_meta(path: Path) -> GameShardMeta:
+    """Decode a games shard's footer (reads only the parquet footer)."""
+    raw = pq.read_schema(path).metadata or {}
+    meta = {k.decode(): v.decode() for k, v in raw.items()}
+    if meta.get("dataset_kind") != DATASET_KIND:
+        raise CorpusSchemaError(f"{path.name}: dataset_kind={meta.get('dataset_kind')!r}, expected {DATASET_KIND!r}")
+    plan = json.loads(meta.get("plan", "{}"))
+    sizes = meta["game_sizes"]
+    return GameShardMeta(
+        level=int(meta["level"]),
+        policy_size=int(meta["policy_size"]),
+        board_shape=tuple(int(d) for d in meta["board_shape"].split(",")),
+        board_dtype=meta["board_dtype"],
+        dag_hash=meta["dag_hash"],
+        plan_id=plan.get("plan_id"),
+        budget=plan.get("budget"),
+        temperature=plan.get("temperature"),
+        min_replicas=plan.get("min_replicas"),
+        game_sizes=tuple(int(s) for s in sizes.split(",")) if sizes else (),
+        games=tuple(
+            GameShardGameMeta(
+                game_id=int(g["game_id"]),
+                node_id=int(g["node_id"]),
+                board_key=str(g["board_key"]),
+                replica=int(g["replica"]),
+                engine_seed=int(g["engine_seed"]),
+                witness_actions=tuple(int(a) for a in g["witness_actions"]),
+                white_score=int(g["white_score"]),
+                black_score=int(g["black_score"]),
+                plies=int(g["plies"]),
+            )
+            for g in json.loads(meta["games_meta"])
+        ),
+    )
+
+
+def iter_game_examples(paths: Sequence[Path], *, temperature: float = 1.0) -> Iterator[CorpusExample]:
+    """Stream ``(board, (indices, values), value)`` training tuples from games shards."""
+    for path in paths:
+        meta = read_game_shard_meta(path)
+        parquet_file = pq.ParquetFile(path)
+        columns = ["board", "policy_indices", "policy_values", "value"]
+        for batch in parquet_file.iter_batches(columns=columns):
+            for board_bytes, indices_bytes, values_bytes, value in zip(
+                *(batch.column(name).to_pylist() for name in columns),
+                strict=True,
+            ):
+                board = np.frombuffer(board_bytes, dtype=np.dtype(meta.board_dtype)).reshape(meta.board_shape).copy()
+                indices = np.frombuffer(indices_bytes, dtype=np.int32).copy()
+                values = apply_target_temperature(np.frombuffer(values_bytes, dtype=np.float32), temperature)
+                yield board, (indices, values), float(value)
+
+
+def iter_shard_playouts(directory: Path) -> Iterator[ReconcileEntry]:
+    """Every game a shard directory holds, as store reconciliation entries (footers only).
+
+    Shards are self-describing, so the playouts table can be rebuilt or verified from
+    them alone — the crash repair for a run that died between a shard rename and its DB
+    transaction.
+    """
+    from alphablokus.games.blokusduo.pentobi.store import ReconcileEntry as Entry
+
+    for path in game_shards(directory):
+        meta = read_game_shard_meta(path)
+        for game in meta.games:
+            yield Entry(
+                board_key=bytes.fromhex(game.board_key),
+                replica=game.replica,
+                game_id=game.game_id,
+                shard=path.name,
+                white_margin=game.white_margin,
+                plies=game.plies,
+            )
+
+
+# --------------------------------------------------------------------------- #
+# Validation
+# --------------------------------------------------------------------------- #
+
+
+def validate_game_shard(path: Path, game: BlokusDuoGame) -> int:
+    """Replay every game in a shard through the rules engine and check every row.
+
+    v1's replay is unchanged; what changed is the policy assertion. Instead of "the
+    target is the one-hot of the played move" the checks are: the target sums to 1, its
+    support is a **subset** of the position's legal moves (never equality — Pentobi
+    searches 315 of 414 first moves), the played action is in the support, and
+    ``top_action`` is the target's argmax. Boards, side-to-move, outcome, margin and the
+    terminal scores are checked exactly as in v1.
+
+    Returns the number of positions checked; raises on any mismatch.
+    """
+    meta = read_game_shard_meta(path)
+    table = pq.read_table(path)
+    rows = {name: table.column(name).to_pylist() for name in table.column_names}
+    cursor = 0
+    checked = 0
+    for game_meta, size in zip(meta.games, meta.game_sizes, strict=True):
+        context = f"game {game_meta.game_id}"
+        board = game.initialise_board()
+        player = 1
+        for action in game_meta.witness_actions:
+            _require(bool(game.valid_move_masking(board, player)[action]), path, context, "illegal witness")
+            board, player = game.get_next_state(board, player, action)
+        white_margin = game_meta.white_margin
+        for index in range(cursor, cursor + size):
+            action = int(rows["action"][index])
+            label = f"row {index}"
+            _require(int(rows["player"][index]) == player, path, context, f"{label}: wrong side-to-move")
+            mask = game.valid_move_masking(board, player)
+            _require(bool(mask[action]), path, context, f"{label}: illegal action")
+            expected = np.asarray(game.get_canonical_form(board, player).to_compact(), dtype=np.int8)
+            _require(rows["board"][index] == expected.tobytes(), path, context, f"{label}: board mismatch")
+            indices = np.frombuffer(rows["policy_indices"][index], dtype=np.int32)
+            values = np.frombuffer(rows["policy_values"][index], dtype=np.float32)
+            _require(
+                abs(float(values.sum()) - 1.0) <= 1e-5,
+                path,
+                context,
+                f"{label}: policy does not sum to 1",
+            )
+            legal = set(np.flatnonzero(mask).tolist())
+            _require(set(indices.tolist()) <= legal, path, context, f"{label}: support is not within legal")
+            _require(action in set(indices.tolist()), path, context, f"{label}: action outside the support")
+            _require(
+                int(rows["top_action"][index]) == int(indices[int(np.argmax(values))]),
+                path,
+                context,
+                f"{label}: top_action is not the target's argmax",
+            )
+            _require(
+                int(rows["margin"][index]) == white_margin * player,
+                path,
+                context,
+                f"{label}: margin mismatch",
+            )
+            _require(
+                float(rows["value"][index]) == float(np.sign(white_margin) * player),
+                path,
+                context,
+                f"{label}: value mismatch",
+            )
+            board, player = game.get_next_state(board, player, action)
+            checked += 1
+        cursor += size
+        _require(game.get_game_ended(board, player) != 0, path, context, "replayed game is not terminal")
+        _require(
+            game.final_scores(board) == (game_meta.white_score, game_meta.black_score),
+            path,
+            context,
+            "final scores do not match stored labels",
+        )
+    return checked
+
+
+def validate_opening_shard(path: Path, game: BlokusDuoGame, store: SearchSpaceStore | None = None) -> int:
+    """Check every opening row: real position, legal support, consistent depth.
+
+    Opening rows carry no move sequence of their own (the DAG has no unique one), so the
+    parquet-only checks are structural: the stored board rebuilds into a real position
+    whose legal set contains the whole target support, the target sums to 1, and ``depth``
+    equals the number of pieces on the board. Pass the ``store`` to also replay each
+    node's **witness path** and confirm it lands on exactly the stored key-frame board —
+    the full check the v2 plan asks for.
+    """
+    meta = read_opening_meta(path)
+    table = pq.read_table(path)
+    rows = {name: table.column(name).to_pylist() for name in table.column_names}
+    for index in range(table.num_rows):
+        node_id = int(rows["node_id"][index])
+        compact = np.frombuffer(rows["board"][index], dtype=np.dtype(meta.board_dtype)).reshape(meta.board_shape)
+        indices = np.frombuffer(rows["policy_indices"][index], dtype=np.int32)
+        values = np.frombuffer(rows["policy_values"][index], dtype=np.float32)
+        label = f"node {node_id}"
+        _require(abs(float(values.sum()) - 1.0) <= 1e-5, path, label, "policy does not sum to 1")
+        _require(len(indices) == len(values), path, label, "policy indices/values are misaligned")
+        legal = set(np.flatnonzero(game.valid_move_masking(game.board_from_compact(compact), 1)).tolist())
+        _require(set(indices.tolist()) <= legal, path, label, "support is not within legal")
+        placed = int(np.unique(compact[compact > 0]).size + np.unique(compact[compact < 0]).size)
+        _require(int(rows["depth"][index]) == placed, path, label, "depth is not the pieces placed")
+        if store is not None:
+            record = store.node(node_id)
+            board, player = store.board_at(node_id)
+            witness = np.asarray(game.get_canonical_form(board, player).to_compact(), dtype=np.int8)
+            expected = np.ascontiguousarray(witness.T) if record.key_frame else witness
+            _require(expected.tobytes() == compact.tobytes(), path, label, "witness replay mismatch")
+    return table.num_rows
+
+
+def _require(condition: bool, path: Path, context: str, message: str) -> None:
+    """Raise a uniform validation error when ``condition`` fails."""
+    if not condition:
+        raise CorpusSchemaError(f"{path.name} {context}: {message}")
 
 
 def apply_target_temperature(values: NDArray[np.float32], temperature: float) -> NDArray[np.float32]:
