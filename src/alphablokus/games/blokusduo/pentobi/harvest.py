@@ -264,6 +264,7 @@ def map_plan(
     for round_index in range(max_rounds):
         draft = store.compute_plan(params)
         if not draft.mapping_queue:
+            searched += _search_book_positions(store, source)
             logger.info(
                 "Plan mapped in {} rounds: {} nodes searched, {} openings, {} games planned",
                 round_index,
@@ -282,6 +283,32 @@ def map_plan(
             search_node(store, source, node_id)
             searched += 1
     raise CorpusGenerationError(f"plan mapping did not converge in {max_rounds} rounds")
+
+
+def _search_book_positions(store: SearchSpaceStore, source: ISearchSource) -> int:
+    """Search every position along a book line that the allocation did not reach.
+
+    The allocator searches a node only when it needs that node's move list in order to
+    divide games between its children. Book lines are inserted whole and handed a fixed
+    number of games at their end, so nothing along them ever needs dividing — and a
+    position nobody searched carries no target, so it produces no training data at all.
+
+    That silently discards the most valuable positions available to us: the book is the
+    Pentobi author's hand-curated set of strongest openings, and learning openings is the
+    entire point of v2. So once the plan has converged, search whatever the book
+    contributed and the allocation missed — a few dozen extra searches against a run
+    measured in days.
+
+    Returns:
+        The number of positions searched.
+    """
+    pending = [record for record in store.nodes(status="pending") if record.source == "book"]
+    if not pending:
+        return 0
+    logger.info("Searching {} book-line positions the allocation did not need", len(pending))
+    for record in pending:
+        search_node(store, source, record.node_id)
+    return len(pending)
 
 
 # --------------------------------------------------------------------------- #
