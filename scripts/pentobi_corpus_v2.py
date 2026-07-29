@@ -151,6 +151,25 @@ def plan(args: argparse.Namespace) -> None:
         for round_index in range(args.max_rounds):
             draft = store.compute_plan(params)
             if not draft.mapping_queue:
+                # Positions the *book* contributed are never in the mapping queue: the
+                # allocator only queues a node when it needs that node's move list to
+                # divide games between its children, and a book line is handed a fixed
+                # number of games at its end. An unsearched position carries no target,
+                # so without this the book's hand-curated openings — the most valuable
+                # positions we have — would produce no training data at all.
+                book_pending = [record for record in store.nodes(status="pending") if record.source == "book"]
+                if book_pending:
+                    logger.info("Searching {} book-line positions the allocation did not need", len(book_pending))
+                    _run_searches(
+                        store,
+                        [
+                            (record.node_id, list(record.witness_actions), int(record.engine_seed or 0))
+                            for record in book_pending
+                        ],
+                        args,
+                    )
+                    searched += len(book_pending)
+                    continue  # re-plan: the new move lists may let the allocator split further
                 plan_id = store.save_plan(draft)
                 logger.info(
                     "Plan {} saved: {} openings, {} games, {} searches in {:.1f} min (B={}, T={}, R={})",
