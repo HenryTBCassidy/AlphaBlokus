@@ -42,7 +42,7 @@ from alphablokus.games.blokusduo.pentobi.store import (
 from alphablokus.games.blokusduo.pentobi.translation import PASS, PentobiMoveTranslator
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
     from pathlib import Path
 
     from numpy.typing import NDArray
@@ -244,71 +244,86 @@ def search_node(store: SearchSpaceStore, source: ISearchSource, node_id: int) ->
 
 def map_plan(
     store: SearchSpaceStore,
-    source: ISearchSource,
     params: PlanParameters,
+    search_nodes: Callable[[Sequence[int]], None],
     *,
     max_rounds: int = _MAX_MAPPING_ROUNDS,
 ) -> PlanDraft:
     """Compute the plan, search what it needs, repeat until nothing is missing.
 
-    This is phase A. Each round deepens the plan by one level: the allocator hands back
-    the nodes it wants to split but cannot (they are unsearched), we search exactly
-    those, and recompute. The result is a plan with **zero mapping debt** — every node it
-    allocates games to is either searched or a deliberate playout start.
+    This is phase A, and it is **the** implementation — the CLI drives it too, passing a
+    worker-pool ``search_nodes`` where the tests pass a serial one. (It previously had a
+    second copy inside ``scripts/pentobi_corpus_v2.py``; the copies drifted, and a fix to
+    one silently did not apply to the run that actually generates corpora.)
 
-    Mapping is cheap relative to the games it directs (the measured stage-1 shape is
-    ~1,600 searches ≈ 1 box-hour against ~58 box-hours of games), so there is no
-    tree-vs-games budget tension to manage here.
+    Each round deepens the plan by one level: the allocator hands back the nodes it wants
+    to split but cannot (they are unsearched), we search exactly those, and recompute. The
+    result is a plan with **zero mapping debt** — every node it allocates games to is
+    either searched or a deliberate playout start.
+
+    Once the allocation converges, any position the **book** contributed and the
+    allocation never needed is searched too. The allocator only ever queues a node whose
+    move list it needs in order to divide games between children, and a book line is
+    handed a fixed number of games at its end — so without this pass the book's
+    hand-curated openings, the most valuable positions available to us, would carry no
+    target and produce no training data at all.
+
+    Args:
+        store: The search-space store to plan against and record into.
+        params: ``(budget, temperature, min_replicas)``.
+        search_nodes: Searches every node id it is given and records the results into
+            ``store``. Serial in tests, a process pool in the CLI.
+        max_rounds: Safety bound; only ever hit by a bug.
+
+    Returns:
+        The converged plan draft (unsaved — the caller decides whether to activate it).
     """
     searched = 0
     for round_index in range(max_rounds):
         draft = store.compute_plan(params)
-        if not draft.mapping_queue:
-            searched += _search_book_positions(store, source)
+        if draft.mapping_queue:
             logger.info(
-                "Plan mapped in {} rounds: {} nodes searched, {} openings, {} games planned",
+                "Mapping round {}: searching {} nodes ({} allocated so far)",
                 round_index,
-                searched,
-                len(draft.starts),
-                draft.planned_games,
+                len(draft.mapping_queue),
+                len(draft.allocations),
             )
-            return draft
+            search_nodes(draft.mapping_queue)
+            searched += len(draft.mapping_queue)
+            continue
+
+        book_pending = [record.node_id for record in store.nodes(status="pending") if record.source == "book"]
+        if book_pending:
+            logger.info("Searching {} book-line positions the allocation did not need", len(book_pending))
+            search_nodes(book_pending)
+            searched += len(book_pending)
+            continue  # re-plan: the new move lists may let the allocator split further
+
         logger.info(
-            "Mapping round {}: searching {} nodes ({} allocated so far)",
+            "Plan mapped in {} rounds: {} nodes searched, {} openings, {} games planned",
             round_index,
-            len(draft.mapping_queue),
-            len(draft.allocations),
+            searched,
+            len(draft.starts),
+            draft.planned_games,
         )
-        for node_id in draft.mapping_queue:
-            search_node(store, source, node_id)
-            searched += 1
+        return draft
     raise CorpusGenerationError(f"plan mapping did not converge in {max_rounds} rounds")
 
 
-def _search_book_positions(store: SearchSpaceStore, source: ISearchSource) -> int:
-    """Search every position along a book line that the allocation did not reach.
+def map_plan_serially(
+    store: SearchSpaceStore,
+    source: ISearchSource,
+    params: PlanParameters,
+    *,
+    max_rounds: int = _MAX_MAPPING_ROUNDS,
+) -> PlanDraft:
+    """:func:`map_plan` driven by one in-process source — the engine-free test path."""
 
-    The allocator searches a node only when it needs that node's move list in order to
-    divide games between its children. Book lines are inserted whole and handed a fixed
-    number of games at their end, so nothing along them ever needs dividing — and a
-    position nobody searched carries no target, so it produces no training data at all.
+    def search_nodes(node_ids: Sequence[int]) -> None:
+        for node_id in node_ids:
+            search_node(store, source, node_id)
 
-    That silently discards the most valuable positions available to us: the book is the
-    Pentobi author's hand-curated set of strongest openings, and learning openings is the
-    entire point of v2. So once the plan has converged, search whatever the book
-    contributed and the allocation missed — a few dozen extra searches against a run
-    measured in days.
-
-    Returns:
-        The number of positions searched.
-    """
-    pending = [record for record in store.nodes(status="pending") if record.source == "book"]
-    if not pending:
-        return 0
-    logger.info("Searching {} book-line positions the allocation did not need", len(pending))
-    for record in pending:
-        search_node(store, source, record.node_id)
-    return len(pending)
+    return map_plan(store, params, search_nodes, max_rounds=max_rounds)
 
 
 # --------------------------------------------------------------------------- #

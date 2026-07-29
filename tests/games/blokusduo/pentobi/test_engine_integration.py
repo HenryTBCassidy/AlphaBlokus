@@ -28,7 +28,7 @@ from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.pentobi.gtp import find_pentobi_gtp
 from alphablokus.games.blokusduo.pentobi.harvest import (
     PentobiSearchSource,
-    map_plan,
+    map_plan_serially,
     play_planned_game,
 )
 from alphablokus.games.blokusduo.pentobi.store import (
@@ -123,7 +123,7 @@ def test_a_planned_run_maps_and_generates_end_to_end(game: BlokusDuoGame, tmp_pa
     """
     with SearchSpaceStore(tmp_path / "store.sqlite", game, level=_LEVEL) as store:
         with PentobiSearchSource(game, _LEVEL) as source:
-            draft = map_plan(store, source, PlanParameters(budget=8, temperature=2.0, min_replicas=2))
+            draft = map_plan_serially(store, source, PlanParameters(budget=8, temperature=2.0, min_replicas=2))
             store.save_plan(draft)
             assert draft.mapping_queue == ()
             assert draft.planned_games == 8

@@ -18,7 +18,7 @@ from alphablokus.games.blokusduo.pentobi.gtp import GtpError
 from alphablokus.games.blokusduo.pentobi.harvest import (
     RandomSearchSource,
     SearchResult,
-    map_plan,
+    map_plan_serially,
     play_planned_game,
     read_book_lines,
     search_node,
@@ -104,7 +104,7 @@ def test_search_node_records_the_position_it_replayed(
 def test_map_plan_leaves_no_mapping_debt(store: SearchSpaceStore, game: BlokusDuoGame) -> None:
     """Phase A's contract: every node the plan allocates games to is searched or a start."""
     params = PlanParameters(budget=200, temperature=2.0, min_replicas=2)
-    draft = map_plan(store, RandomSearchSource(game, breadth=4), params)
+    draft = map_plan_serially(store, RandomSearchSource(game, breadth=4), params)
     assert draft.mapping_queue == ()
     assert draft.planned_games == 200
     store.save_plan(draft)
@@ -117,11 +117,11 @@ def test_map_plan_leaves_no_mapping_debt(store: SearchSpaceStore, game: BlokusDu
 def test_map_plan_is_incremental_across_budgets(store: SearchSpaceStore, game: BlokusDuoGame) -> None:
     """A top-up re-plans and maps only the newly needed nodes — nothing is re-searched."""
     source = RandomSearchSource(game, breadth=4)
-    map_plan(store, source, PlanParameters(budget=200, temperature=2.0, min_replicas=2))
+    map_plan_serially(store, source, PlanParameters(budget=200, temperature=2.0, min_replicas=2))
     searched_before = {record.node_id for record in store.nodes(status="searched")}
     stamps_before = {record.node_id: record.searched_at for record in store.nodes(status="searched")}
 
-    draft = map_plan(store, source, PlanParameters(budget=800, temperature=2.0, min_replicas=2))
+    draft = map_plan_serially(store, source, PlanParameters(budget=800, temperature=2.0, min_replicas=2))
     assert draft.mapping_queue == ()
     searched_after = {record.node_id for record in store.nodes(status="searched")}
     assert searched_before <= searched_after
@@ -133,7 +133,7 @@ def test_map_plan_is_incremental_across_budgets(store: SearchSpaceStore, game: B
 def test_map_plan_raises_rather_than_looping_forever(store: SearchSpaceStore, game: BlokusDuoGame) -> None:
     """A mapping loop that will not converge is a bug, and must say so."""
     with pytest.raises(CorpusGenerationError, match="did not converge"):
-        map_plan(store, RandomSearchSource(game, breadth=4), PlanParameters(10_000, 2.0, 2), max_rounds=1)
+        map_plan_serially(store, RandomSearchSource(game, breadth=4), PlanParameters(10_000, 2.0, 2), max_rounds=1)
 
 
 # --------------------------------------------------------------------------- #
@@ -173,7 +173,7 @@ def test_book_lines_enter_the_dag_with_a_games_floor(
     assert all(store.node(node_id).source == "book" for node_id in terminals)
 
     params = PlanParameters(budget=300, temperature=2.0, min_replicas=2)
-    draft = map_plan(store, RandomSearchSource(game, breadth=4), params)
+    draft = map_plan_serially(store, RandomSearchSource(game, breadth=4), params)
     planned = {a.node_id: a.planned_games for a in draft.allocations}
     assert all(planned[node_id] >= params.min_replicas for node_id in terminals)
     assert draft.planned_games == 300

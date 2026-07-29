@@ -33,7 +33,7 @@ from alphablokus.games.blokusduo.pentobi.distill import (
     soft_target_over_legal,
     split_opening_units,
 )
-from alphablokus.games.blokusduo.pentobi.harvest import RandomSearchSource, map_plan, play_planned_game
+from alphablokus.games.blokusduo.pentobi.harvest import RandomSearchSource, map_plan_serially, play_planned_game
 from alphablokus.games.blokusduo.pentobi.store import PlanParameters, SearchSpaceStore, canonical_key
 from alphablokus.games.blokusduo.pieces import default_pieces_path
 from alphablokus.storage.sparse_policy import densify
@@ -57,7 +57,7 @@ def corpus(game: BlokusDuoGame, tmp_path_factory: pytest.TempPathFactory) -> Pat
     (directory / "games").mkdir()
     with SearchSpaceStore(directory / "store.sqlite", game, level=9) as store:
         source = RandomSearchSource(game, breadth=5)
-        store.save_plan(map_plan(store, source, PlanParameters(120, 2.0, 2)))
+        store.save_plan(map_plan_serially(store, source, PlanParameters(120, 2.0, 2)))
         played = [play_planned_game(game, source, job, top_k=8) for job in store.schedule(8)]
         plan = store.active_plan()
         assert plan is not None

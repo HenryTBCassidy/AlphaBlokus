@@ -35,7 +35,7 @@ from alphablokus.games.blokusduo.pentobi.distill import build_training_examples,
 from alphablokus.games.blokusduo.pentobi.harvest import (
     HarvestedGame,
     RandomSearchSource,
-    map_plan,
+    map_plan_serially,
     play_planned_game,
 )
 from alphablokus.games.blokusduo.pentobi.store import (
@@ -71,7 +71,7 @@ def _generate(
 ) -> list[HarvestedGame]:
     """Run the real phase A + phase B loop with the engine-free source."""
     source = RandomSearchSource(game, breadth=5)
-    store.save_plan(map_plan(store, source, PlanParameters(budget, 2.0, 2)))
+    store.save_plan(map_plan_serially(store, source, PlanParameters(budget, 2.0, 2)))
     return [play_planned_game(game, source, job, top_k=8) for job in store.schedule(games)]
 
 
@@ -161,7 +161,7 @@ def test_a_lying_engine_margin_is_caught(store: SearchSpaceStore, game: BlokusDu
             return 999
 
     source = LyingSource(game, breadth=4)
-    store.save_plan(map_plan(store, source, PlanParameters(60, 2.0, 2)))
+    store.save_plan(map_plan_serially(store, source, PlanParameters(60, 2.0, 2)))
     with pytest.raises(CorpusGenerationError, match="margin"):
         play_planned_game(game, source, store.schedule(1)[0])
 
@@ -174,7 +174,7 @@ def test_a_witness_path_that_does_not_reach_its_node_is_caught(
     import dataclasses
 
     source = RandomSearchSource(game, breadth=4)
-    store.save_plan(map_plan(store, source, PlanParameters(60, 2.0, 2)))
+    store.save_plan(map_plan_serially(store, source, PlanParameters(60, 2.0, 2)))
     job = store.schedule(1)[0]
     tampered = dataclasses.replace(job, board_key=b"\x7f" * 196)
     with pytest.raises(CorpusGenerationError, match="start node"):

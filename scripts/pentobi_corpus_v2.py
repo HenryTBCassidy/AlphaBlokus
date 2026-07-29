@@ -49,12 +49,15 @@ import argparse
 import json
 import multiprocessing as mp
 import time
+from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 from loguru import logger
 
 from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.pentobi.corpus import CorpusGenerationError
 from alphablokus.games.blokusduo.pentobi.corpus_v2 import (
     GameShardMeta,
     analyze_corpus,
@@ -70,6 +73,7 @@ from alphablokus.games.blokusduo.pentobi.corpus_v2 import (
 from alphablokus.games.blokusduo.pentobi.gtp import find_pentobi_gtp
 from alphablokus.games.blokusduo.pentobi.harvest import (
     PentobiSearchSource,
+    map_plan,
     play_planned_game,
     read_book_lines,
     replay_witness,
@@ -82,6 +86,9 @@ from alphablokus.games.blokusduo.pentobi.store import (
     StoreError,
 )
 from alphablokus.games.blokusduo.pieces import default_pieces_path
+
+if TYPE_CHECKING:
+    from collections.abc import Sequence
 
 #: Layout inside a corpus directory.
 STORE_FILENAME = "store.sqlite"
@@ -147,51 +154,37 @@ def plan(args: argparse.Namespace) -> None:
             terminals = store.insert_book_paths(lines)
             logger.info("Inserted {} book lines ({} terminal nodes) with a games floor.", len(lines), len(terminals))
         started = time.perf_counter()
-        searched = 0
-        for round_index in range(args.max_rounds):
-            draft = store.compute_plan(params)
-            if not draft.mapping_queue:
-                # Positions the *book* contributed are never in the mapping queue: the
-                # allocator only queues a node when it needs that node's move list to
-                # divide games between its children, and a book line is handed a fixed
-                # number of games at its end. An unsearched position carries no target,
-                # so without this the book's hand-curated openings — the most valuable
-                # positions we have — would produce no training data at all.
-                book_pending = [record for record in store.nodes(status="pending") if record.source == "book"]
-                if book_pending:
-                    logger.info("Searching {} book-line positions the allocation did not need", len(book_pending))
-                    _run_searches(
-                        store,
-                        [
-                            (record.node_id, list(record.witness_actions), int(record.engine_seed or 0))
-                            for record in book_pending
-                        ],
-                        args,
-                    )
-                    searched += len(book_pending)
-                    continue  # re-plan: the new move lists may let the allocator split further
-                plan_id = store.save_plan(draft)
-                logger.info(
-                    "Plan {} saved: {} openings, {} games, {} searches in {:.1f} min (B={}, T={}, R={})",
-                    plan_id,
-                    len(draft.starts),
-                    draft.planned_games,
-                    searched,
-                    (time.perf_counter() - started) / 60,
-                    params.budget,
-                    params.temperature,
-                    params.min_replicas,
-                )
-                _log_coverage(store)
-                return
-            requests = [
-                (node_id, list(store.node(node_id).witness_actions), int(store.node(node_id).engine_seed or 0))
-                for node_id in draft.mapping_queue
-            ]
-            logger.info("Mapping round {}: {} positions to search", round_index, len(requests))
-            _run_searches(store, requests, args)
-            searched += len(requests)
-        raise SystemExit(f"plan mapping did not converge in {args.max_rounds} rounds")
+
+        def search_nodes(node_ids: Sequence[int]) -> None:
+            """Fan one mapping round out over the worker pool."""
+            _run_searches(
+                store,
+                [
+                    (node_id, list(store.node(node_id).witness_actions), int(store.node(node_id).engine_seed or 0))
+                    for node_id in node_ids
+                ],
+                args,
+            )
+
+        # The mapping loop itself lives in the library, so the code that generates real
+        # corpora and the code the tests exercise are the same code — only the way
+        # searches are dispatched differs (a process pool here, in-process there).
+        try:
+            draft = map_plan(store, params, search_nodes, max_rounds=args.max_rounds)
+        except CorpusGenerationError as error:
+            raise SystemExit(str(error)) from error
+        plan_id = store.save_plan(draft)
+        logger.info(
+            "Plan {} saved: {} openings, {} games in {:.1f} min (B={}, T={}, R={})",
+            plan_id,
+            len(draft.starts),
+            draft.planned_games,
+            (time.perf_counter() - started) / 60,
+            params.budget,
+            params.temperature,
+            params.min_replicas,
+        )
+        _log_coverage(store)
     finally:
         store.close()
 
