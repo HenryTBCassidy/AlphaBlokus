@@ -26,6 +26,7 @@ from alphablokus.games.blokusduo.pentobi.distill import (
     build_training_examples,
     load_corpus_games_v2,
     load_opening_examples,
+    measure_holdout_leakage,
     mix_examples,
     opening_unit_for,
     partition_by_unit,
@@ -369,3 +370,73 @@ def test_a_childless_searched_node_is_not_exported(store: SearchSpaceStore, game
     store.record_search(root, [], validate=False)
     assert store.node(root).is_searched
     assert list(store.iter_opening_rows()) == []
+
+
+# --------------------------------------------------------------------------- #
+# Holdout leakage (V9's duplicate-position metric)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_clean_split_reports_no_leakage() -> None:
+    """Disjoint positions must report zero, and not divide by zero on an empty side."""
+    train = [np.full((4, 4), index, dtype=np.int8) for index in range(1, 6)]
+    holdout = [np.full((4, 4), index, dtype=np.int8) for index in range(6, 9)]
+    report = measure_holdout_leakage(train, holdout)
+    assert report.train_rows == 5
+    assert report.holdout_rows == 3
+    assert report.shared_positions == 0
+    assert report.leaked_fraction == 0.0
+    assert report.leaked_fraction_mirror == 0.0
+
+    empty = measure_holdout_leakage(train, [])
+    assert empty.holdout_rows == 0
+    assert empty.leaked_fraction == 0.0  # not a ZeroDivisionError
+
+
+def test_a_position_on_both_sides_is_counted_once_per_row() -> None:
+    """Distinct shared *positions* and leaked *rows* are different numbers, and both matter."""
+    shared = np.array([[1, 0], [0, 2]], dtype=np.int8)
+    other = np.array([[3, 5], [0, 4]], dtype=np.int8)  # deliberately NOT symmetric
+    report = measure_holdout_leakage([shared, other], [shared, shared, np.ascontiguousarray(other.T)])
+    assert report.shared_positions == 1
+    assert report.leaked_rows == 2  # the shared board appears in two held-out rows
+    assert report.leaked_fraction == pytest.approx(2 / 3)
+    # ...and the third row is the mirror of a training position, so it leaks too.
+    assert report.leaked_rows_mirror == 3
+
+
+def test_a_mirrored_position_leaks_even_though_the_bytes_differ() -> None:
+    """Training augments with the diagonal twin, so a mirror in training is a leak.
+
+    An exact-bytes comparison misses this entirely: the two boards are genuinely different
+    arrays, and yet the model will have been trained on one of them by augmentation and
+    then tested on the other.
+    """
+    board = np.array([[1, 2], [0, 0]], dtype=np.int8)
+    mirror = np.ascontiguousarray(board.T)
+    assert board.tobytes() != mirror.tobytes()
+
+    report = measure_holdout_leakage([board], [mirror])
+    assert report.shared_positions == 0  # nothing matches byte for byte...
+    assert report.leaked_rows == 0
+    assert report.shared_positions_mirror == 1  # ...but it has leaked all the same
+    assert report.leaked_rows_mirror == 1
+    assert report.leaked_fraction_mirror == 1.0
+
+
+def test_leakage_is_measurable_on_a_real_subtree_split(corpus: Path, game: BlokusDuoGame) -> None:
+    """End to end on a real v2 corpus: split by opening subtree, then measure it."""
+    games = load_corpus_games_v2(game_shards(corpus / "games"), game)
+    units = [rows.opening_unit for rows in games]
+    holdout_units = split_opening_units(units, [float(len(rows)) for rows in games], 0.34, seed=3)
+    train, holdout = partition_by_unit(games, holdout_units)
+    assert train and holdout, "fixture did not produce a two-sided split"
+
+    report = measure_holdout_leakage(
+        [board for rows in train for board in rows.boards],
+        [board for rows in holdout for board in rows.boards],
+    )
+    assert report.train_rows == sum(len(rows) for rows in train)
+    assert report.holdout_rows == sum(len(rows) for rows in holdout)
+    assert 0.0 <= report.leaked_fraction <= report.leaked_fraction_mirror <= 1.0
+    assert set(report.to_dict()) >= {"leaked_fraction", "leaked_fraction_mirror", "shared_positions"}

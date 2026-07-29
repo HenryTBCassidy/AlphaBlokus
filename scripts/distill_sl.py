@@ -68,6 +68,7 @@ from alphablokus.games.blokusduo.pentobi.distill import (
     load_corpus_games,
     load_corpus_games_v2,
     load_opening_examples,
+    measure_holdout_leakage,
     mix_examples,
     partition_by_unit,
     sample_games,
@@ -410,6 +411,29 @@ def main() -> None:
     )
     holdout_actions: list[int] = _flatten(holdout_games, "actions")
     holdout_players: list[int] = _flatten(holdout_games, "players")
+
+    # How much of the exam has the model already seen? Splitting by opening subtree keeps
+    # whole lines apart but cannot keep whole positions apart — two openings can transpose
+    # into the same board — so measure it rather than assume. Reported, never enforced:
+    # the number qualifies the held-out score that feeds the ladder gate.
+    leakage = measure_holdout_leakage(
+        (board for rows in train_games for board in rows.boards),
+        (board for rows in holdout_games for board in rows.boards),
+    )
+    logger.info(
+        "Holdout leakage: {}/{} held-out rows share a position with training ({:.3%}); "
+        "{:.3%} counting mirrors; {} distinct positions on both sides",
+        leakage.leaked_rows,
+        leakage.holdout_rows,
+        leakage.leaked_fraction,
+        leakage.leaked_fraction_mirror,
+        leakage.shared_positions,
+    )
+    if leakage.leaked_fraction_mirror > 0.01:
+        logger.warning(
+            "More than 1% of the held-out set is also in training — the held-out score is "
+            "flattered by that much, and the gate verdict should be read accordingly",
+        )
     logger.info(
         "Corpus: {} games from {} shards → train {} games ({} examples, augment={}) / holdout {} games ({} positions)",
         len(games),
@@ -451,6 +475,7 @@ def main() -> None:
         "seed": args.seed,
         "lr": args.lr,
         "timestamp": datetime.now(UTC).isoformat(),
+        "holdout_leakage": leakage.to_dict(),
         "arms": arms,
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)

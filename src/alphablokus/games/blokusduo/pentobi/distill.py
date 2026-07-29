@@ -72,7 +72,7 @@ from alphablokus.games.blokusduo.pentobi.corpus_v2 import (
 from alphablokus.games.blokusduo.pentobi.store import canonical_key
 
 if TYPE_CHECKING:
-    from collections.abc import Mapping, Sequence
+    from collections.abc import Iterable, Mapping, Sequence
     from pathlib import Path
 
     from numpy.typing import NDArray
@@ -364,6 +364,105 @@ def partition_by_unit(
     train = [rows for rows in games if rows.opening_unit not in holdout_units]
     holdout = [rows for rows in games if rows.opening_unit in holdout_units]
     return train, holdout
+
+
+@dataclass(frozen=True)
+class LeakageReport:
+    """How much of the held-out set the training set has already seen (V9's metric).
+
+    Splitting by opening subtree keeps whole *lines* apart, but it cannot keep whole
+    *positions* apart: two different openings can transpose into the same board later in
+    the game, and that board then sits on both sides of the split legitimately. Every such
+    position is a question the model saw the answer to before the exam, so a high rate
+    means the held-out score is flattered — and that score is an input to the gate.
+
+    ``mirror`` counts a position and its main-diagonal twin as the same position. Training
+    augments every example with its twin, so a holdout position whose *mirror* is in the
+    training set has leaked just as surely as one whose exact board is.
+    """
+
+    train_rows: int
+    holdout_rows: int
+    train_positions: int
+    holdout_positions: int
+    shared_positions: int
+    leaked_rows: int
+    shared_positions_mirror: int
+    leaked_rows_mirror: int
+
+    @property
+    def leaked_fraction(self) -> float:
+        """Share of held-out rows whose exact board also appears in training."""
+        return self.leaked_rows / self.holdout_rows if self.holdout_rows else 0.0
+
+    @property
+    def leaked_fraction_mirror(self) -> float:
+        """Share of held-out rows whose board *or its mirror* appears in training."""
+        return self.leaked_rows_mirror / self.holdout_rows if self.holdout_rows else 0.0
+
+    def to_dict(self) -> dict[str, object]:
+        """JSON-serialisable form, for the report and the diagnostics CLI."""
+        return {
+            "train_rows": self.train_rows,
+            "holdout_rows": self.holdout_rows,
+            "train_positions": self.train_positions,
+            "holdout_positions": self.holdout_positions,
+            "shared_positions": self.shared_positions,
+            "leaked_rows": self.leaked_rows,
+            "leaked_fraction": self.leaked_fraction,
+            "shared_positions_mirror": self.shared_positions_mirror,
+            "leaked_rows_mirror": self.leaked_rows_mirror,
+            "leaked_fraction_mirror": self.leaked_fraction_mirror,
+        }
+
+
+def measure_holdout_leakage(
+    train_boards: Iterable[NDArray[np.int8]],
+    holdout_boards: Iterable[NDArray[np.int8]],
+) -> LeakageReport:
+    """Count the positions the two sides of a split have in common.
+
+    Runs on a finished corpus and a *chosen* split — the split is what it measures, so it
+    cannot be computed at generation time, and it is not part of training because it
+    changes nothing the model learns. It needs no engine and no GPU: two passes over the
+    stored boards.
+
+    Args:
+        train_boards: Canonical compact boards on the training side.
+        holdout_boards: Canonical compact boards on the held-out side.
+    """
+    train_exact: set[bytes] = set()
+    train_mirror: set[bytes] = set()
+    train_rows = 0
+    for board in train_boards:
+        grid = np.ascontiguousarray(board, dtype=np.int8)
+        train_rows += 1
+        train_exact.add(grid.tobytes())
+        train_mirror.add(canonical_key(grid)[0])
+
+    holdout_exact: set[bytes] = set()
+    holdout_mirror: set[bytes] = set()
+    holdout_rows = leaked_rows = leaked_rows_mirror = 0
+    for board in holdout_boards:
+        grid = np.ascontiguousarray(board, dtype=np.int8)
+        exact = grid.tobytes()
+        mirror = canonical_key(grid)[0]
+        holdout_rows += 1
+        holdout_exact.add(exact)
+        holdout_mirror.add(mirror)
+        leaked_rows += exact in train_exact
+        leaked_rows_mirror += mirror in train_mirror
+
+    return LeakageReport(
+        train_rows=train_rows,
+        holdout_rows=holdout_rows,
+        train_positions=len(train_exact),
+        holdout_positions=len(holdout_exact),
+        shared_positions=len(train_exact & holdout_exact),
+        leaked_rows=leaked_rows,
+        shared_positions_mirror=len(train_mirror & holdout_mirror),
+        leaked_rows_mirror=leaked_rows_mirror,
+    )
 
 
 def build_training_examples(
