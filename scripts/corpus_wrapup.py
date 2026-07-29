@@ -53,15 +53,36 @@ def _run_remote(host: str, command: str) -> None:
         logger.info("[{}] {}", host, result.stdout.strip().splitlines()[-1])
 
 
+def _is_v2_corpus(host: str, remote_dir: str) -> bool:
+    """A v2 corpus is the one with a store; v1 is bare shards in a directory."""
+    result = subprocess.run(  # noqa: S603 — fixed argv, host/dir are operator-supplied
+        ["ssh", "-o", "ConnectTimeout=20", host, f"test -f {remote_dir}/store.sqlite && echo v2 || echo v1"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    return result.stdout.strip() == "v2"
+
+
 def validate_and_analyze_remote(host: str, remote_repo: str, remote_dir: str) -> None:
-    """Replay-validate and diversity-analyze the corpus in place on the box."""
+    """Replay-validate and analyze the corpus in place on the box.
+
+    The two generators have separate scripts and incompatible layouts — v1 keeps bare
+    ``corpus_*.parquet`` in one directory, v2 keeps ``games/``, ``opening/`` and
+    ``store.sqlite`` — so the right one has to be chosen. Pointing v1's validator at a v2
+    corpus is the dangerous case rather than a loud one: it finds no shards at the top
+    level, prints "No corpus shards found" and **exits 0**, so the gate that is supposed
+    to prove a corpus correct passes having checked nothing at all.
+    """
     base = f"export PATH=$HOME/.local/bin:$PATH && cd {remote_repo}"
-    logger.info("Validating every row on {} ...", host)
-    _run_remote(host, f"{base} && uv run python scripts/pentobi_corpus.py validate --data {remote_dir}")
-    logger.info("Analyzing corpus diversity on {} ...", host)
+    script = "scripts/pentobi_corpus_v2.py" if _is_v2_corpus(host, remote_dir) else "scripts/pentobi_corpus.py"
+    flag = "--corpus" if script.endswith("_v2.py") else "--data"
+    logger.info("Detected {} corpus; validating every row on {} ...", "v2" if "_v2" in script else "v1", host)
+    _run_remote(host, f"{base} && uv run python -m {script[:-3].replace('/', '.')} validate {flag} {remote_dir}")
+    logger.info("Analyzing corpus on {} ...", host)
     _run_remote(
         host,
-        f"{base} && uv run python scripts/pentobi_corpus.py analyze --data {remote_dir} "
+        f"{base} && uv run python -m {script[:-3].replace('/', '.')} analyze {flag} {remote_dir} "
         f"--json {remote_dir}/diversity.json",
     )
 

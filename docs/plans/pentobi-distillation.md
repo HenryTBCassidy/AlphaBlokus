@@ -10,6 +10,13 @@ Pentobi L9 beats our best net 80–95%+ — it is an information source self-pla
 (research R5). Phase 1 (this branch) builds and validates the data half: a diverse, correct,
 reusable corpus of Pentobi L9 games. Phases 2–3 (separate branches) build the training half.
 
+> **Status 2026-07-27 — the corpus half is being rebuilt.** Stage 1 of D5 ran (13 k L9 games), D6/D7
+> were built, and **D8's ladder gate failed**: the distilled nets came out far below v3 gen-40. The
+> post-mortem blamed the *corpus*, on two counts — junk unharvested openings and one-hot policy
+> targets — so the generator is being replaced by [`pentobi-corpus-v2.md`](pentobi-corpus-v2.md),
+> which supersedes the two decisions marked below. D6/D7 (dataloader + trainer) and D8's gate
+> criterion survive unchanged; the 13 k v1 corpus is kept as a mid-game supplement.
+
 **Locked design decisions** (agreed before Phase 1 was built — do not re-litigate):
 
 - **L9 only.** Strongest moves = best policy targets; L9-vs-L9 outcomes = most accurate value
@@ -17,6 +24,7 @@ reusable corpus of Pentobi L9 games. Phases 2–3 (separate branches) build the 
   (irrelevant for supervised imitation).
 - **Policy target = the single move Pentobi played, stored one-hot** (behavioural cloning).
   Label smoothing is a training-time transform, never stored.
+  *(Superseded by v2: the full `move_values` distribution is stored as a soft target.)*
 - **Value target = game outcome from the side to move**; the **final score margin** and
   **side-to-move** are stored alongside.
 - **Diversity is mandatory and proven, not assumed** — Pentobi at L9 is near-deterministic, so a
@@ -34,6 +42,8 @@ reusable corpus of Pentobi L9 games. Phases 2–3 (separate branches) build the 
   whole corpus (prefix space ≈ 414⁴ ≈ 3×10¹⁰). Prefix *depth* (4 plies) and *distribution*
   (uniform over all legal openings, incl. weak ones — the realistic-opening-bias question) are the
   real quality levers and are deferred to a possible v2 corpus, not decided here.
+  *(v2 keeps the deterministic stratified key but strata are strong-opening-tree leaves, not
+  uniform-random prefixes — the deferred quality levers, now decided.)*
 - The corpus is a **one-time reusable asset** (parquet shards, schema in
   [`../07-DATA-STORAGE.md`](../07-DATA-STORAGE.md) § Pentobi Distillation Corpus), consumed by
   every future run.
@@ -48,10 +58,10 @@ reusable corpus of Pentobi L9 games. Phases 2–3 (separate branches) build the 
 | D2 | Engine-path shakeout on the box (L1) + full-row replay validation | 1 h | High | ✅ |
 | D3 | **Diversity A/B at L9**: seed-variation-only vs random-opening-prefix, quantified | 2 h box CPU | High | ✅ |
 | D4 | L9 pilot (~190 games): correctness validation + throughput measurement | 2 h box CPU | High | ✅ |
-| D5 | **Full corpus generation run** (execute the D4 recommendation after human review) | see D5 | High | |
+| D5 | **Full corpus generation run** (execute the D4 recommendation after human review) | see D5 | High | ✅ stage 1 |
 | D6 | Corpus dataloader: shard streaming, symmetry augmentation, label smoothing | 1 day | High | ✅ |
 | D7 | SL distillation trainer: policy CE + value MSE fine-tune of the best net (+ from-scratch arm) | 2 days | High | ✅ |
-| D8 | SL evaluation gate: mini-ladder the distilled net | ½ day + box | High | |
+| D8 | SL evaluation gate: mini-ladder the distilled net | ½ day + box | High | ❌ failed |
 | D9 | RL warm-start from the distilled base (continuation hygiene: AdamW, epochs 1, LR 2.5e-4) | ½ day + run | High | |
 | D10 | Continuous Pentobi-mix: corpus examples blended into the RL replay buffer | 1–2 days | Medium | |
 | D11 | Opponent-pool diversity for RL self-play | 2 days | Medium | |

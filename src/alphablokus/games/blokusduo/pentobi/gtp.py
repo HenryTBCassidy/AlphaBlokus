@@ -9,7 +9,9 @@ Interface facts pinned in H2 against the real binary (Pentobi v31, ``--game duo`
 - colour tokens are ``b`` / ``w`` (our White=+1 ↔ ``b``; Black=−1 ↔ ``w`` — see
   ``pentobi_translation`` / the harness plan);
 - moves are comma-separated lowercase cells (``h7,g8,...``) or ``pass``;
-- ``final_score`` returns ``B+N`` / ``W+N`` (``B`` = our White).
+- ``final_score`` returns ``B+N`` / ``W+N`` (``B`` = our White);
+- ``move_values`` dumps the last search's root children (the corpus's soft policy target,
+  parsed by :mod:`alphablokus.games.blokusduo.pentobi.move_values`).
 
 Gotchas handled (per docs/06-INTERFACES.md §2): flush after every write; read to the
 **blank-line** terminator (not one line); ``--quiet`` + stderr→DEVNULL so the engine's
@@ -21,6 +23,8 @@ from __future__ import annotations
 import os
 import subprocess
 from pathlib import Path
+
+from alphablokus.games.blokusduo.pentobi.move_values import MoveValues, parse_move_values
 
 # Default location of the locally-built binary (H2). Override via $PENTOBI_GTP_PATH.
 DEFAULT_PENTOBI_GTP = Path.home() / "code" / "pentobi" / "build" / "pentobi_gtp" / "pentobi-gtp"
@@ -55,6 +59,7 @@ class PentobiGtp:
         seed: int | None = None,
         game: str = "duo",
         noresign: bool = False,
+        nobook: bool = False,
     ) -> None:
         path = Path(binary).expanduser() if binary else find_pentobi_gtp()
         if path is None or not path.exists():
@@ -69,6 +74,14 @@ class PentobiGtp:
             # Corpus generation needs games played to the final position: a resign
             # forfeits the true score margin the value/margin labels are built from.
             argv += ["--noresign"]
+        if nobook:
+            # Corpus generation needs a search tree behind every move: a book hit returns
+            # a move with *no* tree, so ``move_values`` comes back empty and the ply is
+            # unharvestable. Book-free play is currently an accident of Pentobi's
+            # ``books_dir = application_dir_path`` build path (no .blksgf files there);
+            # this flag makes it explicit so a future rebuild can't silently start
+            # returning empty harvests. See docs/plans/pentobi-corpus-v2.md fact 13.
+            argv += ["--nobook"]
         # stderr → DEVNULL: --quiet already silences logging; discarding stderr removes
         # any chance of a full-pipe deadlock. GTP errors arrive on stdout as "? ...".
         self._proc = subprocess.Popen(
@@ -140,6 +153,17 @@ class PentobiGtp:
     def reg_genmove(self, color: str) -> str:
         """Generate a move without playing it (no state change)."""
         return self.send(f"reg_genmove {color}")
+
+    def move_values(self) -> MoveValues:
+        """Return the root children of the **last** search, parsed.
+
+        Pentobi builds this tree during ``genmove``/``reg_genmove`` anyway, so reading it
+        is free. Pair it with :meth:`reg_genmove` (search without playing) to harvest the
+        expert distribution at a position and then play a different move — the corpus
+        generator's whole drive pattern. An empty response (no search tree: a forced
+        pass, a terminal position, a book hit) yields an empty :class:`MoveValues`.
+        """
+        return parse_move_values(self.send("move_values"))
 
     def showboard(self) -> str:
         return self.send("showboard")

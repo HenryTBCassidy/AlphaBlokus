@@ -1,0 +1,442 @@
+"""Tests for the v2 SL dataloader: soft targets, subtree holdout, source mixing (V9).
+
+A tiny real v2 corpus is generated engine-free (real rules engine, real plan, real
+parquet) and then streamed through the training path, so what is checked here is the
+data the trainer would actually see.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+import numpy as np
+import pytest
+
+from alphablokus.games.blokusduo.game import BlokusDuoGame
+from alphablokus.games.blokusduo.pentobi.corpus_v2 import (
+    GameShardMeta,
+    export_opening,
+    game_shard_filename,
+    game_shards,
+    opening_shards,
+    write_game_shard,
+)
+from alphablokus.games.blokusduo.pentobi.distill import (
+    _HOLDOUT_STRATA,
+    build_training_examples,
+    load_corpus_games_v2,
+    load_opening_examples,
+    measure_holdout_leakage,
+    mix_examples,
+    opening_unit_for,
+    partition_by_unit,
+    soft_target_over_legal,
+    split_opening_units,
+)
+from alphablokus.games.blokusduo.pentobi.harvest import RandomSearchSource, map_plan_serially, play_planned_game
+from alphablokus.games.blokusduo.pentobi.store import PlanParameters, SearchSpaceStore, canonical_key
+from alphablokus.games.blokusduo.pieces import default_pieces_path
+from alphablokus.storage.sparse_policy import densify
+
+if TYPE_CHECKING:
+    from collections.abc import Iterator
+    from pathlib import Path
+
+    from alphablokus.games.blokusduo.pentobi.distill import CorpusGameRows
+
+
+@pytest.fixture(scope="module")
+def game() -> BlokusDuoGame:
+    return BlokusDuoGame(pieces_config_path=default_pieces_path())
+
+
+@pytest.fixture(scope="module")
+def corpus(game: BlokusDuoGame, tmp_path_factory: pytest.TempPathFactory) -> Path:
+    """A tiny real v2 corpus: a mapped plan, a handful of games, both datasets on disk."""
+    directory = tmp_path_factory.mktemp("corpus_v2")
+    (directory / "games").mkdir()
+    with SearchSpaceStore(directory / "store.sqlite", game, level=9) as store:
+        source = RandomSearchSource(game, breadth=5)
+        store.save_plan(map_plan_serially(store, source, PlanParameters(120, 2.0, 2)))
+        played = [play_planned_game(game, source, job, top_k=8) for job in store.schedule(8)]
+        plan = store.active_plan()
+        assert plan is not None
+        meta = GameShardMeta(
+            level=9,
+            policy_size=game.get_action_size(),
+            board_shape=(game.board_size, game.board_size),
+            board_dtype="int8",
+            dag_hash=store.dag_hash(),
+            plan_id=plan.plan_id,
+            budget=plan.parameters.budget,
+            temperature=plan.parameters.temperature,
+            min_replicas=plan.parameters.min_replicas,
+            game_sizes=tuple(len(g.plies) for g in played),
+            games=(),
+        )
+        write_game_shard(directory / "games" / game_shard_filename(0), played, meta=meta)
+        for harvested in played:
+            store.mark_done(
+                harvested.node_id,
+                harvested.replica,
+                shard=game_shard_filename(0),
+                white_margin=harvested.white_margin,
+                plies=len(harvested.plies),
+            )
+        store.link()
+        export_opening(store, directory / "opening")
+    return directory
+
+
+@pytest.fixture
+def store(game: BlokusDuoGame, tmp_path: Path) -> Iterator[SearchSpaceStore]:
+    with SearchSpaceStore(tmp_path / "store.sqlite", game, level=9) as opened:
+        yield opened
+
+
+@pytest.fixture(scope="module")
+def games(corpus: Path, game: BlokusDuoGame) -> list[CorpusGameRows]:
+    return load_corpus_games_v2(game_shards(corpus / "games"), game)
+
+
+# --------------------------------------------------------------------------- #
+# Soft targets
+# --------------------------------------------------------------------------- #
+
+
+def test_v2_games_load_with_their_stored_targets(games: list[CorpusGameRows]) -> None:
+    """The distribution Pentobi computed reaches the trainer, not a synthesised one."""
+    assert games
+    for rows in games:
+        assert rows.policies is not None
+        assert len(rows.policies) == len(rows.boards)
+        assert rows.opening_unit is not None
+        for (indices, values), action in zip(rows.policies, rows.actions, strict=True):
+            assert values.sum() == pytest.approx(1.0, abs=1e-5)
+            assert action in indices.tolist()
+    assert any(len(policy[0]) > 1 for rows in games for policy in (rows.policies or ()))
+
+
+def test_build_examples_uses_the_stored_target_verbatim_at_tau_one(
+    game: BlokusDuoGame,
+    games: list[CorpusGameRows],
+) -> None:
+    """With ε = 0 and τ = 1 the training target *is* the stored distribution."""
+    examples = build_training_examples(game, games[:1], epsilon=0.0, augment=False)
+    assert games[0].policies is not None
+    for (_, (indices, values), _), (stored_indices, stored_values) in zip(
+        examples,
+        games[0].policies,
+        strict=True,
+    ):
+        assert indices.tolist() == stored_indices.tolist()
+        assert values.tolist() == pytest.approx(stored_values.tolist())
+
+
+def test_target_temperature_softens_at_load(game: BlokusDuoGame, games: list[CorpusGameRows]) -> None:
+    """τ reshapes confidence at load time, so retuning it never needs regeneration."""
+    sharp = build_training_examples(game, games[:1], epsilon=0.0, augment=False)
+    soft = build_training_examples(game, games[:1], epsilon=0.0, augment=False, temperature=2.0)
+    changed = 0
+    for (_, (_, sharp_values), _), (_, (_, soft_values), _) in zip(sharp, soft, strict=True):
+        assert soft_values.sum() == pytest.approx(1.0, abs=1e-5)
+        assert np.argmax(soft_values) == np.argmax(sharp_values)  # order-preserving
+        if len(sharp_values) > 1 and soft_values.max() < sharp_values.max():
+            changed += 1
+    assert changed > 0
+
+
+def test_epsilon_floors_the_target_over_the_legal_set(game: BlokusDuoGame, games: list[CorpusGameRows]) -> None:
+    """The legal-set floor is still available; it just is not the default any more."""
+    examples = build_training_examples(game, games[:1], epsilon=0.1, augment=False)
+    board, (indices, values), _ = examples[0]
+    legal = np.flatnonzero(game.valid_move_masking(game.board_from_compact(board), 1))
+    assert indices.tolist() == legal.tolist()  # support widens to the whole legal set
+    assert values.sum() == pytest.approx(1.0, abs=1e-5)
+    assert float(values.min()) > 0.0
+
+
+def test_a_target_outside_the_legal_set_is_a_desync(game: BlokusDuoGame) -> None:
+    """Support ⊆ legal is asserted at load — a violation is corpus/rules desync."""
+    legal = np.array([1, 2, 3], dtype=np.int32)
+    policy = (np.array([1, 99], dtype=np.int32), np.array([0.5, 0.5], dtype=np.float32))
+    with pytest.raises(ValueError, match="desync"):
+        soft_target_over_legal(policy, legal)
+
+
+def test_augmentation_transposes_the_whole_support(game: BlokusDuoGame, games: list[CorpusGameRows]) -> None:
+    """Symmetry augmentation is unchanged: an arbitrary support transposes fine."""
+    examples = build_training_examples(game, games[:1], epsilon=0.0, augment=True)
+    (board, (indices, values), value), (twin_board, (twin_indices, twin_values), twin_value) = examples[:2]
+    assert np.array_equal(twin_board, np.ascontiguousarray(board.T))
+    assert twin_indices.tolist() == [game.transpose_action(int(a)) for a in indices]
+    assert twin_values.tolist() == pytest.approx(values.tolist())
+    assert twin_value == value
+    dense = densify(twin_indices, twin_values, game.get_action_size())
+    assert float(dense.sum()) == pytest.approx(1.0, abs=1e-5)
+
+
+# --------------------------------------------------------------------------- #
+# The opening-subtree holdout
+# --------------------------------------------------------------------------- #
+
+
+def test_opening_unit_is_the_canonical_first_position(game: BlokusDuoGame) -> None:
+    """Mirror-twin openings share a unit, so neither can leak into the other's side."""
+    first = int(np.flatnonzero(game.valid_move_masking(game.initialise_board(), 1))[0])
+    mirror = game.transpose_action(first)
+    assert opening_unit_for(game, (first,)) == opening_unit_for(game, (mirror,))
+    assert opening_unit_for(game, ()) is None
+    board, player = game.get_next_state(game.initialise_board(), 1, first)
+    compact = np.asarray(game.get_canonical_form(board, player).to_compact(), dtype=np.int8)
+    assert opening_unit_for(game, (first,)) == canonical_key(compact)[0]
+
+
+def test_holdout_splits_by_subtree_so_shared_openings_cannot_leak(
+    games: list[CorpusGameRows],
+) -> None:
+    """Every game of a held-out opening goes to the holdout; none of it trains.
+
+    This is the leak v1's game-level split would have introduced in v2: many games share
+    an opening, so a game-level boundary would put identical early positions on both
+    sides.
+    """
+    units = [rows.opening_unit for rows in games]
+    holdout_units = split_opening_units(units, [1.0] * len(games), fraction=0.25, seed=3)
+    assert holdout_units
+    train, holdout = partition_by_unit(games, holdout_units)
+    assert len(train) + len(holdout) == len(games)
+    assert {rows.opening_unit for rows in train} & {rows.opening_unit for rows in holdout} == set()
+    assert all(rows.opening_unit in holdout_units for rows in holdout)
+
+
+def test_holdout_unit_choice_is_deterministic_and_stratified() -> None:
+    """Same seed, same units; heavy and light subtrees are both represented."""
+    units: list[bytes | None] = [bytes([index]) for index in range(20)]
+    weights = [float(20 - index) for index in range(20)]  # a mass gradient, heavy first
+    first = split_opening_units(units, weights, fraction=0.2, seed=11)
+    assert first == split_opening_units(units, weights, fraction=0.2, seed=11)
+    assert 0 < len(first) < len(units)
+    ranks = sorted(units.index(unit) for unit in first)
+    # Drawn from more than one mass stratum — i.e. not all from one end of the
+    # distribution. (Asserted as "spans strata" rather than against a fixed rank: the
+    # split now stops as soon as the target *mass* is reached, so exactly which ranks it
+    # lands on depends on the masses, but it always alternates between strata.)
+    stratum = len(units) // _HOLDOUT_STRATA
+    assert len({rank // stratum for rank in ranks}) > 1
+    assert split_opening_units(units, weights, fraction=0.0, seed=11) == set()
+    assert split_opening_units([None, None], [1.0, 1.0], fraction=0.5, seed=1) == set()
+
+
+def test_opening_rows_share_the_games_holdout_units(corpus: Path, game: BlokusDuoGame) -> None:
+    """An opening row's unit is its depth-1 ancestor, so it lands on the games' side."""
+    examples, units = load_opening_examples(opening_shards(corpus / "opening"), game)
+    assert len(examples) == len(units)
+    assert examples
+    assert units.count(None) == 1  # only the root has no ply-1 ancestor
+    game_units = {rows.opening_unit for rows in load_corpus_games_v2(game_shards(corpus / "games"), game)}
+    assert {unit for unit in units if unit is not None} >= game_units
+
+
+def test_opening_examples_carry_a_blended_value(corpus: Path, game: BlokusDuoGame) -> None:
+    """Opening rows train on the count-shrunk blend of teacher and real outcomes."""
+    blended, _ = load_opening_examples(opening_shards(corpus / "opening"), game, value_target="blend")
+    teacher, _ = load_opening_examples(opening_shards(corpus / "opening"), game, value_target="search")
+    outcomes, _ = load_opening_examples(opening_shards(corpus / "opening"), game, value_target="outcome")
+    assert len(blended) == len(teacher) == len(outcomes)
+    assert any(b != t for (_, _, b), (_, _, t) in zip(blended, teacher, strict=True))
+    for board, (indices, values), value in blended:
+        assert values.sum() == pytest.approx(1.0, abs=1e-5)
+        legal = set(np.flatnonzero(game.valid_move_masking(game.board_from_compact(board), 1)).tolist())
+        assert set(indices.tolist()) <= legal
+        assert -1.0 <= value <= 1.0
+
+
+# --------------------------------------------------------------------------- #
+# Source mixing
+# --------------------------------------------------------------------------- #
+
+
+def test_mix_examples_hits_the_requested_proportions(corpus: Path, game: BlokusDuoGame) -> None:
+    """An opening row must not be a 1-in-160,000 sampling event.
+
+    Openings are ~0.6% of a v2 corpus by row count but are the strategic edge, so the mix
+    weights — not the natural sizes — decide how often the net sees one.
+    """
+    opening, _ = load_opening_examples(opening_shards(corpus / "opening"), game)
+    rows = load_corpus_games_v2(game_shards(corpus / "games"), game)
+    game_examples = build_training_examples(game, rows, epsilon=0.0, augment=False)
+    natural = len(opening) / (len(opening) + len(game_examples))
+    assert natural < 0.2  # openings are naturally a small minority
+
+    mixed = mix_examples({"opening": opening, "games": game_examples}, {"opening": 0.3, "games": 0.7}, seed=5)
+    opening_boards = {example[0].tobytes() for example in opening}
+    share = sum(1 for example in mixed if example[0].tobytes() in opening_boards) / len(mixed)
+    assert share == pytest.approx(0.3, abs=0.05)
+
+
+def test_mix_examples_is_deterministic_and_drops_zero_weight_sources() -> None:
+    """Reproducible in the seed; a zero weight excludes a pool rather than shrinking it."""
+
+    def pool(offset: int, value: float) -> list[tuple[np.ndarray, tuple[np.ndarray, np.ndarray], float]]:
+        target = (np.array([0], dtype=np.int32), np.array([1.0], dtype=np.float32))
+        return [(np.array([offset + index], dtype=np.int16), target, value) for index in range(50)]
+
+    pool_a = pool(0, 1.0)
+    pool_b = pool(1000, -1.0)
+    first = mix_examples({"a": pool_a, "b": pool_b}, {"a": 0.5, "b": 0.5}, seed=1)
+    again = mix_examples({"a": pool_a, "b": pool_b}, {"a": 0.5, "b": 0.5}, seed=1)
+    assert [int(example[0][0]) for example in first] == [int(example[0][0]) for example in again]
+    only_a = mix_examples({"a": pool_a, "b": pool_b}, {"a": 1.0, "b": 0.0}, seed=1)
+    assert all(int(example[0][0]) < 1000 for example in only_a)
+    assert mix_examples({"a": []}, {"a": 1.0}, seed=1) == []
+
+
+def test_holdout_never_swallows_the_whole_corpus() -> None:
+    """At small unit counts the split must degrade to one unit, never to everything.
+
+    The pilot plan and the ablation arms both run at a few hundred games over a handful
+    of distinct openings. A per-stratum ``ceil`` takes every unit once each stratum holds
+    one, which hands the trainer an empty training set — silently, because an empty list
+    is a perfectly valid list.
+    """
+    for count in (2, 3, 5, 8, 12, 20, 40, 100, 300):
+        units = [bytes([index % 251, index // 251]) for index in range(count)]
+        weights = [1.0 + (index % 7) for index in range(count)]
+        holdout = split_opening_units(units, weights, 0.05, seed=0)
+        assert len(holdout) < count, f"{count} units: held out all of them"
+        assert holdout, f"{count} units: held out nothing"
+
+
+def test_holdout_mass_approaches_the_requested_fraction_at_scale() -> None:
+    """Granularity dominates when units are few; the target is met once they are many."""
+    units = [bytes([index % 251, index // 251]) for index in range(400)]
+    weights = [1.0 + (index % 7) for index in range(400)]
+    holdout = split_opening_units(units, weights, 0.10, seed=0)
+    held = sum(weight for unit, weight in zip(units, weights, strict=True) if unit in holdout)
+    assert 0.09 <= held / sum(weights) <= 0.13
+
+
+def test_holdout_is_empty_when_there_is_only_one_opening() -> None:
+    """One unit cannot be split: holding it out would leave nothing to train on."""
+    assert split_opening_units([b"only"], [10.0], 0.5, seed=0) == set()
+
+
+def test_mixing_repeats_the_small_pool_rather_than_discarding_the_large_one() -> None:
+    """ "Openings at 5%" must mean repeating openings, not deleting 95% of the games.
+
+    Sizing the mix by the *smallest* pool-to-share ratio makes the 1.6k opening rows the
+    binding constraint on 260k game rows, throwing away ~88% of a corpus that costs days
+    of engine time. Every game row must survive.
+    """
+    games = [(np.zeros(1, np.int8), (np.array([0], np.int32), np.array([1.0], np.float32)), 0.0)] * 2_000
+    openings = [(np.ones(1, np.int8), (np.array([1], np.int32), np.array([1.0], np.float32)), 1.0)] * 20
+    mixed = mix_examples({"games": games, "opening": openings}, {"games": 0.95, "opening": 0.05}, seed=0)
+
+    opening_rows = sum(1 for board, _, _ in mixed if board[0] == 1)
+    assert len(mixed) - opening_rows == len(games)  # nothing discarded
+    assert 0.045 <= opening_rows / len(mixed) <= 0.055  # and the share is honoured
+
+
+def test_opening_units_resolve_across_shard_boundaries(corpus: Path, game: BlokusDuoGame) -> None:
+    """A node's depth-1 ancestor is usually in a different shard from the node itself.
+
+    Resolving ancestry one shard at a time leaves most rows with no holdout unit, and a
+    unit-less row always trains — so the opening rows of held-out subtrees leak straight
+    into training, which is the exact failure the subtree split exists to prevent.
+    """
+    single = load_opening_examples(opening_shards(corpus / "opening"), game)[1]
+
+    fragmented = corpus / "opening_fragmented"
+    with SearchSpaceStore(corpus / "store.sqlite", game, level=9) as store:
+        export_opening(store, fragmented, rows_per_shard=3)
+    assert len(opening_shards(fragmented)) > 1, "fixture did not actually fragment"
+    split = load_opening_examples(opening_shards(fragmented), game)[1]
+
+    # Only the root (depth 0) legitimately has no unit, however the rows are sharded.
+    assert sum(unit is None for unit in split) == sum(unit is None for unit in single) == 1
+    assert sorted(u for u in split if u) == sorted(u for u in single if u)
+
+
+def test_a_childless_searched_node_is_not_exported(store: SearchSpaceStore, game: BlokusDuoGame) -> None:
+    """An empty ``move_values`` records a leaf; it must not become an invalid row.
+
+    ``search_node`` deliberately tolerates a childless search (the side to move can only
+    pass). Exporting it anyway produces a row whose policy is empty, which the validator
+    then rejects — aborting validation for the whole corpus over a position that carries
+    no training signal at all.
+    """
+    root = store.root_node()
+    store.record_search(root, [], validate=False)
+    assert store.node(root).is_searched
+    assert list(store.iter_opening_rows()) == []
+
+
+# --------------------------------------------------------------------------- #
+# Holdout leakage (V9's duplicate-position metric)
+# --------------------------------------------------------------------------- #
+
+
+def test_a_clean_split_reports_no_leakage() -> None:
+    """Disjoint positions must report zero, and not divide by zero on an empty side."""
+    train = [np.full((4, 4), index, dtype=np.int8) for index in range(1, 6)]
+    holdout = [np.full((4, 4), index, dtype=np.int8) for index in range(6, 9)]
+    report = measure_holdout_leakage(train, holdout)
+    assert report.train_rows == 5
+    assert report.holdout_rows == 3
+    assert report.shared_positions == 0
+    assert report.leaked_fraction == 0.0
+    assert report.leaked_fraction_mirror == 0.0
+
+    empty = measure_holdout_leakage(train, [])
+    assert empty.holdout_rows == 0
+    assert empty.leaked_fraction == 0.0  # not a ZeroDivisionError
+
+
+def test_a_position_on_both_sides_is_counted_once_per_row() -> None:
+    """Distinct shared *positions* and leaked *rows* are different numbers, and both matter."""
+    shared = np.array([[1, 0], [0, 2]], dtype=np.int8)
+    other = np.array([[3, 5], [0, 4]], dtype=np.int8)  # deliberately NOT symmetric
+    report = measure_holdout_leakage([shared, other], [shared, shared, np.ascontiguousarray(other.T)])
+    assert report.shared_positions == 1
+    assert report.leaked_rows == 2  # the shared board appears in two held-out rows
+    assert report.leaked_fraction == pytest.approx(2 / 3)
+    # ...and the third row is the mirror of a training position, so it leaks too.
+    assert report.leaked_rows_mirror == 3
+
+
+def test_a_mirrored_position_leaks_even_though_the_bytes_differ() -> None:
+    """Training augments with the diagonal twin, so a mirror in training is a leak.
+
+    An exact-bytes comparison misses this entirely: the two boards are genuinely different
+    arrays, and yet the model will have been trained on one of them by augmentation and
+    then tested on the other.
+    """
+    board = np.array([[1, 2], [0, 0]], dtype=np.int8)
+    mirror = np.ascontiguousarray(board.T)
+    assert board.tobytes() != mirror.tobytes()
+
+    report = measure_holdout_leakage([board], [mirror])
+    assert report.shared_positions == 0  # nothing matches byte for byte...
+    assert report.leaked_rows == 0
+    assert report.shared_positions_mirror == 1  # ...but it has leaked all the same
+    assert report.leaked_rows_mirror == 1
+    assert report.leaked_fraction_mirror == 1.0
+
+
+def test_leakage_is_measurable_on_a_real_subtree_split(corpus: Path, game: BlokusDuoGame) -> None:
+    """End to end on a real v2 corpus: split by opening subtree, then measure it."""
+    games = load_corpus_games_v2(game_shards(corpus / "games"), game)
+    units = [rows.opening_unit for rows in games]
+    holdout_units = split_opening_units(units, [float(len(rows)) for rows in games], 0.34, seed=3)
+    train, holdout = partition_by_unit(games, holdout_units)
+    assert train and holdout, "fixture did not produce a two-sided split"
+
+    report = measure_holdout_leakage(
+        [board for rows in train for board in rows.boards],
+        [board for rows in holdout for board in rows.boards],
+    )
+    assert report.train_rows == sum(len(rows) for rows in train)
+    assert report.holdout_rows == sum(len(rows) for rows in holdout)
+    assert 0.0 <= report.leaked_fraction <= report.leaked_fraction_mirror <= 1.0
+    assert set(report.to_dict()) >= {"leaked_fraction", "leaked_fraction_mirror", "shared_positions"}

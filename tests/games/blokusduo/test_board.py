@@ -399,6 +399,28 @@ def test_incremental_side_danger_matches_brute_force(pieces_path) -> None:
     assert checks > 500, f"test didn't exercise enough positions (only {checks})"
 
 
+def test_board_from_compact_recovers_the_second_movers_starting_square(blokus_game: BlokusDuoGame):
+    """A depth-1 canonical grid must rebuild with the *second* mover's start square.
+
+    Canonicalisation flips signs so the side to move reads as player 1, but the starting
+    squares are fixed to colours, not to signs: after White's first move it is Black to
+    move and their only legal placements cover (9, 9). Rebuilding from the bare grid has
+    to infer that from the piece counts — before this was handled, every depth-1 opening
+    node rebuilt with zero legal moves (its opening set was tried against (4, 4), which
+    White already occupies).
+    """
+    board = blokus_game.initialise_board()
+    first = int(np.flatnonzero(blokus_game.valid_move_masking(board, 1))[0])
+    board, player = blokus_game.get_next_state(board, 1, first)
+    assert player == -1
+
+    canon = blokus_game.get_canonical_form(board, player)
+    rebuilt = blokus_game.board_from_compact(canon.to_compact())
+    played = blokus_game.valid_move_masking(canon, 1)
+    assert played.sum() > 0
+    assert np.array_equal(blokus_game.valid_move_masking(rebuilt, 1), played)
+
+
 def test_board_from_compact_roundtrip_matches_played_board(blokus_game: BlokusDuoGame):
     """A board rebuilt from a compact grid matches the played board's move set.
 

@@ -32,6 +32,15 @@ One command on the box (GPU), e.g.::
         --arms warm,scratch --warm-start ~/best_nets/v3_gen40.pth.tar \
         --out temp/benchmarks/distill_sl.json --ckpt-dir temp/distill_sl
 
+**v2 corpora are detected automatically** (they keep their games under ``games/``) and
+change the data, not the loss — ``loss_pi`` was always a KL against a full distribution.
+On a v2 corpus the policy target is Pentobi's stored distribution (label smoothing
+defaults to 0), ``--tau`` softens it at load, the opening dataset is mixed in at
+``--opening-mix`` (its value label chosen by ``--opening-value``), the v1 corpus can be
+mixed in as mid-game data via ``--v1-corpus``/``--v1-mix``, and **the held-out split is by
+opening subtree rather than by game** — v2 deliberately shares openings across games, so a
+game-level split would leak. See ``docs/plans/pentobi-corpus-v2.md`` V9.
+
 The verdict is **not** computed here: it is the D8 mini-ladder
 (``scripts/mini_ladder.py`` over both arms' checkpoints + the v3 gen-40 baseline;
 gate = +10 pp at any of L5–L7 after SL alone).
@@ -52,11 +61,18 @@ from loguru import logger
 from alphablokus.calibration import parse_net_sizes
 from alphablokus.config import RunConfig, load_args
 from alphablokus.games.blokusduo.pentobi.corpus import corpus_shards
+from alphablokus.games.blokusduo.pentobi.corpus_v2 import game_shards, opening_shards
 from alphablokus.games.blokusduo.pentobi.distill import (
     CorpusGameRows,
     build_training_examples,
     load_corpus_games,
+    load_corpus_games_v2,
+    load_opening_examples,
+    measure_holdout_leakage,
+    mix_examples,
+    partition_by_unit,
     sample_games,
+    split_opening_units,
 )
 from alphablokus.registry import instantiate_game, instantiate_game_and_network
 from alphablokus.training.holdout import (
@@ -227,6 +243,11 @@ def _run_arm(
     }
 
 
+def _corpus_version(corpus: Path) -> str:
+    """Detect the corpus format: v2 keeps its games under a ``games/`` subdirectory."""
+    return "v2" if (corpus / "games").is_dir() else "v1"
+
+
 def _flatten(games: list[CorpusGameRows], attribute: str) -> list[Any]:
     """Flatten one per-position attribute of grouped games, preserving order."""
     return [item for rows in games for item in getattr(rows, attribute)]
@@ -243,7 +264,39 @@ def main() -> None:
         default=None,
         help="Override net size as <F>x<B> (e.g. 160x10) for the sizing sweep; scratch arm only.",
     )
-    parser.add_argument("--epsilon", type=float, default=0.1, help="Label-smoothing mass over legal moves")
+    parser.add_argument(
+        "--corpus-version",
+        choices=("auto", "v1", "v2"),
+        default="auto",
+        help="Corpus format (auto-detects v2 by its games/ subdirectory)",
+    )
+    parser.add_argument(
+        "--epsilon",
+        type=float,
+        default=None,
+        help="Label-smoothing mass over legal moves (default 0.1 for v1, 0 for v2's soft targets)",
+    )
+    parser.add_argument(
+        "--tau",
+        type=float,
+        default=1.0,
+        help="v2 target temperature: p^(1/tau) over the stored support. Softens confidence; "
+        "order-preserving, so it cannot fix a misordered target (v2 plan V9)",
+    )
+    parser.add_argument(
+        "--opening-value",
+        choices=("blend", "outcome", "search"),
+        default="blend",
+        help="v2 opening-row value label: count-shrunk blend (default), pure outcomes, or the teacher",
+    )
+    parser.add_argument(
+        "--opening-mix",
+        type=float,
+        default=0.05,
+        help="v2 fraction of sampled examples drawn from opening rows (~0.6%% by natural count)",
+    )
+    parser.add_argument("--v1-corpus", type=Path, default=None, help="v1 corpus directory to mix in as mid-game data")
+    parser.add_argument("--v1-mix", type=float, default=0.0, help="Fraction of sampled examples from the v1 corpus")
     parser.add_argument(
         "--augment",
         action=argparse.BooleanOptionalAction,
@@ -282,23 +335,105 @@ def main() -> None:
         raise SystemExit(f"The Pentobi corpus is Blokus-only; config game is {config.game!r}.")
     config = _arm_config(config, args)
 
-    shards = corpus_shards(args.corpus.expanduser())
-    if not shards:
-        raise SystemExit(f"No corpus shards found in {args.corpus}")
-    games = load_corpus_games(shards)
-    if args.max_games is not None:
-        games = sample_games(games, args.max_games, args.seed)
-    train_games, holdout_games = split_games_holdout(games, args.holdout_frac, args.seed)
-
     # One game instance (no net yet) builds the examples for every arm
     # (identical data); its static ``encode_compact`` is what the training
     # DataLoader ships to workers. Building here pays the corpus's one
     # legal-mask pass up front, before any GPU memory is claimed.
     game_typed: BlokusDuoGame = instantiate_game(config)  # type: ignore[assignment]  # blokusduo guaranteed above
-    train_flat = build_training_examples(game_typed, train_games, epsilon=args.epsilon, augment=args.augment)
-    holdout_flat = build_training_examples(game_typed, holdout_games, epsilon=args.epsilon, augment=False)
+    corpus = args.corpus.expanduser()
+    version = _corpus_version(corpus) if args.corpus_version == "auto" else args.corpus_version
+    epsilon = args.epsilon if args.epsilon is not None else (0.1 if version == "v1" else 0.0)
+    logger.info("Corpus {} detected as {} (epsilon {}, target temperature {})", corpus, version, epsilon, args.tau)
+
+    if version == "v1":
+        shards = corpus_shards(corpus)
+        if not shards:
+            raise SystemExit(f"No corpus shards found in {corpus}")
+        games = load_corpus_games(shards)
+        if args.max_games is not None:
+            games = sample_games(games, args.max_games, args.seed)
+        train_games, holdout_games = split_games_holdout(games, args.holdout_frac, args.seed)
+        train_flat = build_training_examples(game_typed, train_games, epsilon=epsilon, augment=args.augment)
+    else:
+        shards = game_shards(corpus / "games")
+        if not shards:
+            raise SystemExit(f"No v2 games shards found in {corpus / 'games'}")
+        games = load_corpus_games_v2(shards, game_typed)
+        if args.max_games is not None:
+            games = sample_games(games, args.max_games, args.seed)
+        # Split by opening subtree, not by game: v2 gives many games a shared opening,
+        # so a game-level boundary would leak identical early positions across it.
+        holdout_units = split_opening_units(
+            [rows.opening_unit for rows in games],
+            [float(len(rows)) for rows in games],
+            args.holdout_frac,
+            args.seed,
+        )
+        train_games, holdout_games = partition_by_unit(games, holdout_units)
+        pools: dict[str, list[CorpusExample]] = {
+            "games": build_training_examples(
+                game_typed,
+                train_games,
+                epsilon=epsilon,
+                augment=args.augment,
+                temperature=args.tau,
+            ),
+        }
+        weights = {"games": max(0.0, 1.0 - args.opening_mix - args.v1_mix)}
+        opening_examples, opening_units = load_opening_examples(
+            opening_shards(corpus / "opening"),
+            game_typed,
+            value_target=args.opening_value,
+            temperature=args.tau,
+            epsilon=epsilon,
+            augment=args.augment,
+        )
+        pools["opening"] = [
+            example for example, unit in zip(opening_examples, opening_units, strict=True) if unit not in holdout_units
+        ]
+        weights["opening"] = args.opening_mix
+        if args.v1_corpus is not None and args.v1_mix > 0.0:
+            v1_games = load_corpus_games(corpus_shards(args.v1_corpus.expanduser()))
+            pools["v1"] = build_training_examples(game_typed, v1_games, epsilon=0.1, augment=args.augment)
+            weights["v1"] = args.v1_mix
+        logger.info(
+            "Source pools: {} → mixed at {}",
+            {name: len(pool) for name, pool in pools.items()},
+            weights,
+        )
+        train_flat = mix_examples(pools, weights, seed=args.seed)
+    holdout_flat = build_training_examples(
+        game_typed,
+        holdout_games,
+        epsilon=epsilon,
+        augment=False,
+        temperature=args.tau,
+    )
     holdout_actions: list[int] = _flatten(holdout_games, "actions")
     holdout_players: list[int] = _flatten(holdout_games, "players")
+
+    # How much of the exam has the model already seen? Splitting by opening subtree keeps
+    # whole lines apart but cannot keep whole positions apart — two openings can transpose
+    # into the same board — so measure it rather than assume. Reported, never enforced:
+    # the number qualifies the held-out score that feeds the ladder gate.
+    leakage = measure_holdout_leakage(
+        (board for rows in train_games for board in rows.boards),
+        (board for rows in holdout_games for board in rows.boards),
+    )
+    logger.info(
+        "Holdout leakage: {}/{} held-out rows share a position with training ({:.3%}); "
+        "{:.3%} counting mirrors; {} distinct positions on both sides",
+        leakage.leaked_rows,
+        leakage.holdout_rows,
+        leakage.leaked_fraction,
+        leakage.leaked_fraction_mirror,
+        leakage.shared_positions,
+    )
+    if leakage.leaked_fraction_mirror > 0.01:
+        logger.warning(
+            "More than 1% of the held-out set is also in training — the held-out score is "
+            "flattered by that much, and the gate verdict should be read accordingly",
+        )
     logger.info(
         "Corpus: {} games from {} shards → train {} games ({} examples, augment={}) / holdout {} games ({} positions)",
         len(games),
@@ -330,11 +465,17 @@ def main() -> None:
         "corpus": str(args.corpus),
         "num_games": len(games),
         "holdout_fraction": args.holdout_frac,
-        "epsilon": args.epsilon,
+        "corpus_version": version,
+        "epsilon": epsilon,
+        "target_temperature": args.tau,
+        "opening_value": args.opening_value,
+        "opening_mix": args.opening_mix,
+        "v1_mix": args.v1_mix,
         "augment": args.augment,
         "seed": args.seed,
         "lr": args.lr,
         "timestamp": datetime.now(UTC).isoformat(),
+        "holdout_leakage": leakage.to_dict(),
         "arms": arms,
     }
     args.out.parent.mkdir(parents=True, exist_ok=True)

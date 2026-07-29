@@ -142,6 +142,63 @@ A strict **superset** of the SelfPlayHistory schema: the first four columns are 
 
 ---
 
+## Pentobi Distillation Corpus v2 — Soft Targets + an Opening Dataset
+
+**Writers:** `write_game_shard()` / `export_opening()` in `alphablokus/games/blokusduo/pentobi/corpus_v2.py`
+**Store:** `alphablokus/games/blokusduo/pentobi/store.py` (`SearchSpaceStore`) — the SQLite search-space DAG that *directs* generation and is the source of truth for the opening dataset
+**Path:** `<corpus_dir>/games/corpus_{shard:05d}.parquet`, `<corpus_dir>/opening/opening_{shard:05d}.parquet`, `<corpus_dir>/store.sqlite`
+**Granularity:** one row per harvested game ply (games) / one row per searched DAG node (opening)
+
+v2 keeps v1's column *format* (`board_kind = "compact_v1"`, `policy_kind = "sparse_v1"`) and replaces its
+*content*: the policy is Pentobi's whole preference distribution rather than a one-hot of the played move,
+and openings are planned, labelled and stored instead of being random unharvested noise. Design:
+`docs/plans/pentobi-corpus-v2.md` and `docs/plans/corpus-search-space-store.md`.
+
+### `games/` schema
+
+v1's columns survive with identical meaning (`value`, `margin`, `player`, `game_id`, `ply`, `action`), plus:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `policy_indices` / `policy_values` | `bytes` | **Soft target**: top-32 children by visits, renormalised to sum 1 (v1 stored `[action]` / `[1.0]`) |
+| `child_values` | `bytes` | `float32`, aligned to `policy_indices` — Pentobi's per-child value |
+| `tail_mass` | `float32` | Visit mass dropped by the top-32 truncation (≈ 0.036 at ply 1, 0.017 at ply 2) |
+| `search_value` | `float32` | Pentobi's backed-up value for the side to move = the **top child's** value (GTP `get_value` is a constant 0 and is never used) |
+| `top_action` | `int32` | `argmax(visits)`; equal to `action` on a full-strength continuation, so any mismatch is visible |
+
+### `opening/` schema
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `board` | `bytes` | The node's **key-frame** compact board (symmetry-canonical orientation; policy indices share the frame) |
+| `policy_indices` / `policy_values` / `child_values` / `tail_mass` / `search_value` | — | As above |
+| `depth` | `int32` | Plies from the empty board (= pieces placed) |
+| `reach_weight` | `float32` | Product of ancestor visit shares, summed over DAG parents |
+| `budget_share` / `planned_games` | `float32` / `int32` | The active plan's allocation at this node |
+| `node_id` / `parent_id` | `int64` | Graph structure (`parent_id` = the first discovered parent) |
+| `player` | `int8` | Side to move |
+| `outcome_mean` / `outcome_count` | `float32` / `int32` | Empirical outcome of subtree playouts, filled by the `link` pass (count 0 until then) |
+
+### File-Level Metadata
+
+`board_kind`/`board_shape`/`board_dtype`/`policy_kind`/`policy_size`/`level` as v1, plus:
+
+| Key | Example Value | Description |
+|-----|---------------|-------------|
+| `dataset_kind` | `"pentobi_distill_v2"` | Format marker for both datasets |
+| `dag_hash` | `"3f9c…"` | SHA-256 over the searched DAG — a stale export is detectable, not merely suspected |
+| `plan` | JSON | `plan_id`, `budget`, `temperature`, `min_replicas` of the generating allocation |
+| `games_meta` | JSON | Per game: `game_id`, `node_id`, start `board_key` (hex), `replica`, `engine_seed`, `witness_actions`, scores, `plies` |
+
+### Notes
+
+- **Identity is positional.** A game is "replica *r* of position *P*", seeded `hash64(board_key ‖ replica)`, so re-planning at a bigger budget can never regenerate a game we already hold and never invalidates one.
+- **Shards are self-describing**: `iter_shard_playouts()` rebuilds or verifies the store's `playouts` table from footers alone (`SearchSpaceStore.reconcile`) — the crash repair for a run that died between a shard rename and its DB transaction. **Sync the store DB with the shards**; it is the map of what they mean.
+- Read with `distill.load_corpus_games_v2()` / `distill.load_opening_examples()` — the single reader for both datasets, yielding the pipeline's `(board, (indices, values), value)` tuples with an optional load-time target temperature τ, asserting `support ⊆ legal`, and returning each row's opening-subtree holdout unit; validate with `validate_game_shard()` (full replay; asserts the target sums to 1, `support ⊆ legal` — never equality, since Pentobi searches 315 of 414 first moves — `action ∈ support`, and `top_action == argmax`) and `validate_opening_shard()` (structural, plus a witness-path replay when handed the store).
+- Opening rows are stored in their node's key frame, so they are *not* interchangeable with game rows byte-for-byte; the trainer's order-2 augmentation regenerates the mirror of either.
+
+---
+
 ## Metrics Tables (Hive-Partitioned)
 
 The remaining **13 datasets** (TrainingData, ArenaData, Timings, SelfPlayProfiling, ResourceUsage, TrainingThroughput, TrainingEntropy, PolicyAccuracy, ValueCalibration, EloRatings, MinimaxResults, SymmetryDiagnostic, ArenaReplays) are all written by `MetricsCollector.flush()` using the same pattern:
