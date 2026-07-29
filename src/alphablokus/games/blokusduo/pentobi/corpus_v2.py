@@ -41,7 +41,6 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from alphablokus.games.blokusduo.game import BlokusDuoGame
-    from alphablokus.games.blokusduo.pentobi.corpus import CorpusExample
     from alphablokus.games.blokusduo.pentobi.harvest import HarvestedGame
     from alphablokus.games.blokusduo.pentobi.store import (
         OpeningRow,
@@ -308,42 +307,6 @@ def opening_value(
     return (outcome_count * outcome_mean + blend_k * rescaled) / (outcome_count + blend_k)
 
 
-def iter_opening_examples(
-    paths: Sequence[Path],
-    *,
-    value_target: str = "blend",
-    blend_k: int = 5,
-    temperature: float = 1.0,
-) -> Iterator[CorpusExample]:
-    """Stream ``(board, (indices, values), value)`` training tuples from opening shards.
-
-    The same tuple shape the self-play pipeline and the v1 corpus reader produce, so the
-    SL trainer consumes all three through one code path. ``temperature`` applies the
-    target softening ``p^(1/τ)`` at load, renormalised over the stored support — the
-    corpus always stores τ = 1 visits, so retuning never requires regeneration.
-    """
-    for path in paths:
-        meta = read_opening_meta(path)
-        parquet_file = pq.ParquetFile(path)
-        columns = ["board", "policy_indices", "policy_values", "search_value", "outcome_mean", "outcome_count"]
-        for batch in parquet_file.iter_batches(columns=columns):
-            for board_bytes, indices_bytes, values_bytes, search_value, outcome_mean, outcome_count in zip(
-                *(batch.column(name).to_pylist() for name in columns),
-                strict=True,
-            ):
-                board = np.frombuffer(board_bytes, dtype=np.dtype(meta.board_dtype)).reshape(meta.board_shape).copy()
-                indices = np.frombuffer(indices_bytes, dtype=np.int32).copy()
-                values = apply_target_temperature(np.frombuffer(values_bytes, dtype=np.float32), temperature)
-                value = opening_value(
-                    float(search_value),
-                    float(outcome_mean),
-                    int(outcome_count),
-                    target=value_target,
-                    blend_k=blend_k,
-                )
-                yield board, (indices, values), value
-
-
 # --------------------------------------------------------------------------- #
 # The games dataset
 # --------------------------------------------------------------------------- #
@@ -512,23 +475,6 @@ def read_game_shard_meta(path: Path) -> GameShardMeta:
             for g in json.loads(meta["games_meta"])
         ),
     )
-
-
-def iter_game_examples(paths: Sequence[Path], *, temperature: float = 1.0) -> Iterator[CorpusExample]:
-    """Stream ``(board, (indices, values), value)`` training tuples from games shards."""
-    for path in paths:
-        meta = read_game_shard_meta(path)
-        parquet_file = pq.ParquetFile(path)
-        columns = ["board", "policy_indices", "policy_values", "value"]
-        for batch in parquet_file.iter_batches(columns=columns):
-            for board_bytes, indices_bytes, values_bytes, value in zip(
-                *(batch.column(name).to_pylist() for name in columns),
-                strict=True,
-            ):
-                board = np.frombuffer(board_bytes, dtype=np.dtype(meta.board_dtype)).reshape(meta.board_shape).copy()
-                indices = np.frombuffer(indices_bytes, dtype=np.int32).copy()
-                values = apply_target_temperature(np.frombuffer(values_bytes, dtype=np.float32), temperature)
-                yield board, (indices, values), float(value)
 
 
 def iter_shard_playouts(directory: Path) -> Iterator[ReconcileEntry]:

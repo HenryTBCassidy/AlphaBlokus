@@ -22,7 +22,6 @@ from alphablokus.games.blokusduo.pentobi.corpus_v2 import (
     build_soft_target,
     game_shard_filename,
     game_shards,
-    iter_game_examples,
     iter_shard_playouts,
     read_game_shard_meta,
     validate_game_shard,
@@ -32,6 +31,7 @@ from alphablokus.games.blokusduo.pentobi.corpus_v2 import (
 from alphablokus.games.blokusduo.pentobi.corpus_v2 import (
     export_opening as export_opening_dataset,
 )
+from alphablokus.games.blokusduo.pentobi.distill import build_training_examples, load_corpus_games_v2
 from alphablokus.games.blokusduo.pentobi.harvest import (
     HarvestedGame,
     RandomSearchSource,
@@ -225,7 +225,10 @@ def test_game_shard_round_trip_and_validation(store: SearchSpaceStore, game: Blo
 
     assert validate_game_shard(path, game) == rows
 
-    examples = list(iter_game_examples([path]))
+    # Through the production reader, so the assertions below cover the path the
+    # trainer takes rather than a second implementation of the same read.
+    loaded = load_corpus_games_v2([path], game)
+    examples = build_training_examples(game, loaded, epsilon=0.0, augment=False)
     assert len(examples) == rows
     flat = [ply for g in games for ply in g.plies]
     for (board, (indices, values), value), ply in zip(examples, flat, strict=True):
