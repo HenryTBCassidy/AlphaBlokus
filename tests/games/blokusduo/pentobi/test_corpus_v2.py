@@ -112,9 +112,13 @@ def test_games_start_at_their_planned_node_and_harvest_every_ply(
     record = store.node(harvested.node_id)
     assert harvested.witness_actions == record.witness_actions
     assert harvested.plies[0].ply == len(record.witness_actions)  # harvesting starts at the start node
-    assert [ply.ply for ply in harvested.plies] == list(
-        range(len(record.witness_actions), len(record.witness_actions) + len(harvested.plies)),
-    )
+    # ``ply`` is the true index within the whole game, so it is strictly increasing but
+    # not necessarily contiguous: a forced pass advances the game without producing a row
+    # (there is no move for the engine to rate, and no choice was made). Every Blokus game
+    # ends with a run of these, so gaps at the tail are normal, not corruption.
+    plies = [ply.ply for ply in harvested.plies]
+    assert plies == sorted(set(plies))
+    assert plies[0] == len(record.witness_actions)
     assert harvested.actions[: len(record.witness_actions)] == record.witness_actions
     assert len(harvested.plies) > 10  # a real game, played to the end
 

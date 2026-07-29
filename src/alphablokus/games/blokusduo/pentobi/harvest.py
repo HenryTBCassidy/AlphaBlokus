@@ -315,6 +315,10 @@ class HarvestedGame:
     plies: tuple[HarvestedPly, ...]
     white_score: int
     black_score: int
+    #: Every action played after the prefix, **including forced passes**. Passes are not
+    #: harvested (no move to rate, no choice made) so they have no entry in ``plies``,
+    #: which would make a replay of ``plies`` alone desync from the real game.
+    played_actions: tuple[int, ...] = ()
 
     @property
     def white_margin(self) -> int:
@@ -323,8 +327,13 @@ class HarvestedGame:
 
     @property
     def actions(self) -> tuple[int, ...]:
-        """The complete game: the replayed witness prefix plus every played ply."""
-        return self.witness_actions + tuple(ply.action for ply in self.plies)
+        """The complete game: the witness prefix plus every action played after it.
+
+        Includes the forced passes, so replaying this sequence through the rules engine
+        reproduces the game exactly. ``plies`` covers only the *harvested* positions and
+        skips passes, so the two sequences are deliberately different lengths.
+        """
+        return self.witness_actions + self.played_actions
 
 
 def play_planned_game(
@@ -366,20 +375,28 @@ def play_planned_game(
 
     source.begin_position(job.engine_seed, witness_prefix(game, job.witness_actions))
     plies: list[HarvestedPly] = []
+    played: list[int] = []
     ply = len(job.witness_actions)
     while game.get_game_ended(board, player) == 0:
         if ply >= _MAX_PLIES:
             raise CorpusGenerationError(f"game {job.game_id} exceeded {_MAX_PLIES} plies — loop desync")
-        result = source.search(board, player)
         mask = game.valid_move_masking(board, player)
-        if not result.children:
-            # No search tree: the side to move is forced to pass. Nothing to harvest, and
-            # Pentobi has no ``play <c> pass`` — we just advance our own board.
-            if not mask[game.action_codec.pass_action_index]:
-                raise CorpusGenerationError(f"game {job.game_id} ply {ply}: empty move_values but moves are available")
+        if not mask[: game.action_codec.pass_action_index].any():
+            # Forced pass. Decide this from *our* rules engine and skip the search
+            # entirely: Pentobi's ``reg_genmove`` raises "player failed to generate a
+            # move" when the side to move has none (``GtpEngine::cmd_reg_genmove``
+            # rejects a null move), so asking first aborts the whole run. (v1 never hit
+            # this because ``genmove`` returns the string "pass" instead of raising —
+            # the two commands differ, and only the real binary shows it.) There is
+            # nothing to harvest at a position with one legal move anyway, and Pentobi
+            # has no ``play <c> pass``, so we just advance our own board.
+            played.append(game.action_codec.pass_action_index)
             board, player = game.get_next_state(board, player, game.action_codec.pass_action_index)
             ply += 1
             continue
+        result = source.search(board, player)
+        if not result.children:
+            raise CorpusGenerationError(f"game {job.game_id} ply {ply}: empty move_values but moves are available")
         target = build_soft_target(result.children, top_k)
         action = target.top_action
         if not mask[action]:
@@ -399,6 +416,7 @@ def play_planned_game(
         # and the source needs the colour that actually played the move (v1's
         # ``play_corpus_game`` orders these the same way). Relaying the flipped colour
         # desyncs the engine's board from ours on the very first continuation ply.
+        played.append(action)
         source.advance(board, player, action)
         board, player = game.get_next_state(board, player, action)
         ply += 1
@@ -419,6 +437,7 @@ def play_planned_game(
         plies=tuple(plies),
         white_score=white_score,
         black_score=black_score,
+        played_actions=tuple(played),
     )
 
 

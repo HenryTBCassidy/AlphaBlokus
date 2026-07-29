@@ -14,8 +14,10 @@ import pytest
 
 from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.pentobi.corpus import CorpusGenerationError
+from alphablokus.games.blokusduo.pentobi.gtp import GtpError
 from alphablokus.games.blokusduo.pentobi.harvest import (
     RandomSearchSource,
+    SearchResult,
     map_plan,
     play_planned_game,
     read_book_lines,
@@ -214,12 +216,15 @@ class BoardTrackingSearchSource(RandomSearchSource):
             self.advance(self._board, player, action)
 
     def advance(self, board: BlokusDuoBoard, player: int, action: int) -> None:
-        """Apply the move as the *stated* colour, rejecting it if that is illegal."""
+        """Apply the move as the *stated* colour, rejecting it if that is illegal.
+
+        Deliberately does **not** require strict alternation: every GTP command names its
+        colour explicitly, so the real engine never assumes whose turn it is — and a
+        forced pass is never announced to it at all (there is no ``play <c> pass``). The
+        legality check is what catches a move sent under the wrong colour, and it is
+        exactly the check the real engine applies.
+        """
         self.relayed.append((player, action))
-        if player != self._to_move:
-            raise AssertionError(
-                f"move {action} relayed as player {player:+d} but it is {self._to_move:+d} to move",
-            )
         if not self._own_game.valid_move_masking(self._board, player)[action]:
             raise AssertionError(f"move {action} is illegal for player {player:+d}")
         self._board, self._to_move = self._own_game.get_next_state(self._board, player, action)
@@ -281,3 +286,36 @@ def test_a_planned_game_replays_its_witness_prefix_under_the_right_colours(
     prefix = witness_prefix(game, record.witness_actions)
     assert source.relayed[: len(prefix)] == prefix
     assert harvested.plies[0].ply == len(record.witness_actions)
+
+
+class ForcedPassRaisingSource(BoardTrackingSearchSource):
+    """Refuses to search when the side to move has no placement, as the engine does.
+
+    ``pentobi-gtp``'s ``reg_genmove`` throws ``player failed to generate a move`` rather
+    than returning a pass (``GtpEngine::cmd_reg_genmove`` rejects a null move) — unlike
+    ``genmove``, which v1 used and which returns the string "pass". A double that returns
+    an empty result instead lets the caller ask a question the real engine refuses, so
+    the whole run aborts the first time anyone runs out of moves.
+    """
+
+    def search(self, board: BlokusDuoBoard, player: int) -> SearchResult:
+        mask = self._own_game.valid_move_masking(board, player)
+        if not mask[: self._own_game.action_codec.pass_action_index].any():
+            raise GtpError("player failed to generate a move")
+        return super().search(board, player)
+
+
+def test_a_forced_pass_never_asks_the_engine_to_move(game: BlokusDuoGame) -> None:
+    """Games must run to the end even when a player is passed out.
+
+    Every Blokus game ends with one side unable to move, so this is not an edge case —
+    it happens in the closing plies of every single game.
+    """
+    source = ForcedPassRaisingSource(game)
+    harvested = play_planned_game(game, source, _root_job(game))
+
+    assert harvested.plies, "no plies harvested"
+    assert harvested.white_margin == source.final_white_margin()
+    # The pass plies are skipped, not harvested: there is nothing to learn from a
+    # position whose only legal move is to do nothing.
+    assert all(ply.action != game.action_codec.pass_action_index for ply in harvested.plies)

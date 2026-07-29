@@ -667,6 +667,13 @@ def validate_game_shard(path: Path, game: BlokusDuoGame) -> int:
         for index in range(cursor, cursor + size):
             action = int(rows["action"][index])
             label = f"row {index}"
+            # Forced passes are not stored: they carry no target (the engine has no move
+            # to rate) and no choice was made. They are fully derivable from the position
+            # — a side with no placement *must* pass — so the replay re-derives them the
+            # same way the harvester skipped them, and the stored plies keep their true
+            # game-ply index with a gap where the pass was.
+            while not game.valid_move_masking(board, player)[: game.action_codec.pass_action_index].any():
+                board, player = game.get_next_state(board, player, game.action_codec.pass_action_index)
             _require(int(rows["player"][index]) == player, path, context, f"{label}: wrong side-to-move")
             mask = game.valid_move_masking(board, player)
             _require(bool(mask[action]), path, context, f"{label}: illegal action")
