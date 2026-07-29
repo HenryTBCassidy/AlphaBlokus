@@ -57,6 +57,16 @@ would be self-defeating.
 | V15 | D8 ladder gate re-run vs v3 gen-40 — **the gate for everything below** | ½ day box | High | |
 | V16 | (gated on V15) Phase 2: net-in-the-loop opening proposal + pentomino enumeration filtered by `move_values` | TBD | Medium | |
 
+> **Post-review follow-up (2026-07-29).** An adversarial review of the implementation found
+> seven defects, all fixed on this branch with tests verified to fail against the pre-fix code
+> (the critical one: phase B relayed every continuation move to the engine under the opponent's
+> colour, so no game could be generated). The duplicate second reader it flagged has been
+> deleted, its test coverage migrated onto the surviving reader. **One item remains open:** V9's
+> promised train/holdout duplicate-position metric is not implemented. It needs only a finished
+> corpus and a chosen split — no engine, no GPU, seconds to run — so it can land any time before
+> V15's gate is read, but it must land before that verdict is trusted: two openings can transpose
+> into the same position, and if that is common the held-out score is flattered.
+
 **Gate:** V15 is D8's criterion unchanged — **+10 pp at any of L5–L7 after SL alone**, mini-ladder
 L1–L9 × 50 games × 400 sims against the v3 gen-40 baseline. If v2 does not move the ladder, the
 distillation thesis (not just the generator) is what's wrong, and Phase 3 RL spend stays blocked.
