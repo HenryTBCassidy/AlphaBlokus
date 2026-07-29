@@ -496,6 +496,7 @@ def iter_shard_playouts(directory: Path) -> Iterator[ReconcileEntry]:
                 shard=path.name,
                 white_margin=game.white_margin,
                 plies=game.plies,
+                dag_hash=meta.dag_hash,
             )
 
 

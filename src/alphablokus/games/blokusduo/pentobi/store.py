@@ -361,6 +361,9 @@ class ReconcileEntry:
     shard: str
     white_margin: int
     plies: int
+    #: The DAG the shard was written against, when the footer records one. Lets
+    #: :meth:`SearchSpaceStore.reconcile` notice a shard produced by a different corpus.
+    dag_hash: str | None = None
 
 
 @dataclass(frozen=True)
@@ -910,7 +913,17 @@ class SearchSpaceStore:
                 (int(row["node_id"]),),
             ):
                 digest.update(f"{int(edge['action'])}:{int(edge['visits'])}".encode())
-        return digest.hexdigest()
+        value = digest.hexdigest()
+        # Remember every hash we have ever emitted, so a shard written by a *different*
+        # corpus can be spotted later. The DAG's hash changes as it grows, so a shard is
+        # legitimately older than the current hash — equality is the wrong test; membership
+        # of this set is the right one.
+        self._connection.execute(
+            "INSERT OR IGNORE INTO meta (key, value) VALUES (?, '1')",
+            (f"dag_hash:{value}",),
+        )
+        self._connection.commit()
+        return value
 
     # -- expansion + planning (S3) --------------------------------------------
 
@@ -1192,6 +1205,11 @@ class SearchSpaceStore:
             raise StoreError(f"no scheduled playout ({node_id}, {replica}) to mark done")
         self._connection.commit()
 
+    def knows_dag_hash(self, dag_hash: str) -> bool:
+        """Whether this store ever emitted ``dag_hash`` (see :meth:`dag_hash`)."""
+        row = self._connection.execute("SELECT 1 FROM meta WHERE key = ?", (f"dag_hash:{dag_hash}",)).fetchone()
+        return row is not None
+
     def reconcile(self, entries: Iterable[ReconcileEntry]) -> ReconcileResult:
         """Rebuild or verify the playout registry from shard footers.
 
@@ -1204,6 +1222,14 @@ class SearchSpaceStore:
         matched = inserted = updated = 0
         unknown: list[bytes] = []
         for entry in entries:
+            if entry.dag_hash is not None and not self.knows_dag_hash(entry.dag_hash):
+                logger.warning(
+                    "shard {} was written against DAG {} — a corpus this store has never "
+                    "produced. Its games are being adopted; check the shard did not come "
+                    "from another run.",
+                    entry.shard,
+                    entry.dag_hash[:12],
+                )
             record = self.node_by_key(entry.board_key)
             if record is None:
                 unknown.append(entry.board_key)

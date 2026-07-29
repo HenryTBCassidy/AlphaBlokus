@@ -15,11 +15,13 @@ Pentobi's 315 searched root children collapse to **160** canonical children.
 
 from __future__ import annotations
 
+import dataclasses
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
 import pytest
+from loguru import logger
 
 from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.pentobi.move_values import parse_move_values
@@ -411,3 +413,50 @@ def test_searching_a_node_preserves_book_edges_the_engine_did_not_report(
     for action in searched:
         assert store.to_key_frame(store.node(root), action) in edges
     assert edges[key_action].rank >= len(searched)
+
+
+def test_reconcile_flags_a_shard_from_a_different_corpus(
+    store: SearchSpaceStore,
+    game: BlokusDuoGame,
+) -> None:
+    """Adopting a shard written by another run should not happen quietly.
+
+    Shards are self-describing, so ``reconcile`` rebuilds the playout registry from them
+    — which means any shard sitting in the games directory gets adopted. Two corpora
+    built from the same book share many positions, so a stray shard's games look
+    perfectly legitimate. (Observed for real: a killed run's worker outlived the kill and
+    wrote into a freshly recreated corpus; its 8 games were absorbed silently.) The DAG
+    hash in the footer is the discriminator, and it must at least be shouted about.
+    """
+    root = store.root_node()
+    legal = [
+        int(a)
+        for a in np.flatnonzero(game.valid_move_masking(game.initialise_board(), 1))
+        if a != game.action_codec.pass_action_index
+    ]
+    store.record_search(root, [SearchChild(action=a, visits=100, value=0.6) for a in legal[:3]])
+    known = store.dag_hash()
+
+    from alphablokus.games.blokusduo.pentobi.store import ReconcileEntry
+
+    entry = ReconcileEntry(
+        board_key=store.node(root).board_key,
+        replica=0,
+        game_id=0,
+        shard="corpus_00000.parquet",
+        white_margin=3,
+        plies=20,
+    )
+    assert store.knows_dag_hash(known)
+    assert not store.knows_dag_hash("f" * 64)
+
+    warnings: list[str] = []
+    sink = logger.add(warnings.append, level="WARNING")
+    try:
+        store.reconcile([dataclasses.replace(entry, dag_hash="f" * 64)])
+        assert any("never produced" in message for message in warnings)
+        warnings.clear()
+        store.reconcile([dataclasses.replace(entry, dag_hash=known)])
+        assert not [message for message in warnings if "never produced" in message]
+    finally:
+        logger.remove(sink)
