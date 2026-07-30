@@ -152,7 +152,7 @@ A strict **superset** of the SelfPlayHistory schema: the first four columns are 
 v2 keeps v1's column *format* (`board_kind = "compact_v1"`, `policy_kind = "sparse_v1"`) and replaces its
 *content*: the policy is Pentobi's whole preference distribution rather than a one-hot of the played move,
 and openings are planned, labelled and stored instead of being random unharvested noise. Design:
-`docs/plans/pentobi-corpus-v2.md` and `docs/plans/corpus-search-space-store.md`.
+`docs/plans/pentobi-corpus-v2.md` and `docs/plans/archive/corpus-search-space-store.md`.
 
 ### `games/` schema
 

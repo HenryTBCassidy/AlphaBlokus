@@ -6,7 +6,7 @@ saturates at the mathematical cap (~+1200 Elo) and can no longer distinguish, sa
 from 43 — the curve flatlines even while the net keeps improving. DeepMind never did this: they
 computed Elo from games *among a pool of players/checkpoints* and fit the ratings with **BayesElo**
 (Bayesian logistic regression), so the curve keeps rising until genuine convergence. See
-[`../research/deepmind-run-configs.md`](../research/deepmind-run-configs.md) and the AlphaGo Zero /
+[`../research/deepmind-run-configs.md`](../../research/deepmind-run-configs.md) and the AlphaGo Zero /
 AlphaZero papers (Elo "computed from evaluation games between different players", BayesElo,
 `c_elo = 1/400`).
 

@@ -4,7 +4,7 @@ Get the repo to a state where **one run on one rented cloud GPU** produces the s
 budget allows: containerized card-agnostic deploy, S3-compatible persistence + resume, a modernized
 (opt-in) torch training loop, net size as a first-class knob, a cost-calibration tool, and Pentobi
 ladder instrumentation. Companion recommendation:
-[`docs/research/cloud-training-recommendation.md`](../research/cloud-training-recommendation.md) (C13).
+[`docs/research/cloud-training-recommendation.md`](../../research/cloud-training-recommendation.md) (C13).
 
 **Reality check.** The current production net (64f×4b) loses ~75% of games vs Pentobi level 1; the
 ladder goes to level 9. "Beat Pentobi at all levels" is the aspiration, **not** a promise for a

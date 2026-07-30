@@ -1,6 +1,6 @@
 # Fix the colour-pinned arena gate + acceptance policy, then rerun
 
-Implements the recommendations of [`../research/plateau-investigation.md`](../research/plateau-investigation.md)
+Implements the recommendations of [`../research/plateau-investigation.md`](../../research/plateau-investigation.md)
 (Fable, 2026-07-15). That post-mortem found — with no training-loop bug — that the arena gate is
 **colour-pinned**: 96.3% of decisive arena games are won by White (the first mover), so between
 near-equal nets the gate score is mathematically stuck at ~0.50 ± 0.02 and *no* threshold at 0.55 or
@@ -16,9 +16,9 @@ hygiene (R8). Deliberately does **not** touch the optimiser/LR (R4) or batch siz
 cleared by the investigation and changing them now would confound the experiment. Curriculum levers
 (R7) and playout-cap randomisation (R9) are explicitly deferred to a later phase.
 
-Companion docs: [`../research/plateau-investigation.md`](../research/plateau-investigation.md) (§2 bug
-hunt, §3 confounders, §5 recommendations R1–R9), [`../guides/PLAN-FORMAT.md`](../guides/PLAN-FORMAT.md),
-[`../guides/STYLE-GUIDE.md`](../guides/STYLE-GUIDE.md).
+Companion docs: [`../research/plateau-investigation.md`](../../research/plateau-investigation.md) (§2 bug
+hunt, §3 confounders, §5 recommendations R1–R9), [`../guides/PLAN-FORMAT.md`](../../guides/PLAN-FORMAT.md),
+[`../guides/STYLE-GUIDE.md`](../../guides/STYLE-GUIDE.md).
 
 ---
 
@@ -114,7 +114,7 @@ consume `(nwins, pwins, draws)`.
 **Current state.** `is_accepted_score_rule(new, prev, draws, threshold)` (`evaluation/acceptance.py:21`)
 accepts iff `score ≥ threshold`; `threshold = update_threshold` (0.55/0.52). This 0.55 gate — an
 AlphaGo-Zero artifact — is the *direct* cause of the stationary loop; every DeepMind successor dropped
-it ([`../research/deepmind-run-configs.md`](../research/deepmind-run-configs.md) §AlphaZero).
+it ([`../research/deepmind-run-configs.md`](../../research/deepmind-run-configs.md) §AlphaZero).
 
 **Target.** Add a config-selectable **gate mode** (`config.py`): `gate_mode: "threshold" |
 "regression_guard" | "always"` (default `regression_guard`).
@@ -183,7 +183,7 @@ Warm-start from v3 gen-40 again, but through the fixed instrument: `paired_arena
 unlike v1/v2, **cannot mechanically freeze**. Read the rolling-Elo slope + a 100-game paired ladder.
 Budget ~40 gens ≈ $70 at n=256 (or ~$35 at n=128 if the R6 A/B is folded in). Requires a topped-up
 RunPod balance and durable storage set up first (R2-of-data-safety; consider finally standing up R2/S3
-object storage per [`../guides/CLOUD-TRAINING.md`](../guides/CLOUD-TRAINING.md) §0).
+object storage per [`../guides/CLOUD-TRAINING.md`](../../guides/CLOUD-TRAINING.md) §0).
 
 ---
 

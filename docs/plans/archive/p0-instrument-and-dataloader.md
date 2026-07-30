@@ -1,6 +1,6 @@
 # P0 — Make the measurements informative + reclaim training wall-clock
 
-The first phase of the post-v3 plan (see [`../research/xl-training-scaleup.md`](../research/xl-training-scaleup.md)
+The first phase of the post-v3 plan (see [`../research/xl-training-scaleup.md`](../../research/xl-training-scaleup.md)
 addendum A6, phase P0). v3 showed that our strength instruments are half-blind — 14 of 19 arena
 rejections scored *exactly* 50–50 and one tournament pairing was 30/30 draws, because eval play is
 deterministic-per-(seed, colour) so near-equal nets just split by colour. We currently **cannot
@@ -13,8 +13,8 @@ generation), so P1 is both *readable* and *cheaper*.
 stack. No net-size change, no new architecture. **Prerequisite for P1** (the operator-thickening
 `--resume` run). Does **not** touch RunPod — the v3 pod is terminated; this is repo + box work.
 
-Companion docs: [`../guides/PLAN-FORMAT.md`](../guides/PLAN-FORMAT.md),
-[`../guides/STYLE-GUIDE.md`](../guides/STYLE-GUIDE.md), the v3 addendum (A1, A4, A5, A6).
+Companion docs: [`../guides/PLAN-FORMAT.md`](../../guides/PLAN-FORMAT.md),
+[`../guides/STYLE-GUIDE.md`](../../guides/STYLE-GUIDE.md), the v3 addendum (A1, A4, A5, A6).
 
 ---
 

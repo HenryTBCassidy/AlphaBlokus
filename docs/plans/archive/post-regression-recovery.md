@@ -1,13 +1,13 @@
 # Post-regression recovery — training hygiene, external keep-best, and the capacity gate
 
 Executes the recommendations of
-[`../research/regression-and-next-steps.md`](../research/regression-and-next-steps.md) (the
+[`../research/regression-and-next-steps.md`](../../research/regression-and-next-steps.md) (the
 `blokus_paired_gate_rerun` post-mortem, 2026-07-20). Context in one paragraph: the rerun regressed
 the best net from Pentobi L4 (weighted 0.344) to L3 (0.298) because a degrading training step
 (epochs 2 + constant 1e-3 + **Adam with no weight decay**) compounded freely behind a
 `regression_guard 0.45` gate that the paired-arena instrument makes mathematically inert (research
 §1.2 — even a ~+100-Elo-class real gap reads as 0.525). Separately, the post-mortem found the `xl`
-demotion in [`../research/xl-training-scaleup.md`](../research/xl-training-scaleup.md) A4 rested on
+demotion in [`../research/xl-training-scaleup.md`](../../research/xl-training-scaleup.md) A4 rested on
 circular evidence (research §3.1): capacity is *untested*, not refuted. This plan fixes the training
 hygiene and the selection mechanism (cheap, certain), then gates the two expensive bets — an `xl`
 run vs Pentobi distillation — on a free capacity probe run on the box.
@@ -20,7 +20,7 @@ the box as the final step before any paid run.
 returned a tie** — `xl` fit gen-40's data no better than `large`, so the plateau is *not* net size.
 That resolves the gate: **P9 (`xl` from scratch) is dropped** (config kept for a later
 capacity-justified moment), and **P10 (Pentobi distillation) is promoted to its own plan,
-[`pentobi-distillation.md`](pentobi-distillation.md)**, which supersedes P10 here. Carried forward:
+[`pentobi-distillation.md`](../pentobi-distillation.md)**, which supersedes P10 here. Carried forward:
 P7 (re-crown v3 gen-40 as best net + box mini-ladder runbook) as box housekeeping, and **P11
 (colour-conditional value calibration) folds into the distillation value-head work** (the 75% White
 skew is flagged there). Everything else in this plan is done.

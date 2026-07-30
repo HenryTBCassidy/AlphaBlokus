@@ -3,7 +3,7 @@
 How much RAM a training run needs, as a function of the scale knobs — so buffer
 size and DataLoader parallelism can be reasoned about *before* a paid run rather
 than discovered by an exit-137 hours in. Companion to
-[`docs/plans/fix-training-oom.md`](../plans/fix-training-oom.md) (the fix that
+[`docs/plans/fix-training-oom.md`](../plans/archive/fix-training-oom.md) (the fix that
 made this a first-class, pre-flight concern) and the guard/probe that implement
 it (`training/diagnostics.py`, `scripts/benchmarks/memory_probe.py`).
 
