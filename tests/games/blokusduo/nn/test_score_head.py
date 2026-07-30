@@ -25,7 +25,6 @@ import torch
 from alphablokus.config import MCTSConfig, NetConfig, RunConfig
 from alphablokus.games.blokusduo.nn.net import AlphaBlokusDuo
 from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper as BlokusDuoNNetWrapper
-from alphablokus.training.score_target import scale_margin
 from tests.conftest import RecordingMetrics
 
 if TYPE_CHECKING:
@@ -353,32 +352,38 @@ def test_zero_weight_keeps_the_total_unchanged_but_still_reports_the_head(
         assert row["total_loss"] == pytest.approx(row["pi_loss"] + row["v_loss"], rel=1e-6)
 
 
-def test_the_head_actually_learns_its_target(
+def test_the_score_term_is_what_drives_the_head(
     blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard, tmp_path: Path
 ) -> None:
-    """Gradients reach the head: repeated passes over a fittable set drive its MSE down."""
+    """Gradients reach the head *because of the score term*, not by accident.
+
+    Asserting only that the score loss falls is not enough, and was measured to pass with
+    ``score_loss_weight=0.0`` — a configuration in which the head receives no gradient at
+    all. The loss falls anyway because the head reads the shared body, and the body keeps
+    improving under the policy and value losses. So the test has to compare *against* a
+    zero-weight arm: identical data, identical seed, identical everything except whether
+    the score term contributes.
+    """
     examples = _examples(blokus_game, blokus_board, 8)
     margins: list[float | None] = [3.0, -7.0, 0.0, 40.0, -2.0, 12.0, 5.0, -20.0]
-    net_config = _net_config(score_head=True, learning_rate=1e-2)
 
-    torch.manual_seed(SEED)
-    wrapper = BlokusDuoNNetWrapper(blokus_game, _run_config(tmp_path, net_config))
-    metrics = RecordingMetrics()
-    torch.manual_seed(SEED + 1)
-    for generation in range(1, 9):
-        wrapper.train(examples, generation=generation, metrics=metrics, score_margins=margins)
+    def final_score_loss(weight: float) -> float:
+        config = _net_config(score_head=True, learning_rate=1e-2, score_loss_weight=weight)
+        torch.manual_seed(SEED)
+        wrapper = BlokusDuoNNetWrapper(blokus_game, _run_config(tmp_path / f"w{weight}", config))
+        metrics = RecordingMetrics()
+        torch.manual_seed(SEED + 1)
+        for generation in range(1, 9):
+            wrapper.train(examples, generation=generation, metrics=metrics, score_margins=margins)
+        tail = [row["score_loss"] for row in metrics.rows[-4:]]
+        return sum(tail) / len(tail)
 
-    first = metrics.rows[0]["score_loss"]
-    last = metrics.rows[-1]["score_loss"]
-    assert last < first
-
-    # And the head's own predictions now track the scaled targets' sign more often
-    # than not — proof it is regressing the margin, not emitting a constant.
-    planes = np.stack([blokus_game.encode_compact(board) for board, _pi, _value in examples])
-    _, _, scores = wrapper.predict_encoded_with_score(planes)
-    assert scores is not None
-    targets = np.array([scale_margin(m, net_config.score_scale) for m in margins])  # type: ignore[arg-type]
-    assert float(np.corrcoef(scores, targets)[0, 1]) > 0.0
+    driven = final_score_loss(0.15)
+    drifting = final_score_loss(0.0)
+    assert driven < drifting, (
+        f"the score term made no difference: {driven:.4f} with it, {drifting:.4f} without — "
+        "the head is being carried by the shared body rather than trained"
+    )
 
 
 def test_masked_positions_contribute_nothing_rather_than_a_zero_target() -> None:
