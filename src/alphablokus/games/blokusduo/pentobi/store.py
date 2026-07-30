@@ -581,7 +581,7 @@ class SearchSpaceStore:
         path: Path,
         game: BlokusDuoGame,
         *,
-        level: int = 9,
+        level: int | None = 9,
         engine_version: str = "unknown",
     ) -> None:
         """Open (or create) the store at ``path``.
@@ -625,17 +625,25 @@ class SearchSpaceStore:
     def __exit__(self, *_exc: object) -> None:
         self.close()
 
-    def _sync_meta(self, *, level: int, engine_version: str) -> None:
-        """Write the pinned metadata on creation; assert compatibility on reopen."""
+    def _sync_meta(self, *, level: int | None, engine_version: str) -> None:
+        """Write the pinned metadata on creation; assert compatibility on reopen.
+
+        ``level`` may be ``None`` for commands that never touch the engine (export, link,
+        coverage, analyze, validate): they have no opinion about the level, so imposing
+        the CLI default would make them refuse to open a store built at any other one.
+        """
         expected = {
             "schema_version": str(SCHEMA_VERSION),
             "game": "blokusduo",
             "board_kind": BOARD_KIND,
             "policy_size": str(self._game.get_action_size()),
-            "level": str(level),
         }
+        if level is not None:
+            expected["level"] = str(level)
         stored = {str(row["key"]): str(row["value"]) for row in self._connection.execute("SELECT key, value FROM meta")}
         if not stored:
+            if level is None:
+                raise StoreError(f"{self._path.name}: refusing to create a store without a level")
             rows = [*expected.items(), ("engine_version", engine_version), ("created_at", _now())]
             self._connection.executemany("INSERT INTO meta (key, value) VALUES (?, ?)", rows)
             return

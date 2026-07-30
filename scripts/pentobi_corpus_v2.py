@@ -105,8 +105,13 @@ _WireChild = tuple[int, int, float]
 _WireSearch = tuple[int, list[_WireChild], float | None, float]
 
 
-def _open_store(corpus: Path, *, level: int = 9, create: bool = False) -> SearchSpaceStore:
-    """Open the corpus store, refusing to invent one unless asked."""
+def _open_store(corpus: Path, *, level: int | None = None, create: bool = False) -> SearchSpaceStore:
+    """Open the corpus store, refusing to invent one unless asked.
+
+    ``level = None`` adopts whatever the store already pins — the right thing for every
+    command that does not drive the engine, which would otherwise impose the CLI default
+    and refuse to open a corpus built at another level.
+    """
     path = corpus / STORE_FILENAME
     if not path.exists() and not create:
         raise SystemExit(f"No store at {path} — run `plan` first.")
@@ -272,7 +277,7 @@ def generate(args: argparse.Namespace) -> None:
     games_dir.mkdir(parents=True, exist_ok=True)
     for stale in games_dir.glob("*.tmp"):
         stale.unlink()  # torn shards from a killed run — regenerated below
-    store = _open_store(corpus)
+    store = _open_store(corpus, level=args.level)  # generate drives the engine: the level must match
     try:
         active = store.active_plan()
         if active is None:
