@@ -296,6 +296,7 @@ class INeuralNetWrapper(IPolicyValuePredictor, Protocol):
         generation: int,
         metrics: MetricsCollector | None = None,
         eval_set: EvalSet | None = None,
+        score_margins: Sequence[float | None] | None = None,
     ) -> None:
         """Train the neural network with full passes over the replay buffer.
 
@@ -308,6 +309,11 @@ class INeuralNetWrapper(IPolicyValuePredictor, Protocol):
             metrics: Optional metrics collector for recording training loss data.
             eval_set: Optional frozen held-out positions for per-epoch
                 network diagnostics.
+            score_margins: Optional raw final score margins from the side to move,
+                index-aligned with ``examples`` (``None`` per entry = no margin for
+                that position). Only consumed when the net has the auxiliary score
+                head. Deliberately a separate argument so ``ProcessedExample`` keeps
+                its shape and the self-play pipeline never carries a score target.
         """
         ...
 

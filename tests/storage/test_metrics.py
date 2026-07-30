@@ -36,6 +36,17 @@ def test_log_training_appends(collector: MetricsCollector):
     assert len(collector._training_records) == 2
 
 
+def test_log_training_omits_score_loss_unless_supplied(collector: MetricsCollector):
+    """Runs without the auxiliary score head keep exactly their old parquet schema."""
+    collector.log_training(generation=1, epoch=0, batch_number=0, pi_loss=0.5, v_loss=0.3, total_loss=0.8)
+    assert "score_loss" not in collector._training_records[0]
+
+    collector.log_training(
+        generation=1, epoch=0, batch_number=1, pi_loss=0.4, v_loss=0.2, total_loss=0.66, score_loss=0.4
+    )
+    assert collector._training_records[1]["score_loss"] == 0.4
+
+
 def test_log_arena_appends(collector: MetricsCollector):
     """log_arena should accumulate records in _arena_records."""
     collector.log_arena(generation=1, wins=3, losses=1, draws=0)

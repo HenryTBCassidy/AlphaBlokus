@@ -74,6 +74,15 @@ def accepted_mask(arena_data: pd.DataFrame, update_threshold: float) -> pd.Serie
     )
 
 
+def _has_score_loss(df: pd.DataFrame) -> bool:
+    """Whether this run trained the auxiliary score head (plan S4).
+
+    The column is written only by runs with the head on, so its absence is the
+    normal case and simply means one fewer series.
+    """
+    return "score_loss" in df.columns and bool(df["score_loss"].notna().any())
+
+
 def make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
     """Line chart with mean pi_loss, v_loss, and total_loss per generation.
 
@@ -81,20 +90,21 @@ def make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
     losses — i.e. where the network is most trained for that gen. Aggregating
     raw per-batch values avoids the running-mean reset spikes that used to
     appear at epoch boundaries.
+
+    Runs with the auxiliary score head on get a fourth series (its raw MSE, before
+    the ``score_loss_weight`` that scales it into the total).
     """
     sorted_df = df.sort_values(["generation", "epoch", "batch_number"])
     last_epoch = sorted_df.groupby("generation")["epoch"].max()
     last_epoch_df = sorted_df[sorted_df["epoch"] == sorted_df["generation"].map(last_epoch)]
-    agg = (
-        last_epoch_df.groupby("generation")
-        .agg(
-            pi_loss=("pi_loss", "mean"),
-            v_loss=("v_loss", "mean"),
-            total_loss=("total_loss", "mean"),
-        )
-        .reset_index()
-        .sort_values("generation")
-    )
+    aggregations = {
+        "pi_loss": ("pi_loss", "mean"),
+        "v_loss": ("v_loss", "mean"),
+        "total_loss": ("total_loss", "mean"),
+    }
+    if _has_score_loss(df):
+        aggregations["score_loss"] = ("score_loss", "mean")
+    agg = last_epoch_df.groupby("generation").agg(**aggregations).reset_index().sort_values("generation")
 
     fig = go.Figure()
     fig.add_trace(
@@ -124,6 +134,16 @@ def make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
             line={"width": 2, "color": _COLORS["tertiary"]},
         )
     )
+    if "score_loss" in agg.columns:
+        fig.add_trace(
+            go.Scatter(
+                x=agg["generation"],
+                y=agg["score_loss"],
+                mode="lines+markers",
+                name="Score (auxiliary)",
+                line={"width": 2, "color": _COLORS["accent"], "dash": "dot"},
+            )
+        )
 
     # "Worse than random" band for value loss
     max_v = float(agg["v_loss"].max())
@@ -169,6 +189,8 @@ def make_loss_timeline(df: pd.DataFrame) -> go.Figure:
         ("pi_loss", "Policy", _COLORS["secondary"]),
         ("v_loss", "Value", _COLORS["tertiary"]),
     ]
+    if _has_score_loss(sorted_df):
+        series.append(("score_loss", "Score (auxiliary)", _COLORS["accent"]))
 
     fig = go.Figure()
 

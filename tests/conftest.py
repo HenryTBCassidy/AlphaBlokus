@@ -9,6 +9,27 @@ from alphablokus.games.blokusduo.pieces import PieceManager, default_pieces_path
 from alphablokus.games.tictactoe.game import TicTacToeGame
 
 
+class RecordingMetrics:
+    """``MetricsCollector`` stand-in that records every ``log_training`` row.
+
+    Shared by every test that needs to read the losses ``BaseNNetWrapper.train``
+    actually logged (perf-knob equivalence, the auxiliary score term). One copy so
+    the tests cannot disagree about what the collector's surface is.
+    """
+
+    def __init__(self) -> None:
+        self.rows: list[dict] = []
+
+    def log_training(self, **kwargs: object) -> None:
+        self.rows.append(kwargs)
+
+    def log_training_throughput(self, **_kwargs: object) -> None:
+        pass
+
+    def log_learning_rate(self, **_kwargs: object) -> None:
+        pass
+
+
 @pytest.fixture(scope="session")
 def ttt_game() -> TicTacToeGame:
     """A reusable TicTacToe game instance."""

@@ -19,27 +19,12 @@ import torch
 from alphablokus.config import TrainingPerfConfig
 from alphablokus.games.base_wrapper import _LazyPolicyDataset, resolve_dataloader_context
 from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
+from tests.conftest import RecordingMetrics
 
 if TYPE_CHECKING:
     from alphablokus.config import RunConfig
     from alphablokus.games.blokusduo.game import BlokusDuoGame
     from alphablokus.games.tictactoe.game import TicTacToeGame
-
-
-class _RecordingMetrics:
-    """Metrics stand-in that records every log_training row."""
-
-    def __init__(self) -> None:
-        self.rows: list[dict] = []
-
-    def log_training(self, **kwargs: object) -> None:
-        self.rows.append(kwargs)
-
-    def log_training_throughput(self, **_kwargs: object) -> None:
-        pass
-
-    def log_learning_rate(self, **_kwargs: object) -> None:
-        pass
 
 
 def _buffer(action_size: int, n: int) -> list:
@@ -57,12 +42,12 @@ def _train_with_perf(
     config: RunConfig,
     perf: TrainingPerfConfig,
     seed: int = 123,
-) -> tuple[dict[str, torch.Tensor], _RecordingMetrics]:
+) -> tuple[dict[str, torch.Tensor], RecordingMetrics]:
     """Seeded wrapper init + train with the given perf knobs → (weights, metrics)."""
     run_config = replace(config, net_config=replace(config.net_config, epochs=2, perf=perf))
     torch.manual_seed(seed)
     nnet = NNetWrapper(ttt_game, run_config)
-    metrics = _RecordingMetrics()
+    metrics = RecordingMetrics()
     torch.manual_seed(seed + 1)  # shuffle RNG
     nnet.train(_buffer(ttt_game.get_action_size(), 40), generation=0, metrics=metrics)
     state = {k: v.detach().clone() for k, v in nnet.nnet.state_dict().items()}

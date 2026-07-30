@@ -236,7 +236,39 @@ class AlphaBlokusDuo(nn.Module):
                 nn.Linear(2 * conv_out, self.action_size),
             )
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+        # Auxiliary score head: a near-copy of the value head, predicting the bounded
+        # score-margin target ``tanh(margin / score_scale)`` (see
+        # ``alphablokus.training.score_target``). Built only when asked, so with
+        # ``score_head=False`` the module — and therefore its state dict, its parameter
+        # count and its forward output — is exactly the pre-score-head net.
+        #
+        # Constructed **last, after every other head**, so that at a fixed seed the
+        # trunk, value head and policy head initialise identically whether or not the
+        # score head exists: the S7 A/B arms then genuinely differ by the head alone,
+        # not by a shifted RNG stream.
+        #
+        # **Never consulted when choosing a move**: ``forward`` appends it as a third
+        # element and ``predict``/``predict_batch`` drop it.
+        self.score_head: nn.Module | None = None
+        if config.score_head:
+            self.score_head = nn.Sequential(
+                nn.Conv2d(
+                    in_channels=config.num_filters,
+                    out_channels=1,
+                    kernel_size=1,
+                    stride=1,
+                    bias=False,
+                ),
+                nn.BatchNorm2d(num_features=1),
+                nn.ReLU(),
+                nn.Flatten(),
+                nn.Linear(1 * conv_out, config.num_filters),
+                nn.ReLU(),
+                nn.Linear(config.num_filters, 1),
+                nn.Tanh(),
+            )
+
+    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
         """
         Forward pass through the network.
 
@@ -245,8 +277,20 @@ class AlphaBlokusDuo(nn.Module):
                Shape: batch_size x 44 x 14 x 14
 
         Returns:
-            pi: Log-softmax policy over all actions.   Shape: batch_size x 17837
-            v:  Value estimate for the current player.  Shape: batch_size x 1
+            ``(pi, v)`` — log-softmax policy over all actions (batch_size x 17837)
+            and the value estimate for the current player (batch_size x 1) — plus a
+            third element ``score`` (batch_size x 1) **only when the auxiliary score
+            head is built** (``NetConfig.score_head``).
+
+            The arity varies rather than the third element being ``None``: a ``None``
+            in a module's output makes it untraceable ("Only tensors, lists, tuples of
+            tensors ... can be output from traced functions"), which would break the
+            web ONNX export even with the head switched off. With the head off the
+            output is byte-for-byte the pre-score-head 2-tuple.
+
+            Callers unpack via ``BaseNNetWrapper._split_net_outputs``; the score is
+            dropped by ``predict``/``predict_batch``, so **no code path consults it
+            when choosing a move**.
         """
 
         x = x.view(-1, self.num_input_channels, self.board_rows, self.board_cols)
@@ -257,4 +301,7 @@ class AlphaBlokusDuo(nn.Module):
 
         value = self.value_head(features)
 
-        return F.log_softmax(pi_logits, dim=1), value
+        log_pi = F.log_softmax(pi_logits, dim=1)
+        if self.score_head is None:
+            return log_pi, value
+        return log_pi, value, self.score_head(features)
