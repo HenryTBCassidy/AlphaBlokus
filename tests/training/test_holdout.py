@@ -300,3 +300,117 @@ def test_colour_only_floor_is_high_when_one_side_usually_wins() -> None:
         top1_accuracy=0.5, n_positions=100, calibration=(), value_mse=0.45, colour_only_value_mse=0.30
     )
     assert worse_than_guessing.value_skill < 0.0
+
+
+# --------------------------------------------------------------------------- #
+# Auxiliary score head (docs/plans/score-auxiliary-target.md S6)
+# --------------------------------------------------------------------------- #
+
+
+class _ScoringPredictor:
+    """Minimal predictor exposing the diagnostics-only score surface."""
+
+    def __init__(self, scores: np.ndarray | None) -> None:
+        self._scores = scores
+        self._cursor = 0
+
+    def predict_encoded_with_score(self, planes: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+        n = planes.shape[0]
+        policies = np.full((n, 4), 0.25, dtype=np.float32)
+        values = np.zeros((n,), dtype=np.float32)
+        if self._scores is None:
+            return policies, values, None
+        chunk = self._scores[self._cursor : self._cursor + n].astype(np.float32)
+        self._cursor += n
+        return policies, values, chunk
+
+
+def _score_examples(count: int) -> list:
+    return [
+        (
+            np.zeros((3, 3), dtype=np.int8),
+            (np.array([0], dtype=np.int32), np.array([1.0], dtype=np.float32)),
+            1.0,
+        )
+        for _ in range(count)
+    ]
+
+
+def test_evaluate_score_head_matches_the_closed_form_mse() -> None:
+    """Targets are ``tanh(margin / scale)``; the MSE is against exactly those."""
+    from alphablokus.training.holdout import evaluate_score_head
+
+    margins: list[float | None] = [25.0, -25.0, 0.0]
+    target = math.tanh(1.0)
+    predictor = _ScoringPredictor(np.array([target, -target, 0.5]))
+
+    metrics = evaluate_score_head(
+        predictor,
+        _score_examples(3),
+        margins,
+        score_scale=25.0,
+        encode_fn=_encode_fake,
+        batch_size=2,  # exercise batching
+    )
+
+    assert metrics is not None
+    assert metrics.n_positions == 3
+    assert metrics.n_skipped == 0
+    assert metrics.score_mse == pytest.approx(0.25 / 3)  # only the third row is wrong
+
+
+def test_evaluate_score_head_skips_positions_without_a_margin() -> None:
+    """Opening rows (no margin) must be excluded, not scored against a zero."""
+    from alphablokus.training.holdout import evaluate_score_head
+
+    predictor = _ScoringPredictor(np.array([0.0, 0.0, 0.0, 0.0]))
+    margins: list[float | None] = [0.0, None, 0.0, None]
+
+    metrics = evaluate_score_head(predictor, _score_examples(4), margins, score_scale=25.0, encode_fn=_encode_fake)
+
+    assert metrics is not None
+    assert (metrics.n_positions, metrics.n_skipped) == (2, 2)
+    assert metrics.score_mse == pytest.approx(0.0)
+
+
+def test_evaluate_score_head_returns_none_without_a_head_or_without_margins() -> None:
+    from alphablokus.training.holdout import evaluate_score_head
+
+    headless = _ScoringPredictor(None)
+    assert (
+        evaluate_score_head(headless, _score_examples(2), [1.0, 2.0], score_scale=25.0, encode_fn=_encode_fake) is None
+    )
+
+    no_margins = _ScoringPredictor(np.zeros(2))
+    assert (
+        evaluate_score_head(no_margins, _score_examples(2), [None, None], score_scale=25.0, encode_fn=_encode_fake)
+        is None
+    )
+
+
+def test_score_skill_is_measured_against_a_constant_predictor() -> None:
+    """A head emitting the mean target scores zero skill however small its MSE."""
+    from alphablokus.training.holdout import evaluate_score_head
+
+    margins: list[float | None] = [25.0, -25.0]
+    mean_target = 0.0  # tanh is odd, so these two average to zero
+    constant_head = _ScoringPredictor(np.array([mean_target, mean_target]))
+
+    metrics = evaluate_score_head(constant_head, _score_examples(2), margins, score_scale=25.0, encode_fn=_encode_fake)
+
+    assert metrics is not None
+    assert metrics.score_skill == pytest.approx(0.0)
+    assert metrics.score_mse == pytest.approx(metrics.constant_mse)
+
+
+def test_evaluate_score_head_rejects_misaligned_margins() -> None:
+    from alphablokus.training.holdout import evaluate_score_head
+
+    with pytest.raises(ValueError, match="index-aligned"):
+        evaluate_score_head(
+            _ScoringPredictor(np.zeros(3)),
+            _score_examples(3),
+            [1.0],
+            score_scale=25.0,
+            encode_fn=_encode_fake,
+        )

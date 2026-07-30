@@ -10,6 +10,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 import numpy as np
+import pyarrow.parquet as pq
 import pytest
 
 from alphablokus.games.blokusduo.game import BlokusDuoGame
@@ -122,7 +123,7 @@ def test_build_examples_uses_the_stored_target_verbatim_at_tau_one(
     games: list[CorpusGameRows],
 ) -> None:
     """With ε = 0 and τ = 1 the training target *is* the stored distribution."""
-    examples = build_training_examples(game, games[:1], epsilon=0.0, augment=False)
+    examples, _margins = build_training_examples(game, games[:1], epsilon=0.0, augment=False)
     assert games[0].policies is not None
     for (_, (indices, values), _), (stored_indices, stored_values) in zip(
         examples,
@@ -135,8 +136,8 @@ def test_build_examples_uses_the_stored_target_verbatim_at_tau_one(
 
 def test_target_temperature_softens_at_load(game: BlokusDuoGame, games: list[CorpusGameRows]) -> None:
     """τ reshapes confidence at load time, so retuning it never needs regeneration."""
-    sharp = build_training_examples(game, games[:1], epsilon=0.0, augment=False)
-    soft = build_training_examples(game, games[:1], epsilon=0.0, augment=False, temperature=2.0)
+    sharp, _ = build_training_examples(game, games[:1], epsilon=0.0, augment=False)
+    soft, _ = build_training_examples(game, games[:1], epsilon=0.0, augment=False, temperature=2.0)
     changed = 0
     for (_, (_, sharp_values), _), (_, (_, soft_values), _) in zip(sharp, soft, strict=True):
         assert soft_values.sum() == pytest.approx(1.0, abs=1e-5)
@@ -148,7 +149,7 @@ def test_target_temperature_softens_at_load(game: BlokusDuoGame, games: list[Cor
 
 def test_epsilon_floors_the_target_over_the_legal_set(game: BlokusDuoGame, games: list[CorpusGameRows]) -> None:
     """The legal-set floor is still available; it just is not the default any more."""
-    examples = build_training_examples(game, games[:1], epsilon=0.1, augment=False)
+    examples, _ = build_training_examples(game, games[:1], epsilon=0.1, augment=False)
     board, (indices, values), _ = examples[0]
     legal = np.flatnonzero(game.valid_move_masking(game.board_from_compact(board), 1))
     assert indices.tolist() == legal.tolist()  # support widens to the whole legal set
@@ -166,7 +167,7 @@ def test_a_target_outside_the_legal_set_is_a_desync(game: BlokusDuoGame) -> None
 
 def test_augmentation_transposes_the_whole_support(game: BlokusDuoGame, games: list[CorpusGameRows]) -> None:
     """Symmetry augmentation is unchanged: an arbitrary support transposes fine."""
-    examples = build_training_examples(game, games[:1], epsilon=0.0, augment=True)
+    examples, _ = build_training_examples(game, games[:1], epsilon=0.0, augment=True)
     (board, (indices, values), value), (twin_board, (twin_indices, twin_values), twin_value) = examples[:2]
     assert np.array_equal(twin_board, np.ascontiguousarray(board.T))
     assert twin_indices.tolist() == [game.transpose_action(int(a)) for a in indices]
@@ -230,7 +231,7 @@ def test_holdout_unit_choice_is_deterministic_and_stratified() -> None:
 
 def test_opening_rows_share_the_games_holdout_units(corpus: Path, game: BlokusDuoGame) -> None:
     """An opening row's unit is its depth-1 ancestor, so it lands on the games' side."""
-    examples, units = load_opening_examples(opening_shards(corpus / "opening"), game)
+    examples, units, _margins = load_opening_examples(opening_shards(corpus / "opening"), game)
     assert len(examples) == len(units)
     assert examples
     assert units.count(None) == 1  # only the root has no ply-1 ancestor
@@ -240,9 +241,9 @@ def test_opening_rows_share_the_games_holdout_units(corpus: Path, game: BlokusDu
 
 def test_opening_examples_carry_a_blended_value(corpus: Path, game: BlokusDuoGame) -> None:
     """Opening rows train on the count-shrunk blend of teacher and real outcomes."""
-    blended, _ = load_opening_examples(opening_shards(corpus / "opening"), game, value_target="blend")
-    teacher, _ = load_opening_examples(opening_shards(corpus / "opening"), game, value_target="search")
-    outcomes, _ = load_opening_examples(opening_shards(corpus / "opening"), game, value_target="outcome")
+    blended, *_ = load_opening_examples(opening_shards(corpus / "opening"), game, value_target="blend")
+    teacher, *_ = load_opening_examples(opening_shards(corpus / "opening"), game, value_target="search")
+    outcomes, *_ = load_opening_examples(opening_shards(corpus / "opening"), game, value_target="outcome")
     assert len(blended) == len(teacher) == len(outcomes)
     assert any(b != t for (_, _, b), (_, _, t) in zip(blended, teacher, strict=True))
     for board, (indices, values), value in blended:
@@ -263,9 +264,9 @@ def test_mix_examples_hits_the_requested_proportions(corpus: Path, game: BlokusD
     Openings are ~0.6% of a v2 corpus by row count but are the strategic edge, so the mix
     weights — not the natural sizes — decide how often the net sees one.
     """
-    opening, _ = load_opening_examples(opening_shards(corpus / "opening"), game)
+    opening, *_ = load_opening_examples(opening_shards(corpus / "opening"), game)
     rows = load_corpus_games_v2(game_shards(corpus / "games"), game)
-    game_examples = build_training_examples(game, rows, epsilon=0.0, augment=False)
+    game_examples, _ = build_training_examples(game, rows, epsilon=0.0, augment=False)
     natural = len(opening) / (len(opening) + len(game_examples))
     assert natural < 0.2  # openings are naturally a small minority
 
@@ -440,3 +441,62 @@ def test_leakage_is_measurable_on_a_real_subtree_split(corpus: Path, game: Bloku
     assert report.holdout_rows == sum(len(rows) for rows in holdout)
     assert 0.0 <= report.leaked_fraction <= report.leaked_fraction_mirror <= 1.0
     assert set(report.to_dict()) >= {"leaked_fraction", "leaked_fraction_mirror", "shared_positions"}
+
+
+# --------------------------------------------------------------------------- #
+# Score-head margins (docs/plans/score-auxiliary-target.md S5)
+# --------------------------------------------------------------------------- #
+
+
+def test_v2_loader_carries_the_stored_margin(corpus: Path, game: BlokusDuoGame) -> None:
+    """v2 game shards store ``margin`` from the side to move, like v1's."""
+    games = load_corpus_games_v2(game_shards(corpus / "games"), game)
+    stored = [
+        int(m)
+        for path in game_shards(corpus / "games")
+        for m in pq.read_table(path, columns=["margin"]).column("margin").to_pylist()
+    ]
+
+    assert [m for rows in games for m in rows.margins] == [float(m) for m in stored]
+    for rows in games:
+        for margin, value in zip(rows.margins, rows.values, strict=True):
+            assert np.sign(margin) == pytest.approx(value)
+
+
+def test_opening_rows_carry_no_margin(corpus: Path, game: BlokusDuoGame) -> None:
+    """An opening node has many games through it, and no margin is aggregated for it.
+
+    ``link`` backs up the playouts' *outcomes* (``outcome_mean``, the sign of each
+    margin), never their magnitudes, and the opening schema has no ``margin`` column. So
+    the loader reports ``None`` and the score term skips these rows rather than being
+    taught an invented number.
+    """
+    examples, units, margins = load_opening_examples(opening_shards(corpus / "opening"), game)
+
+    assert len(margins) == len(examples) == len(units)
+    assert all(margin is None for margin in margins)
+    assert "margin" not in pq.read_schema(opening_shards(corpus / "opening")[0]).names
+
+
+def test_mixing_keeps_each_example_with_its_own_margin() -> None:
+    """Margins ride through the mixer *attached* to their example.
+
+    A parallel margin list could not survive ``rng.choice`` resampling and the final
+    shuffle, and the misalignment would train the head on other positions' scores while
+    every other metric looked fine.
+    """
+
+    def pool(board_value: int, margin: float | None) -> list:
+        target = (np.array([0], dtype=np.int32), np.array([1.0], dtype=np.float32))
+        return [((np.array([board_value], dtype=np.int8), target, 0.0), margin) for _ in range(50)]
+
+    mixed = mix_examples(
+        {"games": pool(1, 12.0), "opening": pool(2, None)},
+        {"games": 0.5, "opening": 0.5},
+        seed=3,
+    )
+
+    assert len(mixed) == 100
+    for (board, _pi, _value), margin in mixed:
+        assert margin == (12.0 if int(board[0]) == 1 else None)
+    assert sum(1 for _example, margin in mixed if margin is None) == 50

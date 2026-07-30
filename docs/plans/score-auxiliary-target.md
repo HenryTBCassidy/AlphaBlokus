@@ -44,8 +44,8 @@ different positions.
 | S2 | The head itself in `nn/net.py`; `forward` returns a 3-tuple, `predict`/`predict_batch` still return `(pi, v)` | 2 h | High | ✅ |
 | S3 | Checkpoint compatibility both ways — warm-start an old net into a score-head net and vice versa | 2 h | High | ✅ |
 | S4 | `BaseNNetWrapper.train` takes optional per-example scores and adds the weighted loss term | 3 h | High | ✅ |
-| S5 | Thread `margin` out of the corpus loaders as the score target | 2 h | High | |
-| S6 | `distill_sl.py` wiring + report score MSE and the change in value skill | 2 h | High | |
+| S5 | Thread `margin` out of the corpus loaders as the score target | 2 h | High | ✅ |
+| S6 | `distill_sl.py` wiring + report score MSE and the change in value skill | 2 h | High | ✅ |
 | S7 | **A/B on the box**: identical SL fits with and without the head | ½ day box GPU | High | |
 | S8 | Decision + default: keep, drop, or retune — recorded with the numbers | 1 h | High | |
 
@@ -154,6 +154,23 @@ Opening rows have no single margin (a DAG node has many games through it); use t
 margin of the playouts beneath it where `link` has computed one, and skip the score term for
 the rest rather than inventing a number.
 
+> **As built — `link` has *no* mean margin, so every opening row is skipped.** The plan's
+> fallback does not exist: `SearchSpaceStore`'s aggregation backs up
+> `SUM(CASE WHEN white_margin > 0 THEN 1 WHEN white_margin < 0 THEN -1 ELSE 0 END)` — the
+> **sign** of each playout's margin — into `outcome_mean`, and the opening schema has no
+> `margin` column at all. Magnitudes are never aggregated, so there is nothing to average.
+> `load_opening_examples` therefore returns `None` for every opening row and the loss masks
+> them (`BaseNNetWrapper.loss_score` averages over the unmasked positions only). At the
+> shipped `--opening-mix 0.05` that is ~5% of the mixed corpus carrying no score target,
+> which the held-out `ScoreHeadMetrics.n_skipped` reports explicitly. Aggregating a mean
+> margin in `link` would be a corpus-side change, out of scope here.
+>
+> `build_training_examples` returns `(examples, margins)` and `load_opening_examples`
+> returns `(examples, units, margins)`. `mix_examples` is now generic in its item type, so
+> `distill_sl.py` mixes `(example, margin)` **pairs** through the same resampling and
+> shuffle — a parallel margin list could not survive `rng.choice` and the misalignment
+> would train the head on other positions' scores while every other metric looked fine.
+
 ## S6. Trainer wiring
 
 `distill_sl.py` passes the margins through and reports, per epoch:
@@ -163,6 +180,14 @@ the rest rather than inventing a number.
   is the number this whole plan exists to move.
 
 Both into the run JSON so the S7 arms are comparable after the fact.
+
+> **As built.** `--score-head` / `--score-loss-weight` / `--score-scale` are the arm knobs
+> (off by default), and each curve row now carries `value_skill` explicitly — `asdict`
+> drops it, being a property — plus a `score` block from
+> `alphablokus.training.holdout.evaluate_score_head`: `score_mse`, `constant_mse`,
+> `score_skill` (`1 − mse / constant_mse`) and the scored/skipped counts. `constant_mse` is
+> the S8 retune signal the plan asks for: a small `score_mse` at ~zero skill means the head
+> has learnt the mean and `score_scale` is too small.
 
 ## S7. The A/B
 

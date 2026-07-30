@@ -9,9 +9,13 @@ CPU net.
 
 from __future__ import annotations
 
+import json
+import sys
 from typing import TYPE_CHECKING
+from unittest import mock
 
 import numpy as np
+import pyarrow.parquet as pq
 import pytest
 
 from alphablokus.config import MCTSConfig, NetConfig, RunConfig
@@ -107,6 +111,45 @@ def test_load_corpus_games_groups_rows_by_game(
     assert all(p in (-1, 1) for g in corpus_games for p in g.players)
 
 
+def test_loader_carries_the_stored_margin_per_position(corpus_dir: Path, corpus_games: list[CorpusGameRows]) -> None:
+    """v1 shards store ``margin`` from the side to move; the loader must surface it.
+
+    Cross-checked against the stored ``value``: the outcome label is the *sign* of the
+    margin from that same side, so a loader that read the wrong column or lost the
+    per-position player flip would disagree here (score-head plan S5).
+    """
+    stored = [
+        int(m)
+        for path in corpus_shards(corpus_dir)
+        for m in pq.read_table(path, columns=["margin"]).column("margin").to_pylist()
+    ]
+    flat_margins = [m for g in corpus_games for m in g.margins]
+    assert flat_margins == [float(m) for m in stored]
+
+    for rows in corpus_games:
+        assert len(rows.margins) == len(rows)
+        for margin, value in zip(rows.margins, rows.values, strict=True):
+            assert np.sign(margin) == pytest.approx(value)
+
+
+def test_build_training_examples_returns_margins_aligned_with_its_examples(
+    game: BlokusDuoGame, corpus_games: list[CorpusGameRows]
+) -> None:
+    """Alignment is the whole contract: a shifted margin trains the head on the wrong
+    position and shows up in no metric. The symmetry twin shares its original's margin —
+    transposing a board does not change the score."""
+    rows = corpus_games[0]
+    plain, plain_margins = build_training_examples(game, [rows], epsilon=EPSILON, augment=False)
+    augmented, augmented_margins = build_training_examples(game, [rows], epsilon=EPSILON, augment=True)
+
+    assert len(plain_margins) == len(plain) == len(rows)
+    assert plain_margins == list(rows.margins)
+
+    assert len(augmented_margins) == len(augmented) == 2 * len(rows)
+    assert augmented_margins[::2] == list(rows.margins)
+    assert augmented_margins[1::2] == list(rows.margins)
+
+
 # --------------------------------------------------------------------------- #
 # Label smoothing
 # --------------------------------------------------------------------------- #
@@ -118,7 +161,7 @@ def test_smoothed_targets_sum_to_one_over_exactly_the_legal_moves(
     """Each smoothed target sums to 1, keeps ≥ 1−ε on Pentobi's move, and its support
     is exactly the position's legal set (zero mass on any illegal action)."""
     rows = corpus_games[0]
-    examples = build_training_examples(game, [rows], epsilon=EPSILON, augment=False)
+    examples, _margins = build_training_examples(game, [rows], epsilon=EPSILON, augment=False)
     assert len(examples) == len(rows)
     for (compact, pi, _value), action in zip(examples, rows.actions, strict=True):
         dense = as_dense(pi, game.get_action_size())
@@ -149,8 +192,8 @@ def test_augmentation_appends_the_transposed_twin(game: BlokusDuoGame, corpus_ga
     """augment=True doubles the count, and each twin equals the ``get_symmetries``
     ground truth: the transposed board with the policy mapped via ``transpose_action``."""
     rows = corpus_games[0]
-    plain = build_training_examples(game, [rows], epsilon=EPSILON, augment=False)
-    augmented = build_training_examples(game, [rows], epsilon=EPSILON, augment=True)
+    plain, _ = build_training_examples(game, [rows], epsilon=EPSILON, augment=False)
+    augmented, _ = build_training_examples(game, [rows], epsilon=EPSILON, augment=True)
     assert len(augmented) == 2 * len(plain)
 
     action_size = game.get_action_size()
@@ -227,7 +270,7 @@ def test_training_step_runs_and_fits_a_tiny_subset(
 
     torch.manual_seed(0)
     wrapper = BlokusDuoNNetWrapper(game, _tiny_run_config(tmp_path))
-    examples = build_training_examples(game, [corpus_games[0]], epsilon=EPSILON, augment=False)[:12]
+    examples = build_training_examples(game, [corpus_games[0]], epsilon=EPSILON, augment=False)[0][:12]
 
     before = evaluate_holdout(
         wrapper, examples, encode_fn=game.encode_compact, action_size=game.get_action_size(), batch_size=8
@@ -248,7 +291,7 @@ def test_imitation_diagnostics_on_real_corpus_examples(
     """The colour-conditional diagnostics run off the dataloader's alignment: one
     calibration row per side-to-move, bucket counts partitioning that colour's rows."""
     rows = corpus_games[1]
-    examples = build_training_examples(game, [rows], epsilon=EPSILON, augment=False)
+    examples, _margins = build_training_examples(game, [rows], epsilon=EPSILON, augment=False)
     wrapper = BlokusDuoNNetWrapper(game, _tiny_run_config(tmp_path))
 
     diagnostics = evaluate_imitation_diagnostics(
@@ -270,3 +313,95 @@ def test_imitation_diagnostics_on_real_corpus_examples(
         assert calibration.mean_outcome == pytest.approx(
             np.mean([v for v, p in zip(rows.values, rows.players, strict=True) if p == calibration.player])
         )
+
+
+# --------------------------------------------------------------------------- #
+# The SL trainer's score-head wiring, end to end (score-head plan S6)
+# --------------------------------------------------------------------------- #
+
+
+def _tiny_config_json(tmp_path: Path) -> Path:
+    """The tiny Blokus run config as JSON, for the ``distill_sl`` CLI."""
+    config = tmp_path / "config.json"
+    config.write_text(
+        json.dumps(
+            {
+                "game": "blokusduo",
+                "run_name": "distill_score_test",
+                "num_generations": 1,
+                "num_eps": 1,
+                "temp_threshold": 5,
+                "update_threshold": 0.55,
+                "num_arena_matches": 2,
+                "root_directory": str(tmp_path),
+                "load_model": False,
+                "mcts_config": {"num_mcts_sims": 2, "cpuct": 1},
+                "net_config": {
+                    "learning_rate": 0.005,
+                    "dropout": 0.0,
+                    "epochs": 1,
+                    "batch_size": 8,
+                    "cuda": False,
+                    "num_filters": 16,
+                    "num_residual_blocks": 1,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return config
+
+
+def _run_distill_sl(tmp_path: Path, corpus_dir: Path, *extra: str) -> dict:
+    """Drive the real ``distill_sl`` CLI over the tiny corpus and read its run JSON."""
+    from scripts.distill_sl import main
+
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    out = tmp_path / "distill.json"
+    argv = [
+        "distill_sl.py",
+        "--config",
+        str(_tiny_config_json(tmp_path)),
+        "--corpus",
+        str(corpus_dir),
+        "--arms",
+        "scratch",
+        "--max-epochs",
+        "1",
+        "--holdout-frac",
+        "0.25",
+        "--ckpt-dir",
+        str(tmp_path / "ckpt"),
+        "--out",
+        str(out),
+        *extra,
+    ]
+    with mock.patch.object(sys, "argv", argv):
+        main()
+    return json.loads(out.read_text())
+
+
+def test_distill_sl_reports_score_mse_and_value_skill_with_the_head_on(corpus_dir: Path, tmp_path: Path) -> None:
+    """The S7 arms are compared on these two numbers, so both must reach the run JSON."""
+    payload = _run_distill_sl(tmp_path, corpus_dir, "--score-head")
+
+    arm = payload["arms"]["scratch"]
+    assert payload["score_head"] is True
+    assert arm["score_head"] is True
+    for row in arm["curve"]:
+        assert np.isfinite(row["value_skill"])
+        assert row["score"] is not None
+        assert np.isfinite(row["score"]["score_mse"])
+        assert row["score"]["n_positions"] > 0
+    assert arm["best_score"] is not None
+
+
+def test_distill_sl_without_the_head_reports_no_score_and_a_smaller_net(corpus_dir: Path, tmp_path: Path) -> None:
+    """The control arm: no head, no score numbers, and fewer parameters."""
+    with_head = _run_distill_sl(tmp_path / "on", corpus_dir, "--score-head")
+    without = _run_distill_sl(tmp_path / "off", corpus_dir)
+
+    assert without["score_head"] is False
+    assert all(row["score"] is None for row in without["arms"]["scratch"]["curve"])
+    assert without["arms"]["scratch"]["best_score"] is None
+    assert without["arms"]["scratch"]["num_params"] < with_head["arms"]["scratch"]["num_params"]
