@@ -452,3 +452,60 @@ def test_loss_score_masks_and_averages_over_real_targets_only() -> None:
     assert outputs.grad is not None
     assert torch.equal(outputs.grad[[1, 3]], torch.zeros(2, 1)), "masked rows must get no gradient"
     assert torch.isfinite(outputs.grad).all()
+
+
+# --------------------------------------------------------------------------- #
+# 5. Downstream consumers of a score-head state dict
+# --------------------------------------------------------------------------- #
+
+
+def test_the_jax_bridge_converts_a_score_head_state_dict(
+    blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard
+) -> None:
+    """The jax self-play net reads named tensors, so the extra head must be inert.
+
+    ``convert_state_dict`` needs numpy only (torch is lazy there), so this runs without
+    the jax extra installed.
+    """
+    from alphablokus.games.blokusduo.jax.checkpoint import convert_state_dict
+
+    net_config = _net_config(score_head=True, num_residual_blocks=1)
+    net = _build_net(blokus_game, blokus_board, net_config)
+
+    params = convert_state_dict(net.state_dict(), net_config.num_residual_blocks)
+
+    assert set(params) == {"trunk", "blocks", "value", "policy", "perm"}
+    assert len(params["blocks"]) == net_config.num_residual_blocks
+
+
+def test_scored_dataset_appends_the_target_to_the_memmap_dataset(
+    blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard, tmp_path: Path
+) -> None:
+    """The DataLoader-worker path is a *wrapped* memmap dataset, not a second one.
+
+    Also checks the wrapper pickles: ``dataloader_workers > 0`` ships the dataset to
+    spawn/forkserver workers, and an unpicklable wrapper would only fail on the box.
+    """
+    import pickle
+
+    from alphablokus.games.base_wrapper import _ScoredDataset
+    from alphablokus.training.memmap_dataset import MemmapPolicyDataset
+
+    examples = _examples(blokus_game, blokus_board, 4)
+    base = MemmapPolicyDataset.build(
+        examples, blokus_game.get_action_size(), blokus_game.encode_compact, tmp_path / "memmap"
+    )
+    targets = np.array([0.1, np.nan, -0.3, 0.4], dtype=np.float32)
+
+    scored = pickle.loads(pickle.dumps(_ScoredDataset(base, targets)))
+
+    assert len(scored) == 4
+    for index in range(4):
+        board, pi, value, score = scored[index]
+        assert board.shape == base[index][0].shape
+        assert torch.equal(pi, base[index][1])
+        assert value == base[index][2]
+        if np.isnan(targets[index]):
+            assert torch.isnan(score)
+        else:
+            assert score.item() == pytest.approx(float(targets[index]))
