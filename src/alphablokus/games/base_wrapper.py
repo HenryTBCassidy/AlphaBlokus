@@ -232,6 +232,16 @@ class _ScoredDataset(Dataset):
         return (*self._base[idx], self._targets[idx])
 
 
+def _shuffle_seed(seed: int, generation: int) -> int:
+    """A per-epoch shuffle seed that does not depend on the global RNG's position.
+
+    Derived from the run's configured seed and the generation so shuffling stays
+    reproducible and still differs between epochs, while being immune to how many draws
+    anything else (net construction, in particular) has taken from the global stream.
+    """
+    return (seed * 1_000_003 + generation) % (2**31 - 1)
+
+
 class BaseNNetWrapper(INeuralNetWrapper, ABC):
     """
     Base neural network wrapper implementing all shared training, prediction,
@@ -251,7 +261,9 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
 
         # One-shot guard so a mis-wired score head (head on, no targets — or the
         # reverse) is reported once, not once per generation.
-        self._score_target_warned = False
+        self._score_warned: set[str] = set()
+        self._score_scored_rows = 0
+        self._score_total_rows = 0
 
         self._device = self._resolve_device()
         self.nnet.to(self._device)
@@ -457,13 +469,13 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 "they must be index-aligned.",
             )
         if not self.has_score_head():
-            if score_margins is not None and not self._score_target_warned:
-                self._score_target_warned = True
+            if score_margins is not None and "no_head" not in self._score_warned:
+                self._score_warned.add("no_head")
                 logger.info("Score margins supplied but this net has no score head — ignoring them.")
             return None
         if score_margins is None:
-            if not self._score_target_warned:
-                self._score_target_warned = True
+            if "no_margins" not in self._score_warned:
+                self._score_warned.add("no_margins")
                 logger.warning(
                     "net_config.score_head is on but train() got no score_margins — the score head "
                     "will not be trained this run. Pass score_margins, or set score_head=False.",
@@ -476,9 +488,23 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         from alphablokus.training.score_target import scale_margins
 
         targets = scale_margins(score_margins, self.net_config.score_scale)
-        if not bool(np.isfinite(targets).any()) and not self._score_target_warned:
-            self._score_target_warned = True
+        scored = int(np.isfinite(targets).sum())
+        self._score_scored_rows = scored
+        self._score_total_rows = len(targets)
+        if scored == 0 and "all_none" not in self._score_warned:
+            self._score_warned.add("all_none")
             logger.warning("Every supplied score margin is None — the score term contributes nothing.")
+        elif scored < len(targets) and "partial" not in self._score_warned:
+            self._score_warned.add("partial")
+            # Not an error: opening rows legitimately have no margin (the opening dataset
+            # stores none). Reported because the fraction is otherwise invisible — the
+            # held-out ``n_skipped`` counts holdout rows, which always have margins.
+            logger.info(
+                "Score targets: {}/{} training rows carry a margin ({:.1%} unscored).",
+                scored,
+                len(targets),
+                1.0 - scored / len(targets),
+            )
         return targets
 
     def train(
@@ -620,10 +646,21 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         # Built once so persistent workers survive across epochs; iterating a
         # shuffle=True loader reshuffles each epoch exactly as the old
         # loader-per-epoch construction did.
+        # Shuffle from a generator seeded by (seed, generation) rather than from the
+        # global torch RNG. Otherwise the shuffle order depends on how many random draws
+        # the *net's construction* happened to consume — so building a score head (~38k
+        # extra parameters) silently reshuffles the data too, and an A/B between
+        # score_head on and off differs by both the head and the data order. The
+        # confound was measured at ~4x the treatment effect it was meant to detect, so
+        # this is what makes that experiment interpretable at all.
+        shuffle_generator = torch.Generator()
+        if self.config.seed is not None:
+            shuffle_generator.manual_seed(_shuffle_seed(self.config.seed, generation))
         loader = DataLoader(
             dataset,
             batch_size=self.net_config.batch_size,
             shuffle=True,
+            generator=shuffle_generator,
             pin_memory=pin_memory,
             **worker_kwargs,
         )

@@ -220,3 +220,35 @@ def test_default_dataloader_context_is_non_fork(ttt_game: TicTacToeGame, test_co
         TrainingPerfConfig(dataloader_workers=2, prefetch_factor=2, dataloader_context="spawn"),
     )
     _assert_identical_weights(baseline_weights, workers_weights)
+
+
+def test_shuffle_order_does_not_depend_on_how_the_net_was_built() -> None:
+    """The A/B arms must see their data in the same order, head on or off.
+
+    Building the score head draws ~38k extra numbers from the global torch RNG, and a
+    ``DataLoader(shuffle=True)`` with no explicit generator draws from that same stream —
+    so switching the head on silently reshuffles the training data too. The two arms
+    would then differ by *two* things, and the confound was measured at roughly four
+    times the treatment effect it was meant to detect. Seeding the shuffle from
+    ``(seed, generation)`` makes the experiment interpretable.
+    """
+    import torch
+
+    from alphablokus.games.base_wrapper import _shuffle_seed
+
+    def order_after_consuming(draws: int) -> list[int]:
+        torch.manual_seed(0)
+        torch.rand(draws)  # stand-in for however many the net's construction takes
+        generator = torch.Generator()
+        generator.manual_seed(_shuffle_seed(42, 0))
+        return torch.randperm(16, generator=generator).tolist()
+
+    assert order_after_consuming(0) == order_after_consuming(38_211)
+
+    # ...and it still differs between epochs, so shuffling is real
+    def order_for_generation(generation: int) -> list[int]:
+        generator = torch.Generator()
+        generator.manual_seed(_shuffle_seed(42, generation))
+        return torch.randperm(16, generator=generator).tolist()
+
+    assert order_for_generation(0) != order_for_generation(1)
