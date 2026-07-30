@@ -21,7 +21,7 @@ the score head on `feat/score-auxiliary-head` (built, unmeasured). N3 below *is*
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| N1 | The comparison protocol: paired arms, fixed seeds, one metric set, one command | ½ day | High | |
+| N1 | The A/B harness: two runs identical but for one thing, fixed seeds, one metric set, one command | ½ day | High | |
 | N2 | Data-fraction curve (25 / 50 / 100% of the corpus) — makes every later result interpretable | 3 h box GPU | High | |
 | N3 | **Score-head A/B** (code already built — this is `score-auxiliary-target.md` S7) | ½ day box GPU | High | |
 | N4 | Ownership head: predict the final board, per cell | 2 days + ½ day box | High | |
@@ -30,13 +30,24 @@ the score head on `feat/score-auxiliary-head` (built, unmeasured). N3 below *is*
 | N7 | Win/draw/loss value head (IDEAS I8) | 2 days + ½ day box | Medium | |
 | N8 | Global pooling in the trunk — **gated on N4/N5 showing the trunk is the constraint** | 3–4 days + ½ day box | Medium | |
 
-**The gate that matters is still V15**, the Pentobi ladder. Nothing here replaces it: these rows
-choose *which net* goes into that gate. Screening happens on cheap held-out metrics (N1); the
-ladder runs once, on the winning combination, not once per arm.
+**Every row gets a paired A/B — no change is taken on faith.** Two instruments, chosen for
+sensitivity rather than cost:
+
+- **Held-out metrics (N1) run for every single change.** They are sensitive enough to rank small
+  effects, and cheap.
+- **The Pentobi ladder runs at decision points, not per arm.** At 50 games per level its binomial
+  noise is ≈ ±7 pp, so it simply cannot see a 2 pp improvement — running it per arm would measure
+  mostly noise, not save time. It answers "is this combination actually stronger", which is the
+  V15 gate's question and remains the one that matters.
+
+**These rows can start before the corpus finishes.** Generation is CPU-only (12 of 20 cores) and
+leaves the GPU completely idle; the shards already written are complete and valid, so N1–N3 can run
+against a partial corpus. Keep training's dataloader workers low so the two do not contend, and
+watch that generation's games/hour does not drop.
 
 ---
 
-## N1. The comparison protocol
+## N1. The A/B harness
 
 Every row below is a two-arm comparison, so the comparison itself should be built once, correctly,
 and then reused. Without this each experiment reinvents its own setup and none are comparable.
