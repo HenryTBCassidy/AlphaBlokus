@@ -232,7 +232,7 @@ def test_game_shard_round_trip_and_validation(store: SearchSpaceStore, game: Blo
     # Through the production reader, so the assertions below cover the path the
     # trainer takes rather than a second implementation of the same read.
     loaded = load_corpus_games_v2([path], game)
-    examples, _margins = build_training_examples(game, loaded, epsilon=0.0, augment=False)
+    examples = [row.example for row in build_training_examples(game, loaded, epsilon=0.0, augment=False)]
     assert len(examples) == rows
     flat = [ply for g in games for ply in g.plies]
     for (board, (indices, values), value), ply in zip(examples, flat, strict=True):

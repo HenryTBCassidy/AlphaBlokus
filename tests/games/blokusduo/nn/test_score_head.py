@@ -22,61 +22,17 @@ import numpy as np
 import pytest
 import torch
 
-from alphablokus.config import MCTSConfig, NetConfig, RunConfig
-from alphablokus.games.blokusduo.nn.net import AlphaBlokusDuo
 from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper as BlokusDuoNNetWrapper
 from tests.conftest import RecordingMetrics
+from tests.games.blokusduo.nn.aux_helpers import SEED, build_net, net_config, run_config
+from tests.games.blokusduo.nn.aux_helpers import examples as build_examples
+from tests.games.blokusduo.nn.aux_helpers import train_once as train_once_helper
 
 if TYPE_CHECKING:
     from pathlib import Path
 
     from alphablokus.games.blokusduo.board import BlokusDuoBoard
     from alphablokus.games.blokusduo.game import BlokusDuoGame
-
-SEED = 20260730
-
-
-def _net_config(**overrides: object) -> NetConfig:
-    """A tiny CPU net config; ``overrides`` flips the score-head knobs."""
-    base = NetConfig(
-        learning_rate=5e-3,
-        dropout=0.0,
-        epochs=1,
-        batch_size=4,
-        cuda=False,
-        num_filters=16,
-        num_residual_blocks=1,
-    )
-    return replace(base, **overrides)  # type: ignore[arg-type]  # kwargs are field values
-
-
-def _run_config(tmp_path: Path, net_config: NetConfig) -> RunConfig:
-    return RunConfig(
-        game="blokusduo",
-        run_name="score_head_test",
-        num_generations=1,
-        num_eps=1,
-        temp_threshold=5,
-        update_threshold=0.55,
-        num_arena_matches=2,
-        root_directory=tmp_path,
-        load_model=False,
-        mcts_config=MCTSConfig(num_mcts_sims=2, cpuct=1.0),
-        net_config=net_config,
-    )
-
-
-def _build_net(game: BlokusDuoGame, board: BlokusDuoBoard, net_config: NetConfig) -> AlphaBlokusDuo:
-    """Seeded construction, so two nets differ only where the architecture does."""
-    rows, cols = game.get_board_size()
-    torch.manual_seed(SEED)
-    return AlphaBlokusDuo(
-        board_rows=rows,
-        board_cols=cols,
-        action_size=game.get_action_size(),
-        num_input_channels=board.num_channels,
-        config=net_config,
-    )
 
 
 # --------------------------------------------------------------------------- #
@@ -85,15 +41,15 @@ def _build_net(game: BlokusDuoGame, board: BlokusDuoBoard, net_config: NetConfig
 
 
 def test_score_head_is_off_by_default() -> None:
-    assert _net_config().score_head is False
-    assert _net_config().score_loss_weight == 0.15
-    assert _net_config().score_scale == 25.0
+    assert net_config().score_head is False
+    assert net_config().score_loss_weight == 0.15
+    assert net_config().score_scale == 25.0
 
 
 def test_head_off_builds_no_head_and_returns_the_two_tuple(
     blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard
 ) -> None:
-    net = _build_net(blokus_game, blokus_board, _net_config())
+    net = build_net(blokus_game, blokus_board, net_config())
 
     assert net.score_head is None
     assert not [key for key in net.state_dict() if key.startswith("score_head")]
@@ -113,8 +69,8 @@ def test_turning_the_head_on_leaves_every_other_parameter_untouched(
     with the head on and off — which is why the score head is constructed last, after
     every other head, rather than in the middle of the RNG stream.
     """
-    off = _build_net(blokus_game, blokus_board, _net_config())
-    on = _build_net(blokus_game, blokus_board, _net_config(score_head=True))
+    off = build_net(blokus_game, blokus_board, net_config())
+    on = build_net(blokus_game, blokus_board, net_config(score_head=True))
 
     off_state, on_state = off.state_dict(), on.state_dict()
     for key, tensor in off_state.items():
@@ -136,9 +92,9 @@ def test_head_costs_about_half_a_percent_at_the_production_net_size(
     blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard
 ) -> None:
     """The plan's cost claim, at the ``large`` preset the runs actually use (192x12)."""
-    large = _net_config(num_filters=192, num_residual_blocks=12)
-    off = _build_net(blokus_game, blokus_board, large)
-    on = _build_net(blokus_game, blokus_board, replace(large, score_head=True))
+    large = net_config(num_filters=192, num_residual_blocks=12)
+    off = build_net(blokus_game, blokus_board, large)
+    on = build_net(blokus_game, blokus_board, replace(large, score_head=True))
 
     off_params = sum(p.numel() for p in off.parameters())
     on_params = sum(p.numel() for p in on.parameters())
@@ -152,7 +108,7 @@ def test_head_costs_about_half_a_percent_at_the_production_net_size(
 
 
 def test_head_on_returns_a_bounded_third_output(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard) -> None:
-    net = _build_net(blokus_game, blokus_board, _net_config(score_head=True))
+    net = build_net(blokus_game, blokus_board, net_config(score_head=True))
 
     net.eval()
     with torch.no_grad():
@@ -168,16 +124,16 @@ def test_inference_surface_never_exposes_the_score(
     blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard, tmp_path: Path
 ) -> None:
     """``predict``/``predict_batch``/``predict_encoded`` are what search calls."""
-    wrapper = BlokusDuoNNetWrapper(blokus_game, _run_config(tmp_path, _net_config(score_head=True)))
+    wrapper = BlokusDuoNNetWrapper(blokus_game, run_config(tmp_path, net_config(score_head=True)))
 
-    assert wrapper.has_score_head()
+    assert wrapper.has_aux_head("score")
     assert len(wrapper.predict(blokus_board)) == 2
     assert len(wrapper.predict_batch([blokus_board, blokus_board])) == 2
     planes = blokus_board.as_multi_channel(1)[np.newaxis, ...]
     assert len(wrapper.predict_encoded(planes)) == 2
 
-    policies, values, scores = wrapper.predict_encoded_with_score(planes)
-    assert scores is not None and scores.shape == (1,)
+    policies, values, aux = wrapper.predict_encoded_aux(planes)
+    assert set(aux) == {"score"} and aux["score"].shape == (1,)
     # The diagnostics surface must agree with the play surface on the first two outputs.
     play_policies, play_values = wrapper.predict_encoded(planes)
     assert np.array_equal(policies, play_policies)
@@ -187,10 +143,10 @@ def test_inference_surface_never_exposes_the_score(
 def test_a_headless_net_reports_no_score(
     blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard, tmp_path: Path
 ) -> None:
-    wrapper = BlokusDuoNNetWrapper(blokus_game, _run_config(tmp_path, _net_config()))
+    wrapper = BlokusDuoNNetWrapper(blokus_game, run_config(tmp_path, net_config()))
 
-    assert not wrapper.has_score_head()
-    assert wrapper.predict_encoded_with_score(blokus_board.as_multi_channel(1)[np.newaxis, ...])[2] is None
+    assert not wrapper.has_aux_head("score")
+    assert wrapper.predict_encoded_aux(blokus_board.as_multi_channel(1)[np.newaxis, ...])[2] == {}
 
 
 # --------------------------------------------------------------------------- #
@@ -209,10 +165,10 @@ def _body_bytes(wrapper: BlokusDuoNNetWrapper) -> dict[str, bytes]:
 
 def test_old_checkpoint_warm_starts_a_score_head_net(blokus_game: BlokusDuoGame, tmp_path: Path) -> None:
     """v3-style donor (no score weights) → score-head net: loads, head left fresh."""
-    donor = BlokusDuoNNetWrapper(blokus_game, _run_config(tmp_path, _net_config()))
+    donor = BlokusDuoNNetWrapper(blokus_game, run_config(tmp_path, net_config()))
     donor.save_checkpoint("plain.pth.tar")
 
-    target = BlokusDuoNNetWrapper(blokus_game, _run_config(tmp_path, _net_config(score_head=True)))
+    target = BlokusDuoNNetWrapper(blokus_game, run_config(tmp_path, net_config(score_head=True)))
     assert target.nnet.score_head is not None
     fresh_head = {k: v.detach().clone() for k, v in target.nnet.score_head.state_dict().items()}
 
@@ -225,10 +181,10 @@ def test_old_checkpoint_warm_starts_a_score_head_net(blokus_game: BlokusDuoGame,
 
 def test_score_head_checkpoint_loads_into_a_plain_net(blokus_game: BlokusDuoGame, tmp_path: Path) -> None:
     """The direction that keeps evaluation, ONNX export and the jax bridge working."""
-    donor = BlokusDuoNNetWrapper(blokus_game, _run_config(tmp_path, _net_config(score_head=True)))
+    donor = BlokusDuoNNetWrapper(blokus_game, run_config(tmp_path, net_config(score_head=True)))
     donor.save_checkpoint("scored.pth.tar")
 
-    target = BlokusDuoNNetWrapper(blokus_game, _run_config(tmp_path, _net_config()))
+    target = BlokusDuoNNetWrapper(blokus_game, run_config(tmp_path, net_config()))
     target.load_weights("scored.pth.tar")
 
     assert _body_bytes(target) == _body_bytes(donor)
@@ -237,10 +193,10 @@ def test_score_head_checkpoint_loads_into_a_plain_net(blokus_game: BlokusDuoGame
 
 def test_a_genuinely_wrong_checkpoint_still_raises(blokus_game: BlokusDuoGame, tmp_path: Path) -> None:
     """Tolerance is scoped to the score head: an fc/conv head swap must stay loud."""
-    donor = BlokusDuoNNetWrapper(blokus_game, _run_config(tmp_path, _net_config(policy_head="fc")))
+    donor = BlokusDuoNNetWrapper(blokus_game, run_config(tmp_path, net_config(policy_head="fc")))
     donor.save_checkpoint("fc.pth.tar")
 
-    target = BlokusDuoNNetWrapper(blokus_game, _run_config(tmp_path, _net_config(policy_head="conv")))
+    target = BlokusDuoNNetWrapper(blokus_game, run_config(tmp_path, net_config(policy_head="conv")))
 
     with pytest.raises(RuntimeError, match="does not match this network architecture"):
         target.load_weights("fc.pth.tar")
@@ -251,47 +207,14 @@ def test_a_genuinely_wrong_checkpoint_still_raises(blokus_game: BlokusDuoGame, t
 # --------------------------------------------------------------------------- #
 
 
-def _examples(blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard, count: int) -> list:
-    """``count`` trivially-distinct training examples in the stored (sparse) shape."""
-    examples = []
-    board = blokus_board
-    player = 1
-    for i in range(count):
-        legal = np.flatnonzero(blokus_game.valid_move_masking(board, player))
-        action = int(legal[i % len(legal)])
-        indices = np.array([action], dtype=np.int32)
-        values = np.array([1.0], dtype=np.float32)
-        compact = np.asarray(board.to_compact(), dtype=np.int8)
-        examples.append((compact, (indices, values), float((-1) ** i)))
-        board, player = blokus_game.get_next_state(board, player, action)
-        board = blokus_game.get_canonical_form(board, player)
-        player = 1
-    return examples
-
-
-def _train_once(
-    blokus_game: BlokusDuoGame,
-    net_config: NetConfig,
-    tmp_path: Path,
-    examples: list,
-    score_margins: list[float | None] | None,
-) -> tuple[BlokusDuoNNetWrapper, RecordingMetrics]:
-    torch.manual_seed(SEED)
-    wrapper = BlokusDuoNNetWrapper(blokus_game, _run_config(tmp_path, net_config))
-    metrics = RecordingMetrics()
-    torch.manual_seed(SEED + 1)
-    wrapper.train(examples, generation=1, metrics=metrics, score_margins=score_margins)
-    return wrapper, metrics
-
-
 def test_head_off_ignores_margins_and_logs_no_score_loss(
     blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard, tmp_path: Path
 ) -> None:
     """With the head off the total is exactly ``pi + v`` and no score column appears."""
-    examples = _examples(blokus_game, blokus_board, 8)
+    examples = build_examples(blokus_game, blokus_board, 8)
     margins: list[float | None] = [3.0, -7.0, 0.0, 40.0, -2.0, 12.0, 5.0, -20.0]
 
-    _, metrics = _train_once(blokus_game, _net_config(), tmp_path, examples, margins)
+    _, metrics = train_once_helper(blokus_game, net_config(), tmp_path, examples, score_margins=margins)
 
     assert metrics.rows
     for row in metrics.rows:
@@ -303,16 +226,16 @@ def test_head_on_adds_the_weighted_score_term_to_the_total(
     blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard, tmp_path: Path
 ) -> None:
     """With the head on the total is ``pi + v + w·score`` and the term is non-trivial."""
-    examples = _examples(blokus_game, blokus_board, 8)
+    examples = build_examples(blokus_game, blokus_board, 8)
     margins: list[float | None] = [3.0, -7.0, 0.0, 40.0, -2.0, 12.0, 5.0, -20.0]
-    net_config = _net_config(score_head=True)
+    config = net_config(score_head=True)
 
-    _, metrics = _train_once(blokus_game, net_config, tmp_path, examples, margins)
+    _, metrics = train_once_helper(blokus_game, config, tmp_path, examples, score_margins=margins)
 
     assert metrics.rows
     for row in metrics.rows:
         assert row["score_loss"] is not None and row["score_loss"] > 0.0
-        expected = row["pi_loss"] + row["v_loss"] + net_config.score_loss_weight * row["score_loss"]
+        expected = row["pi_loss"] + row["v_loss"] + config.score_loss_weight * row["score_loss"]
         assert row["total_loss"] == pytest.approx(expected, rel=1e-5)
         assert row["total_loss"] > row["pi_loss"] + row["v_loss"]
 
@@ -326,12 +249,12 @@ def test_head_on_without_margins_trains_the_old_total_and_warns(
     messages: list[str] = []
     sink_id = logger.add(lambda message: messages.append(message), level="WARNING")
     try:
-        examples = _examples(blokus_game, blokus_board, 8)
-        _, metrics = _train_once(blokus_game, _net_config(score_head=True), tmp_path, examples, None)
+        examples = build_examples(blokus_game, blokus_board, 8)
+        _, metrics = train_once_helper(blokus_game, net_config(score_head=True), tmp_path, examples)
     finally:
         logger.remove(sink_id)
 
-    assert any("score_head is on but train() got no score_margins" in message for message in messages)
+    assert any("score_head is on but train() got no score targets" in message for message in messages)
     for row in metrics.rows:
         assert row["score_loss"] is None
         assert row["total_loss"] == pytest.approx(row["pi_loss"] + row["v_loss"], rel=1e-6)
@@ -340,11 +263,15 @@ def test_head_on_without_margins_trains_the_old_total_and_warns(
 def test_zero_weight_keeps_the_total_unchanged_but_still_reports_the_head(
     blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard, tmp_path: Path
 ) -> None:
-    examples = _examples(blokus_game, blokus_board, 8)
+    examples = build_examples(blokus_game, blokus_board, 8)
     margins: list[float | None] = [3.0, -7.0, 0.0, 40.0, -2.0, 12.0, 5.0, -20.0]
 
-    _, metrics = _train_once(
-        blokus_game, _net_config(score_head=True, score_loss_weight=0.0), tmp_path, examples, margins
+    _, metrics = train_once_helper(
+        blokus_game,
+        net_config(score_head=True, score_loss_weight=0.0),
+        tmp_path,
+        examples,
+        score_margins=margins,
     )
 
     for row in metrics.rows:
@@ -364,13 +291,13 @@ def test_the_score_term_is_what_drives_the_head(
     zero-weight arm: identical data, identical seed, identical everything except whether
     the score term contributes.
     """
-    examples = _examples(blokus_game, blokus_board, 8)
+    examples = build_examples(blokus_game, blokus_board, 8)
     margins: list[float | None] = [3.0, -7.0, 0.0, 40.0, -2.0, 12.0, 5.0, -20.0]
 
     def final_score_loss(weight: float) -> float:
-        config = _net_config(score_head=True, learning_rate=1e-2, score_loss_weight=weight)
+        config = net_config(score_head=True, learning_rate=1e-2, score_loss_weight=weight)
         torch.manual_seed(SEED)
-        wrapper = BlokusDuoNNetWrapper(blokus_game, _run_config(tmp_path / f"w{weight}", config))
+        wrapper = BlokusDuoNNetWrapper(blokus_game, run_config(tmp_path / f"w{weight}", config))
         metrics = RecordingMetrics()
         torch.manual_seed(SEED + 1)
         for generation in range(1, 9):
@@ -408,10 +335,14 @@ def test_a_partly_masked_batch_still_trains(
     blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard, tmp_path: Path
 ) -> None:
     """End to end: a mixed batch (some rows without a margin) yields a finite term."""
-    examples = _examples(blokus_game, blokus_board, 4)
+    examples = build_examples(blokus_game, blokus_board, 4)
 
-    _, metrics = _train_once(
-        blokus_game, _net_config(score_head=True, batch_size=4), tmp_path, examples, [40.0, None, -30.0, None]
+    _, metrics = train_once_helper(
+        blokus_game,
+        net_config(score_head=True, batch_size=4),
+        tmp_path,
+        examples,
+        score_margins=[40.0, None, -30.0, None],
     )
 
     for row in metrics.rows:
@@ -423,10 +354,14 @@ def test_all_margins_missing_contributes_a_zero_term(
     blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard, tmp_path: Path
 ) -> None:
     """A fully-masked batch must give 0, not NaN from a 0/0 mean."""
-    examples = _examples(blokus_game, blokus_board, 4)
+    examples = build_examples(blokus_game, blokus_board, 4)
 
-    _, metrics = _train_once(
-        blokus_game, _net_config(score_head=True, batch_size=4), tmp_path, examples, [None, None, None, None]
+    _, metrics = train_once_helper(
+        blokus_game,
+        net_config(score_head=True, batch_size=4),
+        tmp_path,
+        examples,
+        score_margins=[None, None, None, None],
     )
 
     for row in metrics.rows:
@@ -438,8 +373,8 @@ def test_misaligned_margins_are_rejected(
     blokus_game: BlokusDuoGame, blokus_board: BlokusDuoBoard, tmp_path: Path
 ) -> None:
     """Silently training on other positions' margins would show up in no metric."""
-    examples = _examples(blokus_game, blokus_board, 4)
-    wrapper = BlokusDuoNNetWrapper(blokus_game, _run_config(tmp_path, _net_config(score_head=True)))
+    examples = build_examples(blokus_game, blokus_board, 4)
+    wrapper = BlokusDuoNNetWrapper(blokus_game, run_config(tmp_path, net_config(score_head=True)))
 
     with pytest.raises(ValueError, match="index-aligned"):
         wrapper.train(examples, generation=1, score_margins=[1.0, 2.0])
@@ -474,13 +409,13 @@ def test_the_jax_bridge_converts_a_score_head_state_dict(
     """
     from alphablokus.games.blokusduo.jax.checkpoint import convert_state_dict
 
-    net_config = _net_config(score_head=True, num_residual_blocks=1)
-    net = _build_net(blokus_game, blokus_board, net_config)
+    config = net_config(score_head=True, num_residual_blocks=1)
+    net = build_net(blokus_game, blokus_board, config)
 
-    params = convert_state_dict(net.state_dict(), net_config.num_residual_blocks)
+    params = convert_state_dict(net.state_dict(), config.num_residual_blocks)
 
     assert set(params) == {"trunk", "blocks", "value", "policy", "perm"}
-    assert len(params["blocks"]) == net_config.num_residual_blocks
+    assert len(params["blocks"]) == config.num_residual_blocks
 
 
 def test_scored_dataset_appends_the_target_to_the_memmap_dataset(
@@ -493,16 +428,17 @@ def test_scored_dataset_appends_the_target_to_the_memmap_dataset(
     """
     import pickle
 
-    from alphablokus.games.base_wrapper import _ScoredDataset
+    from alphablokus.games.base_wrapper import _AuxTargetDataset, _ScoreTargetSource
     from alphablokus.training.memmap_dataset import MemmapPolicyDataset
 
-    examples = _examples(blokus_game, blokus_board, 4)
+    examples = build_examples(blokus_game, blokus_board, 4)
     base = MemmapPolicyDataset.build(
         examples, blokus_game.get_action_size(), blokus_game.encode_compact, tmp_path / "memmap"
     )
     targets = np.array([0.1, np.nan, -0.3, 0.4], dtype=np.float32)
 
-    scored = pickle.loads(pickle.dumps(_ScoredDataset(base, targets)))
+    wrapped = _AuxTargetDataset(base, {"score": _ScoreTargetSource(targets)}, len(examples))
+    scored = pickle.loads(pickle.dumps(wrapped))
 
     assert len(scored) == 4
     for index in range(4):

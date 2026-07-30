@@ -24,8 +24,8 @@ the score head on `feat/score-auxiliary-head` (built, unmeasured). N3 below *is*
 | N1 | The A/B harness: two runs identical but for one thing, fixed seeds, one metric set, one command | ½ day | High | |
 | N2 | Data-fraction curve (25 / 50 / 100% of the corpus) — makes every later result interpretable | 3 h box GPU | High | |
 | N3 | **Score-head A/B** (code already built — this is `score-auxiliary-target.md` S7) | ½ day box GPU | High | |
-| N4 | Ownership head: predict the final board, per cell | 2 days + ½ day box | High | |
-| N5 | Opponent-reply target: predict the reply distribution from the current position | 1 day + ½ day box | High | |
+| N4 | Ownership head: predict the final board, per cell | 2 days + ½ day box | High | ✅ |
+| N5 | Opponent-reply target: predict the reply distribution from the current position | 1 day + ½ day box | High | ✅ |
 | N6 | Value-label arms: teacher blend λ ∈ {0, 0.3, 0.5}, and outcome-balanced sampling | ½ day + ½ day box | Medium | |
 | N7 | Win/draw/loss value head (IDEAS I8) | 2 days + ½ day box | Medium | |
 | N8 | Global pooling in the trunk — **gated on N4/N5 showing the trunk is the constraint** | 3–4 days + ½ day box | Medium | |
@@ -126,6 +126,32 @@ derivable by replaying the stored actions, no regeneration. Reuses the score hea
 checkpoint-compatibility machinery wholesale. Same rules as the score head: **off by default, never
 read at play time.**
 
+> **As built.** `NetConfig.ownership_head` / `ownership_loss_weight` (default 0.15) build
+> `AlphaBlokusDuo.ownership_head`, a bare `Conv2d(num_filters → 3, 1×1)` — **579 parameters at the
+> 192×12 preset, 0.007% of the net**. Deliberately no normalisation and no depth: an auxiliary
+> target exists to apply pressure to the *trunk*, and anything deeper spends the capacity in the
+> head instead. `BaseNNetWrapper.loss_ownership` is a per-cell cross-entropy averaged over the
+> **unmasked cells only**, so it starts at ln 3 ≈ 1.10 — the same O(1) scale as the value loss,
+> which is what makes `ownership_loss_weight` comparable to `score_loss_weight`. (KataGo's quoted
+> 1.5 is against a differently-normalised loss and is deliberately *not* copied.)
+>
+> **The label is in the position's own canonical frame**, not the absolute one:
+> `distill.final_ownership` returns a White-positive map (replay the stored actions, then multiply
+> by `players[0]`), and each row multiplies that by *its own* `player`, so `+1` always means "the
+> side to move holds this cell". Class index is `ownership + 1`, so the head's channels read
+> opponent / neither / mine. The symmetry twin takes the **transposed** map. Two properties pin
+> this down in tests: the map matches an independent replay from the *empty* board with the real
+> colours, and every cell already occupied in a stored board carries `sign(stored_board)` as its
+> label — an absolute-frame label passes that for White-to-move rows and fails for every
+> Black-to-move one.
+>
+> Rows with no final board are masked, and there are two kinds: v2 opening rows (a DAG node has
+> many games through it) and — should it ever happen — a game whose stored rows do not replay to a
+> terminal position, which `final_ownership` detects and reports rather than labelling a
+> half-played board as final.
+>
+> **Still to run: the box A/B** (N1's harness, `--ownership-head` against a control).
+
 ## N5. Opponent-reply target
 
 A second policy-shaped head predicting the *opponent's* next move, from the current position.
@@ -142,6 +168,30 @@ it improved *supervised* move prediction — so the evidence covers our phase, n
 **The data is already on disk.** A game row's reply distribution is the *next* row's stored soft
 target; the loader attaches it index-shifted, masking the final ply of each game exactly as the
 score loss masks its gaps. No regeneration.
+
+> **As built.** `NetConfig.reply_head` / `reply_loss_weight` (default 0.15 — KataGo's own weight for
+> this target) build a **second policy head** through the same factory as the first, so the two
+> cannot drift apart in architecture and a `policy_head: "fc"` config gets an fc reply head.
+> **17,756 parameters at the 192×12 preset, 0.22% of the net** (the score head, for
+> comparison, costs 38,211 — 0.47%). `loss_reply` is the same batch-mean
+> KL as `loss_pi`, restricted to the unmasked rows, so the two numbers are directly comparable.
+>
+> **The target is the next row's already-transformed policy target, by reference** — the same object
+> the next example carries, after temperature and any legal-set floor — so attaching replies to a
+> corpus costs one pointer per row and nothing else. Action indices are colour-free
+> (`(square, orientation)`), so no re-indexing is needed across the canonical frame flip; the
+> symmetry twin takes the *twin's* next policy, whose support is transposed.
+>
+> Masking uses an **all-zero** dense row as the sentinel: a real target sums to 1, so it is
+> unambiguous, and `loss_reply` excludes those rows from both the numerator and the denominator.
+> Rows are built **per game**, which is what stops a game's last ply borrowing the next game's
+> first row — the failure mode that would be invisible in every other metric.
+>
+> **Cost note for the box:** with the head on, the DataLoader densifies a *second*
+> full-action-space vector per example (~71 KB), so expect the input pipeline to do roughly twice
+> the per-item work. Watch `dataloader_workers` if the GPU starts starving.
+>
+> **Still to run: the box A/B** (N1's harness, `--reply-head` against a control).
 
 ## N6. Value-label arms
 

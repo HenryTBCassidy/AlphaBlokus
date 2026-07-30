@@ -57,7 +57,7 @@ from __future__ import annotations
 import argparse
 import gc
 import json
-from dataclasses import asdict, replace
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -70,6 +70,7 @@ from alphablokus.games.blokusduo.pentobi.corpus import corpus_shards
 from alphablokus.games.blokusduo.pentobi.corpus_v2 import game_shards, opening_shards
 from alphablokus.games.blokusduo.pentobi.distill import (
     CorpusGameRows,
+    TrainingRow,
     build_training_examples,
     load_corpus_games,
     load_corpus_games_v2,
@@ -84,21 +85,20 @@ from alphablokus.registry import instantiate_game, instantiate_game_and_network
 from alphablokus.training.holdout import (
     HoldoutMetrics,
     ImitationDiagnostics,
+    OwnershipHeadMetrics,
+    ReplyHeadMetrics,
     ScoreHeadMetrics,
     evaluate_holdout,
     evaluate_imitation_diagnostics,
+    evaluate_ownership_head,
+    evaluate_reply_head,
     evaluate_score_head,
     split_games_holdout,
 )
 
 if TYPE_CHECKING:
     from alphablokus.games.blokusduo.game import BlokusDuoGame
-    from alphablokus.games.blokusduo.pentobi.corpus import CorpusExample
     from alphablokus.interfaces import INeuralNetWrapper
-
-    # A training example with the score head's raw margin attached, so the two travel
-    # together through ``mix_examples``' resampling and shuffle.
-    _ScoredExample = tuple[CorpusExample, float | None]
 
 KNOWN_ARMS = ("warm", "scratch")
 
@@ -112,9 +112,11 @@ def _arm_config(base: RunConfig, args: argparse.Namespace) -> RunConfig:
     peak). AdamW weight decay and the perf knobs stay the config's; net size is
     the config's unless ``--net-size <F>x<B>`` overrides it (the sizing sweep).
 
-    ``--score-head`` is the S7 A/B switch: it is the *only* difference between the two
-    arms, and because the head is built after every other head the trunk, value head and
-    policy head start from identical weights at the same seed either way.
+    The auxiliary-head flags (``--score-head``, ``--ownership-head``, ``--reply-head``)
+    are the A/B switches: an arm should differ from its control by exactly one of them,
+    and because the heads are built after every primary head — and appended in a fixed
+    order — the trunk, value head, policy head and every *earlier* auxiliary head start
+    from identical weights at the same seed either way.
     """
     num_filters = base.net_config.num_filters
     num_residual_blocks = base.net_config.num_residual_blocks
@@ -136,6 +138,14 @@ def _arm_config(base: RunConfig, args: argparse.Namespace) -> RunConfig:
             base.net_config.score_loss_weight if args.score_loss_weight is None else args.score_loss_weight
         ),
         score_scale=base.net_config.score_scale if args.score_scale is None else args.score_scale,
+        ownership_head=base.net_config.ownership_head if args.ownership_head is None else args.ownership_head,
+        ownership_loss_weight=(
+            base.net_config.ownership_loss_weight if args.ownership_loss_weight is None else args.ownership_loss_weight
+        ),
+        reply_head=base.net_config.reply_head if args.reply_head is None else args.reply_head,
+        reply_loss_weight=(
+            base.net_config.reply_loss_weight if args.reply_loss_weight is None else args.reply_loss_weight
+        ),
     )
     return replace(base, net_config=net_config)
 
@@ -161,14 +171,49 @@ def _release(wrapper: INeuralNetWrapper) -> None:
         torch.cuda.empty_cache()
 
 
-def _score_summary(score: ScoreHeadMetrics | None) -> str:
-    """The score head's held-out fit, or nothing at all when there is no head."""
-    if score is None:
-        return ""
-    return (
-        f" | score mse {score.score_mse:.4f} vs constant {score.constant_mse:.4f}"
-        f" (skill {score.score_skill:+.1%}, n {score.n_positions}, skipped {score.n_skipped})"
-    )
+@dataclass(frozen=True)
+class AuxMetrics:
+    """Every auxiliary head's held-out fit for one evaluation, ``None`` where absent.
+
+    One object so the arm loop, the log line and the run JSON cannot disagree about
+    which heads were measured.
+    """
+
+    score: ScoreHeadMetrics | None
+    ownership: OwnershipHeadMetrics | None
+    reply: ReplyHeadMetrics | None
+
+    def to_dict(self) -> dict[str, Any]:
+        """JSON form: one key per head, ``None`` for a head this net does not have."""
+        return {
+            "score": None if self.score is None else asdict(self.score),
+            "ownership": None if self.ownership is None else asdict(self.ownership),
+            "reply": None if self.reply is None else asdict(self.reply),
+        }
+
+    def summary(self) -> str:
+        """One log fragment per head that exists — nothing at all when none do."""
+        parts: list[str] = []
+        if self.score is not None:
+            parts.append(
+                f"score mse {self.score.score_mse:.4f} vs constant {self.score.constant_mse:.4f}"
+                f" (skill {self.score.score_skill:+.1%}, n {self.score.n_positions},"
+                f" skipped {self.score.n_skipped})"
+            )
+        if self.ownership is not None:
+            parts.append(
+                f"ownership ce {self.ownership.cross_entropy:.4f} vs marginal"
+                f" {self.ownership.marginal_cross_entropy:.4f} (skill {self.ownership.skill:+.1%},"
+                f" acc {self.ownership.accuracy:.3f}, n {self.ownership.n_positions},"
+                f" skipped {self.ownership.n_skipped})"
+            )
+        if self.reply is not None:
+            parts.append(
+                f"reply ce {self.reply.policy_ce:.4f} (KL {self.reply.policy_kl:.4f},"
+                f" top-1 {self.reply.top1_accuracy:.3f}, n {self.reply.n_positions},"
+                f" skipped {self.reply.n_skipped})"
+            )
+        return "".join(f" | {part}" for part in parts)
 
 
 def _diagnostics_summary(diagnostics: ImitationDiagnostics) -> str:
@@ -187,7 +232,7 @@ def _diagnostics_summary(diagnostics: ImitationDiagnostics) -> str:
         if diagnostics.colour_only_value_mse > 0.0
         else ""
     )
-    return f"top-1 {diagnostics.top1_accuracy:.3f}{skill} | {biases}"
+    return f"top-1 {diagnostics.top1_accuracy:.3f} top-3 {diagnostics.top3_accuracy:.3f}{skill} | {biases}"
 
 
 def _run_arm(
@@ -195,12 +240,10 @@ def _run_arm(
     config: RunConfig,
     args: argparse.Namespace,
     game: BlokusDuoGame,
-    train_flat: list[CorpusExample],
-    train_margins: list[float | None],
-    holdout_flat: list[CorpusExample],
+    train_rows: list[TrainingRow],
+    holdout_rows: list[TrainingRow],
     holdout_actions: list[int],
     holdout_players: list[int],
-    holdout_margins: list[float | None],
 ) -> dict[str, Any]:
     """Train one arm to its early-stopped best; checkpoint every CE improvement."""
     _seed_everything(args.seed)
@@ -211,7 +254,19 @@ def _run_arm(
 
     ckpt_path = (Path(args.ckpt_dir) / f"distill_{name}.pth.tar").resolve()
 
-    def evaluate() -> tuple[HoldoutMetrics, ImitationDiagnostics, ScoreHeadMetrics | None]:
+    # Unpacked once, not per epoch: the auxiliary targets ride on the rows so they stay
+    # aligned through mixing, and ``train``/the holdout evaluators take them as separate
+    # index-aligned sequences.
+    train_flat = [row.example for row in train_rows]
+    train_margins = [row.margin for row in train_rows]
+    train_ownership = [row.ownership for row in train_rows]
+    train_replies: list[object | None] = [row.reply for row in train_rows]
+    holdout_flat = [row.example for row in holdout_rows]
+    holdout_margins = [row.margin for row in holdout_rows]
+    holdout_ownership = [row.ownership for row in holdout_rows]
+    holdout_replies: list[object | None] = [row.reply for row in holdout_rows]
+
+    def evaluate() -> tuple[HoldoutMetrics, ImitationDiagnostics, AuxMetrics]:
         metrics = evaluate_holdout(
             wrapper,  # type: ignore[arg-type]  # BaseNNetWrapper satisfies SupportsEncodedPrediction
             holdout_flat,
@@ -227,51 +282,77 @@ def _run_arm(
             encode_fn=game.encode_compact,
             batch_size=args.eval_batch_size,
         )
-        # ``None`` for an arm without the head — nothing to report, not a fabricated zero.
-        score = evaluate_score_head(
-            wrapper,  # type: ignore[arg-type]
-            holdout_flat,
-            holdout_margins,
-            score_scale=config.net_config.score_scale,
-            encode_fn=game.encode_compact,
-            batch_size=args.eval_batch_size,
+        # Each is ``None`` for an arm without that head — nothing to report, not a
+        # fabricated zero.
+        aux = AuxMetrics(
+            score=evaluate_score_head(
+                wrapper,  # type: ignore[arg-type]
+                holdout_flat,
+                holdout_margins,
+                score_scale=config.net_config.score_scale,
+                encode_fn=game.encode_compact,
+                batch_size=args.eval_batch_size,
+            ),
+            ownership=evaluate_ownership_head(
+                wrapper,  # type: ignore[arg-type]
+                holdout_flat,
+                holdout_ownership,
+                encode_fn=game.encode_compact,
+                batch_size=args.eval_batch_size,
+            ),
+            reply=evaluate_reply_head(
+                wrapper,  # type: ignore[arg-type]
+                holdout_flat,
+                holdout_replies,
+                action_size=game.get_action_size(),
+                encode_fn=game.encode_compact,
+                batch_size=args.eval_batch_size,
+            ),
         )
-        return metrics, diagnostics, score
+        return metrics, diagnostics, aux
 
     def curve_row(
         epoch: int,
         metrics: HoldoutMetrics,
         diagnostics: ImitationDiagnostics,
-        score: ScoreHeadMetrics | None,
+        aux: AuxMetrics,
     ) -> dict[str, Any]:
         # ``value_skill`` is a property, so ``asdict`` drops it — and it is the number the
-        # whole score-head experiment exists to move (plan S6), so record it explicitly.
+        # whole auxiliary-target family exists to move (plan S6), so record it explicitly.
         return {
             "epoch": epoch,
             **asdict(metrics),
             "diagnostics": asdict(diagnostics),
             "value_skill": diagnostics.value_skill,
-            "score": None if score is None else asdict(score),
+            "aux": aux.to_dict(),
         }
 
     curve: list[dict[str, Any]] = []
-    best, best_diagnostics, best_score = evaluate()
+    best, best_diagnostics, best_aux = evaluate()
     best_epoch = 0
-    curve.append(curve_row(0, best, best_diagnostics, best_score))
+    curve.append(curve_row(0, best, best_diagnostics, best_aux))
     logger.info(
         "Arm {} epoch 0 (baseline): CE {:.4f}, value MSE {:.4f} | {}{}",
         name,
         best.policy_ce,
         best.value_mse,
         _diagnostics_summary(best_diagnostics),
-        _score_summary(best_score),
+        best_aux.summary(),
     )
 
     epochs_since_improvement = 0
     for epoch in range(1, args.max_epochs + 1):
-        wrapper.train(train_flat, generation=epoch, metrics=None, eval_set=None, score_margins=train_margins)
-        metrics, diagnostics, score = evaluate()
-        curve.append(curve_row(epoch, metrics, diagnostics, score))
+        wrapper.train(
+            train_flat,
+            generation=epoch,
+            metrics=None,
+            eval_set=None,
+            score_margins=train_margins,
+            ownership_targets=train_ownership,
+            reply_targets=train_replies,
+        )
+        metrics, diagnostics, aux = evaluate()
+        curve.append(curve_row(epoch, metrics, diagnostics, aux))
         logger.info(
             "Arm {} epoch {}: CE {:.4f} (KL {:.4f}), value MSE {:.4f} | {}{}",
             name,
@@ -280,10 +361,10 @@ def _run_arm(
             metrics.policy_kl,
             metrics.value_mse,
             _diagnostics_summary(diagnostics),
-            _score_summary(score),
+            aux.summary(),
         )
         if metrics.policy_ce <= best.policy_ce - args.min_delta:
-            best, best_diagnostics, best_score = metrics, diagnostics, score
+            best, best_diagnostics, best_aux = metrics, diagnostics, aux
             best_epoch, epochs_since_improvement = epoch, 0
             # ``save_checkpoint`` joins its filename onto the config's net
             # directory, so an absolute path lands exactly where asked.
@@ -310,8 +391,14 @@ def _run_arm(
         "best": asdict(best),
         "best_diagnostics": asdict(best_diagnostics),
         "best_value_skill": best_diagnostics.value_skill,
-        "best_score": None if best_score is None else asdict(best_score),
-        "score_head": config.net_config.score_head,
+        "best_aux": best_aux.to_dict(),
+        # The *resolved* head switches this arm actually ran with — the field an A/B
+        # reviewer reads to know which arm is which.
+        "heads": {
+            "score": config.net_config.score_head,
+            "ownership": config.net_config.ownership_head,
+            "reply": config.net_config.reply_head,
+        },
         "checkpoint": str(ckpt_path),
         "curve": curve,
     }
@@ -398,6 +485,32 @@ def main() -> None:
         help="Margin scaling for the score target: tanh(margin / scale). 25 puts the resolution "
         "on small margins (the median is 3) and saturates the blowouts",
     )
+    parser.add_argument(
+        "--ownership-head",
+        action=argparse.BooleanOptionalAction,
+        default=None,  # None = inherit the base config; see _arm_config
+        help="Train the auxiliary ownership head (per-cell final-board prediction). Never read "
+        "when choosing a move; the target is derived by replaying each game's stored actions.",
+    )
+    parser.add_argument(
+        "--ownership-loss-weight",
+        type=float,
+        default=None,
+        help="Weight of the per-cell ownership term in the total loss (default: the base config's)",
+    )
+    parser.add_argument(
+        "--reply-head",
+        action=argparse.BooleanOptionalAction,
+        default=None,  # None = inherit the base config; see _arm_config
+        help="Train the auxiliary opponent-reply head (the next ply's policy target, index-shifted). "
+        "Never read when choosing a move.",
+    )
+    parser.add_argument(
+        "--reply-loss-weight",
+        type=float,
+        default=None,
+        help="Weight of the reply term in the total loss (default: the base config's)",
+    )
     parser.add_argument("--max-games", type=int, default=None, help="Subsample the corpus to this many games")
     parser.add_argument("--holdout-frac", type=float, default=0.05, help="Fraction of games held out (default 0.05)")
     parser.add_argument("--seed", type=int, default=7, help="Split + init + subsample seed (default 7)")
@@ -440,6 +553,10 @@ def main() -> None:
     epsilon = args.epsilon if args.epsilon is not None else (0.1 if version == "v1" else 0.0)
     logger.info("Corpus {} detected as {} (epsilon {}, target temperature {})", corpus, version, epsilon, args.tau)
 
+    # Deriving each game's final board costs one replay per game, so it is paid only by
+    # the arms that actually train the ownership head.
+    with_ownership = config.net_config.ownership_head
+
     if version == "v1":
         shards = corpus_shards(corpus)
         if not shards:
@@ -448,8 +565,12 @@ def main() -> None:
         if args.max_games is not None:
             games = sample_games(games, args.max_games, args.seed)
         train_games, holdout_games = split_games_holdout(games, args.holdout_frac, args.seed)
-        train_flat, train_margins = build_training_examples(
-            game_typed, train_games, epsilon=epsilon, augment=args.augment
+        train_rows = build_training_examples(
+            game_typed,
+            train_games,
+            epsilon=epsilon,
+            augment=args.augment,
+            with_ownership=with_ownership,
         )
     else:
         shards = game_shards(corpus / "games")
@@ -467,25 +588,21 @@ def main() -> None:
             args.seed,
         )
         train_games, holdout_games = partition_by_unit(games, holdout_units)
-        # Pools carry ``(example, margin)`` pairs so the score head's target survives the
+        # Pools carry whole ``TrainingRow`` items so every auxiliary target survives the
         # mixer's resampling and shuffle — the same code path, not a parallel copy of it
-        # (a separate margin list could not stay aligned through ``rng.choice``).
-        pools: dict[str, list[_ScoredExample]] = {
-            "games": list(
-                zip(
-                    *build_training_examples(
-                        game_typed,
-                        train_games,
-                        epsilon=epsilon,
-                        augment=args.augment,
-                        temperature=args.tau,
-                    ),
-                    strict=True,
-                )
+        # (separate side lists could not stay aligned through ``rng.choice``).
+        pools: dict[str, list[TrainingRow]] = {
+            "games": build_training_examples(
+                game_typed,
+                train_games,
+                epsilon=epsilon,
+                augment=args.augment,
+                temperature=args.tau,
+                with_ownership=with_ownership,
             )
         }
         weights = {"games": max(0.0, 1.0 - args.opening_mix - args.v1_mix)}
-        opening_examples, opening_units, opening_margins = load_opening_examples(
+        opening_rows, opening_units = load_opening_examples(
             opening_shards(corpus / "opening"),
             game_typed,
             value_target=args.opening_value,
@@ -494,15 +611,17 @@ def main() -> None:
             augment=args.augment,
         )
         pools["opening"] = [
-            (example, margin)
-            for example, unit, margin in zip(opening_examples, opening_units, opening_margins, strict=True)
-            if unit not in holdout_units
+            row for row, unit in zip(opening_rows, opening_units, strict=True) if unit not in holdout_units
         ]
         weights["opening"] = args.opening_mix
         if args.v1_corpus is not None and args.v1_mix > 0.0:
             v1_games = load_corpus_games(corpus_shards(args.v1_corpus.expanduser()))
-            pools["v1"] = list(
-                zip(*build_training_examples(game_typed, v1_games, epsilon=0.1, augment=args.augment), strict=True)
+            pools["v1"] = build_training_examples(
+                game_typed,
+                v1_games,
+                epsilon=0.1,
+                augment=args.augment,
+                with_ownership=with_ownership,
             )
             weights["v1"] = args.v1_mix
         logger.info(
@@ -510,15 +629,14 @@ def main() -> None:
             {name: len(pool) for name, pool in pools.items()},
             weights,
         )
-        mixed = mix_examples(pools, weights, seed=args.seed)
-        train_flat = [example for example, _margin in mixed]
-        train_margins = [margin for _example, margin in mixed]
-    holdout_flat, holdout_margins = build_training_examples(
+        train_rows = mix_examples(pools, weights, seed=args.seed)
+    holdout_rows = build_training_examples(
         game_typed,
         holdout_games,
         epsilon=epsilon,
         augment=False,
         temperature=args.tau,
+        with_ownership=with_ownership,
     )
     holdout_actions: list[int] = _flatten(holdout_games, "actions")
     holdout_players: list[int] = _flatten(holdout_games, "players")
@@ -550,10 +668,10 @@ def main() -> None:
         len(games),
         len(shards),
         len(train_games),
-        len(train_flat),
+        len(train_rows),
         args.augment,
         len(holdout_games),
-        len(holdout_flat),
+        len(holdout_rows),
     )
 
     args.ckpt_dir.mkdir(parents=True, exist_ok=True)
@@ -565,12 +683,10 @@ def main() -> None:
             config,
             args,
             game_typed,
-            train_flat,
-            train_margins,
-            holdout_flat,
+            train_rows,
+            holdout_rows,
             holdout_actions,
             holdout_players,
-            holdout_margins,
         )
 
     payload = {
@@ -587,14 +703,19 @@ def main() -> None:
         "augment": args.augment,
         "seed": args.seed,
         "lr": args.lr,
+        "max_games": args.max_games,
         # The *resolved* settings, not the raw flags: a flag left unset inherits the base
         # config, so recording the flag would say "None" for a run that trained the head.
-        # This field is what an S8 reviewer reads to know which arm actually ran.
-        "score_head": config.net_config.score_head if args.score_head is None else args.score_head,
-        "score_loss_weight": (
-            config.net_config.score_loss_weight if args.score_loss_weight is None else args.score_loss_weight
-        ),
-        "score_scale": config.net_config.score_scale if args.score_scale is None else args.score_scale,
+        # These fields are what an A/B reviewer reads to know which arm actually ran, and
+        # what ``scripts/ab_harness.py`` diffs to name the one thing that varied.
+        "score_head": config.net_config.score_head,
+        "score_loss_weight": config.net_config.score_loss_weight,
+        "score_scale": config.net_config.score_scale,
+        "ownership_head": config.net_config.ownership_head,
+        "ownership_loss_weight": config.net_config.ownership_loss_weight,
+        "reply_head": config.net_config.reply_head,
+        "reply_loss_weight": config.net_config.reply_loss_weight,
+        "net_size": f"{config.net_config.num_filters}x{config.net_config.num_residual_blocks}",
         "timestamp": datetime.now(UTC).isoformat(),
         "holdout_leakage": leakage.to_dict(),
         "arms": arms,

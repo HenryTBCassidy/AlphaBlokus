@@ -165,7 +165,8 @@ def test_export_round_trips_through_the_trainer_reader(
 
     # Read back through the *production* reader (the one ``distill_sl.py`` uses), so
     # this checks the path the trainer actually takes rather than a parallel one.
-    examples, units, _margins = load_opening_examples([path], game)
+    rows, units = load_opening_examples([path], game)
+    examples = [row.example for row in rows]
     assert len(examples) == meta.num_rows
     assert len(units) == len(examples)
     for board_compact, (indices, values), value in examples:

@@ -356,6 +356,40 @@ class NetConfig:
     # dominating the MSE. Inert unless ``score_head``.
     score_scale: float = 25.0
 
+    # Auxiliary **ownership head** — a 1×1 convolution to 3 channels over the
+    # board predicting, per cell, who holds it when the game ends: the side to
+    # move, their opponent, or neither. ~196 labels per position instead of 1,
+    # each anchored to a square, so the trunk is forced to learn which regions
+    # each player can actually reach. In Blokus the final board *is* the
+    # ownership map (unlike Go, where it is a scoring abstraction) and the score
+    # margin is exactly the sum of it, so this refines the score head rather
+    # than competing with it. Off by default; never read when choosing a move.
+    # Plan: docs/plans/supervised-network-improvements.md N4.
+    ownership_head: bool = False
+
+    # Weight of the ownership term in the total loss. The loss is a **per-cell
+    # mean** cross-entropy, so it starts at ln 3 ≈ 1.10 — the same O(1) scale as
+    # the value MSE — and this is the same fractional nudge the score head gets.
+    # (KataGo quotes 1.5 for ownership, but against a differently-normalised
+    # loss; that number is not transferable, so it is not copied.) Inert unless
+    # ``ownership_head``.
+    ownership_loss_weight: float = 0.15
+
+    # Auxiliary **opponent-reply head** — a second policy-shaped output
+    # predicting the opponent's next move *from the current position*, i.e.
+    # without searching. Search predicts replies while playing and then throws
+    # the answer away; this installs the knowledge in the trunk, where the main
+    # policy and value heads get it free on every forward pass. KataGo ablates
+    # it at 1.30× in isolation and credits Darkforest, where it improved
+    # *supervised* move prediction — our phase exactly. Off by default; never
+    # read when choosing a move. Plan: docs/plans/supervised-network-improvements.md N5.
+    reply_head: bool = False
+
+    # Weight of the reply term in the total loss. 0.15 is KataGo's own weight
+    # for this target, and the loss is the same batch-mean KL as the main policy
+    # loss, so the two are directly comparable. Inert unless ``reply_head``.
+    reply_loss_weight: float = 0.15
+
     # Opt-in training-loop performance knobs (autocast, TF32, channels_last,
     # torch.compile, DataLoader workers, metric-sync cadence). Every field
     # defaults to "off" = current behaviour; see ``TrainingPerfConfig``.

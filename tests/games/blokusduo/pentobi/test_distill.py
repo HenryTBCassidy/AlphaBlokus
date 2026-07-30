@@ -33,6 +33,7 @@ from alphablokus.games.blokusduo.pentobi.corpus import (
 )
 from alphablokus.games.blokusduo.pentobi.distill import (
     build_training_examples,
+    final_ownership,
     load_corpus_games,
     sample_games,
     smooth_policy,
@@ -139,15 +140,15 @@ def test_build_training_examples_returns_margins_aligned_with_its_examples(
     position and shows up in no metric. The symmetry twin shares its original's margin —
     transposing a board does not change the score."""
     rows = corpus_games[0]
-    plain, plain_margins = build_training_examples(game, [rows], epsilon=EPSILON, augment=False)
-    augmented, augmented_margins = build_training_examples(game, [rows], epsilon=EPSILON, augment=True)
+    plain = build_training_examples(game, [rows], epsilon=EPSILON, augment=False)
+    augmented = build_training_examples(game, [rows], epsilon=EPSILON, augment=True)
 
-    assert len(plain_margins) == len(plain) == len(rows)
-    assert plain_margins == list(rows.margins)
+    assert len(plain) == len(rows)
+    assert [row.margin for row in plain] == list(rows.margins)
 
-    assert len(augmented_margins) == len(augmented) == 2 * len(rows)
-    assert augmented_margins[::2] == list(rows.margins)
-    assert augmented_margins[1::2] == list(rows.margins)
+    assert len(augmented) == 2 * len(rows)
+    assert [row.margin for row in augmented[::2]] == list(rows.margins)
+    assert [row.margin for row in augmented[1::2]] == list(rows.margins)
 
 
 # --------------------------------------------------------------------------- #
@@ -161,7 +162,7 @@ def test_smoothed_targets_sum_to_one_over_exactly_the_legal_moves(
     """Each smoothed target sums to 1, keeps ≥ 1−ε on Pentobi's move, and its support
     is exactly the position's legal set (zero mass on any illegal action)."""
     rows = corpus_games[0]
-    examples, _margins = build_training_examples(game, [rows], epsilon=EPSILON, augment=False)
+    examples = [row.example for row in build_training_examples(game, [rows], epsilon=EPSILON, augment=False)]
     assert len(examples) == len(rows)
     for (compact, pi, _value), action in zip(examples, rows.actions, strict=True):
         dense = as_dense(pi, game.get_action_size())
@@ -192,8 +193,8 @@ def test_augmentation_appends_the_transposed_twin(game: BlokusDuoGame, corpus_ga
     """augment=True doubles the count, and each twin equals the ``get_symmetries``
     ground truth: the transposed board with the policy mapped via ``transpose_action``."""
     rows = corpus_games[0]
-    plain, _ = build_training_examples(game, [rows], epsilon=EPSILON, augment=False)
-    augmented, _ = build_training_examples(game, [rows], epsilon=EPSILON, augment=True)
+    plain = [row.example for row in build_training_examples(game, [rows], epsilon=EPSILON, augment=False)]
+    augmented = [row.example for row in build_training_examples(game, [rows], epsilon=EPSILON, augment=True)]
     assert len(augmented) == 2 * len(plain)
 
     action_size = game.get_action_size()
@@ -270,7 +271,8 @@ def test_training_step_runs_and_fits_a_tiny_subset(
 
     torch.manual_seed(0)
     wrapper = BlokusDuoNNetWrapper(game, _tiny_run_config(tmp_path))
-    examples = build_training_examples(game, [corpus_games[0]], epsilon=EPSILON, augment=False)[0][:12]
+    rows = build_training_examples(game, [corpus_games[0]], epsilon=EPSILON, augment=False)
+    examples = [row.example for row in rows][:12]
 
     before = evaluate_holdout(
         wrapper, examples, encode_fn=game.encode_compact, action_size=game.get_action_size(), batch_size=8
@@ -291,7 +293,7 @@ def test_imitation_diagnostics_on_real_corpus_examples(
     """The colour-conditional diagnostics run off the dataloader's alignment: one
     calibration row per side-to-move, bucket counts partitioning that colour's rows."""
     rows = corpus_games[1]
-    examples, _margins = build_training_examples(game, [rows], epsilon=EPSILON, augment=False)
+    examples = [row.example for row in build_training_examples(game, [rows], epsilon=EPSILON, augment=False)]
     wrapper = BlokusDuoNNetWrapper(game, _tiny_run_config(tmp_path))
 
     diagnostics = evaluate_imitation_diagnostics(
@@ -387,13 +389,16 @@ def test_distill_sl_reports_score_mse_and_value_skill_with_the_head_on(corpus_di
 
     arm = payload["arms"]["scratch"]
     assert payload["score_head"] is True
-    assert arm["score_head"] is True
+    assert arm["heads"] == {"score": True, "ownership": False, "reply": False}
     for row in arm["curve"]:
         assert np.isfinite(row["value_skill"])
-        assert row["score"] is not None
-        assert np.isfinite(row["score"]["score_mse"])
-        assert row["score"]["n_positions"] > 0
-    assert arm["best_score"] is not None
+        assert row["aux"]["score"] is not None
+        assert np.isfinite(row["aux"]["score"]["score_mse"])
+        assert row["aux"]["score"]["n_positions"] > 0
+        # Heads that were not built report nothing at all, never a fabricated zero.
+        assert row["aux"]["ownership"] is None
+        assert row["aux"]["reply"] is None
+    assert arm["best_aux"]["score"] is not None
 
 
 def test_distill_sl_without_the_head_reports_no_score_and_a_smaller_net(corpus_dir: Path, tmp_path: Path) -> None:
@@ -402,6 +407,201 @@ def test_distill_sl_without_the_head_reports_no_score_and_a_smaller_net(corpus_d
     without = _run_distill_sl(tmp_path / "off", corpus_dir)
 
     assert without["score_head"] is False
-    assert all(row["score"] is None for row in without["arms"]["scratch"]["curve"])
-    assert without["arms"]["scratch"]["best_score"] is None
+    assert all(row["aux"]["score"] is None for row in without["arms"]["scratch"]["curve"])
+    assert without["arms"]["scratch"]["best_aux"]["score"] is None
     assert without["arms"]["scratch"]["num_params"] < with_head["arms"]["scratch"]["num_params"]
+
+
+def test_distill_sl_reports_the_ownership_and_reply_heads_when_asked(corpus_dir: Path, tmp_path: Path) -> None:
+    """N4/N5 end to end through the real CLI: both heads train and both are measured.
+
+    The corpus fixture is whole games, so every held-out position has a final board and
+    every one but each game's last has a next ply — which is exactly what the two
+    ``n_skipped`` counts must say.
+    """
+    payload = _run_distill_sl(tmp_path, corpus_dir, "--ownership-head", "--reply-head")
+
+    arm = payload["arms"]["scratch"]
+    assert payload["ownership_head"] is True
+    assert payload["reply_head"] is True
+    assert arm["heads"] == {"score": False, "ownership": True, "reply": True}
+    for row in arm["curve"]:
+        ownership = row["aux"]["ownership"]
+        reply = row["aux"]["reply"]
+        assert ownership is not None and reply is not None
+        assert np.isfinite(ownership["cross_entropy"]) and 0.0 <= ownership["accuracy"] <= 1.0
+        assert ownership["n_positions"] > 0 and ownership["n_skipped"] == 0
+        assert np.isfinite(reply["policy_ce"]) and 0.0 <= reply["top1_accuracy"] <= 1.0
+        # One masked position per held-out game: its last ply has no reply.
+        assert reply["n_skipped"] == payload["holdout_leakage"]["holdout_rows"] - reply["n_positions"]
+        assert reply["n_skipped"] > 0
+        assert row["aux"]["score"] is None
+
+
+# --------------------------------------------------------------------------- #
+# Ownership targets (plan N4)
+# --------------------------------------------------------------------------- #
+
+
+def _replay_from_empty(game: BlokusDuoGame, corpus_dir: Path, game_id: int) -> np.ndarray:
+    """The finished board's ownership map, computed by a wholly independent route.
+
+    Replays the game from the **empty** board with its real colours — the shard footer's
+    opening prefix followed by the stored plies — instead of from a canonical mid-game
+    board with an alternating sign. If ``final_ownership``'s frame arithmetic were wrong
+    in any way (a missing player multiply, the wrong starting parity) this map would
+    disagree, and no other assertion in the suite would notice.
+    """
+    meta = next(
+        game_meta
+        for path in corpus_shards(corpus_dir)
+        for game_meta in read_shard_meta(path).games
+        if game_meta.game_id == game_id
+    )
+    rows = next(g for g in load_corpus_games(corpus_shards(corpus_dir)) if g.game_id == game_id)
+    board = game.initialise_board()
+    player = 1
+    for action in (*meta.opening_actions, *rows.actions):
+        board, player = game.get_next_state(board, player, action)
+    return np.sign(np.asarray(board.to_compact(), dtype=np.int8)).astype(np.int8)
+
+
+def test_final_ownership_matches_an_independent_replay_from_the_empty_board(
+    game: BlokusDuoGame, corpus_dir: Path, corpus_games: list[CorpusGameRows]
+) -> None:
+    """White-positive, and derived from stored actions alone — no regeneration."""
+    for rows in corpus_games:
+        ownership = final_ownership(game, rows)
+        assert ownership is not None
+        assert ownership.shape == (game.board_size, game.board_size)
+        assert set(np.unique(ownership).tolist()) <= {-1, 0, 1}
+        assert np.array_equal(ownership, _replay_from_empty(game, corpus_dir, rows.game_id))
+        # A finished Blokus board is mostly owned; an all-zero map would mean the replay
+        # never placed anything and every later assertion would pass vacuously.
+        assert int(np.count_nonzero(ownership)) > 40
+
+
+def test_the_per_position_label_is_in_that_position_s_canonical_frame(
+    game: BlokusDuoGame, corpus_games: list[CorpusGameRows]
+) -> None:
+    """The frame test, and the one most likely to be silently wrong.
+
+    Pieces are never removed, so every cell already occupied in a stored (canonical)
+    board keeps that same owner at the end of the game. In the position's own frame the
+    mover's pieces read positive — so the ownership label at those cells must equal the
+    *sign of the stored board itself*. A label left in the absolute White-positive frame
+    would satisfy this for White-to-move rows and fail for every Black-to-move one.
+    """
+    rows = corpus_games[0]
+    built = build_training_examples(game, [rows], epsilon=EPSILON, augment=False, with_ownership=True)
+
+    assert any(player == -1 for player in rows.players), "fixture must contain Black-to-move rows"
+    for row, player in zip(built, rows.players, strict=True):
+        assert row.ownership is not None
+        stored = np.asarray(row.example[0], dtype=np.int8)
+        occupied = stored != 0
+        assert np.array_equal(row.ownership[occupied], np.sign(stored[occupied]))
+        # And it really is the game's final map, re-signed into this position's frame.
+        assert np.array_equal(row.ownership, (final_ownership(game, rows) * player).astype(np.int8))
+
+
+def test_the_symmetry_twin_takes_the_transposed_ownership_map(
+    game: BlokusDuoGame, corpus_games: list[CorpusGameRows]
+) -> None:
+    """The twin is the transposed board, so its label is the transposed final board."""
+    rows = corpus_games[1]
+    built = build_training_examples(game, [rows], epsilon=EPSILON, augment=True, with_ownership=True)
+
+    assert len(built) == 2 * len(rows)
+    for original, twin in zip(built[::2], built[1::2], strict=True):
+        assert original.ownership is not None and twin.ownership is not None
+        assert np.array_equal(twin.ownership, original.ownership.T)
+        # The invariant of the previous test must survive the transpose too.
+        stored = np.asarray(twin.example[0], dtype=np.int8)
+        occupied = stored != 0
+        assert np.array_equal(twin.ownership[occupied], np.sign(stored[occupied]))
+
+
+def test_ownership_is_not_derived_unless_asked(game: BlokusDuoGame, corpus_games: list[CorpusGameRows]) -> None:
+    """Off by default: the extra game replay is paid only by the arms that use it."""
+    built = build_training_examples(game, corpus_games[:1], epsilon=EPSILON, augment=True)
+    assert built and all(row.ownership is None for row in built)
+
+
+def test_a_game_whose_rows_stop_short_has_no_final_board(
+    game: BlokusDuoGame, corpus_games: list[CorpusGameRows]
+) -> None:
+    """Truncated rows must mask the target, never label a half-played board as final."""
+    from dataclasses import replace as replace_dataclass
+
+    full = corpus_games[0]
+    truncated = replace_dataclass(
+        full,
+        boards=full.boards[:5],
+        actions=full.actions[:5],
+        players=full.players[:5],
+        values=full.values[:5],
+        margins=full.margins[:5],
+    )
+
+    assert final_ownership(game, truncated) is None
+    built = build_training_examples(game, [truncated], epsilon=EPSILON, augment=False, with_ownership=True)
+    assert built and all(row.ownership is None for row in built)
+
+
+# --------------------------------------------------------------------------- #
+# Opponent-reply targets (plan N5)
+# --------------------------------------------------------------------------- #
+
+
+def test_the_reply_target_is_the_next_position_s_policy(
+    game: BlokusDuoGame, corpus_games: list[CorpusGameRows]
+) -> None:
+    """The index shift, and the mask on the final ply.
+
+    Off-by-one here is invisible in every other metric: the head would simply learn a
+    slightly-wrong distribution, and the arm would read as "the technique did not help".
+    """
+    rows = corpus_games[0]
+    built = build_training_examples(game, [rows], epsilon=EPSILON, augment=False)
+
+    for index, row in enumerate(built[:-1]):
+        assert row.reply is not None
+        next_indices, next_values = built[index + 1].example[1]
+        assert row.reply[0].tolist() == next_indices.tolist()
+        assert row.reply[1].tolist() == next_values.tolist()
+        # It is the *opponent's* actual move that carries the mass.
+        assert int(row.reply[0][int(np.argmax(row.reply[1]))]) == rows.actions[index + 1]
+    assert built[-1].reply is None, "the last ply of a game has no reply"
+
+
+def test_no_game_borrows_the_next_game_s_first_reply(game: BlokusDuoGame, corpus_games: list[CorpusGameRows]) -> None:
+    """Built per game, so a game boundary masks rather than leaking across it."""
+    built = build_training_examples(game, corpus_games, epsilon=EPSILON, augment=False)
+
+    cursor = 0
+    for rows in corpus_games:
+        cursor += len(rows)
+        assert built[cursor - 1].reply is None, f"game {rows.game_id}'s last ply borrowed a reply"
+    assert cursor == len(built)
+    assert sum(1 for row in built if row.reply is None) == len(corpus_games)
+
+
+def test_the_twin_s_reply_is_the_twin_of_the_next_position_s_policy(
+    game: BlokusDuoGame, corpus_games: list[CorpusGameRows]
+) -> None:
+    """A transposed board must be answered with a transposed reply, not the original."""
+    rows = corpus_games[1]
+    built = build_training_examples(game, [rows], epsilon=EPSILON, augment=True)
+
+    twins = built[1::2]
+    for index, twin in enumerate(twins[:-1]):
+        assert twin.reply is not None
+        expected_indices, expected_values = twins[index + 1].example[1]
+        assert twin.reply[0].tolist() == expected_indices.tolist()
+        assert twin.reply[1].tolist() == expected_values.tolist()
+        # Which is the transpose of what the un-augmented original was given.
+        original_reply = built[2 * index].reply
+        assert original_reply is not None
+        assert twin.reply[0].tolist() == [game.transpose_action(int(a)) for a in original_reply[0]]
+    assert twins[-1].reply is None

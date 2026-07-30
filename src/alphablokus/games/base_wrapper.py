@@ -6,7 +6,7 @@ import shutil
 import time
 from abc import ABC, abstractmethod
 from contextlib import AbstractContextManager, nullcontext
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 import numpy as np
 import torch
@@ -18,6 +18,7 @@ from torch.optim.lr_scheduler import CosineAnnealingLR, LRScheduler, MultiStepLR
 from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
+from alphablokus.aux_heads import AUX_HEAD_NAMES, aux_key
 from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper, IPolicyValuePredictor
 from alphablokus.storage.sparse_policy import as_dense
 
@@ -34,7 +35,7 @@ MAX_EVAL_SET_POSITIONS = 2_000
 PVC_TOP_K = 8
 
 if TYPE_CHECKING:
-    from collections.abc import Callable, Sequence
+    from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
     from alphablokus.config import RunConfig
@@ -158,8 +159,9 @@ class _LossWindow:
     (every ``log_every_batches`` batches). Window size 1 reproduces the
     original per-batch behaviour exactly.
 
-    The auxiliary score loss is accumulated only when the score head is on; with
-    it off the window holds and syncs exactly the three tensors it always did.
+    Auxiliary losses are accumulated only for the heads that are actually
+    contributing; with every head off the window holds and syncs exactly the
+    three tensors it always did.
     """
 
     def __init__(self, device: torch.device) -> None:
@@ -169,25 +171,33 @@ class _LossWindow:
         self._pi = torch.zeros((), device=device)
         self._v = torch.zeros((), device=device)
         self._total = torch.zeros((), device=device)
-        self._score: Tensor | None = None
+        self._aux: dict[str, Tensor] = {}
 
-    def add(self, l_pi: Tensor, l_v: Tensor, total: Tensor, num_examples: int, l_score: Tensor | None = None) -> None:
+    def add(
+        self,
+        l_pi: Tensor,
+        l_v: Tensor,
+        total: Tensor,
+        num_examples: int,
+        aux_losses: Mapping[str, Tensor] | None = None,
+    ) -> None:
         """Accumulate one batch's losses (detached — no graph retention)."""
         self._pi += l_pi.detach().float()
         self._v += l_v.detach().float()
         self._total += total.detach().float()
-        if l_score is not None:
-            if self._score is None:
-                self._score = torch.zeros((), device=self._device)
-            self._score += l_score.detach().float()
+        for key, loss in (aux_losses or {}).items():
+            if key not in self._aux:
+                self._aux[key] = torch.zeros((), device=self._device)
+            self._aux[key] += loss.detach().float()
         self.batches += 1
         self.examples += num_examples
 
-    def drain(self) -> tuple[float, float, float, int, float | None] | None:
-        """Sync + reset: ``(mean_pi, mean_v, mean_total, examples, mean_score)``, or None if empty.
+    def drain(self) -> tuple[float, float, float, int, dict[str, float]] | None:
+        """Sync + reset: ``(mean_pi, mean_v, mean_total, examples, mean_aux)``, or None if empty.
 
-        ``mean_score`` is ``None`` whenever no score loss was accumulated in the
-        window (the score head off, or every position in it lacking a margin).
+        ``mean_aux`` holds one entry per auxiliary head that contributed to the
+        window and is empty when none did (no head built, or every position in the
+        window lacking that head's target).
         """
         if self.batches == 0:
             return None
@@ -196,40 +206,110 @@ class _LossWindow:
             self._v.item() / self.batches,
             self._total.item() / self.batches,
             self.examples,
-            None if self._score is None else self._score.item() / self.batches,
+            {key: total.item() / self.batches for key, total in self._aux.items()},
         )
         self.batches = 0
         self.examples = 0
         self._pi = torch.zeros((), device=self._device)
         self._v = torch.zeros((), device=self._device)
         self._total = torch.zeros((), device=self._device)
-        self._score = None
+        self._aux = {}
         return result
 
 
-class _ScoredDataset(Dataset):
-    """Appends a per-position score target to any of the training datasets.
+class _ScoreTargetSource:
+    """Per-position score targets ``tanh(margin / score_scale)``; ``NaN`` = masked."""
 
-    A **wrapper**, not a fourth dataset: both the in-RAM ``_LazyPolicyDataset`` and the
-    memmap-backed :class:`~alphablokus.training.memmap_dataset.MemmapPolicyDataset` keep
-    their ``(board, pi, value)`` item shape and their tuned hot paths untouched, and this
-    adds the extra tensor on top. Applied only when a training call actually supplies
-    score targets, so the default path is bit-for-bit the pre-score-head one.
-
-    ``targets`` is index-aligned with the wrapped dataset (both index the same
-    ``examples`` list) and carries ``NaN`` where a position has no margin; the masking
-    lives in :meth:`BaseNNetWrapper.loss_score`.
-    """
-
-    def __init__(self, base: Dataset, targets: np.ndarray) -> None:
-        self._base = base
+    def __init__(self, targets: np.ndarray) -> None:
         self._targets = torch.from_numpy(np.ascontiguousarray(targets, dtype=np.float32))
 
+    def __getitem__(self, idx: int) -> Tensor:
+        return self._targets[idx]
+
+
+class _OwnershipTargetSource:
+    """Per-cell ownership class labels, flattened row-major; ``-1`` = masked.
+
+    Holds the corpus's ``{-1, 0, +1}`` maps by **reference** — every position in a game
+    shares one of at most four arrays (the final board, its negation for the other side
+    to move, and the transposes of both for the symmetry twins), so a whole corpus costs
+    a pointer per row rather than 196 bytes. The ``+1`` shift to class indices happens
+    per item, in the DataLoader worker.
+    """
+
+    def __init__(self, maps: Sequence[np.ndarray | None], cells: int) -> None:
+        self._maps = list(maps)
+        # One shared all-masked row: positions with no final board (v2 opening rows)
+        # are common and identical, so they need no per-item allocation.
+        self._masked = torch.full((cells,), -1, dtype=torch.int64)
+
+    def __getitem__(self, idx: int) -> Tensor:
+        ownership = self._maps[idx]
+        if ownership is None:
+            return self._masked
+        return torch.from_numpy(np.asarray(ownership, dtype=np.int64).reshape(-1) + 1)
+
+
+class _ReplyTargetSource:
+    """Dense opponent-reply distributions; an **all-zero** row is a masked position.
+
+    Densified per item, exactly as the main policy target is, so only one DataLoader
+    batch of them is ever dense at once. The stored sparse pair is shared with the
+    *next* position's policy target (it is literally the same object), so attaching
+    reply targets to a corpus costs one pointer per row.
+    """
+
+    def __init__(self, replies: Sequence[object | None], action_size: int) -> None:
+        self._replies = list(replies)
+        self._action_size = action_size
+
+    def __getitem__(self, idx: int) -> Tensor:
+        reply = self._replies[idx]
+        if reply is None:
+            return torch.zeros(self._action_size, dtype=torch.float32)
+        return torch.from_numpy(as_dense(reply, self._action_size))
+
+
+class _AuxTargetDataset(Dataset):
+    """Appends the auxiliary heads' per-position targets to a training dataset.
+
+    A **wrapper**, not a second family of datasets: both the in-RAM
+    ``_LazyPolicyDataset`` and the memmap-backed
+    :class:`~alphablokus.training.memmap_dataset.MemmapPolicyDataset` keep their
+    ``(board, pi, value)`` item shape and their tuned hot paths untouched, and this adds
+    the extra tensors on top, in ``AUX_HEAD_NAMES`` order. Applied only when a training
+    call actually supplies auxiliary targets, so the default path is bit-for-bit the
+    pre-auxiliary-head one.
+
+    Every source is index-aligned with the wrapped dataset (all of them index the same
+    ``examples`` list) and carries its own masking sentinel for positions the target does
+    not exist for; the masking itself lives in the loss functions.
+    """
+
+    def __init__(self, base: Dataset, sources: Mapping[str, Any], length: int) -> None:
+        self._base = base
+        self._sources = tuple(sources.values())
+        self._length = length
+
     def __len__(self) -> int:
-        return len(self._targets)
+        return self._length
 
     def __getitem__(self, idx: int) -> tuple[Tensor, ...]:
-        return (*self._base[idx], self._targets[idx])
+        return (*self._base[idx], *(source[idx] for source in self._sources))
+
+
+class NetOutputs(NamedTuple):
+    """A net's forward output, unpacked by name rather than by position.
+
+    ``forward``'s arity varies with which auxiliary heads were built (see
+    :mod:`alphablokus.aux_heads`), so positional unpacking is wrong the moment one head
+    is on and an earlier one is off. ``aux`` holds one entry per built head, keyed by its
+    short name (``"score"``, ``"ownership"``, ``"reply"``).
+    """
+
+    log_pi: Tensor
+    value: Tensor
+    aux: dict[str, Tensor]
 
 
 def _shuffle_seed(seed: int, generation: int) -> int:
@@ -259,11 +339,15 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         self.board_rows: int = cast("int", self.nnet.board_rows)
         self.board_cols: int = cast("int", self.nnet.board_cols)
 
-        # One-shot guard so a mis-wired score head (head on, no targets — or the
+        # Which auxiliary heads this net actually built, in ``forward``'s output order.
+        # Read from the module rather than from the config so a game whose net ignores
+        # the flags (TicTacToe builds none) reports honestly instead of the config
+        # promising outputs that do not exist.
+        self._aux_head_names: tuple[str, ...] = tuple(getattr(self.nnet, "aux_head_names", ()))
+
+        # One-shot guard so a mis-wired auxiliary head (head on, no targets — or the
         # reverse) is reported once, not once per generation.
-        self._score_warned: set[str] = set()
-        self._score_scored_rows = 0
-        self._score_total_rows = 0
+        self._aux_warned: set[str] = set()
 
         self._device = self._resolve_device()
         self.nnet.to(self._device)
@@ -411,7 +495,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         drained = window.drain()
         if drained is None:
             return
-        mean_pi, mean_v, mean_total, num_examples, mean_score = drained
+        mean_pi, mean_v, mean_total, num_examples, mean_aux = drained
         pi_losses.update(mean_pi, num_examples)
         v_losses.update(mean_v, num_examples)
         progress.set_postfix(Loss_pi=pi_losses, Loss_v=v_losses)
@@ -423,89 +507,133 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 pi_loss=mean_pi,
                 v_loss=mean_v,
                 total_loss=mean_total,
-                score_loss=mean_score,
+                score_loss=mean_aux.get("score"),
+                ownership_loss=mean_aux.get("ownership"),
+                reply_loss=mean_aux.get("reply"),
             )
 
-    @staticmethod
-    def _split_net_outputs(outputs: Any) -> tuple[Tensor, Tensor, Tensor | None]:
-        """Normalise a net's forward output to ``(log_pi, value, score | None)``.
+    def _split_net_outputs(self, outputs: Any) -> NetOutputs:
+        """Normalise a net's forward output to ``(log_pi, value, aux)``.
 
-        Nets return a 2-tuple (TicTacToe, and Blokus with the score head off) or a
-        3-tuple (Blokus with the auxiliary score head on). The arity varies rather than
-        the third element being ``None`` because a ``None`` in a module's output makes
-        it untraceable, which would break the web ONNX export — see
-        :meth:`~alphablokus.games.blokusduo.nn.net.AlphaBlokusDuo.forward`. One helper
-        so every call site unpacks identically.
+        Nets return a 2-tuple (TicTacToe, and Blokus with every auxiliary head off)
+        followed by one element per **built** auxiliary head, in ``AUX_HEAD_NAMES``
+        order. The arity varies rather than absent heads being ``None`` because a
+        ``None`` in a module's output makes it untraceable, which would break the web
+        ONNX export — see
+        :meth:`~alphablokus.games.blokusduo.nn.net.AlphaBlokusDuo.forward`.
+
+        Which means unpacking by position is **wrong**: with the score head off and the
+        ownership head on, ``outputs[2]`` is the ownership map. This is the one place
+        that resolves the layout, from the net's own ``aux_head_names``, so no call site
+        can get it wrong on its own.
         """
-        log_pi, value = outputs[0], outputs[1]
-        score = outputs[2] if len(outputs) > 2 else None
-        return log_pi, value, score
+        aux = {
+            aux_key(name): outputs[2 + offset]
+            for offset, name in enumerate(self._aux_head_names)
+            if 2 + offset < len(outputs)
+        }
+        return NetOutputs(outputs[0], outputs[1], aux)
 
-    def has_score_head(self) -> bool:
-        """Whether this net actually built the auxiliary score head.
+    def has_aux_head(self, key: str) -> bool:
+        """Whether this net actually built the auxiliary head with short name ``key``.
 
-        A structural check on the module rather than a read of
-        ``net_config.score_head``, so a game whose net ignores the flag
-        (TicTacToe has no score head) reports honestly instead of the config
-        promising an output that does not exist.
+        A structural check on the module rather than a read of ``net_config``, so a game
+        whose net ignores the flags (TicTacToe builds no auxiliary heads) reports
+        honestly instead of the config promising an output that does not exist.
+
+        Args:
+            key: Short head name — ``"score"``, ``"ownership"`` or ``"reply"``.
         """
-        return getattr(self.nnet, "score_head", None) is not None
+        return f"{key}_head" in self._aux_head_names
 
-    def _resolve_score_targets(
+    def _resolve_aux_targets(
         self,
         examples: list[ProcessedExample],
-        score_margins: Sequence[float | None] | None,
-    ) -> np.ndarray | None:
-        """Scale raw margins into head targets, or ``None`` to skip the score term.
+        supplied: Mapping[str, Sequence[Any] | None],
+    ) -> dict[str, Any]:
+        """Turn the raw per-position auxiliary targets into DataLoader sources.
+
+        One resolver for all three heads, because the four ways this goes wrong are the
+        same for each: targets misaligned with the examples, targets supplied to a net
+        with no such head, a head built with no targets at all (the silent no-op this
+        project has been bitten by), and a partially-populated column.
+
+        Args:
+            examples: The training examples the targets must be aligned with.
+            supplied: Short head name → its per-position raw targets, or ``None``.
+                ``None`` *entries within* a sequence mark positions the target does not
+                exist for and are masked out of that head's loss.
+
+        Returns:
+            Short head name → target source, in ``AUX_HEAD_NAMES`` order, holding only
+            the heads that are both built and supplied.
 
         Raises:
-            ValueError: If ``score_margins`` is supplied but not index-aligned with
-                ``examples`` — a misalignment would train the head on other positions'
-                margins, which no downstream metric would reveal.
+            ValueError: If a supplied sequence is not index-aligned with ``examples``.
+                A misalignment would train a head on other positions' targets, which no
+                downstream metric would reveal.
         """
-        if score_margins is not None and len(score_margins) != len(examples):
-            raise ValueError(
-                f"score_margins has {len(score_margins)} entries for {len(examples)} examples; "
-                "they must be index-aligned.",
-            )
-        if not self.has_score_head():
-            if score_margins is not None and "no_head" not in self._score_warned:
-                self._score_warned.add("no_head")
-                logger.info("Score margins supplied but this net has no score head — ignoring them.")
-            return None
-        if score_margins is None:
-            if "no_margins" not in self._score_warned:
-                self._score_warned.add("no_margins")
-                logger.warning(
-                    "net_config.score_head is on but train() got no score_margins — the score head "
-                    "will not be trained this run. Pass score_margins, or set score_head=False.",
+        sources: dict[str, Any] = {}
+        for name in AUX_HEAD_NAMES:
+            key = aux_key(name)
+            targets = supplied.get(key)
+            if targets is not None and len(targets) != len(examples):
+                raise ValueError(
+                    f"{key} targets have {len(targets)} entries for {len(examples)} examples; "
+                    "they must be index-aligned.",
                 )
-            return None
+            if not self.has_aux_head(key):
+                if targets is not None and self._warn_once(f"{key}:no_head"):
+                    logger.info("{} targets supplied but this net has no {} head — ignoring them.", key, key)
+                continue
+            if targets is None:
+                if self._warn_once(f"{key}:no_targets"):
+                    logger.warning(
+                        "net_config.{}_head is on but train() got no {} targets — the head will not be "
+                        "trained this run. Pass them, or set {}_head=False.",
+                        key,
+                        key,
+                        key,
+                    )
+                continue
+            present = sum(1 for target in targets if target is not None)
+            if present == 0 and self._warn_once(f"{key}:all_missing"):
+                logger.warning("Every supplied {} target is None — the {} term contributes nothing.", key, key)
+            elif 0 < present < len(targets) and self._warn_once(f"{key}:partial"):
+                # Not an error: v2 opening rows legitimately have no final board and no
+                # next ply. Reported because the fraction is otherwise invisible — the
+                # held-out ``n_skipped`` counts holdout rows, which are complete games.
+                logger.info(
+                    "{} targets: {}/{} training rows carry one ({:.1%} masked).",
+                    key,
+                    present,
+                    len(targets),
+                    1.0 - present / len(targets),
+                )
+            sources[key] = self._build_aux_source(key, targets)
+        return sources
 
-        # Imported here, not at module scope: ``alphablokus.training``'s package
-        # __init__ pulls in the Coach, which reaches the registry, which imports
-        # this module — the same cycle that keeps ``memmap_dataset`` local below.
-        from alphablokus.training.score_target import scale_margins
+    def _warn_once(self, token: str) -> bool:
+        """True the first time ``token`` is seen, so a mis-wiring is reported once."""
+        if token in self._aux_warned:
+            return False
+        self._aux_warned.add(token)
+        return True
 
-        targets = scale_margins(score_margins, self.net_config.score_scale)
-        scored = int(np.isfinite(targets).sum())
-        self._score_scored_rows = scored
-        self._score_total_rows = len(targets)
-        if scored == 0 and "all_none" not in self._score_warned:
-            self._score_warned.add("all_none")
-            logger.warning("Every supplied score margin is None — the score term contributes nothing.")
-        elif scored < len(targets) and "partial" not in self._score_warned:
-            self._score_warned.add("partial")
-            # Not an error: opening rows legitimately have no margin (the opening dataset
-            # stores none). Reported because the fraction is otherwise invisible — the
-            # held-out ``n_skipped`` counts holdout rows, which always have margins.
-            logger.info(
-                "Score targets: {}/{} training rows carry a margin ({:.1%} unscored).",
-                scored,
-                len(targets),
-                1.0 - scored / len(targets),
-            )
-        return targets
+    def _build_aux_source(self, key: str, targets: Sequence[Any]) -> Any:
+        """Construct the DataLoader-side target source for one auxiliary head."""
+        if key == "score":
+            # Imported here, not at module scope: ``alphablokus.training``'s package
+            # __init__ pulls in the Coach, which reaches the registry, which imports
+            # this module — the same cycle that keeps ``memmap_dataset`` local below.
+            from alphablokus.training.score_target import scale_margins
+
+            return _ScoreTargetSource(scale_margins(targets, self.net_config.score_scale))
+        if key == "ownership":
+            return _OwnershipTargetSource(targets, self.board_rows * self.board_cols)
+        if key == "reply":
+            return _ReplyTargetSource(targets, self.game.get_action_size())
+        raise ValueError(f"No target source is defined for auxiliary head {key!r}")
 
     def train(
         self,
@@ -514,6 +642,8 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         metrics: MetricsCollector | None = None,
         eval_set: EvalSet | None = None,
         score_margins: Sequence[float | None] | None = None,
+        ownership_targets: Sequence[np.ndarray | None] | None = None,
+        reply_targets: Sequence[object | None] | None = None,
     ) -> None:
         """Train with ``epochs`` full, shuffled passes over the whole buffer.
 
@@ -541,20 +671,40 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 loss. Consumed only when the auxiliary score head is built
                 (``net_config.score_head``), where the target is
                 ``tanh(margin / score_scale)`` and the term enters the total as
-                ``score_loss_weight × score_loss``. A **separate argument on
-                purpose**: ``ProcessedExample`` keeps its
-                ``(board, policy, value)`` shape, so self-play, the replay buffer
-                and storage never see the score target
-                (docs/plans/score-auxiliary-target.md S4).
+                ``score_loss_weight × score_loss``.
+            ownership_targets: Optional per-position final-ownership maps —
+                ``(rows, cols)`` arrays of ``{-1, 0, +1}`` **in the position's own
+                canonical frame** (``+1`` = the side to move holds that cell when
+                the game ends), index-aligned with ``examples``; ``None`` entries
+                mark positions with no final board and are masked out of the loss.
+                Consumed only when ``net_config.ownership_head`` built the head
+                (docs/plans/supervised-network-improvements.md N4).
+            reply_targets: Optional per-position **opponent-reply** distributions
+                over the action space — the next ply's policy target, sparse
+                ``(indices, values)`` or dense — index-aligned with ``examples``;
+                ``None`` entries mark positions with no next ply (every game's final
+                position) and are masked out of the loss. Consumed only when
+                ``net_config.reply_head`` built the head (plan N5).
+
+        Note:
+            Every auxiliary target is a **separate argument on purpose**:
+            ``ProcessedExample`` keeps its ``(board, policy, value)`` shape, so
+            self-play, the replay buffer and storage never carry one
+            (docs/plans/score-auxiliary-target.md S4). No auxiliary head is read when
+            choosing a move.
         """
         if not examples:
             logger.warning("No training examples provided, skipping training.")
             return
 
-        # Resolve the score-target situation once, loudly. Training a head on
-        # nothing (head on, no margins supplied) is exactly the silent-no-op this
-        # project has been bitten by, so it warns rather than shrugging.
-        score_targets = self._resolve_score_targets(examples, score_margins)
+        # Resolve every auxiliary head's target situation once, loudly. Training a
+        # head on nothing (head on, no targets supplied) is exactly the silent-no-op
+        # this project has been bitten by, so it warns rather than shrugging.
+        aux_sources = self._resolve_aux_targets(
+            examples,
+            {"score": score_margins, "ownership": ownership_targets, "reply": reply_targets},
+        )
+        aux_names = tuple(aux_sources)
 
         boards_np, raw_pis, vs_np = zip(*examples, strict=True)
         action_size = self.game.get_action_size()
@@ -595,10 +745,10 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             dataset = MemmapPolicyDataset.build(examples, action_size, encode_fn, memmap_dir)
         else:
             dataset = _LazyPolicyDataset(boards_np, raw_pis, vs_np, action_size, encode_fn)
-        if score_targets is not None:
+        if aux_sources:
             # Wrap, don't fork: both datasets keep their item shape and hot path,
-            # and this appends the aligned score target on top.
-            dataset = _ScoredDataset(dataset, score_targets)
+            # and this appends the aligned auxiliary targets on top.
+            dataset = _AuxTargetDataset(dataset, aux_sources, len(examples))
 
         # Opt-in training-perf knobs (net_config.perf). Everything defaults to
         # off = the original fp32, in-process, per-batch-sync loop; CUDA-only
@@ -683,26 +833,37 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             window = _LossWindow(self._device)
             t = tqdm(loader, desc="Training Net")
             for batch_number, batch in enumerate(t):
-                # 4th element only when score targets were supplied (``_ScoredDataset``).
+                # Trailing elements only when auxiliary targets were supplied, in
+                # ``aux_names`` order (``_AuxTargetDataset``).
                 boards, target_pis, target_vs, *extra = batch
                 boards = boards.to(self._device, non_blocking=non_blocking)
                 target_pis = target_pis.to(self._device, non_blocking=non_blocking)
                 target_vs = target_vs.to(self._device, non_blocking=non_blocking)
-                target_scores = extra[0].to(self._device, non_blocking=non_blocking) if extra else None
+                aux_batch = {
+                    key: tensor.to(self._device, non_blocking=non_blocking)
+                    for key, tensor in zip(aux_names, extra, strict=True)
+                }
                 if on_cuda and perf.channels_last:
                     boards = boards.to(memory_format=torch.channels_last)
 
-                l_score: Tensor | None = None
+                aux_losses: dict[str, Tensor] = {}
                 with train_autocast():
-                    out_pi, out_v, out_score = self._split_net_outputs(self._forward_net(boards))
-                    l_pi = self.loss_pi(target_pis, out_pi)
-                    l_v = self.loss_v(target_vs, out_v)
+                    outputs = self._split_net_outputs(self._forward_net(boards))
+                    l_pi = self.loss_pi(target_pis, outputs.log_pi)
+                    l_v = self.loss_v(target_vs, outputs.value)
                     total_loss = l_pi + l_v
-                    if target_scores is not None and out_score is not None:
-                        l_score = self.loss_score(target_scores, out_score)
-                        total_loss = total_loss + self.net_config.score_loss_weight * l_score
+                    # Fixed ``AUX_HEAD_NAMES`` order, so the float accumulation of the
+                    # total is identical for a given set of heads regardless of the
+                    # order the targets were passed in.
+                    for key in aux_names:
+                        head_output = outputs.aux.get(key)
+                        if head_output is None:
+                            continue
+                        loss = self._aux_loss(key, aux_batch[key], head_output)
+                        aux_losses[key] = loss
+                        total_loss = total_loss + self._aux_loss_weight(key) * loss
 
-                window.add(l_pi, l_v, total_loss, boards.size(0), l_score)
+                window.add(l_pi, l_v, total_loss, boards.size(0), aux_losses)
                 if window.batches >= log_window:
                     self._flush_loss_window(window, pi_losses, v_losses, t, metrics, generation, epoch, batch_number)
 
@@ -821,7 +982,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 boards_chunk = eval_set.boards[chunk_start:end]
                 tensor = torch.tensor(boards_chunk, dtype=torch.float32)
                 tensor = tensor.to(self._device)
-                log_pi, v, _ = self._split_net_outputs(self._forward_net(tensor))
+                log_pi, v, _aux = self._split_net_outputs(self._forward_net(tensor))
                 pi = torch.exp(log_pi)
 
                 # Entropy per row.
@@ -1150,9 +1311,9 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         planes over shared memory) route through here, so they are guaranteed
         bit-identical.
 
-        The auxiliary score head is **dropped here**, so nothing that plays a move
-        ever sees it. :meth:`predict_encoded_with_score` is the diagnostics-only
-        surface that keeps it.
+        Every auxiliary head is **dropped here**, so nothing that plays a move ever
+        sees one. :meth:`predict_encoded_aux` is the diagnostics-only surface that
+        keeps them.
 
         Args:
             planes: ``(N, C, H, W)`` float32 — ``N`` boards already encoded via
@@ -1162,32 +1323,52 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             ``(policies, values)`` — ``(N, A)`` softmaxed policy array and
             ``(N,)`` value array, both float32 on the CPU.
         """
-        policies, values, _ = self.predict_encoded_with_score(planes)
+        policies, values, _aux = self.predict_encoded_aux(planes)
         return policies, values
 
-    def predict_encoded_with_score(self, planes: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-        """As :meth:`predict_encoded`, but also returning the score head's output.
+    def predict_encoded_aux(self, planes: np.ndarray) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]:
+        """As :meth:`predict_encoded`, but also returning the auxiliary heads' outputs.
 
-        For **diagnostics only** (the SL trainer's held-out score MSE). Nothing that
-        chooses a move calls this — search, the arena, the Pentobi harness and the jax
-        bridge all go through :meth:`predict_encoded` / :meth:`predict`, which drop it.
+        For **diagnostics only** (the SL trainer's held-out auxiliary-head metrics).
+        Nothing that chooses a move calls this — search, the arena, the Pentobi harness
+        and the jax bridge all go through :meth:`predict_encoded` / :meth:`predict`,
+        which drop the auxiliary outputs entirely.
 
         Returns:
-            ``(policies, values, scores)`` — ``scores`` is ``(N,)`` float32 when the net
-            has a score head, else ``None``.
+            ``(policies, values, aux)``. ``aux`` holds one entry per **built** head, so
+            it is empty for a net with none:
+
+            - ``"score"``: ``(N,)`` predicted scaled margin;
+            - ``"ownership"``: ``(N, 3, rows, cols)`` per-cell class **probabilities**;
+            - ``"reply"``: ``(N, A)`` reply **probabilities**.
+
+            Probabilities rather than logits, matching ``policies``, so every consumer
+            takes logs the same way.
         """
         tensor = torch.from_numpy(np.ascontiguousarray(planes, dtype=np.float32))
         tensor = tensor.to(self._device)
         self.nnet.eval()
         with torch.no_grad(), self._inference_autocast():
-            log_pi, v, score = self._split_net_outputs(self._forward_net(tensor))
+            outputs = self._split_net_outputs(self._forward_net(tensor))
+            probabilities = {key: self._aux_probabilities(key, tensor_out) for key, tensor_out in outputs.aux.items()}
 
         # .float() casts back from fp16 (if autocast was active) so downstream
         # code always sees float32; a no-op when inference ran in float32.
-        policies = torch.exp(log_pi).float().data.cpu().numpy()
-        values = v.view(-1).float().data.cpu().numpy()
-        scores = None if score is None else score.view(-1).float().data.cpu().numpy()
-        return policies, values, scores
+        policies = torch.exp(outputs.log_pi).float().data.cpu().numpy()
+        values = outputs.value.view(-1).float().data.cpu().numpy()
+        aux = {key: value.float().data.cpu().numpy() for key, value in probabilities.items()}
+        return policies, values, aux
+
+    @staticmethod
+    def _aux_probabilities(key: str, output: Tensor) -> Tensor:
+        """Normalise one auxiliary head's raw output for the diagnostics surface."""
+        if key == "score":
+            return output.view(-1)
+        if key == "ownership":
+            return F.softmax(output, dim=1)
+        if key == "reply":
+            return torch.exp(output)
+        raise ValueError(f"No diagnostics normalisation is defined for auxiliary head {key!r}")
 
     def predict(self, board: IBoard) -> tuple[np.ndarray, float]:
         """Make a prediction for a given board state.
@@ -1222,6 +1403,20 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         """Calculate the value loss."""
         return torch.sum((targets - outputs.view(-1)) ** 2) / targets.size()[0]
 
+    def _aux_loss(self, key: str, targets: Tensor, outputs: Tensor) -> Tensor:
+        """Dispatch one auxiliary head's loss by its short name."""
+        if key == "score":
+            return self.loss_score(targets, outputs)
+        if key == "ownership":
+            return self.loss_ownership(targets, outputs)
+        if key == "reply":
+            return self.loss_reply(targets, outputs)
+        raise ValueError(f"No loss is defined for auxiliary head {key!r}")
+
+    def _aux_loss_weight(self, key: str) -> float:
+        """``net_config.<key>_loss_weight`` — how much this head nudges the total."""
+        return float(getattr(self.net_config, f"{key}_loss_weight"))
+
     @staticmethod
     def loss_score(targets: Tensor, outputs: Tensor) -> Tensor:
         """Auxiliary score loss: MSE over the positions that *have* a margin.
@@ -1240,6 +1435,52 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         clean = torch.where(mask, targets, torch.zeros_like(targets))
         squared = ((clean - flat) * mask) ** 2
         return squared.sum() / mask.sum().clamp(min=1)
+
+    @staticmethod
+    def loss_ownership(targets: Tensor, outputs: Tensor) -> Tensor:
+        """Auxiliary ownership loss: per-cell cross-entropy over the unmasked cells.
+
+        Args:
+            targets: ``(B, cells)`` int64 class labels — ``0`` opponent, ``1`` neither,
+                ``2`` the side to move — with ``-1`` marking a masked cell. A row is
+                entirely ``-1`` when the position has no final board (v2 opening rows).
+            outputs: ``(B, 3, rows, cols)`` raw logits from the head.
+
+        The same masking discipline as :meth:`loss_score`: labels are cleaned to a valid
+        class *before* the cross-entropy so the masked entries cannot produce a NaN in
+        the backward pass, and the sum is averaged over the unmasked cells only. A batch
+        in which every cell is masked returns a differentiable zero, so the term drops
+        out instead of producing NaN from a 0/0 mean.
+
+        Averaged per **cell**, not per position, so the term starts at ln 3 ≈ 1.10 — the
+        same O(1) scale as the value loss, which is what makes
+        ``ownership_loss_weight`` comparable to ``score_loss_weight``.
+        """
+        logits = outputs.reshape(outputs.size(0), outputs.size(1), -1)
+        mask = targets >= 0
+        clean = torch.where(mask, targets, torch.zeros_like(targets))
+        per_cell = F.cross_entropy(logits, clean, reduction="none")
+        return (per_cell * mask).sum() / mask.sum().clamp(min=1)
+
+    @staticmethod
+    def loss_reply(targets: Tensor, outputs: Tensor) -> Tensor:
+        """Auxiliary opponent-reply loss: masked KL, the same form as :meth:`loss_pi`.
+
+        Args:
+            targets: ``(B, action_size)`` reply distributions. An **all-zero** row marks
+                a position with no next ply (a game's final position) and is masked out
+                — a real target always sums to 1, so the sentinel is unambiguous.
+            outputs: ``(B, action_size)`` log-probabilities from the head.
+
+        ``F.kl_div`` is computed per row and averaged over the unmasked rows, matching
+        ``loss_pi``'s ``batchmean`` when nothing is masked. Masked rows are all-zero
+        targets, whose KL and whose gradient are both already zero; the explicit mask
+        keeps that a stated property rather than a happy accident, and keeps the
+        denominator honest.
+        """
+        per_row = F.kl_div(outputs, targets, reduction="none").sum(dim=1)
+        mask = targets.sum(dim=1) > 0
+        return (per_row * mask).sum() / mask.sum().clamp(min=1)
 
     def save_checkpoint(self, filename: str) -> None:
         """Save the neural network state to a checkpoint file."""

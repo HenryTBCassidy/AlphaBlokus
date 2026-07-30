@@ -28,6 +28,12 @@ if TYPE_CHECKING:
     from alphablokus.evaluation.arena import GameRecord
 
 
+# Training-loss columns written only by runs with that auxiliary head on
+# (:mod:`alphablokus.aux_heads`). Absent from every other run's parquet, so both the
+# W&B mirror and the report treat them as optional series.
+AUXILIARY_LOSS_COLUMNS: tuple[str, ...] = ("score_loss", "ownership_loss", "reply_loss")
+
+
 # ---------------------------------------------------------------------------
 # Public enum
 # ---------------------------------------------------------------------------
@@ -369,6 +375,8 @@ class MetricsCollector:
         v_loss: float,
         total_loss: float,
         score_loss: float | None = None,
+        ownership_loss: float | None = None,
+        reply_loss: float | None = None,
     ) -> None:
         """Record raw per-batch policy, value, and total loss.
 
@@ -378,10 +386,11 @@ class MetricsCollector:
         that misled the eye. The reporting layer now smooths the raw per-batch
         losses visually instead (EWM in HTML, native in W&B).
 
-        ``score_loss`` is the auxiliary score head's MSE (plan
-        docs/plans/score-auxiliary-target.md S4), present only for runs with the head
-        on; the column is omitted otherwise, so existing runs' parquet schema is
-        unchanged and the report simply has no score series to draw.
+        ``score_loss`` / ``ownership_loss`` / ``reply_loss`` are the auxiliary heads'
+        raw losses (plans docs/plans/score-auxiliary-target.md S4 and
+        docs/plans/supervised-network-improvements.md N4/N5), present only for runs
+        with that head on; each column is omitted otherwise, so existing runs' parquet
+        schema is unchanged and the report simply has one fewer series to draw.
         """
         record: dict[str, Any] = {
             "generation": generation,
@@ -391,8 +400,8 @@ class MetricsCollector:
             "v_loss": v_loss,
             "total_loss": total_loss,
         }
-        if score_loss is not None:
-            record["score_loss"] = score_loss
+        auxiliary = {"score_loss": score_loss, "ownership_loss": ownership_loss, "reply_loss": reply_loss}
+        record.update({name: value for name, value in auxiliary.items() if value is not None})
         self._training_records.append(record)
         self._global_batch += 1
         published: dict[str, Any] = {
@@ -404,8 +413,7 @@ class MetricsCollector:
             "epoch": epoch,
             "batch": batch_number,
         }
-        if score_loss is not None:
-            published["training/score_loss"] = score_loss
+        published.update({f"training/{name}": value for name, value in auxiliary.items() if value is not None})
         self._publish(published)
 
     def log_arena(
@@ -1252,8 +1260,9 @@ class MetricsCollector:
                         "training_per_gen/total_loss": float(last["total_loss"].mean()),
                     }
                 )
-                if "score_loss" in last and last["score_loss"].notna().any():
-                    per_gen_payload[int(gen)]["training_per_gen/score_loss"] = float(last["score_loss"].mean())
+                for column in AUXILIARY_LOSS_COLUMNS:
+                    if column in last and last[column].notna().any():
+                        per_gen_payload[int(gen)][f"training_per_gen/{column}"] = float(last[column].mean())
 
         if self._training_entropy_records:
             ent = pd.DataFrame(self._training_entropy_records)

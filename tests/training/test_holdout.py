@@ -307,22 +307,31 @@ def test_colour_only_floor_is_high_when_one_side_usually_wins() -> None:
 # --------------------------------------------------------------------------- #
 
 
-class _ScoringPredictor:
-    """Minimal predictor exposing the diagnostics-only score surface."""
+class _AuxPredictor:
+    """Scripted predictor exposing the diagnostics-only auxiliary surface.
 
-    def __init__(self, scores: np.ndarray | None) -> None:
-        self._scores = scores
+    ``aux`` maps a head's short name to its per-position outputs, sliced batch by batch
+    in call order — so a metric that fed the batches in the wrong order, or fed masked
+    positions it should have skipped, reads the wrong rows and the numbers move.
+    An empty mapping is a net that built no auxiliary head at all.
+    """
+
+    def __init__(self, aux: dict[str, np.ndarray]) -> None:
+        self._aux = aux
         self._cursor = 0
 
-    def predict_encoded_with_score(self, planes: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+    def predict_encoded_aux(self, planes: np.ndarray) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]:
         n = planes.shape[0]
         policies = np.full((n, 4), 0.25, dtype=np.float32)
         values = np.zeros((n,), dtype=np.float32)
-        if self._scores is None:
-            return policies, values, None
-        chunk = self._scores[self._cursor : self._cursor + n].astype(np.float32)
+        chunk = {name: values_[self._cursor : self._cursor + n] for name, values_ in self._aux.items()}
         self._cursor += n
         return policies, values, chunk
+
+
+def _scoring_predictor(scores: np.ndarray | None) -> _AuxPredictor:
+    """A predictor with just the score head, or (``None``) with no head at all."""
+    return _AuxPredictor({} if scores is None else {"score": scores.astype(np.float32)})
 
 
 def _score_examples(count: int) -> list:
@@ -342,7 +351,7 @@ def test_evaluate_score_head_matches_the_closed_form_mse() -> None:
 
     margins: list[float | None] = [25.0, -25.0, 0.0]
     target = math.tanh(1.0)
-    predictor = _ScoringPredictor(np.array([target, -target, 0.5]))
+    predictor = _scoring_predictor(np.array([target, -target, 0.5]))
 
     metrics = evaluate_score_head(
         predictor,
@@ -363,7 +372,7 @@ def test_evaluate_score_head_skips_positions_without_a_margin() -> None:
     """Opening rows (no margin) must be excluded, not scored against a zero."""
     from alphablokus.training.holdout import evaluate_score_head
 
-    predictor = _ScoringPredictor(np.array([0.0, 0.0, 0.0, 0.0]))
+    predictor = _scoring_predictor(np.array([0.0, 0.0, 0.0, 0.0]))
     margins: list[float | None] = [0.0, None, 0.0, None]
 
     metrics = evaluate_score_head(predictor, _score_examples(4), margins, score_scale=25.0, encode_fn=_encode_fake)
@@ -376,12 +385,12 @@ def test_evaluate_score_head_skips_positions_without_a_margin() -> None:
 def test_evaluate_score_head_returns_none_without_a_head_or_without_margins() -> None:
     from alphablokus.training.holdout import evaluate_score_head
 
-    headless = _ScoringPredictor(None)
+    headless = _scoring_predictor(None)
     assert (
         evaluate_score_head(headless, _score_examples(2), [1.0, 2.0], score_scale=25.0, encode_fn=_encode_fake) is None
     )
 
-    no_margins = _ScoringPredictor(np.zeros(2))
+    no_margins = _scoring_predictor(np.zeros(2))
     assert (
         evaluate_score_head(no_margins, _score_examples(2), [None, None], score_scale=25.0, encode_fn=_encode_fake)
         is None
@@ -394,7 +403,7 @@ def test_score_skill_is_measured_against_a_constant_predictor() -> None:
 
     margins: list[float | None] = [25.0, -25.0]
     mean_target = 0.0  # tanh is odd, so these two average to zero
-    constant_head = _ScoringPredictor(np.array([mean_target, mean_target]))
+    constant_head = _scoring_predictor(np.array([mean_target, mean_target]))
 
     metrics = evaluate_score_head(constant_head, _score_examples(2), margins, score_scale=25.0, encode_fn=_encode_fake)
 
@@ -408,9 +417,162 @@ def test_evaluate_score_head_rejects_misaligned_margins() -> None:
 
     with pytest.raises(ValueError, match="index-aligned"):
         evaluate_score_head(
-            _ScoringPredictor(np.zeros(3)),
+            _scoring_predictor(np.zeros(3)),
             _score_examples(3),
             [1.0],
             score_scale=25.0,
             encode_fn=_encode_fake,
         )
+
+
+def test_imitation_diagnostics_top3_is_a_rank_three_window() -> None:
+    """Top-3 must be *the top three legal moves*, not "any legal move".
+
+    Both positions have five legal moves and the same ranking, so the only thing
+    separating them is where the expert's move sits in it — third (inside the window)
+    versus fourth (outside). A "top-k over the whole legal set" bug scores 100% here,
+    and a top-3 that silently aliased top-1 scores 0%.
+    """
+    from alphablokus.training.holdout import evaluate_imitation_diagnostics as evaluate
+
+    legal = np.array([0, 1, 2, 3, 4], dtype=np.int32)
+    policies = np.zeros((2, 8), dtype=np.float32)
+    policies[:, legal] = [0.30, 0.25, 0.20, 0.15, 0.10]  # ranking is 0, 1, 2, 3, 4
+    predictor = _TablePredictor(policies, np.zeros(2, dtype=np.float32))
+    examples = [(np.full((3, 3), i, dtype=np.int8), (legal, np.full(5, 0.2, dtype=np.float32)), 0.0) for i in range(2)]
+
+    diagnostics = evaluate(predictor, examples, [2, 3], [1, -1], encode_fn=_encode_fake)
+
+    assert diagnostics.top1_accuracy == 0.0
+    assert diagnostics.top3_accuracy == pytest.approx(0.5)
+
+
+# --------------------------------------------------------------------------- #
+# Auxiliary ownership head (plan N4)
+# --------------------------------------------------------------------------- #
+
+
+def _ownership_fixture() -> tuple[list, list, _AuxPredictor]:
+    """Three 2x2 positions — two labelled, one with no final board — hand-computable.
+
+    Position 0 predicts class 0 everywhere at 0.6 and is labelled class 0 everywhere;
+    position 1 predicts class 2 at 0.6 and is labelled ``[2, 2, 1, 1]``. So the head is
+    right on 6 of 8 labelled cells and every cell's cross-entropy is ``−ln 0.6`` or
+    ``−ln 0.3``.
+    """
+    probabilities = np.zeros((3, 3, 2, 2), dtype=np.float32)
+    probabilities[0] = np.array([0.6, 0.3, 0.1], dtype=np.float32)[:, None, None]
+    probabilities[1] = np.array([0.1, 0.3, 0.6], dtype=np.float32)[:, None, None]
+    probabilities[2] = np.array([1 / 3, 1 / 3, 1 / 3], dtype=np.float32)[:, None, None]
+    ownership = [
+        np.array([[-1, -1], [-1, -1]], dtype=np.int8),  # classes 0,0,0,0
+        np.array([[1, 1], [0, 0]], dtype=np.int8),  # classes 2,2,1,1
+        None,  # no final board — masked, and never shown to the predictor
+    ]
+    examples = [
+        (
+            np.full((3, 3), i, dtype=np.int8),
+            (np.array([0], dtype=np.int32), np.array([1.0], dtype=np.float32)),
+            0.0,
+        )
+        for i in range(3)
+    ]
+    return examples, ownership, _AuxPredictor({"ownership": probabilities})
+
+
+def test_evaluate_ownership_head_matches_the_closed_form() -> None:
+    from alphablokus.training.holdout import evaluate_ownership_head
+
+    examples, ownership, predictor = _ownership_fixture()
+
+    metrics = evaluate_ownership_head(predictor, examples, ownership, encode_fn=_encode_fake, batch_size=1)
+
+    assert metrics is not None
+    assert (metrics.n_positions, metrics.n_skipped) == (2, 1)
+    assert metrics.cross_entropy == pytest.approx((6 * -math.log(0.6) + 2 * -math.log(0.3)) / 8)
+    assert metrics.accuracy == pytest.approx(0.75)
+    # Label marginal over the 8 labelled cells is [0.5, 0.25, 0.25].
+    assert metrics.marginal_cross_entropy == pytest.approx(-(0.5 * math.log(0.5) + 0.5 * math.log(0.25)))
+    assert metrics.skill == pytest.approx(1.0 - metrics.cross_entropy / metrics.marginal_cross_entropy)
+
+
+def test_evaluate_ownership_head_returns_none_without_a_head_or_a_final_board() -> None:
+    from alphablokus.training.holdout import evaluate_ownership_head
+
+    examples, ownership, _predictor = _ownership_fixture()
+
+    headless = _AuxPredictor({})
+    assert evaluate_ownership_head(headless, examples, ownership, encode_fn=_encode_fake) is None
+
+    _, _, predictor = _ownership_fixture()
+    assert evaluate_ownership_head(predictor, examples, [None] * 3, encode_fn=_encode_fake) is None
+
+
+def test_evaluate_ownership_head_rejects_misaligned_targets() -> None:
+    from alphablokus.training.holdout import evaluate_ownership_head
+
+    examples, ownership, predictor = _ownership_fixture()
+    with pytest.raises(ValueError, match="index-aligned"):
+        evaluate_ownership_head(predictor, examples, ownership[:2], encode_fn=_encode_fake)
+
+
+# --------------------------------------------------------------------------- #
+# Auxiliary opponent-reply head (plan N5)
+# --------------------------------------------------------------------------- #
+
+
+def _reply_fixture() -> tuple[list, list, _AuxPredictor]:
+    """Three positions, the last with no next ply, over a 4-action space."""
+    predicted = np.array(
+        [[0.7, 0.1, 0.1, 0.1], [0.1, 0.1, 0.7, 0.1]],
+        dtype=np.float32,
+    )
+    replies: list[object | None] = [
+        (np.array([0], dtype=np.int32), np.array([1.0], dtype=np.float32)),  # top-1 hit
+        (np.array([1], dtype=np.int32), np.array([1.0], dtype=np.float32)),  # top-1 miss
+        None,  # a game's final position
+    ]
+    examples = [
+        (
+            np.full((3, 3), i, dtype=np.int8),
+            (np.array([0], dtype=np.int32), np.array([1.0], dtype=np.float32)),
+            0.0,
+        )
+        for i in range(3)
+    ]
+    return examples, replies, _AuxPredictor({"reply": predicted})
+
+
+def test_evaluate_reply_head_matches_the_closed_form() -> None:
+    from alphablokus.training.holdout import evaluate_reply_head
+
+    examples, replies, predictor = _reply_fixture()
+
+    metrics = evaluate_reply_head(predictor, examples, replies, action_size=4, encode_fn=_encode_fake, batch_size=2)
+
+    assert metrics is not None
+    assert (metrics.n_positions, metrics.n_skipped) == (2, 1)
+    assert metrics.policy_ce == pytest.approx((-math.log(0.7) + -math.log(0.1)) / 2)
+    assert metrics.target_entropy == pytest.approx(0.0)  # one-hot replies
+    assert metrics.policy_kl == pytest.approx(metrics.policy_ce)
+    assert metrics.top1_accuracy == pytest.approx(0.5)
+
+
+def test_evaluate_reply_head_returns_none_without_a_head_or_a_next_ply() -> None:
+    from alphablokus.training.holdout import evaluate_reply_head
+
+    examples, replies, _predictor = _reply_fixture()
+
+    headless = _AuxPredictor({})
+    assert evaluate_reply_head(headless, examples, replies, action_size=4, encode_fn=_encode_fake) is None
+
+    _, _, predictor = _reply_fixture()
+    assert evaluate_reply_head(predictor, examples, [None] * 3, action_size=4, encode_fn=_encode_fake) is None
+
+
+def test_evaluate_reply_head_rejects_misaligned_targets() -> None:
+    from alphablokus.training.holdout import evaluate_reply_head
+
+    examples, replies, predictor = _reply_fixture()
+    with pytest.raises(ValueError, match="index-aligned"):
+        evaluate_reply_head(predictor, examples, replies[:2], action_size=4, encode_fn=_encode_fake)
