@@ -209,14 +209,27 @@ learning as much as better endpoints.
 
 Record the numbers and pick one, in the plan and in the config default:
 
-- **Keep** (flip `score_head` on for the RL phase) if value skill improves materially with
-  policy agreement flat or better.
+- **Keep** if value skill improves materially with policy agreement flat or better.
+  **"Keep" means keep for SL distillation only.** Carrying the head into the RL phase is
+  *not* currently possible and flipping the flag on there would be silently wrong: `Coach`
+  never passes `score_margins` (self-play records a final score, but nothing plumbs it
+  through the replay buffer), so the head would sit in every checkpoint permanently
+  random, paying inference cost on every search batch and contributing nothing. Extending
+  it to RL is a separate piece of work — plumb the margin through self-play and the replay
+  buffer — and should be planned on its own evidence, after this A/B.
 - **Retune** if score MSE is near zero (the head has an easy job — `score_scale` too small)
   or barely moves (too large, or the weight is too low).
 - **Drop** if nothing improves. An auxiliary target that does not help is dead weight in
   every future run, and this project already has a habit of accumulating unused paths.
 
 ---
+
+> **As built — the metrics limb is currently unreachable (2026-07-30).** `score_loss` is
+> logged, mirrored to W&B and charted, but no shipped run can produce it: `Coach` is the
+> only caller that passes a `MetricsCollector` and it never passes margins, while
+> `distill_sl.py` is the only caller that passes margins and it passes `metrics=None`
+> (writing its own JSON instead). The plumbing is correct and stays for when RL gains
+> margins; until then the score numbers come from the trainer's JSON, not the parquet.
 
 ## Not in scope
 

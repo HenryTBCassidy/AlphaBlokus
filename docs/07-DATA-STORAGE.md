@@ -230,7 +230,7 @@ df = pd.read_parquet(config.training_data_directory)  # or any of the 13
 | `pi_loss` | `float64` | Policy-head loss for this batch (`F.kl_div`, batch-mean) |
 | `v_loss` | `float64` | Value head MSE loss for this batch |
 | `total_loss` | `float64` | `pi_loss + v_loss` (+ `score_loss_weight × score_loss` when the score head is on) for this batch |
-| `score_loss` | `float64` | **Optional.** Auxiliary score-head MSE against `tanh(margin / score_scale)`, over the batch positions that have a margin. Written only by runs with `net_config.score_head` on, so older runs' schema is unchanged and the report simply omits the series. See `docs/plans/score-auxiliary-target.md`. |
+| `score_loss` | `float64` | **Optional.** Auxiliary score-head MSE against `tanh(margin / score_scale)`, over the batch positions that have a margin. Reserved for the auxiliary score head. **No shipped run writes it yet** — the only caller that supplies margins (`scripts/distill_sl.py`) passes no `MetricsCollector`, and the only caller that passes one (`Coach`) supplies no margins, so older runs' schema is unchanged and the report simply omits the series. See `docs/plans/score-auxiliary-target.md`. |
 
 > Earlier versions also wrote `average_pi_loss` / `average_v_loss` / `average_loss` running-mean columns. These were **removed** — they reset every epoch and produced misleading start-of-epoch spikes; the reporting layer smooths the raw per-batch losses instead.
 
