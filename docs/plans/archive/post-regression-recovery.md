@@ -20,7 +20,7 @@ the box as the final step before any paid run.
 returned a tie** — `xl` fit gen-40's data no better than `large`, so the plateau is *not* net size.
 That resolves the gate: **P9 (`xl` from scratch) is dropped** (config kept for a later
 capacity-justified moment), and **P10 (Pentobi distillation) is promoted to its own plan,
-[`pentobi-distillation.md`](../pentobi-distillation.md)**, which supersedes P10 here. Carried forward:
+[`pentobi-distillation.md`](pentobi-distillation.md)**, which supersedes P10 here. Carried forward:
 P7 (re-crown v3 gen-40 as best net + box mini-ladder runbook) as box housekeeping, and **P11
 (colour-conditional value calibration) folds into the distillation value-head work** (the 75% White
 skew is flagged there). Everything else in this plan is done.

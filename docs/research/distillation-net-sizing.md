@@ -1,7 +1,7 @@
 # Distillation net sizing (Phase A) — choosing the net for the Pentobi-L9 corpus
 
 Design investigation for the network that will absorb the Pentobi-L9 distillation corpus
-([`../plans/pentobi-distillation.md`](../plans/pentobi-distillation.md) Phase 2) and then carry the
+([`../plans/archive/pentobi-distillation.md`](../plans/archive/pentobi-distillation.md) Phase 2) and then carry the
 RL-beyond-the-teacher phase. Written 2026-07-24, **before** any distillation training — this doc is
 pure analysis: no GPU work, no corpus access. The only thing executed for it was instantiating the
 net on CPU to count parameters and microbench a forward pass (§5).
@@ -159,7 +159,7 @@ Two honest scalings:
   world-champion-level one ([`deepmind-run-configs.md`](deepmind-run-configs.md) §7).
 - **Data:** AGZ's 20×256 (~23M params, community estimate) was fed 4.9M games / ~500k-game replay
   windows. Our corpus is **50k games ≈ 1.5M positions (~3.0M after 2× symmetry augmentation)**
-  ([`../plans/pentobi-distillation.md`](../plans/pentobi-distillation.md) D5); stage 1 is 13k games
+  ([`../plans/archive/pentobi-distillation.md`](../plans/archive/pentobi-distillation.md) D5); stage 1 is 13k games
   ≈ 800k augmented positions. Fitting 19M parameters to 1.5M positions is a regularisation problem,
   not a capacity flex — AlphaGo's SL net had ~1 position per ~0.1 param; `xl` on our corpus would
   be ~13 params per position.
@@ -405,7 +405,7 @@ triangle); and the true games/s of the knee candidates (§5's interpolation ±).
 - Capacity probe (tie verdict): [`../plans/archive/post-regression-recovery.md`](../plans/archive/post-regression-recovery.md)
   P8; script `scripts/capacity_probe.py`; verdict rule pre-registered in
   [`regression-and-next-steps.md`](regression-and-next-steps.md) §3.4.
-- Corpus size / schema / plan: [`../plans/pentobi-distillation.md`](../plans/pentobi-distillation.md)
+- Corpus size / schema / plan: [`../plans/archive/pentobi-distillation.md`](../plans/archive/pentobi-distillation.md)
   (D4 pilot: ~30.3 positions/game [measured]; D5 target: 50k games ≈ 1.5M positions).
 - Preset definitions + resolution: `src/alphablokus/config.py:25-30, 798-813`; `<F>x<B>` spec
   support: `src/alphablokus/calibration.py::parse_net_sizes`;

@@ -138,7 +138,7 @@ A strict **superset** of the SelfPlayHistory schema: the first four columns are 
 - Read with `iter_corpus_examples()` (yields the same `(board, (indices, values), value)` tuples as the self-play pipeline) or `read_shard_meta()`/`analyze_corpus()` for provenance and diversity metrics; `validate_shard()` replays every game through the rules engine and checks every stored row.
 - Symmetry augmentation is **not** stored — apply `IGame.get_symmetries` at training time (the stored board rebuilds via `board_from_compact`, and the one-hot policy transposes to the one-hot of `transpose_action`).
 - Shards are written atomically (`.tmp` → rename), so any file matching the final name is complete; `generate` skips existing shards on rerun (resume) and each game's seeds are a pure function of `(--seed, game_id)`.
-- Design + generation strategy: `docs/plans/pentobi-distillation.md`.
+- Design + generation strategy: `docs/plans/archive/pentobi-distillation.md`.
 
 ---
 

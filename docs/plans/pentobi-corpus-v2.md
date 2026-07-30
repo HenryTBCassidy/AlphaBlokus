@@ -1,6 +1,6 @@
 # Pentobi distillation corpus v2 — strong openings + soft targets
 
-The v1 expert corpus ([`pentobi-distillation.md`](pentobi-distillation.md) D1–D5) generated cleanly,
+The v1 expert corpus ([`pentobi-distillation.md`](archive/pentobi-distillation.md) D1–D5) generated cleanly,
 validated perfectly, and **failed the D8 ladder gate**: the distilled nets (`96x6` weighted 0.088,
 `256x16` similar) came out far below v3 gen-40 (0.344) — ~55% at Pentobi L1, ~0% at L6+. The sizing
 sweep ruled out capacity (18× params bought +1.8 pp top-1). This plan replaces the corpus
@@ -80,6 +80,11 @@ would be self-defeating.
 **Gate:** V15 is D8's criterion unchanged — **+10 pp at any of L5–L7 after SL alone**, mini-ladder
 L1–L9 × 50 games × 400 sims against the v3 gen-40 baseline. If v2 does not move the ladder, the
 distillation thesis (not just the generator) is what's wrong, and Phase 3 RL spend stays blocked.
+
+**If it fires, Phase 3 begins** — RL warm-start from the distilled base, the continuous Pentobi-mix
+and opponent-pool diversity. That recipe is D9–D11 of the archived umbrella plan
+([`archive/pentobi-distillation.md`](archive/pentobi-distillation.md)) and gets spawned as its own
+plan then; it is not tracked here, because a corpus plan should not own the RL phase.
 
 ---
 
@@ -682,7 +687,7 @@ against the larger corpus per D8's caveat.
 
 ## V15. D8 ladder gate
 
-Unchanged from [`pentobi-distillation.md`](pentobi-distillation.md) D8: `scripts/mini_ladder.py`,
+Unchanged from [`pentobi-distillation.md`](archive/pentobi-distillation.md) D8: `scripts/mini_ladder.py`,
 L1–L9 × 50 games × 400 sims, the chosen net plus the v3 gen-40 baseline, **gate = +10 pp at any of
 L5–L7 after SL alone** — against book-enabled or book-free Pentobi per V11's verdict. If v2 clears
 it, Phase 3 (D9–D11) unblocks and the corpus scales via a re-plan top-up. If it fails a second

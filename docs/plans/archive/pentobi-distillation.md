@@ -1,8 +1,19 @@
 # Pentobi distillation — expert corpus, SL imitation, RL beyond
 
+> **Archived: superseded and split (2026-07-30).** Phase 1's data half (D1–D5) was rebuilt as
+> [`pentobi-corpus-v2.md`](../pentobi-corpus-v2.md) after this plan's corpus failed its own gate;
+> D6/D7's dataloader and trainer survive and are still the code in use; D8's gate criterion moved
+> to that plan as row V15, unchanged (+10 pp at any of L5–L7 after SL alone).
+>
+> **D9–D11 (Phase 3: RL from the distilled base) are not started and are not superseded** — they
+> are simply blocked on V15. Their recipe below stays the reference, and they get their own plan
+> the moment that gate fires. This file is archived rather than left in flight because a plan whose
+> only live rows are gated on another document's checkpoint is not in-flight work; it is a design
+> note waiting to be reactivated.
+
 The curriculum fix for the L4 plateau. The capacity probe (post-regression-recovery P8) showed the
 plateau is **not** a net-size problem — `xl` fit gen-40's self-play data no better than `large`
-([`../research/regression-and-next-steps.md`](../research/regression-and-next-steps.md) §3) — so the
+([`../research/regression-and-next-steps.md`](../../research/regression-and-next-steps.md) §3) — so the
 binding constraint is the *curriculum*: pure self-play-vs-itself is exhausted for this net. The fix
 is to inject external strength by distilling from Pentobi, exactly how AlphaGo (2016) bootstrapped
 from human games: supervised move-prediction to imitate a strong player, then RL to surpass it.
@@ -13,7 +24,7 @@ reusable corpus of Pentobi L9 games. Phases 2–3 (separate branches) build the 
 > **Status 2026-07-27 — the corpus half is being rebuilt.** Stage 1 of D5 ran (13 k L9 games), D6/D7
 > were built, and **D8's ladder gate failed**: the distilled nets came out far below v3 gen-40. The
 > post-mortem blamed the *corpus*, on two counts — junk unharvested openings and one-hot policy
-> targets — so the generator is being replaced by [`pentobi-corpus-v2.md`](pentobi-corpus-v2.md),
+> targets — so the generator is being replaced by [`pentobi-corpus-v2.md`](../pentobi-corpus-v2.md),
 > which supersedes the two decisions marked below. D6/D7 (dataloader + trainer) and D8's gate
 > criterion survive unchanged; the 13 k v1 corpus is kept as a mid-game supplement.
 
@@ -45,7 +56,7 @@ reusable corpus of Pentobi L9 games. Phases 2–3 (separate branches) build the 
   *(v2 keeps the deterministic stratified key but strata are strong-opening-tree leaves, not
   uniform-random prefixes — the deferred quality levers, now decided.)*
 - The corpus is a **one-time reusable asset** (parquet shards, schema in
-  [`../07-DATA-STORAGE.md`](../07-DATA-STORAGE.md) § Pentobi Distillation Corpus), consumed by
+  [`../07-DATA-STORAGE.md`](../../07-DATA-STORAGE.md) § Pentobi Distillation Corpus), consumed by
   every future run.
 
 ---
@@ -92,7 +103,7 @@ keep-best policy). Nothing in Phase 3 starts unless Phase 2's gate fires.
   rules engine, and the engine's `final_score` must equal our computed margin (new public
   `BlokusDuoGame.final_scores`).
 - **Storage**: parquet shards, schema a strict superset of `SelfPlayStore`'s (markers asserted
-  equal in tests) — documented in [`../07-DATA-STORAGE.md`](../07-DATA-STORAGE.md). Atomic writes
+  equal in tests) — documented in [`../07-DATA-STORAGE.md`](../../07-DATA-STORAGE.md). Atomic writes
   (`.tmp` → rename); resume = skip existing shards; game `g`'s seeds are a pure function of
   `(--seed, g)` so a rerun regenerates exactly the missing shards.
 - **Parallelism**: `--workers` spawn-pool over shards; one single-threaded engine per worker.
@@ -253,7 +264,7 @@ any RL spend.
 ### Phase B execution — net-sizing sweep → gate
 
 The net we distil into is chosen empirically, not from the arbitrary presets — full analysis and the
-candidate table in [`../research/distillation-net-sizing.md`](../research/distillation-net-sizing.md).
+candidate table in [`../research/distillation-net-sizing.md`](../../research/distillation-net-sizing.md).
 Two axes, both on the box GPU:
 
 - **Accuracy (which size captures L9):** per-candidate SL fit via `distill_sl.py --net-size <F>x<B>
