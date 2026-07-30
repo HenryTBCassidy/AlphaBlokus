@@ -6,7 +6,7 @@ validated perfectly, and **failed the D8 ladder gate**: the distilled nets (`96x
 sweep ruled out capacity (18× params bought +1.8 pp top-1). This plan replaces the corpus
 *generator*, not the training half: D6/D7's dataloader and SL trainer stay, D8's gate stays, and the
 v1 shards stay on disk as a mid-game supplement. Everything below is Blokus Duo / `pentobi-gtp` only.
-Companion documents: [`corpus-search-space-store.md`](corpus-search-space-store.md) (the persistent
+Companion documents: [`archive/corpus-search-space-store.md`](archive/corpus-search-space-store.md) (the persistent
 search-space DAG + allocation-plan store this plan builds on) and
 [`../research/corpus-generation-literature.md`](../research/corpus-generation-literature.md) (what
 AlphaGo/KataGo/Lc0/Stockfish-NNUE/ChessBench and the imitation-learning literature say about
@@ -42,14 +42,14 @@ would be self-defeating.
 |---|------|--------|----------|------|
 | V1 | GTP layer: `reg_genmove` / `move_values` + `MoveValues` parser (strip `[PIECE]`, signed values) + fixture tests; make `--nobook` an explicit `PentobiGtp` flag | 2 h | High | ✅ |
 | V2 | **Confidently-wrong base-rate probe** (top-8 children of ~30 allocated nodes independently evaluated) + residual engine probes (argmax-vs-`genmove`, pass/terminal edge cases, drive-pattern overhead) | 4 h box | High | |
-| V3 | Search-space store: execute [`corpus-search-space-store.md`](corpus-search-space-store.md) S1–S6 (SQLite DAG + allocation plans + playout registry + export + coverage) | 1.5 days | High | ✅ |
+| V3 | Search-space store: execute [`archive/corpus-search-space-store.md`](archive/corpus-search-space-store.md) S1–S6 (SQLite DAG + allocation plans + playout registry + export + coverage) | 1.5 days | High | ✅ |
 | V4 | Phase A — `plan`: budget-proportional allocation (`w ∝ p^(1/T)`, split floor R), emergent depth, search-on-demand mapping, mirror-pair merging, book-line floors | 1 day | High | ✅ |
 | V5 | Phase B — `generate`: fulfilment-driven scheduling against the active plan, prefix replay, harvest **every** ply, full-strength continuations | ½ day | High | ✅ |
 | V6 | Schema v2 (games shards + `export-opening` parquet, plan provenance in footers), validator, `docs/07-DATA-STORAGE.md` | ½ day | High | ✅ |
 | V7 | CLI + diagnostics: v2 subcommands, plan-fulfilment/coverage report, opening-vs-midgame row ratio, target-entropy / duplicate-position metrics | 3 h | High | ✅ |
 | V8 | `link` pass: aggregate playout outcomes up the DAG into `outcome_mean`/`outcome_count` | 2 h | Medium | ✅ |
 | V9 | Trainer: soft-target load path, target temperature τ, **opening-subtree holdout split** (fixes a latent leak), opening-value target choice, source mix weights | 1 day | High | ✅ |
-| V10 | L9 pilot on the box (plan at B=1,000 + ~200 games): validate, measure, freeze knobs | 4 h box | High | |
+| V10 | L9 pilot on the box: validate, measure, freeze knobs | 4 h box | High | ✅ *(as a smoke run + top-up test — see note)* |
 | V11 | **Book-strength measurement**: enable the opening book, verify engagement, book-on L9 vs book-off L9, spell out benchmark consequences | 4 h box | Medium | |
 | V12 | Stage-1 v2 corpus generation on the box — **(B = 10,000, T = 2, R = 2)**, ~3-day run — + `corpus_wrapup.py` to R2 (verify-before-done; the store DB syncs with the shards) | 3 days box | High | |
 | V13 | Breadth-vs-replication ablation as a **stage-1 subset experiment** (zero extra generation; informs the top-up shape) | 1 day box GPU | Medium | |
@@ -66,6 +66,16 @@ would be self-defeating.
 > corpus and a chosen split — no engine, no GPU, seconds to run — so it can land any time before
 > V15's gate is read, but it must land before that verdict is trusted: two openings can transpose
 > into the same position, and if that is common the held-out score is flattered.
+
+> **V10 note (2026-07-30).** Run as an engine-backed smoke run at B=140 with 12 games plus a
+> separate top-up test, rather than the B=1,000 / 200-game pilot as written. It served V10's
+> three purposes: **validate** (every row replayed, zero mismatches; both datasets exported;
+> `validate` clean), **measure** (45.7 s mean search, ~260 s per game, 29.5 plies/game, 184
+> games/h at 12 workers — the projection that sized the stage-1 run), and **freeze knobs**
+> (B = 10,000, T = 2, R = 2, 12 workers). It also found three production-stopping bugs that no
+> engine-free test could have caught, which is why it ran first and small. The top-up test
+> additionally proved the extension mechanism end to end: 12 games → 26, zero re-searched
+> positions, original games byte-identical.
 
 **Gate:** V15 is D8's criterion unchanged — **+10 pp at any of L5–L7 after SL alone**, mini-ladder
 L1–L9 × 50 games × 400 sims against the v3 gen-40 baseline. If v2 does not move the ladder, the
@@ -305,7 +315,7 @@ Output: a short table appended to this section; V4's defaults are confirmed or r
 
 ## V3. Search-space store
 
-Execute [`corpus-search-space-store.md`](corpus-search-space-store.md) S1–S6: the position-keyed
+Execute [`archive/corpus-search-space-store.md`](archive/corpus-search-space-store.md) S1–S6: the position-keyed
 SQLite DAG (symmetry-canonical node keys — **decided**, with mirror-pair weight merging at
 symmetric nodes; full child lists as queryable edges; content-derived seeds), the **allocation
 plans** (`plans`/`plan_nodes`: every plan's per-node game targets stored, planned-vs-actual

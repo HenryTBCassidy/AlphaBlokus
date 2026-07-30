@@ -18,6 +18,7 @@ Status legend: **Idea** (raw, unexamined) · **Researching** (actively being inv
 | I5 | [Parallel Pentobi benchmark](#i5-parallel-pentobi-benchmark) | Promoted (shipped) | The Pentobi benchmark now fans games across a `spawn` worker pool (`--workers N`), each with its own net + engine — the GPU sat ~2% idle serially ([`plans/archive/parallel-pentobi-benchmark.md`](plans/archive/parallel-pentobi-benchmark.md)) |
 | I6 | [Sharded multi-GPU self-play](#i6-sharded-multi-gpu-self-play) | Idea | Split the jax self-play phase across N GPUs — one pinned producer process per card streaming games into the coach's `sink`, serial loop unchanged; a wall-clock lever for when single-card runs exceed ~a week ([`research/xl-training-scaleup.md`](research/xl-training-scaleup.md) §4) |
 | I7 | [Error-seeking exploration](#i7-error-seeking-exploration) | Idea | Generate data preferentially where a player is **confidently wrong** rather than uniformly — seed self-play from positions Pentobi misjudges, weight training by prior-vs-search disagreement. Measured 2026-07-28: Pentobi puts 92.9% of its ply-2 search on a reply ranked 35th of 315 |
+| I8 | [Win/draw/loss value head](#i8-windrawloss-value-head) | Idea | Replace the single tanh value output with three probabilities. 22% of v2 corpus games are draws, and one number cannot separate "certain draw" from "coin flip" — Lc0 moved to WDL for exactly this |
 
 > Ideas already captured elsewhere (not duplicated here): the conv policy head (F4) and the cross-worker inference server (F5) are done — see the [optimisation menu](plans/archive/full-cycle-optimisation.md#optimisation-menu); MCTS tree reuse, Cython move-gen and cached-valid-moves are in that plan's [Considered and set aside](plans/archive/full-cycle-optimisation.md#considered-and-set-aside) section; mixed-precision / fp16 inference is in its Out-of-scope list. Dirichlet root noise is **implemented** (`dirichlet_epsilon`/`dirichlet_alpha` in `MCTSConfig`, default-off).
 
@@ -212,3 +213,38 @@ high, this graduates to a plan; if it is low, there is nothing to hunt.
 **Related:** [`plans/pentobi-corpus-v2.md`](plans/pentobi-corpus-v2.md) (V2's base-rate probe, V16's
 net-in-the-loop phase), [`research/corpus-generation-literature.md`](research/corpus-generation-literature.md)
 §8 (why visit distributions are not move-quality distributions).
+
+
+---
+
+## I8. Win/draw/loss value head
+
+**The observation.** The value head emits one number in [−1, 1] and is trained against the
+game result. That number cannot distinguish **"this is a certain draw"** from **"this is a
+coin flip between a win and a loss"** — both are zero. In the v2 corpus **22% of games are
+draws** (measured across the first 2,400 games of the stage-1 run), so this is not a corner
+case; roughly a fifth of the value signal is being flattened into an ambiguity.
+
+Leela Chess Zero hit this and moved to a **WDL head**: three outputs through a softmax
+giving P(win), P(draw), P(loss). The scalar value becomes `P(win) − P(loss)`, so nothing
+downstream needs to change, but the head can now say *how* it got there — and the search
+can tell a drawn position from an unclear one.
+
+**Why it might matter more for us than for chess.** Chess engines draw constantly and the
+distinction is well understood there. Blokus Duo's draws come from a different place — the
+scoring is a margin, so a draw is an exact tie, which is a genuinely specific outcome rather
+than a default. A head that can predict "exactly tied" separately from "unresolved" is
+plausibly learning something real about the position.
+
+**Cost.** Three outputs instead of one, a cross-entropy loss instead of MSE, and a
+conversion at the inference boundary so callers still see a scalar. Checkpoint
+compatibility needs the same care as the score head ([`plans/score-auxiliary-target.md`](plans/score-auxiliary-target.md) S3).
+
+**Why it is parked rather than planned.** It overlaps the score-head experiment, and running
+both at once makes neither A/B readable. Do the score head first; if the value head is still
+weak afterwards, this is the next lever.
+
+**Related:** [`plans/score-auxiliary-target.md`](plans/score-auxiliary-target.md) (the
+auxiliary-target experiment that comes first),
+[`research/corpus-quality-principles.md`](research/corpus-quality-principles.md) (where the
+draw rate and the colour-prior floor are measured).

@@ -2,7 +2,7 @@
 
 Research supporting the v2 Pentobi-distillation corpus design
 ([`../plans/pentobi-corpus-v2.md`](../plans/pentobi-corpus-v2.md)) and the search-space store
-([`../plans/corpus-search-space-store.md`](../plans/corpus-search-space-store.md)). The question —
+([`../plans/archive/corpus-search-space-store.md`](../plans/archive/corpus-search-space-store.md)). The question —
 how to build a supervised corpus from a strong engine's play, and how to trade opening breadth
 against per-opening replication — is decades old; this note collects what the strongest prior
 projects actually did, with citations, and flags where our situation differs from each.

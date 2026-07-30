@@ -1,9 +1,9 @@
 # Corpus search-space store — a position-keyed DAG in SQLite
 
 Design + implementation plan for how the v2 Pentobi corpus stores the search space it explores.
-Companion to [`pentobi-corpus-v2.md`](pentobi-corpus-v2.md) (whose V3 row executes this plan's
+Companion to [`pentobi-corpus-v2.md`](../pentobi-corpus-v2.md) (whose V3 row executes this plan's
 checklist); literature context in
-[`../research/corpus-generation-literature.md`](../research/corpus-generation-literature.md).
+[`../research/corpus-generation-literature.md`](../../research/corpus-generation-literature.md).
 Requirements, verbatim (Henry):
 
 > a) makes it easy to tell what we've done before; b) allows us to make more training data
@@ -23,7 +23,7 @@ per-node game targets, so "planned vs actual" is queryable and top-ups are recom
 
 ## Checklist
 
-Executed as row V3 of [`pentobi-corpus-v2.md`](pentobi-corpus-v2.md).
+Executed as row V3 of [`pentobi-corpus-v2.md`](../pentobi-corpus-v2.md).
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
