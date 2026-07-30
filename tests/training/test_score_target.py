@@ -103,3 +103,21 @@ def test_non_positive_scale_is_rejected(bad: float) -> None:
         scale_margin(3, bad)
     with pytest.raises(ValueError, match="score_scale must be positive"):
         scale_margins([3], bad)
+
+
+def test_score_scale_rejects_values_that_would_fail_silently() -> None:
+    """A bad scale must raise, not quietly produce useless targets.
+
+    ``<= 0`` is the obvious case and was already caught. The dangerous ones are the
+    quiet failures: a huge or infinite scale maps every margin to ~0, so the head learns
+    to predict zero, the diagnostics report "no skill", and the experiment's verdict
+    reads "the head didn't help" rather than "the config is broken". A tiny scale
+    saturates every target at exactly ±1, which a ``tanh`` head can never reach.
+    """
+    for bad in (0.0, -1.0, float("inf"), float("-inf"), float("nan"), 1e-6, 1e30):
+        with pytest.raises(ValueError):
+            scale_margin(3.0, bad)
+        with pytest.raises(ValueError):
+            scale_margins([3.0], bad)
+    # the usable band still works, and still puts resolution on small margins
+    assert scale_margin(3.0, 25.0) == pytest.approx(0.1194, abs=1e-4)

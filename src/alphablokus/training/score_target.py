@@ -39,6 +39,29 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
 
+def _validate_scale(score_scale: float) -> None:
+    """Reject a ``score_scale`` that would silently produce useless targets.
+
+    ``<= 0`` is the obvious case. The non-obvious ones matter more because they fail
+    *quietly*: a huge or infinite scale maps every margin to ~0, so the head learns to
+    predict zero, the diagnostics report "no skill", and the S8 reading is "the head
+    didn't help" rather than "the config is broken". A tiny scale saturates every target
+    to exactly ±1, which a ``tanh`` head can never reach, so the loss can never go to
+    zero. NaN poisons every target.
+    """
+    if not np.isfinite(score_scale):
+        raise ValueError(f"score_scale must be finite, got {score_scale}")
+    if score_scale <= 0.0:
+        raise ValueError(f"score_scale must be positive, got {score_scale}")
+    # Margins run to ~88. Outside this band every target is either saturated at ±1 or
+    # crushed to ~0, and in both cases the head cannot learn anything useful.
+    if not 0.5 <= score_scale <= 1_000.0:
+        raise ValueError(
+            f"score_scale {score_scale} is outside the usable range [0.5, 1000]: margins run to ~88, so "
+            "a smaller scale saturates every target at ±1 and a larger one crushes them all to ~0.",
+        )
+
+
 def scale_margin(margin: float, score_scale: float) -> float:
     """One margin → its bounded score-head target ``tanh(margin / score_scale)``.
 
@@ -51,8 +74,7 @@ def scale_margin(margin: float, score_scale: float) -> float:
     Returns:
         The target in ``(-1, 1)``.
     """
-    if score_scale <= 0.0:
-        raise ValueError(f"score_scale must be positive, got {score_scale}")
+    _validate_scale(score_scale)
     return float(np.tanh(margin / score_scale))
 
 
@@ -67,7 +89,6 @@ def scale_margins(margins: Sequence[float | None], score_scale: float) -> NDArra
     Returns:
         ``(len(margins),)`` float32 targets, ``NaN`` wherever the margin was ``None``.
     """
-    if score_scale <= 0.0:
-        raise ValueError(f"score_scale must be positive, got {score_scale}")
+    _validate_scale(score_scale)
     raw = np.array([np.nan if margin is None else float(margin) for margin in margins], dtype=np.float64)
     return np.tanh(raw / score_scale).astype(np.float32)
