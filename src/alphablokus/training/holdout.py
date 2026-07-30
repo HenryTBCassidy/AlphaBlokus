@@ -214,11 +214,34 @@ class ImitationDiagnostics:
         n_positions: Held-out positions evaluated.
         calibration: One :class:`ColourValueCalibration` per side-to-move
             present, ordered by ``player`` ascending (Black -1 first).
+        value_mse: Value MSE over all held-out positions.
+        colour_only_value_mse: The MSE of a model that sees **only whose turn it
+            is** — it predicts each colour's mean held-out outcome and never looks
+            at the board. This is the floor a value head has to beat to be reading
+            positions at all, and in a game with a large first-player advantage the
+            floor is high: measured on real v2 data, White-to-move positions are 79%
+            wins and Black-to-move 78% losses, so guessing from the colour alone
+            scores 0.30 MSE against 0.84 for always predicting a draw. Without this
+            number a value head that has learnt nothing but the colour prior looks
+            like a value head that works.
     """
 
     top1_accuracy: float
     n_positions: int
     calibration: tuple[ColourValueCalibration, ...]
+    value_mse: float = 0.0
+    colour_only_value_mse: float = 0.0
+
+    @property
+    def value_skill(self) -> float:
+        """How much of the colour-only baseline's error the value head removes.
+
+        ``1 - mse / colour_only_mse``. Zero means the head has learnt the colour
+        prior and nothing else; negative means it is worse than that.
+        """
+        if self.colour_only_value_mse <= 0.0:
+            return 0.0
+        return 1.0 - self.value_mse / self.colour_only_value_mse
 
 
 def evaluate_imitation_diagnostics(
@@ -274,10 +297,14 @@ def evaluate_imitation_diagnostics(
         _colour_calibration(colour, predicted_values[player_arr == colour], outcomes[player_arr == colour])
         for colour in sorted(set(player_arr.tolist()))
     )
+    colour_means = {colour: float(outcomes[player_arr == colour].mean()) for colour in set(player_arr.tolist())}
+    colour_only = np.array([colour_means[int(colour)] for colour in player_arr], dtype=np.float64)
     return ImitationDiagnostics(
         top1_accuracy=top1_hits / len(examples),
         n_positions=len(examples),
         calibration=calibration,
+        value_mse=float(np.mean((predicted_values - outcomes) ** 2)),
+        colour_only_value_mse=float(np.mean((colour_only - outcomes) ** 2)),
     )
 
 

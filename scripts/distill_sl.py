@@ -143,7 +143,17 @@ def _diagnostics_summary(diagnostics: ImitationDiagnostics) -> str:
         f"player {c.player:+d}: bias {c.mean_predicted - c.mean_outcome:+.3f} (mse {c.value_mse:.3f})"
         for c in diagnostics.calibration
     )
-    return f"top-1 {diagnostics.top1_accuracy:.3f} | {biases}"
+    # The colour-only baseline is the number that stops a value head which has learnt
+    # only "whose turn is it" from looking like one that reads the board. In Blokus Duo
+    # the first player wins ~71% of games, so guessing from the colour alone already
+    # scores ~0.30 MSE — a head reporting 0.30 has learnt nothing.
+    skill = (
+        f" | value mse {diagnostics.value_mse:.3f} vs colour-only {diagnostics.colour_only_value_mse:.3f}"
+        f" (skill {diagnostics.value_skill:+.1%})"
+        if diagnostics.colour_only_value_mse > 0.0
+        else ""
+    )
+    return f"top-1 {diagnostics.top1_accuracy:.3f}{skill} | {biases}"
 
 
 def _run_arm(

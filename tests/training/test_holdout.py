@@ -256,3 +256,47 @@ def test_imitation_diagnostics_accepts_dense_policies_and_validates_inputs() -> 
         evaluate_imitation_diagnostics(predictor, [], [], [], encode_fn=_encode_fake)
     with pytest.raises(ValueError, match="misaligned"):
         evaluate_imitation_diagnostics(predictor, examples, expert_actions[:2], players, encode_fn=_encode_fake)
+
+
+def test_imitation_diagnostics_report_the_colour_only_value_floor() -> None:
+    """A value head must beat "guess from whose turn it is" to be reading the board.
+
+    Blokus Duo has a severe first-player advantage, so the outcome is largely predictable
+    from the side to move alone — measured on real v2 data, White-to-move positions are
+    79% wins and Black-to-move 78% losses, and guessing purely from the colour scores
+    0.30 MSE against 0.84 for always predicting a draw. The per-position win/loss split
+    looks reassuringly balanced (43/41) but that is a mechanical consequence of players
+    alternating and carries no information. Without this floor reported alongside it, a
+    value head that has learnt nothing but the colour prior is indistinguishable from one
+    that works.
+    """
+    examples, expert_actions, players, predictor = _imitation_fixture()
+    diagnostics = evaluate_imitation_diagnostics(predictor, examples, expert_actions, players, encode_fn=_encode_fake)
+
+    # The fixture's outcomes are [1, -1] for each colour, so each colour's mean is 0 and
+    # the colour-only predictor scores the outcome variance.
+    outcomes = np.array([value for _board, _policy, value in examples])
+    assert diagnostics.colour_only_value_mse == pytest.approx(float(np.mean(outcomes**2)))
+    assert diagnostics.value_mse > 0.0
+    assert diagnostics.value_skill == pytest.approx(1.0 - diagnostics.value_mse / diagnostics.colour_only_value_mse)
+
+
+def test_colour_only_floor_is_high_when_one_side_usually_wins() -> None:
+    """The floor rises with the first-player advantage — which is the whole point."""
+    from alphablokus.training.holdout import ImitationDiagnostics
+
+    # A head that exactly reproduces the colour prior has zero skill by construction.
+    no_skill = ImitationDiagnostics(
+        top1_accuracy=0.5, n_positions=100, calibration=(), value_mse=0.30, colour_only_value_mse=0.30
+    )
+    assert no_skill.value_skill == pytest.approx(0.0)
+
+    reads_the_board = ImitationDiagnostics(
+        top1_accuracy=0.5, n_positions=100, calibration=(), value_mse=0.15, colour_only_value_mse=0.30
+    )
+    assert reads_the_board.value_skill == pytest.approx(0.5)
+
+    worse_than_guessing = ImitationDiagnostics(
+        top1_accuracy=0.5, n_positions=100, calibration=(), value_mse=0.45, colour_only_value_mse=0.30
+    )
+    assert worse_than_guessing.value_skill < 0.0
