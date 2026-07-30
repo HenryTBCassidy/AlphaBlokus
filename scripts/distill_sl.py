@@ -128,9 +128,14 @@ def _arm_config(base: RunConfig, args: argparse.Namespace) -> RunConfig:
         lr_scheduler="constant",
         num_filters=num_filters,
         num_residual_blocks=num_residual_blocks,
-        score_head=args.score_head,
-        score_loss_weight=args.score_loss_weight,
-        score_scale=args.score_scale,
+        # Fall back to the base config when a flag was not passed, rather than letting
+        # argparse defaults silently overwrite settings pinned in a run-config JSON —
+        # which would quietly run the control arm when the config asked for the treatment.
+        score_head=base.net_config.score_head if args.score_head is None else args.score_head,
+        score_loss_weight=(
+            base.net_config.score_loss_weight if args.score_loss_weight is None else args.score_loss_weight
+        ),
+        score_scale=base.net_config.score_scale if args.score_scale is None else args.score_scale,
     )
     return replace(base, net_config=net_config)
 
@@ -375,18 +380,21 @@ def main() -> None:
     parser.add_argument(
         "--score-head",
         action=argparse.BooleanOptionalAction,
-        default=False,
+        default=None,  # None = inherit the base config; see _arm_config
         help="Train the auxiliary score head (final-margin regression alongside policy/value). "
         "Never read when choosing a move; this is the S7 A/B switch and the only difference "
         "between the two arms of that experiment.",
     )
     parser.add_argument(
-        "--score-loss-weight", type=float, default=0.15, help="Weight of the score term in the total loss"
+        "--score-loss-weight",
+        type=float,
+        default=None,
+        help="Weight of the score term in the total loss (default: the base config's)",
     )
     parser.add_argument(
         "--score-scale",
         type=float,
-        default=25.0,
+        default=None,
         help="Margin scaling for the score target: tanh(margin / scale). 25 puts the resolution "
         "on small margins (the median is 3) and saturates the blowouts",
     )
@@ -579,9 +587,14 @@ def main() -> None:
         "augment": args.augment,
         "seed": args.seed,
         "lr": args.lr,
-        "score_head": args.score_head,
-        "score_loss_weight": args.score_loss_weight,
-        "score_scale": args.score_scale,
+        # The *resolved* settings, not the raw flags: a flag left unset inherits the base
+        # config, so recording the flag would say "None" for a run that trained the head.
+        # This field is what an S8 reviewer reads to know which arm actually ran.
+        "score_head": config.net_config.score_head if args.score_head is None else args.score_head,
+        "score_loss_weight": (
+            config.net_config.score_loss_weight if args.score_loss_weight is None else args.score_loss_weight
+        ),
+        "score_scale": config.net_config.score_scale if args.score_scale is None else args.score_scale,
         "timestamp": datetime.now(UTC).isoformat(),
         "holdout_leakage": leakage.to_dict(),
         "arms": arms,
