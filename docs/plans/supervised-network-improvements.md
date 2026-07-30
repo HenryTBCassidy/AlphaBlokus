@@ -21,7 +21,7 @@ the score head on `feat/score-auxiliary-head` (built, unmeasured). N3 below *is*
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| N1 | The A/B harness: two runs identical but for one thing, fixed seeds, one metric set, one command | ½ day | High | |
+| N1 | The A/B harness: two runs identical but for one thing, fixed seeds, one metric set, one command | ½ day | High | ✅ |
 | N2 | Data-fraction curve (25 / 50 / 100% of the corpus) — makes every later result interpretable | 3 h box GPU | High | |
 | N3 | **Score-head A/B** (code already built — this is `score-auxiliary-target.md` S7) | ½ day box GPU | High | |
 | N4 | Ownership head: predict the final board, per cell | 2 days + ½ day box | High | ✅ |
@@ -75,6 +75,49 @@ and then reused. Without this each experiment reinvents its own setup and none a
 
 **Deliverable:** one command that takes a list of arms and emits a single comparison table plus the
 per-arm JSON. Not a framework — a script that runs `distill_sl.py` twice and diffs the results.
+
+> **As built — `scripts/ab_harness.py`.** The first `--arm` is the control every delta is measured
+> against; each later one names the single thing it varies:
+>
+> ```bash
+> uv run python scripts/ab_harness.py \
+>     --config run_configurations/blokus_cloud_v2.json \
+>     --corpus ~/corpora/pentobi_l9_v2 --out-dir temp/ab/ownership \
+>     --arm control \
+>     --arm zero_weight="--ownership-head --ownership-loss-weight 0" \
+>     --arm ownership="--ownership-head" \
+>     --noise-floor-arm zero_weight
+> ```
+>
+> It writes `<out-dir>/<arm>.json` (the untouched `distill_sl.py` run JSON), plus
+> `comparison.md` and `comparison.json`, and prints the table.
+>
+> **Three mechanisms make an unfair comparison hard to build**, rather than merely discouraged:
+>
+> 1. **Data and protocol are harness-level.** Corpus, seed, `--max-games`, holdout fraction,
+>    schedule, LR, τ and the mix weights are given *once* and forwarded verbatim. An arm cannot set
+>    them because they are not arm flags.
+> 2. **Arm flags are allow-listed** to the auxiliary-head switches and their weights. Anything else
+>    is refused *before* a GPU-hour is spent, with a message naming `--allow-varying` as the
+>    deliberate escape hatch — which is then printed in the comparison, so a reader always knows the
+>    control was loosened. (`--allow-varying --max-games` is exactly how N2's data-fraction curve
+>    runs through this harness.)
+> 3. **It re-checks afterwards.** Each arm's run JSON records the settings it *resolved* plus the
+>    **measured** holdout leakage, and those are diffed across arms; so is "did these arms differ in
+>    exactly one head". Any disagreement marks the run `comparable: false`, prints a
+>    `NOT COMPARABLE` banner above the table, and exits non-zero. The table is still written —
+>    useful for diagnosis, impossible to mistake for a result.
+>
+> **The noise floor is wired in.** `--noise-floor-arm` names the mathematically inert arm; every
+> other arm's delta is annotated `below noise` when it does not exceed the inert arm's own
+> movement on that metric. Deltas are signed `(+)`/`(−)` by whether the metric is better high or
+> low, so nobody has to remember that CE improves downward.
+>
+> The metric set is read from each arm's **best** epoch (arms early-stop at different points):
+> value skill, top-1 and **top-3** agreement (`ImitationDiagnostics.top3_accuracy`, added here),
+> per-colour bias and MSE, each auxiliary head's own loss *against its own baseline*
+> (`evaluate_score_head` / `evaluate_ownership_head` / `evaluate_reply_head` — each returns `None`
+> rather than a fabricated zero for a head the arm did not build), and the leakage figure.
 
 ## N2. Data-fraction curve
 
