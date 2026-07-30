@@ -515,4 +515,4 @@ Run down this list before declaring a corpus ready to train against:
 - [Tian et al. 2019, *ELF OpenGo*](https://arxiv.org/abs/1902.04522)
 - [Anthony, Tian & Barber 2017, *Expert Iteration*](https://arxiv.org/abs/1705.08439)
 - [*PAWN: Piece Value Analysis with Neural Networks* (game-level vs row-level splits)](https://arxiv.org/pdf/2604.15585)
-- Internal: [`corpus-generation-literature.md`](corpus-generation-literature.md), [`../plans/pentobi-corpus-v2.md`](../plans/pentobi-corpus-v2.md), [`../plans/pentobi-distillation.md`](../plans/pentobi-distillation.md), [`distillation-net-sizing.md`](distillation-net-sizing.md)
+- Internal: [`corpus-generation-literature.md`](corpus-generation-literature.md), [`../plans/pentobi-corpus-v2.md`](../plans/pentobi-corpus-v2.md), [`../plans/archive/pentobi-distillation.md`](../plans/archive/pentobi-distillation.md), [`distillation-net-sizing.md`](distillation-net-sizing.md)
