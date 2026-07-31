@@ -544,6 +544,15 @@ def final_ownership(game: BlokusDuoGame, rows: CorpusGameRows) -> NDArray[np.int
     board = game.board_from_compact(rows.boards[0])
     player = 1  # ``boards[0]`` is canonical, so its mover is the positive side here.
     for action in rows.actions:
+        # Re-derive the forced passes the v2 schema deliberately does not store. A pass
+        # carries no target and no choice was made, so ``write_game_shard`` omits it and
+        # ``validate_game_shard`` re-derives it the same way — a side with no placement
+        # *must* pass, so it is a function of the position. Replaying the stored actions
+        # with strict alternation therefore places every ply after the first skipped pass
+        # for the **wrong colour**: measured on the real corpus, 16.8% of games contain
+        # such a gap. Silent, because the head is then scored against its own bad labels.
+        while not game.valid_move_masking(board, player)[: game.action_codec.pass_action_index].any():
+            board, player = game.get_next_state(board, player, game.action_codec.pass_action_index)
         board, player = game.get_next_state(board, player, action)
     if game.get_game_ended(board, player) == 0.0:
         logger.warning(
@@ -659,15 +668,29 @@ def _rows_for_game(
 
     built: list[TrainingRow] = []
     last = len(policies) - 1
+
+    def reply_index(index: int) -> int | None:
+        """The row holding the *opponent's* answer to row ``index``, if it is stored.
+
+        Not simply ``index + 1``: a forced pass is never stored (the v2 schema derives
+        it), so when one falls between two rows the next row is the **same** side moving
+        again. Measured on the real corpus, 0.86% of pairs — teaching the head that a
+        player's own follow-up is their opponent's reply. Mask those rather than lie.
+        """
+        if index == last:
+            return None
+        return index + 1 if rows.players[index + 1] != rows.players[index] else None
+
     for index, (compact, value, margin, player) in enumerate(
         zip(rows.boards, rows.values, rows.margins, rows.players, strict=True)
     ):
+        nxt = reply_index(index)
         built.append(
             TrainingRow(
                 example=(compact, policies[index], value),
                 margin=margin,
                 ownership=by_player[player],
-                reply=None if index == last else policies[index + 1],
+                reply=None if nxt is None else policies[nxt],
             )
         )
         if augment:
@@ -676,7 +699,7 @@ def _rows_for_game(
                     example=(np.ascontiguousarray(compact.T), twin_policies[index], value),
                     margin=margin,
                     ownership=by_player_twin[player],
-                    reply=None if index == last else twin_policies[index + 1],
+                    reply=None if nxt is None else twin_policies[nxt],
                 )
             )
     return built

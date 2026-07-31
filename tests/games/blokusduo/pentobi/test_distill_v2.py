@@ -26,6 +26,7 @@ from alphablokus.games.blokusduo.pentobi.distill import (
     _HOLDOUT_STRATA,
     TrainingRow,
     build_training_examples,
+    final_ownership,
     load_corpus_games_v2,
     load_opening_examples,
     measure_holdout_leakage,
@@ -517,3 +518,69 @@ def test_mixing_keeps_each_example_with_its_own_margin() -> None:
     for row in mixed:
         assert row.margin == (12.0 if int(row.example[0][0]) == 1 else None)
     assert sum(1 for row in mixed if row.margin is None) == 50
+
+
+# --------------------------------------------------------------------------- #
+# Unstored forced passes (the v2 schema derives them; the loader must too)
+# --------------------------------------------------------------------------- #
+
+
+def _pass_gaps(rows: CorpusGameRows) -> list[int]:
+    """Indices where the next stored row is the *same* side — an unstored pass sits there.
+
+    A v2 game stores only rows where the mover had a real choice. When a side is frozen
+    out (no legal placement) the harvester passes for it without storing a row, so the
+    ``players`` column is not alternating and cannot be treated as if it were.
+    """
+    return [i for i in range(len(rows.players) - 1) if rows.players[i + 1] == rows.players[i]]
+
+
+@pytest.fixture(scope="module")
+def gapped(games: list[CorpusGameRows]) -> CorpusGameRows:
+    """A fixture game that really does contain an unstored pass."""
+    for rows in games:
+        if _pass_gaps(rows):
+            return rows
+    pytest.skip("no fixture game ended with one side frozen out")
+
+
+def test_the_final_board_is_reconstructed_across_an_unstored_pass(
+    game: BlokusDuoGame,
+    gapped: CorpusGameRows,
+) -> None:
+    """Regression: replaying with strict alternation desynchronises at the first pass.
+
+    From then on every remaining move is applied under the wrong colour, so the ownership
+    map is either wrong or the replay stops short and the game reads as unfinished. Both
+    failures are silent — the head just learns a mislabelled board.
+    """
+    ownership = final_ownership(game, gapped)
+    assert ownership is not None, "a completed game must yield a final board"
+
+    board, player = game.board_from_compact(gapped.boards[0]), 1
+    for index, action in enumerate(gapped.actions):
+        while gapped.players[index] != gapped.players[0] * player:
+            board, player = game.get_next_state(board, player, game.action_codec.pass_action_index)
+        board, player = game.get_next_state(board, player, action)
+    expected = np.sign(np.asarray(board.to_compact(), dtype=np.int8) * gapped.players[0]).astype(np.int8)
+
+    assert np.array_equal(ownership, expected)
+    assert game.get_game_ended(board, player) != 0.0
+
+
+def test_the_reply_target_is_never_the_mover_s_own_follow_up(
+    game: BlokusDuoGame,
+    gapped: CorpusGameRows,
+) -> None:
+    """Regression: across a pass gap ``policies[i + 1]`` belongs to the *same* side.
+
+    Handing that to the opponent-reply head teaches it that a player answers themselves.
+    The row is masked instead — a missing target costs nothing, a wrong one is taught.
+    """
+    built = build_training_examples(game, [gapped], epsilon=0.0, augment=False)
+    gaps = _pass_gaps(gapped)
+
+    assert gaps, "fixture guarantees at least one gap"
+    assert all(built[index].reply is None for index in gaps)
+    assert built[-1].reply is None  # the final position has no next ply at all
+    assert any(row.reply is not None for row in built), "masking must not empty the target"
