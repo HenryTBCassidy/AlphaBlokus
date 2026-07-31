@@ -22,8 +22,8 @@ the score head on `feat/score-auxiliary-head` (built, unmeasured). N3 below *is*
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
 | N1 | The A/B harness: two runs identical but for one thing, fixed seeds, one metric set, one command | ½ day | High | ✅ |
-| N2 | Data-fraction curve (25 / 50 / 100% of the corpus) — makes every later result interpretable | 3 h box GPU | High | |
-| N3 | **Score-head A/B** (code already built — this is `score-auxiliary-target.md` S7) | ½ day box GPU | High | |
+| N2 | Data-fraction curve (25 / 50 / 100% of the corpus) — makes every later result interpretable | 3 h box GPU | High | ✅ |
+| N3 | **Score-head A/B** (code already built — this is `score-auxiliary-target.md` S7) | ½ day box GPU | High | ⚠️ |
 | N4 | Ownership head: predict the final board, per cell | 2 days + ½ day box | High | ✅ |
 | N5 | Opponent-reply target: predict the reply distribution from the current position | 1 day + ½ day box | High | ✅ |
 | N6 | Value-label arms: teacher blend λ ∈ {0, 0.3, 0.5}, and outcome-balanced sampling | ½ day + ½ day box | Medium | |
@@ -103,7 +103,12 @@ per-arm JSON. Not a framework — a script that runs `distill_sl.py` twice and d
 >    control was loosened. (`--allow-varying max-games` — bare, no dashes, since argparse would
 >    otherwise read `--max-games` as the next option — is exactly how N2's data-fraction curve runs
 >    through this harness.)
-> 3. **It re-checks afterwards.** Each arm's run JSON records the settings it *resolved* plus the
+> 3. **The corpus is frozen before the first arm starts.** The shards present at launch are
+>    symlinked into `<out-dir>/_snapshot` and every arm reads that. Without it, a corpus still being
+>    generated grows between arms, `--max-games` samples different games for each, and the arms sit
+>    different exams — which is how the first score-head A/B (N3 below) was wasted. Symlinks, so
+>    freezing a 30 GB corpus is free. `--no-freeze-corpus` opts out for a finished corpus.
+> 4. **It re-checks afterwards.** Each arm's run JSON records the settings it *resolved* plus the
 >    **measured** holdout leakage, and those are diffed across arms; so is "did these arms differ in
 >    exactly one head". That last check reads each head's *resolved* weight and scale, not just its
 >    on/off switch, so a loss weight cannot ride along unnoticed with the head under test. Any
@@ -144,6 +149,31 @@ Read it as: still climbing steeply at 100% ⇒ we are data-limited, and "generat
 highest-value action regardless of what any technique does. Flattening ⇒ the corpus is adequate and
 technique work is the right lever.
 
+> **Measured 2026-07-31** on the partial stage-1 corpus (96×6 net, 6 epochs, seed 0, holdout 0.1),
+> run on the box's idle GPU while generation continued on the CPU:
+>
+> | games | held-out policy CE | top-1 | value skill |
+> | --- | --- | --- | --- |
+> | 1,000 | 4.066 | 0.207 | −0.218 |
+> | 2,000 | 3.713 | 0.231 | −0.203 |
+> | 4,000 | 3.534 | 0.251 | −0.278 |
+>
+> **We are data-limited, decisively.** Doubling the corpus buys ~0.18–0.35 nats of CE and ~2.4
+> points of top-1 each time, with no sign of flattening. Every technique result below has to be
+> read against that: a marginal gain is not evidence the technique is weak, and "generate more
+> games" outranks all of them. It also means the 10,000-game run is worth finishing and a larger
+> corpus after it is worth generating.
+>
+> **The value head is worse than useless — every arm scores negative value skill.** Predicting the
+> outcome from nothing but whose turn it is beats what the net learned, by 15–28%. That is a
+> stronger and more specific finding than the data-fraction curve itself, and it does not improve
+> with data. It is what N6 (value-label arms) and N7 (win/draw/loss head) exist to attack, and it
+> raises their priority above N8.
+>
+> *Caveat:* the corpus was still being written while these ran, so each arm sampled its games from a
+> slightly larger pool than the one before. That adds noise; it cannot manufacture a monotone
+> 0.53-nat improvement, so the trend stands. Re-run on the finished corpus for a clean curve.
+
 ## N3. Score-head A/B
 
 `score-auxiliary-target.md` S7, run under N1's protocol. The code is built and reviewed.
@@ -155,6 +185,18 @@ auxiliary targets help this network on this data at all?* Three arms — no head
 **Read it as:** a clear gain ⇒ auxiliary targets work here, proceed to N4 which is the stronger
 version of the same idea. No gain but no harm ⇒ the *idea* is unproven, and N4 is the better test
 of it before abandoning the family. A loss ⇒ stop, delete the head, skip N4 and N5.
+
+> **Attempted 2026-07-31 — the result must not be read, and the attempt is why N1 exists.** Three
+> arms were run directly through `distill_sl.py` rather than through the harness, and they were not
+> comparable. The corpus was being written while they ran, so each arm globbed a different number of
+> shards and `--max-games 4000` sampled *different games* for each — visible directly in the holdout,
+> which held 11,804 scored rows for one arm and 13,165 for another. The arms sat different exams.
+> `check_comparable` refuses exactly this (`num_games`, `holdout_leakage`), and the harness now
+> freezes a corpus snapshot before running. Re-run through `scripts/ab_harness.py`.
+>
+> For the record, and *not* as a result: CE 3.493 (off) / 3.528 (weight 0) / 3.509 (weight 0.15).
+> The weight-0 arm — which changes nothing that can affect the policy — moved further from the
+> control than the treatment did, which is the shape of pure noise.
 
 ## N4. Ownership head
 

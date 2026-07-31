@@ -24,6 +24,7 @@ from scripts.ab_harness import (
     Arm,
     build_command,
     check_comparable,
+    freeze_corpus,
     parse_arm,
     render_report,
     render_table,
@@ -175,6 +176,8 @@ def _args(tmp_path: Path, **overrides: Any) -> Namespace:
         "max_games": None,
         "holdout_frac": 0.05,
         "seed": 7,
+        "freeze_corpus": True,
+        "frozen_corpus": None,
         "noise_floor_arm": None,
         "noise_floor_seed": None,
         "max_epochs": 20,
@@ -223,6 +226,43 @@ def test_arm_flags_come_last_so_an_allowed_override_wins(tmp_path: Path) -> None
     command = build_command(Arm("quarter", ("--max-games", "250")), _args(tmp_path, max_games=1000))
     assert command[-2:] == ["--max-games", "250"]
     assert command.index("--max-games") < len(command) - 2  # the shared one is still there, earlier
+
+
+def test_a_snapshot_holds_only_the_shards_that_existed_when_it_was_taken(tmp_path: Path) -> None:
+    """Regression: a corpus still being generated hands later arms more games.
+
+    ``--max-games`` then samples a different set for each arm and they sit different
+    exams — which is precisely how the first score-head A/B was wasted. The snapshot is
+    symlinks, so freezing a large corpus stays free.
+    """
+    corpus = tmp_path / "corpus"
+    (corpus / "games").mkdir(parents=True)
+    (corpus / "opening").mkdir()
+    for index in range(3):
+        (corpus / "games" / f"corpus_{index}.parquet").write_bytes(b"x")
+    (corpus / "opening" / "opening_0.parquet").write_bytes(b"y")
+
+    snapshot = tmp_path / "snap"
+    assert freeze_corpus(corpus, snapshot) == 4
+
+    (corpus / "games" / "corpus_3.parquet").write_bytes(b"x")  # generation carries on
+
+    frozen = sorted(path.name for path in (snapshot / "games").glob("*.parquet"))
+    assert frozen == ["corpus_0.parquet", "corpus_1.parquet", "corpus_2.parquet"]
+    assert (snapshot / "opening" / "opening_0.parquet").is_symlink()
+    assert (snapshot / "games" / "corpus_0.parquet").read_bytes() == b"x"
+
+
+def test_freezing_an_empty_corpus_is_an_error_not_an_empty_comparison(tmp_path: Path) -> None:
+    (tmp_path / "corpus" / "games").mkdir(parents=True)
+    with pytest.raises(SystemExit, match="nothing to compare"):
+        freeze_corpus(tmp_path / "corpus", tmp_path / "snap")
+
+
+def test_every_arm_reads_the_snapshot_rather_than_the_live_corpus(tmp_path: Path) -> None:
+    args = _args(tmp_path, frozen_corpus=tmp_path / "out" / "_snapshot")
+    command = build_command(Arm("control", ()), args)
+    assert command[command.index("--corpus") + 1] == str(tmp_path / "out" / "_snapshot")
 
 
 def test_the_noise_floor_arm_is_the_only_one_reseeded(tmp_path: Path) -> None:

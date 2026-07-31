@@ -218,6 +218,36 @@ def validate_arm_flags(arm: Arm, allow_varying: Sequence[str]) -> None:
         raise SystemExit(f"Arm {arm.name!r} starts with a positional argument {arm.flags[0]!r}; expected a flag.")
 
 
+def freeze_corpus(corpus: Path, destination: Path) -> int:
+    """Symlink the corpus shards that exist *now* into ``destination``; return the count.
+
+    A corpus being generated grows every few minutes. Arms run one after another, so a
+    later arm globs more shards than an earlier one, ``--max-games`` then samples a
+    *different* set of games, and the arms end up sitting different exams — which is
+    exactly how the first score-head A/B was wasted (one arm's holdout held 11,804 scored
+    rows, another's 13,165).
+
+    Symlinks, not copies: a snapshot of a 30 GB corpus should not cost 30 GB, and the
+    shards are only ever read. Files that appear afterwards are simply not in the
+    snapshot, which is the point.
+    """
+    shards = 0
+    for source in (corpus, corpus / "games", corpus / "opening"):
+        if not source.is_dir():
+            continue
+        found = sorted(source.glob("*.parquet"))
+        if not found:
+            continue
+        target = destination if source == corpus else destination / source.name
+        target.mkdir(parents=True, exist_ok=True)
+        for path in found:
+            (target / path.name).symlink_to(path.resolve())
+        shards += len(found)
+    if not shards:
+        raise SystemExit(f"No .parquet shards under {corpus} — nothing to compare on.")
+    return shards
+
+
 def shared_flags(args: argparse.Namespace, arm: Arm | None = None) -> list[str]:
     """The ``distill_sl.py`` flags every arm gets verbatim — the controlled half.
 
@@ -230,7 +260,7 @@ def shared_flags(args: argparse.Namespace, arm: Arm | None = None) -> list[str]:
         "--config",
         str(args.config),
         "--corpus",
-        str(args.corpus),
+        str(args.frozen_corpus or args.corpus),
         "--arms",
         args.distill_arm,
         "--holdout-frac",
@@ -547,6 +577,14 @@ def main() -> None:
     )
     parser.add_argument("--config", required=True, help="Base run config JSON, shared by every arm")
     parser.add_argument("--corpus", type=Path, required=True, help="Corpus directory, shared by every arm")
+    parser.add_argument(
+        "--freeze-corpus",
+        action=argparse.BooleanOptionalAction,
+        default=True,
+        help="Symlink the shards present at start into <out-dir>/_snapshot and point every arm at "
+        "that, so a corpus still being generated cannot hand later arms more games than earlier "
+        "ones. --no-freeze-corpus reads the live directory (only sensible for a finished corpus).",
+    )
     parser.add_argument("--out-dir", type=Path, required=True, help="Where per-arm JSONs and the comparison land")
     parser.add_argument(
         "--noise-floor-arm",
@@ -630,12 +668,23 @@ def main() -> None:
     elif args.noise_floor_seed is not None:
         raise SystemExit("--noise-floor-seed has no effect without --noise-floor-arm.")
 
+    args.frozen_corpus = None
     if args.dry_run:
         for arm in arms:
             print(shlex.join(build_command(arm, args)))  # noqa: T201 — the point of --dry-run
         return
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
+    args.frozen_corpus = None
+    if args.freeze_corpus:
+        snapshot = args.out_dir / "_snapshot"
+        if not snapshot.exists():
+            shards = freeze_corpus(args.corpus, snapshot)
+            logger.info("Froze {} shards of {} into {}", shards, args.corpus, snapshot)
+        else:
+            logger.info("Reusing the existing snapshot at {}", snapshot)
+        args.frozen_corpus = snapshot
+
     summaries = [
         summarise_arm(arm.name, json.loads(run_arm(arm, args).read_text(encoding="utf-8")), args.distill_arm)
         for arm in arms
