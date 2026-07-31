@@ -49,7 +49,18 @@ def _payload(**overrides: Any) -> dict[str, Any]:
         "ownership": None,
         **overrides.pop("metrics", {}),
     }
+    settings = {
+        "score_head": heads["score"],
+        "score_loss_weight": 0.05,
+        "score_scale": 30.0,
+        "ownership_head": heads["ownership"],
+        "ownership_loss_weight": 0.05,
+        "reply_head": heads["reply"],
+        "reply_loss_weight": 0.05,
+    }
+    settings.update(overrides.pop("settings", {}))
     payload: dict[str, Any] = {
+        **settings,
         "corpus": "/corpora/v2",
         "corpus_version": "v2",
         "num_games": 1000,
@@ -164,6 +175,8 @@ def _args(tmp_path: Path, **overrides: Any) -> Namespace:
         "max_games": None,
         "holdout_frac": 0.05,
         "seed": 7,
+        "noise_floor_arm": None,
+        "noise_floor_seed": None,
         "max_epochs": 20,
         "patience": 3,
         "min_delta": 0.002,
@@ -210,6 +223,21 @@ def test_arm_flags_come_last_so_an_allowed_override_wins(tmp_path: Path) -> None
     command = build_command(Arm("quarter", ("--max-games", "250")), _args(tmp_path, max_games=1000))
     assert command[-2:] == ["--max-games", "250"]
     assert command.index("--max-games") < len(command) - 2  # the shared one is still there, earlier
+
+
+def test_the_noise_floor_arm_is_the_only_one_reseeded(tmp_path: Path) -> None:
+    """Regression: the floor has to differ from the control *somehow* to measure spread.
+
+    A zero-weight head does not qualify — it trains bit-identically. The seed is the one
+    difference that changes the run without changing what is being tested, so it is the
+    single thing the harness varies for this arm.
+    """
+    args = _args(tmp_path, noise_floor_arm="replicate", noise_floor_seed=8)
+    control = build_command(Arm("control", ()), args)
+    floor = build_command(Arm("replicate", ()), args)
+
+    assert control[control.index("--seed") + 1] == "7"
+    assert floor[floor.index("--seed") + 1] == "8"
 
 
 def test_each_arm_writes_to_its_own_paths(tmp_path: Path) -> None:
@@ -260,6 +288,86 @@ def test_the_summary_reads_the_auxiliary_head_when_it_exists() -> None:
 def test_a_run_json_without_the_requested_sub_arm_is_an_error() -> None:
     with pytest.raises(SystemExit, match="has no 'warm' arm"):
         summarise_arm("control", _payload(), "warm")
+
+
+def _run_cli(tmp_path: Path, *extra: str) -> None:
+    """``main()`` up to ``--dry-run``: argument parsing and every pre-flight check."""
+    import sys
+    from unittest import mock
+
+    from scripts.ab_harness import main
+
+    argv = [
+        "ab_harness",
+        "--config",
+        "run_configurations/test_run.json",
+        "--corpus",
+        str(tmp_path / "corpus"),
+        "--out-dir",
+        str(tmp_path / "out"),
+        "--dry-run",
+        *extra,
+    ]
+    with mock.patch.object(sys, "argv", argv):
+        main()
+
+
+def test_allow_varying_takes_the_flag_name_without_its_dashes(tmp_path: Path) -> None:
+    """Regression: ``--allow-varying --max-games`` cannot parse — argparse reads the
+    value as the next flag and then complains the option is missing an argument. The
+    bare spelling is the one that works, and it must reach the allowlist as ``--max-games``.
+    """
+    _run_cli(
+        tmp_path,
+        "--arm",
+        "control",
+        "--arm",
+        "quarter=--max-games 250",
+        "--allow-varying",
+        "max-games",
+    )
+
+
+def test_allow_varying_still_takes_the_attached_dashed_spelling(tmp_path: Path) -> None:
+    _run_cli(tmp_path, "--arm", "control", "--arm", "quarter=--max-games 250", "--allow-varying=--max-games")
+
+
+def test_without_the_opt_in_a_data_varying_arm_is_still_refused(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit):
+        _run_cli(tmp_path, "--arm", "control", "--arm", "quarter=--max-games 250")
+
+
+def test_a_noise_floor_arm_needs_its_own_seed_before_any_gpu_time(tmp_path: Path) -> None:
+    """The bit-identical floor is refused up front, not diagnosed after two training runs."""
+    with pytest.raises(SystemExit, match="noise-floor-seed"):
+        _run_cli(tmp_path, "--arm", "control", "--arm", "replicate", "--noise-floor-arm", "replicate")
+    with pytest.raises(SystemExit, match="bit-identically"):
+        _run_cli(
+            tmp_path,
+            "--arm",
+            "control",
+            "--arm",
+            "replicate",
+            "--noise-floor-arm",
+            "replicate",
+            "--noise-floor-seed",
+            "7",
+        )
+
+
+def test_a_noise_floor_arm_carrying_head_flags_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(SystemExit, match="pure replicate"):
+        _run_cli(
+            tmp_path,
+            "--arm",
+            "control",
+            "--arm",
+            "zero=--ownership-head --ownership-loss-weight 0",
+            "--noise-floor-arm",
+            "zero",
+            "--noise-floor-seed",
+            "8",
+        )
 
 
 # --------------------------------------------------------------------------- #
@@ -349,6 +457,69 @@ def test_changing_two_heads_at_once_is_flagged_as_unattributable() -> None:
     assert any("more than one head" in complaint for complaint in complaints)
 
 
+def test_a_head_weight_riding_along_with_the_treatment_is_flagged() -> None:
+    """Regression: the on/off switches alone are not the whole of what an arm varies.
+
+    Both arms build the score head, so the switches match and only ownership *looks*
+    different — but the score loss weight moved too, so any delta has two possible
+    causes and cannot be attributed to the ownership head.
+    """
+    both_score = {"score": True, "ownership": False, "reply": False}
+    control = _summary("control", heads=both_score)
+    treatment = _summary(
+        "own",
+        heads={"score": True, "ownership": True, "reply": False},
+        settings={"score_loss_weight": 0.5},
+    )
+    complaints = check_comparable([control, treatment], [])
+    assert any("more than one head" in complaint for complaint in complaints)
+
+
+def test_the_same_head_at_a_different_weight_is_a_legitimate_single_change() -> None:
+    """The flip side: a weight sweep varies one head and must not be refused."""
+    on = {"score": True, "ownership": False, "reply": False}
+    control = _summary("control", heads=on)
+    heavier = _summary("heavy", heads=on, settings={"score_loss_weight": 0.5})
+    assert check_comparable([control, heavier], []) == []
+
+
+def test_a_head_that_is_off_in_both_arms_cannot_differ_through_its_weight() -> None:
+    """An inherited weight on a head nobody built is not a difference worth reporting."""
+    control = _summary("control")
+    treatment = _summary(
+        "own",
+        heads={"score": False, "ownership": True, "reply": False},
+        settings={"score_loss_weight": 0.5, "reply_loss_weight": 0.9},
+    )
+    assert check_comparable([control, treatment], []) == []
+
+
+def test_a_noise_floor_arm_at_the_control_s_seed_measures_nothing() -> None:
+    """Regression: a same-seed floor trains bit-identically, so nothing can clear it.
+
+    The floor is only meaningful as a *replicate* — same settings, different roll of the
+    dice. Sharing the seed makes every floor delta exactly 0, which silently turns the
+    "below noise" annotation off for the whole table rather than reporting a problem.
+    """
+    control = _summary("control")
+    floor = _summary("replicate")
+    complaints = check_comparable([control, floor], [], "replicate")
+    assert any("bit-identical" in complaint for complaint in complaints)
+
+
+def test_a_properly_seeded_replicate_is_a_clean_noise_floor() -> None:
+    control = _summary("control")
+    floor = _summary("replicate", seed=8)
+    assert check_comparable([control, floor], [], "replicate") == []
+
+
+def test_a_noise_floor_arm_that_also_varies_a_head_is_not_a_replicate() -> None:
+    control = _summary("control")
+    floor = _summary("replicate", seed=8, heads={"score": False, "ownership": True, "reply": False})
+    complaints = check_comparable([control, floor], [], "replicate")
+    assert any("pure replicate" in complaint for complaint in complaints)
+
+
 def test_an_explicit_loosening_is_recorded_in_the_output() -> None:
     complaints = check_comparable(_pair(), ["--max-games"])
     assert any("deliberately loosened" in complaint for complaint in complaints)
@@ -383,18 +554,18 @@ def test_a_regression_is_marked_as_one() -> None:
     assert "+0.5000 (−)" in ce_row
 
 
-def test_a_delta_no_bigger_than_the_inert_arm_s_is_called_noise() -> None:
-    """The noise-floor arm is mathematically inert, so whatever it moves is not an effect.
+def test_a_delta_no_bigger_than_the_replicate_s_is_called_noise() -> None:
+    """The floor arm is the control at another seed, so whatever it moves is not an effect.
 
-    Here the treatment moves top-1 by exactly as much as the weight-0 arm does, which
-    means the technique has been shown to do nothing — and the table has to say so
-    rather than presenting a +0.02 that a reader would take for a result.
+    Here the treatment moves top-1 by exactly as much as the replicate does, which means
+    the technique has been shown to do nothing — and the table has to say so rather than
+    presenting a +0.02 that a reader would take for a result.
     """
     control = _summary("control")
-    inert = _summary("zero", heads={"score": False, "ownership": True, "reply": False}, metrics={"top1": 0.32})
+    inert = _summary("replicate", seed=8, metrics={"top1": 0.32})
     treatment = _summary("own", heads={"score": False, "ownership": True, "reply": False}, metrics={"top1": 0.32})
 
-    table = render_table([control, inert, treatment], "zero")
+    table = render_table([control, inert, treatment], "replicate")
     top1_row = next(line for line in table.splitlines() if "top-1 vs" in line)
 
     assert top1_row.count("below noise") == 1  # the treatment, not the floor arm itself
@@ -402,10 +573,10 @@ def test_a_delta_no_bigger_than_the_inert_arm_s_is_called_noise() -> None:
 
 def test_a_delta_clearing_the_noise_floor_is_not_flagged() -> None:
     control = _summary("control")
-    inert = _summary("zero", heads={"score": False, "ownership": True, "reply": False}, metrics={"top1": 0.305})
+    inert = _summary("replicate", seed=8, metrics={"top1": 0.305})
     treatment = _summary("own", heads={"score": False, "ownership": True, "reply": False}, metrics={"top1": 0.40})
 
-    table = render_table([control, inert, treatment], "zero")
+    table = render_table([control, inert, treatment], "replicate")
     top1_row = next(line for line in table.splitlines() if "top-1 vs" in line)
 
     assert "below noise" not in top1_row
@@ -447,10 +618,10 @@ def test_the_comparison_json_shape_round_trips(tmp_path: Path) -> None:
 def test_an_unchanged_metric_is_not_annotated_as_noise() -> None:
     """ "0 below noise" and "— below noise" are noise about noise — never emitted."""
     control = _summary("control")
-    inert = _summary("zero", heads={"score": False, "ownership": True, "reply": False})
+    inert = _summary("replicate", seed=8)
     treatment = _summary("own", heads={"score": False, "ownership": True, "reply": False})
 
-    table = render_table([control, inert, treatment], "zero")
+    table = render_table([control, inert, treatment], "replicate")
 
     assert "0 below noise" not in table
     assert "— below noise" not in table

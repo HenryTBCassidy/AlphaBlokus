@@ -78,6 +78,16 @@ ARM_FLAG_ALLOWLIST: frozenset[str] = frozenset(
     }
 )
 
+#: Per-head resolved settings, read from the run JSON. Diffing the on/off switches alone
+#: is not enough: two arms can both build the score head at *different* loss weights and
+#: still look like they differ in one thing, so a weight change rides along unattributed
+#: with whatever head is nominally under test.
+HEAD_SETTINGS: dict[str, tuple[str, ...]] = {
+    "score": ("score_head", "score_loss_weight", "score_scale"),
+    "ownership": ("ownership_head", "ownership_loss_weight"),
+    "reply": ("reply_head", "reply_loss_weight"),
+}
+
 #: Fields of the run JSON that every arm must agree on for the comparison to mean
 #: anything. Read from what each arm *resolved*, not from what the harness intended, so
 #: a config file quietly pinning one of them is caught too. ``holdout_leakage`` is the
@@ -145,6 +155,19 @@ class ArmSummary:
     heads: dict[str, bool]
     metrics: dict[str, float | None]
     protocol: dict[str, Any] = field(default_factory=dict)
+    settings: dict[str, Any] = field(default_factory=dict)
+
+    def head_profiles(self) -> dict[str, tuple[Any, ...] | None]:
+        """Each head as ``None`` when off, else its resolved settings.
+
+        A head that is off in both arms cannot differ, whatever its weight says — so a
+        disabled head collapses to ``None`` rather than to its inherited numbers.
+        """
+        profiles: dict[str, tuple[Any, ...] | None] = {}
+        for head, keys in HEAD_SETTINGS.items():
+            enabled, *rest = keys
+            profiles[head] = tuple(self.settings.get(key) for key in rest) if self.settings.get(enabled) else None
+        return profiles
 
 
 def parse_arm(spec: str) -> Arm:
@@ -195,8 +218,14 @@ def validate_arm_flags(arm: Arm, allow_varying: Sequence[str]) -> None:
         raise SystemExit(f"Arm {arm.name!r} starts with a positional argument {arm.flags[0]!r}; expected a flag.")
 
 
-def shared_flags(args: argparse.Namespace) -> list[str]:
-    """The ``distill_sl.py`` flags every arm gets verbatim — the controlled half."""
+def shared_flags(args: argparse.Namespace, arm: Arm | None = None) -> list[str]:
+    """The ``distill_sl.py`` flags every arm gets verbatim — the controlled half.
+
+    Verbatim with one deliberate exception: the noise-floor arm runs at
+    ``--noise-floor-seed``. It is the control repeated under a different roll of the
+    dice, so the spread between the two is what "no effect" looks like on this data.
+    """
+    seed = args.noise_floor_seed if arm is not None and arm.name == args.noise_floor_arm else args.seed
     flags: list[str] = [
         "--config",
         str(args.config),
@@ -207,7 +236,7 @@ def shared_flags(args: argparse.Namespace) -> list[str]:
         "--holdout-frac",
         str(args.holdout_frac),
         "--seed",
-        str(args.seed),
+        str(seed),
         "--max-epochs",
         str(args.max_epochs),
         "--patience",
@@ -253,7 +282,7 @@ def build_command(arm: Arm, args: argparse.Namespace) -> list[str]:
     return [
         sys.executable,
         str(Path(__file__).with_name("distill_sl.py")),
-        *shared_flags(args),
+        *shared_flags(args, arm),
         "--ckpt-dir",
         str(out_dir / arm.name),
         "--out",
@@ -321,10 +350,15 @@ def summarise_arm(name: str, payload: dict[str, Any], distill_arm: str) -> ArmSu
         heads=run.get("heads", {}),
         metrics=metrics,
         protocol={key: payload.get(key) for key in PROTOCOL_KEYS},
+        settings={key: payload.get(key) for keys in HEAD_SETTINGS.values() for key in keys},
     )
 
 
-def check_comparable(summaries: Sequence[ArmSummary], allow_varying: Sequence[str]) -> list[str]:
+def check_comparable(
+    summaries: Sequence[ArmSummary],
+    allow_varying: Sequence[str],
+    noise_floor: str | None = None,
+) -> list[str]:
     """Every way the arms failed to be a controlled comparison, in plain words.
 
     An empty list means the only differences between the arms are the ones their flags
@@ -336,18 +370,40 @@ def check_comparable(summaries: Sequence[ArmSummary], allow_varying: Sequence[st
         return []
     complaints: list[str] = []
     control = summaries[0]
+    base_profiles = control.head_profiles()
     for other in summaries[1:]:
+        replicate = other.name == noise_floor
         for key in PROTOCOL_KEYS:
+            # The noise-floor arm is the control re-run at a different seed: that one
+            # difference is the whole point of it, and is checked separately below.
+            if replicate and key == "seed":
+                continue
             if control.protocol.get(key) != other.protocol.get(key):
                 complaints.append(
                     f"{key}: {control.name}={control.protocol.get(key)!r} but {other.name}={other.protocol.get(key)!r}"
                 )
-        if control.heads == other.heads:
-            complaints.append(f"{other.name} has the same heads as {control.name} — the arms differ in nothing")
-        elif sum(control.heads.get(head) != value for head, value in other.heads.items()) > 1:
+        profiles = other.head_profiles()
+        differing = sorted(head for head, value in profiles.items() if value != base_profiles.get(head))
+        if replicate:
+            # A replicate must be identical in every head *and* actually differently
+            # seeded — otherwise it is bit-identical to the control, its delta is 0 on
+            # every metric, and "below noise" can never fire for anybody.
+            if differing:
+                complaints.append(
+                    f"noise-floor arm {other.name} differs from {control.name} in {', '.join(differing)}; "
+                    "it must be a pure replicate — same settings, different seed"
+                )
+            if control.protocol.get("seed") == other.protocol.get("seed"):
+                complaints.append(
+                    f"noise-floor arm {other.name} ran at the same seed as {control.name} "
+                    f"({other.protocol.get('seed')!r}), so it is bit-identical and measures no noise"
+                )
+        elif not differing:
+            complaints.append(f"{other.name} has the same head settings as {control.name} — the arms differ in nothing")
+        elif len(differing) > 1:
             complaints.append(
                 f"{other.name} differs from {control.name} in more than one head "
-                f"({control.heads} vs {other.heads}) — the result cannot be attributed"
+                f"({', '.join(differing)}) — the result cannot be attributed"
             )
     if allow_varying:
         complaints.append(f"comparison deliberately loosened: --allow-varying {' '.join(allow_varying)}")
@@ -388,11 +444,11 @@ def _is_below_noise(
     floor: ArmSummary | None,
     summary: ArmSummary,
 ) -> bool:
-    """Whether this arm's movement on ``key`` is no larger than the inert arm's.
+    """Whether this arm's movement on ``key`` is no larger than the replicate's.
 
-    The inert arm changes nothing mathematically, so whatever it moves is what run-to-run
-    variation looks like on this metric with this data. A treatment that does not clear
-    it has not been shown to do anything.
+    The replicate is the control repeated at a different seed, so whatever it moves is
+    what run-to-run variation looks like on this metric with this data. A treatment that
+    does not clear it has not been shown to do anything.
     """
     if floor is None or summary is floor or value is None or control is None:
         return False
@@ -495,16 +551,26 @@ def main() -> None:
     parser.add_argument(
         "--noise-floor-arm",
         default=None,
-        help="Name of the mathematically-inert arm (e.g. the head at weight 0). Its distance from "
-        "the control is what 'no effect' measures here, and smaller deltas are flagged.",
+        help="Name of the replicate arm: the control's settings re-run at --noise-floor-seed. Its "
+        "distance from the control is what 'no effect' measures here, and smaller deltas are flagged. "
+        "A zero-weight head is NOT a valid floor — it trains bit-identically, so its delta is always 0.",
+    )
+    parser.add_argument(
+        "--noise-floor-seed",
+        type=int,
+        default=None,
+        help="Seed for the --noise-floor-arm replicate. Must differ from --seed; it is the only "
+        "thing about that arm that differs from the control.",
     )
     parser.add_argument(
         "--allow-varying",
         action="append",
         default=[],
-        metavar="--FLAG",
-        help="Deliberately let arms vary this normally-shared flag (e.g. --max-games for the N2 "
-        "data-fraction curve). Recorded in the comparison so a reader knows.",
+        metavar="FLAG",
+        help="Deliberately let arms vary this normally-shared flag, e.g. --allow-varying max-games "
+        "for the N2 data-fraction curve. Leading dashes are optional (and `--allow-varying "
+        "--max-games` does not parse — argparse reads the value as the next flag — so write it "
+        "bare, or as --allow-varying=--max-games). Recorded in the comparison so a reader knows.",
     )
     parser.add_argument("--distill-arm", choices=("scratch", "warm"), default="scratch", help="distill_sl arm to run")
     parser.add_argument("--warm-start", default=None, help="Checkpoint for --distill-arm warm")
@@ -533,6 +599,10 @@ def main() -> None:
     parser.add_argument("--dry-run", action="store_true", help="Print each arm's command line and stop")
     args = parser.parse_args()
 
+    # `--allow-varying max-games` is the form that parses; normalise it to the flag
+    # spelling the allowlist and the arm specs actually use.
+    args.allow_varying = [f"--{token.lstrip('-')}" for token in args.allow_varying]
+
     arms = [parse_arm(spec) for spec in args.arm]
     names = [arm.name for arm in arms]
     if len(set(names)) != len(names):
@@ -541,6 +611,24 @@ def main() -> None:
         validate_arm_flags(arm, args.allow_varying)
     if args.noise_floor_arm and args.noise_floor_arm not in names:
         raise SystemExit(f"--noise-floor-arm {args.noise_floor_arm!r} is not one of {names}.")
+    if args.noise_floor_arm:
+        floor_arm = next(arm for arm in arms if arm.name == args.noise_floor_arm)
+        if floor_arm.flags:
+            raise SystemExit(
+                f"--noise-floor-arm {args.noise_floor_arm!r} carries flags {list(floor_arm.flags)}. The floor "
+                "must be a pure replicate of the control — declare it as a bare --arm NAME and let "
+                "--noise-floor-seed be the only difference."
+            )
+        if args.noise_floor_seed is None:
+            raise SystemExit("--noise-floor-arm needs --noise-floor-seed: the replicate's one difference.")
+        if args.noise_floor_seed == args.seed:
+            raise SystemExit(
+                f"--noise-floor-seed {args.noise_floor_seed} equals --seed. The replicate would train "
+                "bit-identically to the control, its delta would be 0 on every metric, and nothing "
+                "could ever be flagged 'below noise'."
+            )
+    elif args.noise_floor_seed is not None:
+        raise SystemExit("--noise-floor-seed has no effect without --noise-floor-arm.")
 
     if args.dry_run:
         for arm in arms:
@@ -553,7 +641,7 @@ def main() -> None:
         for arm in arms
     ]
 
-    complaints = check_comparable(summaries, args.allow_varying)
+    complaints = check_comparable(summaries, args.allow_varying, args.noise_floor_arm)
     report = render_report(summaries, complaints, args.noise_floor_arm)
     (args.out_dir / "comparison.md").write_text(report, encoding="utf-8")
     (args.out_dir / "comparison.json").write_text(

@@ -84,9 +84,9 @@ per-arm JSON. Not a framework — a script that runs `distill_sl.py` twice and d
 >     --config run_configurations/blokus_cloud_v2.json \
 >     --corpus ~/corpora/pentobi_l9_v2 --out-dir temp/ab/ownership \
 >     --arm control \
->     --arm zero_weight="--ownership-head --ownership-loss-weight 0" \
+>     --arm replicate \
 >     --arm ownership="--ownership-head" \
->     --noise-floor-arm zero_weight
+>     --noise-floor-arm replicate --noise-floor-seed 8
 > ```
 >
 > It writes `<out-dir>/<arm>.json` (the untouched `distill_sl.py` run JSON), plus
@@ -100,18 +100,28 @@ per-arm JSON. Not a framework — a script that runs `distill_sl.py` twice and d
 > 2. **Arm flags are allow-listed** to the auxiliary-head switches and their weights. Anything else
 >    is refused *before* a GPU-hour is spent, with a message naming `--allow-varying` as the
 >    deliberate escape hatch — which is then printed in the comparison, so a reader always knows the
->    control was loosened. (`--allow-varying --max-games` is exactly how N2's data-fraction curve
->    runs through this harness.)
+>    control was loosened. (`--allow-varying max-games` — bare, no dashes, since argparse would
+>    otherwise read `--max-games` as the next option — is exactly how N2's data-fraction curve runs
+>    through this harness.)
 > 3. **It re-checks afterwards.** Each arm's run JSON records the settings it *resolved* plus the
 >    **measured** holdout leakage, and those are diffed across arms; so is "did these arms differ in
->    exactly one head". Any disagreement marks the run `comparable: false`, prints a
+>    exactly one head". That last check reads each head's *resolved* weight and scale, not just its
+>    on/off switch, so a loss weight cannot ride along unnoticed with the head under test. Any
+>    disagreement marks the run `comparable: false`, prints a
 >    `NOT COMPARABLE` banner above the table, and exits non-zero. The table is still written —
 >    useful for diagnosis, impossible to mistake for a result.
 >
-> **The noise floor is wired in.** `--noise-floor-arm` names the mathematically inert arm; every
-> other arm's delta is annotated `below noise` when it does not exceed the inert arm's own
-> movement on that metric. Deltas are signed `(+)`/`(−)` by whether the metric is better high or
-> low, so nobody has to remember that CE improves downward.
+> **The noise floor is wired in.** `--noise-floor-arm` names a **replicate**: the control's exact
+> settings re-run at `--noise-floor-seed`. Every other arm's delta is annotated `below noise` when
+> it does not exceed the replicate's own movement on that metric. Deltas are signed `(+)`/`(−)` by
+> whether the metric is better high or low, so nobody has to remember that CE improves downward.
+>
+> A head at weight 0 is *not* a usable floor, which is why the example above is not one: the
+> auxiliary heads are built after every primary head, so at a shared seed the trunk, policy head
+> and value head start from identical weights, and a zero-weighted term contributes no gradient.
+> The arm therefore trains bit-identically to the control, its delta is exactly 0 on every metric,
+> and `below noise` could never fire for anybody. The harness refuses that configuration up front —
+> a floor arm must carry no flags and must be differently seeded.
 >
 > The metric set is read from each arm's **best** epoch (arms early-stop at different points):
 > value skill, top-1 and **top-3** agreement (`ImitationDiagnostics.top3_accuracy`, added here),
