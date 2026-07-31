@@ -461,6 +461,28 @@ def test_reply_loss_masks_the_all_zero_rows() -> None:
     assert torch.isfinite(log_probs.grad).all()
 
 
+def test_a_non_finite_reply_row_neither_contributes_nor_poisons_the_batch() -> None:
+    """Regression: masking *after* the arithmetic leaves ``NaN x 0 = NaN``.
+
+    The score loss already zeroes its targets before the subtraction for exactly this
+    reason. The reply loss masked on ``sum > 0``, which reads ``False`` for a ``NaN`` row
+    and so looked safe — but the row's KL was still computed and still ``NaN``, and one
+    such row takes the whole batch's loss and gradient with it.
+    """
+    log_probs = torch.log_softmax(torch.zeros(2, 3), dim=1).requires_grad_(True)
+    poisoned = torch.tensor([[0.5, 0.25, 0.25], [float("nan"), 0.0, 0.0]])
+    only_real = torch.tensor([[0.5, 0.25, 0.25]])
+
+    loss = BlokusDuoNNetWrapper.loss_reply(poisoned, log_probs)
+    loss.backward()
+
+    alone = BlokusDuoNNetWrapper.loss_reply(only_real, torch.log_softmax(torch.zeros(1, 3), dim=1))
+    assert loss.item() == pytest.approx(alone.item())
+    assert log_probs.grad is not None
+    assert torch.isfinite(log_probs.grad).all()
+    assert torch.equal(log_probs.grad[1], torch.zeros(3))
+
+
 def test_a_fully_masked_reply_batch_is_a_zero_term() -> None:
     log_probs = torch.log_softmax(torch.zeros(2, 3), dim=1).requires_grad_(True)
     loss = BlokusDuoNNetWrapper.loss_reply(torch.zeros(2, 3), log_probs)

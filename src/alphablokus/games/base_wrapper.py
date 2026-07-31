@@ -1477,9 +1477,15 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         targets, whose KL and whose gradient are both already zero; the explicit mask
         keeps that a stated property rather than a happy accident, and keeps the
         denominator honest.
+
+        Non-finite entries are zeroed *before* the KL and their whole row masked out,
+        the same discipline as :meth:`loss_score`: multiplying a NaN row by a 0 mask
+        leaves NaN, which would poison the batch's gradient rather than drop the row.
         """
-        per_row = F.kl_div(outputs, targets, reduction="none").sum(dim=1)
-        mask = targets.sum(dim=1) > 0
+        finite = torch.isfinite(targets)
+        clean = torch.where(finite, targets, torch.zeros_like(targets))
+        per_row = F.kl_div(outputs, clean, reduction="none").sum(dim=1)
+        mask = (clean.sum(dim=1) > 0) & finite.all(dim=1)
         return (per_row * mask).sum() / mask.sum().clamp(min=1)
 
     def save_checkpoint(self, filename: str) -> None:
