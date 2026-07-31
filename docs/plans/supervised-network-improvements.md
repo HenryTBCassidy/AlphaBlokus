@@ -24,8 +24,8 @@ the score head on `feat/score-auxiliary-head` (built, unmeasured). N3 below *is*
 | N1 | The A/B harness: two runs identical but for one thing, fixed seeds, one metric set, one command | ½ day | High | ✅ |
 | N2 | Data-fraction curve (25 / 50 / 100% of the corpus) — makes every later result interpretable | 3 h box GPU | High | ✅ |
 | N3 | **Score-head A/B** (code already built — this is `score-auxiliary-target.md` S7) | ½ day box GPU | High | ⚠️ |
-| N4 | Ownership head: predict the final board, per cell | 2 days + ½ day box | High | ✅ |
-| N5 | Opponent-reply target: predict the reply distribution from the current position | 1 day + ½ day box | High | ✅ |
+| N4 | Ownership head: predict the final board, per cell | 2 days + ½ day box | High | ✅ built, ⚠️ inconclusive |
+| N5 | Opponent-reply target: predict the reply distribution from the current position | 1 day + ½ day box | High | ✅ built, ⚠️ inconclusive |
 | N6 | Value-label arms: teacher blend λ ∈ {0, 0.3, 0.5}, and outcome-balanced sampling | ½ day + ½ day box | Medium | |
 | N7 | Win/draw/loss value head (IDEAS I8) | 2 days + ½ day box | Medium | |
 | N8 | Global pooling in the trunk — **gated on N4/N5 showing the trunk is the constraint** | 3–4 days + ½ day box | Medium | |
@@ -250,6 +250,40 @@ read at play time.**
 >
 > **Still to run: the box A/B** (N1's harness, `--ownership-head` against a control).
 
+> **Measured 2026-07-31 — first controlled run, and it does not decide anything yet.** Four arms
+> through `scripts/ab_harness.py` on a frozen 400-shard snapshot of the partial corpus (3,565 games,
+> 96×6 net, 6 epochs, seed 0, holdout 0.1, leakage 0.0000 in every arm), on the box's idle GPU while
+> generation continued. `replicate` is the noise floor: identical settings and holdout, different
+> initial weights.
+>
+> | metric | control | replicate (floor) | ownership | reply |
+> | --- | --- | --- | --- | --- |
+> | policy CE | 3.4709 | 3.4558 (**±0.0151**) | 3.4598 (−0.0112, *below noise*) | 3.4503 (−0.0207) |
+> | top-1 | 0.2519 | 0.2528 (**±0.0009**) | 0.2569 (+0.0050) | 0.2559 (+0.0041) |
+> | top-3 | 0.4912 | 0.4950 (**±0.0038**) | 0.4930 (+0.0018, *below noise*) | 0.4893 (−0.0019, *below noise*) |
+> | value skill | −0.1589 | −0.0928 (**±0.0660**) | −0.1829 (−0.0240, *below noise*) | −0.2418 (−0.0829) |
+> | the head's own skill | — | — | **+0.5457**, 74.9% cell accuracy | top-1 0.0986, CE 4.9035 |
+>
+> **What is solid.** The ownership head *works as a head*: 74.9% per-cell accuracy against a 1.096-nat
+> marginal baseline. The target is learnable and the trunk has the capacity to fit it. The reply head
+> also trains, and masks 474 holdout rows that have no opponent reply — the pass-gap masking behaving
+> as designed.
+>
+> **What is not.** Neither head produces a policy gain that clearly beats noise. Ownership is below
+> the floor on CE and top-3. Reply clears the CE floor (−0.021 vs ±0.015) but **damages the value
+> head**: skill −0.083 and value MSE +0.035, both well clear of the floor and both in the wrong
+> direction. Read together with N2 — still climbing steeply at 4,000 games — this is what "the
+> experiment cannot resolve it yet" looks like, not "the technique does not work".
+>
+> **The floor itself is one sample.** A single replicate gives a *lower bound* on run-to-run
+> variation, not an estimate of it: its top-1 delta of 0.0009 is implausibly small and makes the
+> top-1 row read as significant when it probably is not. Before either head is judged, the re-run
+> needs **2–3 replicates** with the floor taken as the largest of their deltas. The harness supports
+> one today; making `--noise-floor-arm` repeatable is the concrete next change.
+>
+> **Verdict: neither adopted, neither rejected.** Re-run on the finished 10,000-game corpus, at more
+> epochs, with multiple replicates. Both heads stay off by default meanwhile.
+
 ## N5. Opponent-reply target
 
 A second policy-shaped head predicting the *opponent's* next move, from the current position.
@@ -290,6 +324,11 @@ score loss masks its gaps. No regeneration.
 > the per-item work. Watch `dataloader_workers` if the GPU starts starving.
 >
 > **Still to run: the box A/B** (N1's harness, `--reply-head` against a control).
+
+> **Measured 2026-07-31.** Run in the same four-arm comparison as N4 — see the table there. The reply
+> head trains and its masking behaves correctly, its policy CE gain (−0.021) is the largest of the
+> two heads and does clear the noise floor, but it is the only arm that measurably *hurts* the value
+> head. Not adopted, not rejected; re-run on the full corpus with multiple replicates.
 
 ## N6. Value-label arms
 
