@@ -68,6 +68,7 @@ def _payload(**overrides: Any) -> dict[str, Any]:
         "max_games": None,
         "holdout_fraction": 0.05,
         "seed": 7,
+        "init_seed": 7,
         "epsilon": 0.0,
         "target_temperature": 1.0,
         "opening_value": "blend",
@@ -176,6 +177,7 @@ def _args(tmp_path: Path, **overrides: Any) -> Namespace:
         "max_games": None,
         "holdout_frac": 0.05,
         "seed": 7,
+        "init_seed": None,
         "freeze_corpus": True,
         "frozen_corpus": None,
         "noise_floor_arm": None,
@@ -276,8 +278,11 @@ def test_the_noise_floor_arm_is_the_only_one_reseeded(tmp_path: Path) -> None:
     control = build_command(Arm("control", ()), args)
     floor = build_command(Arm("replicate", ()), args)
 
-    assert control[control.index("--seed") + 1] == "7"
-    assert floor[floor.index("--seed") + 1] == "8"
+    assert control[control.index("--init-seed") + 1] == "7"
+    assert floor[floor.index("--init-seed") + 1] == "8"
+    # Only the initial weights differ. Reseeding --seed too would re-split the holdout,
+    # so the floor would measure a variation no treatment arm is ever exposed to.
+    assert floor[floor.index("--seed") + 1] == "7" == control[control.index("--seed") + 1]
 
 
 def test_each_arm_writes_to_its_own_paths(tmp_path: Path) -> None:
@@ -453,6 +458,7 @@ def test_the_protocol_key_set_is_the_whole_controlled_protocol() -> None:
         "max_games",
         "holdout_fraction",
         "seed",
+        "init_seed",
         "epsilon",
         "target_temperature",
         "opening_value",
@@ -549,13 +555,13 @@ def test_a_noise_floor_arm_at_the_control_s_seed_measures_nothing() -> None:
 
 def test_a_properly_seeded_replicate_is_a_clean_noise_floor() -> None:
     control = _summary("control")
-    floor = _summary("replicate", seed=8)
+    floor = _summary("replicate", init_seed=8)
     assert check_comparable([control, floor], [], "replicate") == []
 
 
 def test_a_noise_floor_arm_that_also_varies_a_head_is_not_a_replicate() -> None:
     control = _summary("control")
-    floor = _summary("replicate", seed=8, heads={"score": False, "ownership": True, "reply": False})
+    floor = _summary("replicate", init_seed=8, heads={"score": False, "ownership": True, "reply": False})
     complaints = check_comparable([control, floor], [], "replicate")
     assert any("pure replicate" in complaint for complaint in complaints)
 
@@ -602,7 +608,7 @@ def test_a_delta_no_bigger_than_the_replicate_s_is_called_noise() -> None:
     presenting a +0.02 that a reader would take for a result.
     """
     control = _summary("control")
-    inert = _summary("replicate", seed=8, metrics={"top1": 0.32})
+    inert = _summary("replicate", init_seed=8, metrics={"top1": 0.32})
     treatment = _summary("own", heads={"score": False, "ownership": True, "reply": False}, metrics={"top1": 0.32})
 
     table = render_table([control, inert, treatment], "replicate")
@@ -613,7 +619,7 @@ def test_a_delta_no_bigger_than_the_replicate_s_is_called_noise() -> None:
 
 def test_a_delta_clearing_the_noise_floor_is_not_flagged() -> None:
     control = _summary("control")
-    inert = _summary("replicate", seed=8, metrics={"top1": 0.305})
+    inert = _summary("replicate", init_seed=8, metrics={"top1": 0.305})
     treatment = _summary("own", heads={"score": False, "ownership": True, "reply": False}, metrics={"top1": 0.40})
 
     table = render_table([control, inert, treatment], "replicate")
@@ -658,7 +664,7 @@ def test_the_comparison_json_shape_round_trips(tmp_path: Path) -> None:
 def test_an_unchanged_metric_is_not_annotated_as_noise() -> None:
     """ "0 below noise" and "— below noise" are noise about noise — never emitted."""
     control = _summary("control")
-    inert = _summary("replicate", seed=8)
+    inert = _summary("replicate", init_seed=8)
     treatment = _summary("own", heads={"score": False, "ownership": True, "reply": False})
 
     table = render_table([control, inert, treatment], "replicate")

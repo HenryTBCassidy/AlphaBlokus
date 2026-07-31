@@ -100,6 +100,7 @@ PROTOCOL_KEYS: tuple[str, ...] = (
     "max_games",
     "holdout_fraction",
     "seed",
+    "init_seed",
     "epsilon",
     "target_temperature",
     "opening_value",
@@ -251,12 +252,16 @@ def freeze_corpus(corpus: Path, destination: Path) -> int:
 def shared_flags(args: argparse.Namespace, arm: Arm | None = None) -> list[str]:
     """The ``distill_sl.py`` flags every arm gets verbatim — the controlled half.
 
-    Verbatim with one deliberate exception: the noise-floor arm runs at
-    ``--noise-floor-seed``. It is the control repeated under a different roll of the
-    dice, so the spread between the two is what "no effect" looks like on this data.
+    Verbatim with one deliberate exception: the noise-floor arm's ``--init-seed``. It is
+    the control repeated under a different roll of the initial weights — same games, same
+    holdout, same batch order — so the spread between the two is what "no effect" looks
+    like on this data. Reseeding ``--seed`` instead would also re-split the holdout, and
+    then the floor would measure a variation the treatment arms never face.
     """
-    seed = args.noise_floor_seed if arm is not None and arm.name == args.noise_floor_arm else args.seed
+    is_floor = arm is not None and arm.name == args.noise_floor_arm
     flags: list[str] = [
+        "--init-seed",
+        str(args.noise_floor_seed if is_floor else args.seed),
         "--config",
         str(args.config),
         "--corpus",
@@ -266,7 +271,7 @@ def shared_flags(args: argparse.Namespace, arm: Arm | None = None) -> list[str]:
         "--holdout-frac",
         str(args.holdout_frac),
         "--seed",
-        str(seed),
+        str(args.seed),
         "--max-epochs",
         str(args.max_epochs),
         "--patience",
@@ -404,9 +409,9 @@ def check_comparable(
     for other in summaries[1:]:
         replicate = other.name == noise_floor
         for key in PROTOCOL_KEYS:
-            # The noise-floor arm is the control re-run at a different seed: that one
-            # difference is the whole point of it, and is checked separately below.
-            if replicate and key == "seed":
+            # The noise-floor arm is the control re-run from different initial weights:
+            # that one difference is the whole point of it, checked separately below.
+            if replicate and key == "init_seed":
                 continue
             if control.protocol.get(key) != other.protocol.get(key):
                 complaints.append(
@@ -423,10 +428,10 @@ def check_comparable(
                     f"noise-floor arm {other.name} differs from {control.name} in {', '.join(differing)}; "
                     "it must be a pure replicate — same settings, different seed"
                 )
-            if control.protocol.get("seed") == other.protocol.get("seed"):
+            if control.protocol.get("init_seed") == other.protocol.get("init_seed"):
                 complaints.append(
-                    f"noise-floor arm {other.name} ran at the same seed as {control.name} "
-                    f"({other.protocol.get('seed')!r}), so it is bit-identical and measures no noise"
+                    f"noise-floor arm {other.name} initialised at the same seed as {control.name} "
+                    f"({other.protocol.get('init_seed')!r}), so it is bit-identical and measures no noise"
                 )
         elif not differing:
             complaints.append(f"{other.name} has the same head settings as {control.name} — the arms differ in nothing")
@@ -597,8 +602,8 @@ def main() -> None:
         "--noise-floor-seed",
         type=int,
         default=None,
-        help="Seed for the --noise-floor-arm replicate. Must differ from --seed; it is the only "
-        "thing about that arm that differs from the control.",
+        help="Initialisation seed for the --noise-floor-arm replicate. Must differ from --seed; the "
+        "replicate sees the same games and the same holdout, and differs only in its starting weights.",
     )
     parser.add_argument(
         "--allow-varying",

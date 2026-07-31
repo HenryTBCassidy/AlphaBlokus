@@ -117,7 +117,10 @@ per-arm JSON. Not a framework — a script that runs `distill_sl.py` twice and d
 >    useful for diagnosis, impossible to mistake for a result.
 >
 > **The noise floor is wired in.** `--noise-floor-arm` names a **replicate**: the control's exact
-> settings re-run at `--noise-floor-seed`. Every other arm's delta is annotated `below noise` when
+> settings, the same games and the same holdout, re-run from a different roll of the initial
+> weights (`--noise-floor-seed`, which reaches `distill_sl.py` as `--init-seed`; reseeding `--seed`
+> as well would re-split the holdout, and the floor would then measure a variation no treatment arm
+> is ever exposed to). Every other arm's delta is annotated `below noise` when
 > it does not exceed the replicate's own movement on that metric. Deltas are signed `(+)`/`(−)` by
 > whether the metric is better high or low, so nobody has to remember that CE improves downward.
 >

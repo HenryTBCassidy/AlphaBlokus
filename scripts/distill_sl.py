@@ -246,7 +246,7 @@ def _run_arm(
     holdout_players: list[int],
 ) -> dict[str, Any]:
     """Train one arm to its early-stopped best; checkpoint every CE improvement."""
-    _seed_everything(args.seed)
+    _seed_everything(args.init_seed if args.init_seed is not None else args.seed)
     _, wrapper = instantiate_game_and_network(config)
     if name == "warm":
         wrapper.load_weights(str(Path(args.warm_start).expanduser().resolve()))
@@ -514,6 +514,14 @@ def main() -> None:
     parser.add_argument("--max-games", type=int, default=None, help="Subsample the corpus to this many games")
     parser.add_argument("--holdout-frac", type=float, default=0.05, help="Fraction of games held out (default 0.05)")
     parser.add_argument("--seed", type=int, default=7, help="Split + init + subsample seed (default 7)")
+    parser.add_argument(
+        "--init-seed",
+        type=int,
+        default=None,
+        help="Seed for the weight initialisation only, leaving the split, the subsample and the "
+        "mix on --seed. Defaults to --seed. This is what a noise-floor replicate varies: same "
+        "games, same holdout, different roll of the initial weights.",
+    )
     parser.add_argument("--max-epochs", type=int, default=20, help="Max full passes per arm (default 20)")
     parser.add_argument("--patience", type=int, default=3, help="Early-stop patience in epochs (default 3)")
     parser.add_argument("--min-delta", type=float, default=0.002, help="CE improvement that resets patience (nats)")
@@ -702,6 +710,7 @@ def main() -> None:
         "v1_mix": args.v1_mix,
         "augment": args.augment,
         "seed": args.seed,
+        "init_seed": args.seed if args.init_seed is None else args.init_seed,
         "lr": args.lr,
         "max_games": args.max_games,
         # The *resolved* settings, not the raw flags: a flag left unset inherits the base
