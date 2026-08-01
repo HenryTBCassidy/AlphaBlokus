@@ -157,6 +157,9 @@ class _LossWindow:
     free of forced host syncs; a single ``.item()`` trio happens per flush
     (every ``log_every_batches`` batches). Window size 1 reproduces the
     original per-batch behaviour exactly.
+
+    The auxiliary score loss is accumulated only when the score head is on; with
+    it off the window holds and syncs exactly the three tensors it always did.
     """
 
     def __init__(self, device: torch.device) -> None:
@@ -166,17 +169,26 @@ class _LossWindow:
         self._pi = torch.zeros((), device=device)
         self._v = torch.zeros((), device=device)
         self._total = torch.zeros((), device=device)
+        self._score: Tensor | None = None
 
-    def add(self, l_pi: Tensor, l_v: Tensor, total: Tensor, num_examples: int) -> None:
+    def add(self, l_pi: Tensor, l_v: Tensor, total: Tensor, num_examples: int, l_score: Tensor | None = None) -> None:
         """Accumulate one batch's losses (detached — no graph retention)."""
         self._pi += l_pi.detach().float()
         self._v += l_v.detach().float()
         self._total += total.detach().float()
+        if l_score is not None:
+            if self._score is None:
+                self._score = torch.zeros((), device=self._device)
+            self._score += l_score.detach().float()
         self.batches += 1
         self.examples += num_examples
 
-    def drain(self) -> tuple[float, float, float, int] | None:
-        """Sync + reset: ``(mean_pi, mean_v, mean_total, examples)``, or None if empty."""
+    def drain(self) -> tuple[float, float, float, int, float | None] | None:
+        """Sync + reset: ``(mean_pi, mean_v, mean_total, examples, mean_score)``, or None if empty.
+
+        ``mean_score`` is ``None`` whenever no score loss was accumulated in the
+        window (the score head off, or every position in it lacking a margin).
+        """
         if self.batches == 0:
             return None
         result = (
@@ -184,13 +196,50 @@ class _LossWindow:
             self._v.item() / self.batches,
             self._total.item() / self.batches,
             self.examples,
+            None if self._score is None else self._score.item() / self.batches,
         )
         self.batches = 0
         self.examples = 0
         self._pi = torch.zeros((), device=self._device)
         self._v = torch.zeros((), device=self._device)
         self._total = torch.zeros((), device=self._device)
+        self._score = None
         return result
+
+
+class _ScoredDataset(Dataset):
+    """Appends a per-position score target to any of the training datasets.
+
+    A **wrapper**, not a fourth dataset: both the in-RAM ``_LazyPolicyDataset`` and the
+    memmap-backed :class:`~alphablokus.training.memmap_dataset.MemmapPolicyDataset` keep
+    their ``(board, pi, value)`` item shape and their tuned hot paths untouched, and this
+    adds the extra tensor on top. Applied only when a training call actually supplies
+    score targets, so the default path is bit-for-bit the pre-score-head one.
+
+    ``targets`` is index-aligned with the wrapped dataset (both index the same
+    ``examples`` list) and carries ``NaN`` where a position has no margin; the masking
+    lives in :meth:`BaseNNetWrapper.loss_score`.
+    """
+
+    def __init__(self, base: Dataset, targets: np.ndarray) -> None:
+        self._base = base
+        self._targets = torch.from_numpy(np.ascontiguousarray(targets, dtype=np.float32))
+
+    def __len__(self) -> int:
+        return len(self._targets)
+
+    def __getitem__(self, idx: int) -> tuple[Tensor, ...]:
+        return (*self._base[idx], self._targets[idx])
+
+
+def _shuffle_seed(seed: int, generation: int) -> int:
+    """A per-epoch shuffle seed that does not depend on the global RNG's position.
+
+    Derived from the run's configured seed and the generation so shuffling stays
+    reproducible and still differs between epochs, while being immune to how many draws
+    anything else (net construction, in particular) has taken from the global stream.
+    """
+    return (seed * 1_000_003 + generation) % (2**31 - 1)
 
 
 class BaseNNetWrapper(INeuralNetWrapper, ABC):
@@ -209,6 +258,12 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         # these are plain ints on our net classes.
         self.board_rows: int = cast("int", self.nnet.board_rows)
         self.board_cols: int = cast("int", self.nnet.board_cols)
+
+        # One-shot guard so a mis-wired score head (head on, no targets — or the
+        # reverse) is reported once, not once per generation.
+        self._score_warned: set[str] = set()
+        self._score_scored_rows = 0
+        self._score_total_rows = 0
 
         self._device = self._resolve_device()
         self.nnet.to(self._device)
@@ -356,7 +411,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         drained = window.drain()
         if drained is None:
             return
-        mean_pi, mean_v, mean_total, num_examples = drained
+        mean_pi, mean_v, mean_total, num_examples, mean_score = drained
         pi_losses.update(mean_pi, num_examples)
         v_losses.update(mean_v, num_examples)
         progress.set_postfix(Loss_pi=pi_losses, Loss_v=v_losses)
@@ -368,7 +423,89 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 pi_loss=mean_pi,
                 v_loss=mean_v,
                 total_loss=mean_total,
+                score_loss=mean_score,
             )
+
+    @staticmethod
+    def _split_net_outputs(outputs: Any) -> tuple[Tensor, Tensor, Tensor | None]:
+        """Normalise a net's forward output to ``(log_pi, value, score | None)``.
+
+        Nets return a 2-tuple (TicTacToe, and Blokus with the score head off) or a
+        3-tuple (Blokus with the auxiliary score head on). The arity varies rather than
+        the third element being ``None`` because a ``None`` in a module's output makes
+        it untraceable, which would break the web ONNX export — see
+        :meth:`~alphablokus.games.blokusduo.nn.net.AlphaBlokusDuo.forward`. One helper
+        so every call site unpacks identically.
+        """
+        log_pi, value = outputs[0], outputs[1]
+        score = outputs[2] if len(outputs) > 2 else None
+        return log_pi, value, score
+
+    def has_score_head(self) -> bool:
+        """Whether this net actually built the auxiliary score head.
+
+        A structural check on the module rather than a read of
+        ``net_config.score_head``, so a game whose net ignores the flag
+        (TicTacToe has no score head) reports honestly instead of the config
+        promising an output that does not exist.
+        """
+        return getattr(self.nnet, "score_head", None) is not None
+
+    def _resolve_score_targets(
+        self,
+        examples: list[ProcessedExample],
+        score_margins: Sequence[float | None] | None,
+    ) -> np.ndarray | None:
+        """Scale raw margins into head targets, or ``None`` to skip the score term.
+
+        Raises:
+            ValueError: If ``score_margins`` is supplied but not index-aligned with
+                ``examples`` — a misalignment would train the head on other positions'
+                margins, which no downstream metric would reveal.
+        """
+        if score_margins is not None and len(score_margins) != len(examples):
+            raise ValueError(
+                f"score_margins has {len(score_margins)} entries for {len(examples)} examples; "
+                "they must be index-aligned.",
+            )
+        if not self.has_score_head():
+            if score_margins is not None and "no_head" not in self._score_warned:
+                self._score_warned.add("no_head")
+                logger.info("Score margins supplied but this net has no score head — ignoring them.")
+            return None
+        if score_margins is None:
+            if "no_margins" not in self._score_warned:
+                self._score_warned.add("no_margins")
+                logger.warning(
+                    "net_config.score_head is on but train() got no score_margins — the score head "
+                    "will not be trained this run. Pass score_margins, or set score_head=False.",
+                )
+            return None
+
+        # Imported here, not at module scope: ``alphablokus.training``'s package
+        # __init__ pulls in the Coach, which reaches the registry, which imports
+        # this module — the same cycle that keeps ``memmap_dataset`` local below.
+        from alphablokus.training.score_target import scale_margins
+
+        targets = scale_margins(score_margins, self.net_config.score_scale)
+        scored = int(np.isfinite(targets).sum())
+        self._score_scored_rows = scored
+        self._score_total_rows = len(targets)
+        if scored == 0 and "all_none" not in self._score_warned:
+            self._score_warned.add("all_none")
+            logger.warning("Every supplied score margin is None — the score term contributes nothing.")
+        elif scored < len(targets) and "partial" not in self._score_warned:
+            self._score_warned.add("partial")
+            # Not an error: opening rows legitimately have no margin (the opening dataset
+            # stores none). Reported because the fraction is otherwise invisible — the
+            # held-out ``n_skipped`` counts holdout rows, which always have margins.
+            logger.info(
+                "Score targets: {}/{} training rows carry a margin ({:.1%} unscored).",
+                scored,
+                len(targets),
+                1.0 - scored / len(targets),
+            )
+        return targets
 
     def train(
         self,
@@ -376,6 +513,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         generation: int,
         metrics: MetricsCollector | None = None,
         eval_set: EvalSet | None = None,
+        score_margins: Sequence[float | None] | None = None,
     ) -> None:
         """Train with ``epochs`` full, shuffled passes over the whole buffer.
 
@@ -397,10 +535,26 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 ``log_value_calibration``: policy entropy (confidence),
                 top-1 / top-5 accuracy against MCTS targets, and a value-head
                 reliability diagram.
+            score_margins: Optional **raw** final score margins from the side to
+                move, index-aligned with ``examples``; ``None`` entries mark
+                positions that have no single margin and are masked out of the
+                loss. Consumed only when the auxiliary score head is built
+                (``net_config.score_head``), where the target is
+                ``tanh(margin / score_scale)`` and the term enters the total as
+                ``score_loss_weight × score_loss``. A **separate argument on
+                purpose**: ``ProcessedExample`` keeps its
+                ``(board, policy, value)`` shape, so self-play, the replay buffer
+                and storage never see the score target
+                (docs/plans/score-auxiliary-target.md S4).
         """
         if not examples:
             logger.warning("No training examples provided, skipping training.")
             return
+
+        # Resolve the score-target situation once, loudly. Training a head on
+        # nothing (head on, no margins supplied) is exactly the silent-no-op this
+        # project has been bitten by, so it warns rather than shrugging.
+        score_targets = self._resolve_score_targets(examples, score_margins)
 
         boards_np, raw_pis, vs_np = zip(*examples, strict=True)
         action_size = self.game.get_action_size()
@@ -441,6 +595,10 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             dataset = MemmapPolicyDataset.build(examples, action_size, encode_fn, memmap_dir)
         else:
             dataset = _LazyPolicyDataset(boards_np, raw_pis, vs_np, action_size, encode_fn)
+        if score_targets is not None:
+            # Wrap, don't fork: both datasets keep their item shape and hot path,
+            # and this appends the aligned score target on top.
+            dataset = _ScoredDataset(dataset, score_targets)
 
         # Opt-in training-perf knobs (net_config.perf). Everything defaults to
         # off = the original fp32, in-process, per-batch-sync loop; CUDA-only
@@ -488,10 +646,21 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         # Built once so persistent workers survive across epochs; iterating a
         # shuffle=True loader reshuffles each epoch exactly as the old
         # loader-per-epoch construction did.
+        # Shuffle from a generator seeded by (seed, generation) rather than from the
+        # global torch RNG. Otherwise the shuffle order depends on how many random draws
+        # the *net's construction* happened to consume — so building a score head (~38k
+        # extra parameters) silently reshuffles the data too, and an A/B between
+        # score_head on and off differs by both the head and the data order. The
+        # confound was measured at ~4x the treatment effect it was meant to detect, so
+        # this is what makes that experiment interpretable at all.
+        shuffle_generator = torch.Generator()
+        if self.config.seed is not None:
+            shuffle_generator.manual_seed(_shuffle_seed(self.config.seed, generation))
         loader = DataLoader(
             dataset,
             batch_size=self.net_config.batch_size,
             shuffle=True,
+            generator=shuffle_generator,
             pin_memory=pin_memory,
             **worker_kwargs,
         )
@@ -513,20 +682,27 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
 
             window = _LossWindow(self._device)
             t = tqdm(loader, desc="Training Net")
-            for batch_number, (boards, target_pis, target_vs) in enumerate(t):
+            for batch_number, batch in enumerate(t):
+                # 4th element only when score targets were supplied (``_ScoredDataset``).
+                boards, target_pis, target_vs, *extra = batch
                 boards = boards.to(self._device, non_blocking=non_blocking)
                 target_pis = target_pis.to(self._device, non_blocking=non_blocking)
                 target_vs = target_vs.to(self._device, non_blocking=non_blocking)
+                target_scores = extra[0].to(self._device, non_blocking=non_blocking) if extra else None
                 if on_cuda and perf.channels_last:
                     boards = boards.to(memory_format=torch.channels_last)
 
+                l_score: Tensor | None = None
                 with train_autocast():
-                    out_pi, out_v = self._forward_net(boards)
+                    out_pi, out_v, out_score = self._split_net_outputs(self._forward_net(boards))
                     l_pi = self.loss_pi(target_pis, out_pi)
                     l_v = self.loss_v(target_vs, out_v)
                     total_loss = l_pi + l_v
+                    if target_scores is not None and out_score is not None:
+                        l_score = self.loss_score(target_scores, out_score)
+                        total_loss = total_loss + self.net_config.score_loss_weight * l_score
 
-                window.add(l_pi, l_v, total_loss, boards.size(0))
+                window.add(l_pi, l_v, total_loss, boards.size(0), l_score)
                 if window.batches >= log_window:
                     self._flush_loss_window(window, pi_losses, v_losses, t, metrics, generation, epoch, batch_number)
 
@@ -645,7 +821,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 boards_chunk = eval_set.boards[chunk_start:end]
                 tensor = torch.tensor(boards_chunk, dtype=torch.float32)
                 tensor = tensor.to(self._device)
-                log_pi, v = self._forward_net(tensor)
+                log_pi, v, _ = self._split_net_outputs(self._forward_net(tensor))
                 pi = torch.exp(log_pi)
 
                 # Entropy per row.
@@ -974,6 +1150,10 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         planes over shared memory) route through here, so they are guaranteed
         bit-identical.
 
+        The auxiliary score head is **dropped here**, so nothing that plays a move
+        ever sees it. :meth:`predict_encoded_with_score` is the diagnostics-only
+        surface that keeps it.
+
         Args:
             planes: ``(N, C, H, W)`` float32 — ``N`` boards already encoded via
                 ``board.as_multi_channel(1)`` and stacked.
@@ -982,17 +1162,32 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             ``(policies, values)`` — ``(N, A)`` softmaxed policy array and
             ``(N,)`` value array, both float32 on the CPU.
         """
+        policies, values, _ = self.predict_encoded_with_score(planes)
+        return policies, values
+
+    def predict_encoded_with_score(self, planes: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+        """As :meth:`predict_encoded`, but also returning the score head's output.
+
+        For **diagnostics only** (the SL trainer's held-out score MSE). Nothing that
+        chooses a move calls this — search, the arena, the Pentobi harness and the jax
+        bridge all go through :meth:`predict_encoded` / :meth:`predict`, which drop it.
+
+        Returns:
+            ``(policies, values, scores)`` — ``scores`` is ``(N,)`` float32 when the net
+            has a score head, else ``None``.
+        """
         tensor = torch.from_numpy(np.ascontiguousarray(planes, dtype=np.float32))
         tensor = tensor.to(self._device)
         self.nnet.eval()
         with torch.no_grad(), self._inference_autocast():
-            log_pi, v = self._forward_net(tensor)
+            log_pi, v, score = self._split_net_outputs(self._forward_net(tensor))
 
         # .float() casts back from fp16 (if autocast was active) so downstream
         # code always sees float32; a no-op when inference ran in float32.
         policies = torch.exp(log_pi).float().data.cpu().numpy()
         values = v.view(-1).float().data.cpu().numpy()
-        return policies, values
+        scores = None if score is None else score.view(-1).float().data.cpu().numpy()
+        return policies, values, scores
 
     def predict(self, board: IBoard) -> tuple[np.ndarray, float]:
         """Make a prediction for a given board state.
@@ -1027,6 +1222,25 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         """Calculate the value loss."""
         return torch.sum((targets - outputs.view(-1)) ** 2) / targets.size()[0]
 
+    @staticmethod
+    def loss_score(targets: Tensor, outputs: Tensor) -> Tensor:
+        """Auxiliary score loss: MSE over the positions that *have* a margin.
+
+        Same form as :meth:`loss_v`, but averaged over the unmasked positions only —
+        ``NaN`` targets mark positions with no single margin (v2 opening rows) and must
+        contribute neither error nor gradient. The targets are zeroed before the
+        subtraction because ``NaN × 0`` is ``NaN`` in the backward pass, so masking
+        after the arithmetic would poison the whole batch's gradient.
+
+        A batch in which every target is masked returns a differentiable zero, so the
+        term simply drops out instead of producing ``NaN`` from a 0/0 mean.
+        """
+        flat = outputs.view(-1)
+        mask = torch.isfinite(targets)
+        clean = torch.where(mask, targets, torch.zeros_like(targets))
+        squared = ((clean - flat) * mask) ** 2
+        return squared.sum() / mask.sum().clamp(min=1)
+
     def save_checkpoint(self, filename: str) -> None:
         """Save the neural network state to a checkpoint file."""
         folder = self.config.net_directory
@@ -1060,6 +1274,13 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 scheduler keeps its current position and the just-restored
                 optimizer LR is re-synced to it. No-op for a scheduler-less run
                 (constant LR), which then reverts fully — bit-for-bit as before.
+
+        Note:
+            This is a *resume* path, not a warm-start one. The weights load tolerates a
+            score-head mismatch (see :meth:`_load_net_state`), but the optimizer state
+            does not — its param groups are sized for the architecture that saved them.
+            To warm-start a score-head net from a checkpoint without one, use
+            :meth:`load_weights`.
         """
         folder = self.config.net_directory
         filepath = folder / filename
@@ -1070,7 +1291,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
 
         map_location = None if self.net_config.cuda else "cpu"
         checkpoint = torch.load(filepath, map_location=map_location)
-        self.nnet.load_state_dict(checkpoint["state_dict"])
+        self._load_net_state(checkpoint["state_dict"])
         if "optimizer_state_dict" in checkpoint:
             self.optimizer.load_state_dict(checkpoint["optimizer_state_dict"])
             # ``load_state_dict`` overwrites param-group hyperparameters with
@@ -1101,6 +1322,11 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         rate. Unlike :meth:`load_checkpoint` it ignores the checkpoint's
         optimizer and scheduler state, so a warm start does not silently inherit
         the donor's annealed LR and scheduler position (L4).
+
+        This is the path that warm-starts a score-head net from a checkpoint that
+        predates the head: those tensors stay at their fresh initialisation and are
+        logged by name — see :func:`~alphablokus.training.checkpoint_compat.
+        load_state_dict_compat`, which still raises on any other mismatch.
         """
         folder = self.config.net_directory
         filepath = folder / filename
@@ -1111,4 +1337,16 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
 
         map_location = None if self.net_config.cuda else "cpu"
         checkpoint = torch.load(filepath, map_location=map_location)
-        self.nnet.load_state_dict(checkpoint["state_dict"])
+        self._load_net_state(checkpoint["state_dict"])
+
+    def _load_net_state(self, state_dict: dict) -> None:
+        """Load a state dict, tolerating **only** score-head mismatches.
+
+        One place, so ``load_checkpoint`` and ``load_weights`` cannot drift apart on
+        which mismatches are acceptable.
+        """
+        # Local import: ``alphablokus.training``'s package __init__ imports the Coach,
+        # which reaches the registry, which imports this module.
+        from alphablokus.training.checkpoint_compat import load_state_dict_compat
+
+        load_state_dict_compat(self.nnet, state_dict)

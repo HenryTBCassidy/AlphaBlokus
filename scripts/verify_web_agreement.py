@@ -31,6 +31,7 @@ from loguru import logger
 
 from alphablokus.config import load_args
 from alphablokus.registry import instantiate_game_and_network
+from alphablokus.training.checkpoint_compat import load_state_dict_compat
 
 VALUE_TOLERANCE = 1e-4
 PROB_TIE_TOLERANCE = 1e-6
@@ -54,7 +55,7 @@ def main() -> int:
     config = load_args(args.config)
     game, wrapper = instantiate_game_and_network(config)
     checkpoint = torch.load(args.checkpoint, map_location="cpu")
-    wrapper.nnet.load_state_dict(checkpoint["state_dict"])
+    load_state_dict_compat(wrapper.nnet, checkpoint["state_dict"])
 
     near_ties = 0
     total_plies = 0

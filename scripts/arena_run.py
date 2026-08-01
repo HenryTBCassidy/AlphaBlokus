@@ -45,6 +45,7 @@ import torch
 from alphablokus.config import RunConfig, load_args
 from alphablokus.evaluation.arena import Arena
 from alphablokus.evaluation.players import NetworkPlayer, Player, RandomPlayer
+from alphablokus.training.checkpoint_compat import load_state_dict_compat
 
 if TYPE_CHECKING:
     from alphablokus.interfaces import IGame, INeuralNetWrapper
@@ -86,7 +87,7 @@ def _load_checkpoint_into_wrapper(
     """
     map_location = None if config.net_config.cuda else "cpu"
     ckpt = torch.load(checkpoint_path, map_location=map_location, weights_only=False)
-    wrapper.nnet.load_state_dict(ckpt["state_dict"])
+    load_state_dict_compat(wrapper.nnet, ckpt["state_dict"])
 
 
 def build_player(spec: str, game: IGame, config: RunConfig) -> Player:

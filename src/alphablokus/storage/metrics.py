@@ -368,6 +368,7 @@ class MetricsCollector:
         pi_loss: float,
         v_loss: float,
         total_loss: float,
+        score_loss: float | None = None,
     ) -> None:
         """Record raw per-batch policy, value, and total loss.
 
@@ -376,29 +377,36 @@ class MetricsCollector:
         every epoch — producing characteristic upward spikes at epoch starts
         that misled the eye. The reporting layer now smooths the raw per-batch
         losses visually instead (EWM in HTML, native in W&B).
+
+        ``score_loss`` is the auxiliary score head's MSE (plan
+        docs/plans/score-auxiliary-target.md S4), present only for runs with the head
+        on; the column is omitted otherwise, so existing runs' parquet schema is
+        unchanged and the report simply has no score series to draw.
         """
-        self._training_records.append(
-            {
-                "generation": generation,
-                "epoch": epoch,
-                "batch_number": batch_number,
-                "pi_loss": pi_loss,
-                "v_loss": v_loss,
-                "total_loss": total_loss,
-            }
-        )
+        record: dict[str, Any] = {
+            "generation": generation,
+            "epoch": epoch,
+            "batch_number": batch_number,
+            "pi_loss": pi_loss,
+            "v_loss": v_loss,
+            "total_loss": total_loss,
+        }
+        if score_loss is not None:
+            record["score_loss"] = score_loss
+        self._training_records.append(record)
         self._global_batch += 1
-        self._publish(
-            {
-                "training/pi_loss": pi_loss,
-                "training/v_loss": v_loss,
-                "training/total_loss": total_loss,
-                "global_batch": self._global_batch,
-                "generation": generation,
-                "epoch": epoch,
-                "batch": batch_number,
-            }
-        )
+        published: dict[str, Any] = {
+            "training/pi_loss": pi_loss,
+            "training/v_loss": v_loss,
+            "training/total_loss": total_loss,
+            "global_batch": self._global_batch,
+            "generation": generation,
+            "epoch": epoch,
+            "batch": batch_number,
+        }
+        if score_loss is not None:
+            published["training/score_loss"] = score_loss
+        self._publish(published)
 
     def log_arena(
         self,
@@ -1244,6 +1252,8 @@ class MetricsCollector:
                         "training_per_gen/total_loss": float(last["total_loss"].mean()),
                     }
                 )
+                if "score_loss" in last and last["score_loss"].notna().any():
+                    per_gen_payload[int(gen)]["training_per_gen/score_loss"] = float(last["score_loss"].mean())
 
         if self._training_entropy_records:
             ent = pd.DataFrame(self._training_entropy_records)

@@ -331,6 +331,31 @@ class NetConfig:
     # old FC checkpoint — the two head state_dicts are incompatible).
     policy_head: Literal["fc", "conv"] = "conv"
 
+    # Auxiliary **score head** — a third output predicting the final score
+    # margin, trained alongside policy and value and **never read when choosing
+    # a move** (``predict``/``predict_batch`` keep returning ``(pi, v)``). The
+    # point is a richer signal for the shared body: measured on real v2 corpus
+    # data a predictor that sees only whose turn it is already scores 0.30 value
+    # MSE against 0.84 for always-draw, so "did they win?" is largely answerable
+    # from piece parity — while the margin (−43…+88, median 3) is not. Default
+    # False builds no head at all, so the net is bit-for-bit today's.
+    # Plan: docs/plans/score-auxiliary-target.md.
+    score_head: bool = False
+
+    # Weight of the score term in ``total = policy + value + w · score``.
+    # Deliberately a fraction of the value weight (KataGo's score weight is
+    # likewise small): the body is being nudged to see more, not retargeted.
+    # Inert unless ``score_head``.
+    score_loss_weight: float = 0.15
+
+    # Margin → target scaling: the head's target is ``tanh(margin / score_scale)``
+    # and the head itself ends in ``tanh``, so both heads live on the same
+    # bounded scale and ``score_loss_weight`` means what it says. At 25.0 a
+    # 3-point win maps to 0.12, 10 points to 0.38, 25 to 0.76 and 60+ saturates
+    # near 1 — resolution where the mass is (small margins) and blowouts stop
+    # dominating the MSE. Inert unless ``score_head``.
+    score_scale: float = 25.0
+
     # Opt-in training-loop performance knobs (autocast, TF32, channels_last,
     # torch.compile, DataLoader workers, metric-sync cadence). Every field
     # defaults to "off" = current behaviour; see ``TrainingPerfConfig``.

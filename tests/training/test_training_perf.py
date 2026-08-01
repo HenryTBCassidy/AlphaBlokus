@@ -19,27 +19,12 @@ import torch
 from alphablokus.config import TrainingPerfConfig
 from alphablokus.games.base_wrapper import _LazyPolicyDataset, resolve_dataloader_context
 from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
+from tests.conftest import RecordingMetrics
 
 if TYPE_CHECKING:
     from alphablokus.config import RunConfig
     from alphablokus.games.blokusduo.game import BlokusDuoGame
     from alphablokus.games.tictactoe.game import TicTacToeGame
-
-
-class _RecordingMetrics:
-    """Metrics stand-in that records every log_training row."""
-
-    def __init__(self) -> None:
-        self.rows: list[dict] = []
-
-    def log_training(self, **kwargs: object) -> None:
-        self.rows.append(kwargs)
-
-    def log_training_throughput(self, **_kwargs: object) -> None:
-        pass
-
-    def log_learning_rate(self, **_kwargs: object) -> None:
-        pass
 
 
 def _buffer(action_size: int, n: int) -> list:
@@ -57,12 +42,12 @@ def _train_with_perf(
     config: RunConfig,
     perf: TrainingPerfConfig,
     seed: int = 123,
-) -> tuple[dict[str, torch.Tensor], _RecordingMetrics]:
+) -> tuple[dict[str, torch.Tensor], RecordingMetrics]:
     """Seeded wrapper init + train with the given perf knobs → (weights, metrics)."""
     run_config = replace(config, net_config=replace(config.net_config, epochs=2, perf=perf))
     torch.manual_seed(seed)
     nnet = NNetWrapper(ttt_game, run_config)
-    metrics = _RecordingMetrics()
+    metrics = RecordingMetrics()
     torch.manual_seed(seed + 1)  # shuffle RNG
     nnet.train(_buffer(ttt_game.get_action_size(), 40), generation=0, metrics=metrics)
     state = {k: v.detach().clone() for k, v in nnet.nnet.state_dict().items()}
@@ -235,3 +220,35 @@ def test_default_dataloader_context_is_non_fork(ttt_game: TicTacToeGame, test_co
         TrainingPerfConfig(dataloader_workers=2, prefetch_factor=2, dataloader_context="spawn"),
     )
     _assert_identical_weights(baseline_weights, workers_weights)
+
+
+def test_shuffle_order_does_not_depend_on_how_the_net_was_built() -> None:
+    """The A/B arms must see their data in the same order, head on or off.
+
+    Building the score head draws ~38k extra numbers from the global torch RNG, and a
+    ``DataLoader(shuffle=True)`` with no explicit generator draws from that same stream —
+    so switching the head on silently reshuffles the training data too. The two arms
+    would then differ by *two* things, and the confound was measured at roughly four
+    times the treatment effect it was meant to detect. Seeding the shuffle from
+    ``(seed, generation)`` makes the experiment interpretable.
+    """
+    import torch
+
+    from alphablokus.games.base_wrapper import _shuffle_seed
+
+    def order_after_consuming(draws: int) -> list[int]:
+        torch.manual_seed(0)
+        torch.rand(draws)  # stand-in for however many the net's construction takes
+        generator = torch.Generator()
+        generator.manual_seed(_shuffle_seed(42, 0))
+        return torch.randperm(16, generator=generator).tolist()
+
+    assert order_after_consuming(0) == order_after_consuming(38_211)
+
+    # ...and it still differs between epochs, so shuffling is real
+    def order_for_generation(generation: int) -> list[int]:
+        generator = torch.Generator()
+        generator.manual_seed(_shuffle_seed(42, generation))
+        return torch.randperm(16, generator=generator).tolist()
+
+    assert order_for_generation(0) != order_for_generation(1)

@@ -40,12 +40,12 @@ different positions.
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| S1 | `NetConfig` flags: `score_head`, `score_loss_weight`, `score_scale` (all inert by default) | 1 h | High | |
-| S2 | The head itself in `nn/net.py`; `forward` returns a 3-tuple, `predict`/`predict_batch` still return `(pi, v)` | 2 h | High | |
-| S3 | Checkpoint compatibility both ways — warm-start an old net into a score-head net and vice versa | 2 h | High | |
-| S4 | `BaseNNetWrapper.train` takes optional per-example scores and adds the weighted loss term | 3 h | High | |
-| S5 | Thread `margin` out of the corpus loaders as the score target | 2 h | High | |
-| S6 | `distill_sl.py` wiring + report score MSE and the change in value skill | 2 h | High | |
+| S1 | `NetConfig` flags: `score_head`, `score_loss_weight`, `score_scale` (all inert by default) | 1 h | High | ✅ |
+| S2 | The head itself in `nn/net.py`; `forward` returns a 3-tuple, `predict`/`predict_batch` still return `(pi, v)` | 2 h | High | ✅ |
+| S3 | Checkpoint compatibility both ways — warm-start an old net into a score-head net and vice versa | 2 h | High | ✅ |
+| S4 | `BaseNNetWrapper.train` takes optional per-example scores and adds the weighted loss term | 3 h | High | ✅ |
+| S5 | Thread `margin` out of the corpus loaders as the score target | 2 h | High | ✅ |
+| S6 | `distill_sl.py` wiring + report score MSE and the change in value skill | 2 h | High | ✅ |
 | S7 | **A/B on the box**: identical SL fits with and without the head | ½ day box GPU | High | |
 | S8 | Decision + default: keep, drop, or retune — recorded with the numbers | 1 h | High | |
 
@@ -89,6 +89,18 @@ targets on the same scale, so `score_loss_weight` means what it says.
 returning `(pi, v)` and simply drop the third element. Nothing downstream changes, and
 **no code path consults the score when choosing a move**.
 
+> **As built — the arity varies instead of the third element being `None`.** A `None` in a
+> module's output makes it untraceable (`torch.jit.trace`: *"Only tensors, lists, tuples of
+> tensors, or dictionary of tensors can be output from traced functions"*), which would
+> break `scripts/export_web_assets.py`'s ONNX export **even with the head off** — the one
+> thing S2 promises not to touch. So `forward` returns a 2-tuple with the head off (byte
+> for byte today's output) and a 3-tuple with it on. Call sites unpack through the single
+> helper `BaseNNetWrapper._split_net_outputs`.
+>
+> The head is also constructed **after** the policy head, not before, so that at a fixed
+> seed the trunk, value head and policy head initialise identically with the head on and
+> off — the S7 arms then differ by the head alone rather than by a shifted RNG stream.
+
 ## S3. Checkpoint compatibility
 
 Two directions, both needed and both easy to get silently wrong:
@@ -102,6 +114,14 @@ Two directions, both needed and both easy to get silently wrong:
 
 Test both directions explicitly: a real save/load round trip each way, asserting the shared
 body's weights are byte-identical afterwards.
+
+> **As built.** `alphablokus/training/checkpoint_compat.py::load_state_dict_compat` is the
+> one implementation, used by `load_checkpoint`, `load_weights` and the five scripts that
+> loaded a raw `state_dict` themselves. Tolerance is **scoped to the `score_head.` prefix**:
+> any other missing or unexpected tensor still raises, so the existing fc-vs-conv
+> policy-head guard survives. Cross-architecture warm starts must go through
+> `load_weights`, not `load_checkpoint` — the latter also restores optimizer state, whose
+> param groups genuinely do not match across a head change.
 
 ## S4. The training loss
 
@@ -134,6 +154,23 @@ Opening rows have no single margin (a DAG node has many games through it); use t
 margin of the playouts beneath it where `link` has computed one, and skip the score term for
 the rest rather than inventing a number.
 
+> **As built — `link` has *no* mean margin, so every opening row is skipped.** The plan's
+> fallback does not exist: `SearchSpaceStore`'s aggregation backs up
+> `SUM(CASE WHEN white_margin > 0 THEN 1 WHEN white_margin < 0 THEN -1 ELSE 0 END)` — the
+> **sign** of each playout's margin — into `outcome_mean`, and the opening schema has no
+> `margin` column at all. Magnitudes are never aggregated, so there is nothing to average.
+> `load_opening_examples` therefore returns `None` for every opening row and the loss masks
+> them (`BaseNNetWrapper.loss_score` averages over the unmasked positions only). At the
+> shipped `--opening-mix 0.05` that is ~5% of the mixed corpus carrying no score target,
+> which the held-out `ScoreHeadMetrics.n_skipped` reports explicitly. Aggregating a mean
+> margin in `link` would be a corpus-side change, out of scope here.
+>
+> `build_training_examples` returns `(examples, margins)` and `load_opening_examples`
+> returns `(examples, units, margins)`. `mix_examples` is now generic in its item type, so
+> `distill_sl.py` mixes `(example, margin)` **pairs** through the same resampling and
+> shuffle — a parallel margin list could not survive `rng.choice` and the misalignment
+> would train the head on other positions' scores while every other metric looked fine.
+
 ## S6. Trainer wiring
 
 `distill_sl.py` passes the margins through and reports, per epoch:
@@ -143,6 +180,14 @@ the rest rather than inventing a number.
   is the number this whole plan exists to move.
 
 Both into the run JSON so the S7 arms are comparable after the fact.
+
+> **As built.** `--score-head` / `--score-loss-weight` / `--score-scale` are the arm knobs
+> (off by default), and each curve row now carries `value_skill` explicitly — `asdict`
+> drops it, being a property — plus a `score` block from
+> `alphablokus.training.holdout.evaluate_score_head`: `score_mse`, `constant_mse`,
+> `score_skill` (`1 − mse / constant_mse`) and the scored/skipped counts. `constant_mse` is
+> the S8 retune signal the plan asks for: a small `score_mse` at ~zero skill means the head
+> has learnt the mean and `score_scale` is too small.
 
 ## S7. The A/B
 
@@ -164,14 +209,27 @@ learning as much as better endpoints.
 
 Record the numbers and pick one, in the plan and in the config default:
 
-- **Keep** (flip `score_head` on for the RL phase) if value skill improves materially with
-  policy agreement flat or better.
+- **Keep** if value skill improves materially with policy agreement flat or better.
+  **"Keep" means keep for SL distillation only.** Carrying the head into the RL phase is
+  *not* currently possible and flipping the flag on there would be silently wrong: `Coach`
+  never passes `score_margins` (self-play records a final score, but nothing plumbs it
+  through the replay buffer), so the head would sit in every checkpoint permanently
+  random, paying inference cost on every search batch and contributing nothing. Extending
+  it to RL is a separate piece of work — plumb the margin through self-play and the replay
+  buffer — and should be planned on its own evidence, after this A/B.
 - **Retune** if score MSE is near zero (the head has an easy job — `score_scale` too small)
   or barely moves (too large, or the weight is too low).
 - **Drop** if nothing improves. An auxiliary target that does not help is dead weight in
   every future run, and this project already has a habit of accumulating unused paths.
 
 ---
+
+> **As built — the metrics limb is currently unreachable (2026-07-30).** `score_loss` is
+> logged, mirrored to W&B and charted, but no shipped run can produce it: `Coach` is the
+> only caller that passes a `MetricsCollector` and it never passes margins, while
+> `distill_sl.py` is the only caller that passes margins and it passes `metrics=None`
+> (writing its own JSON instead). The plumbing is correct and stays for when RL gains
+> margins; until then the score numbers come from the trainer's JSON, not the parquet.
 
 ## Not in scope
 

@@ -40,6 +40,7 @@ import torch
 from alphablokus.config import load_args
 from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.games.tictactoe.game import TicTacToeGame
+from alphablokus.training.checkpoint_compat import load_state_dict_compat
 
 
 def _render_board(board, current_player: int) -> str:
@@ -111,7 +112,7 @@ def main() -> None:
     ckpt_path = Path(args.checkpoint)
     map_location = None if config.net_config.cuda else "cpu"
     ckpt = torch.load(ckpt_path, map_location=map_location, weights_only=False)
-    wrapper.nnet.load_state_dict(ckpt["state_dict"])
+    load_state_dict_compat(wrapper.nnet, ckpt["state_dict"])
 
     model_player = NetworkPlayer(
         game=game,

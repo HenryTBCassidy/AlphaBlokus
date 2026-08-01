@@ -3,9 +3,15 @@
 The training half of the Pentobi-distillation plan
 (``docs/plans/pentobi-distillation.md`` D6/D7): supervised behavioural cloning on the
 expert corpus — policy cross-entropy against Pentobi's move (label-smoothed over legal
-moves at batch-build time, plan D6) + value MSE against the game outcome. ``margin`` is
-stored in the corpus for a later margin-aware experiment but deliberately **not** part
-of the v1 loss.
+moves at batch-build time, plan D6) + value MSE against the game outcome.
+
+``--score-head`` adds the third, **auxiliary** term: MSE against the corpus's stored
+``margin``, scaled to ``tanh(margin / --score-scale)`` and weighted by
+``--score-loss-weight``. It is off by default and it is never read when choosing a move;
+the point is a richer signal for the shared body, and the two arms of the A/B in
+``docs/plans/score-auxiliary-target.md`` S7 differ by this flag alone. The numbers to
+compare are ``value_skill`` (the metric the change exists to move) and the per-epoch
+score MSE, both written into the run JSON's curve.
 
 Two arms, one config each:
 
@@ -78,8 +84,10 @@ from alphablokus.registry import instantiate_game, instantiate_game_and_network
 from alphablokus.training.holdout import (
     HoldoutMetrics,
     ImitationDiagnostics,
+    ScoreHeadMetrics,
     evaluate_holdout,
     evaluate_imitation_diagnostics,
+    evaluate_score_head,
     split_games_holdout,
 )
 
@@ -87,6 +95,10 @@ if TYPE_CHECKING:
     from alphablokus.games.blokusduo.game import BlokusDuoGame
     from alphablokus.games.blokusduo.pentobi.corpus import CorpusExample
     from alphablokus.interfaces import INeuralNetWrapper
+
+    # A training example with the score head's raw margin attached, so the two travel
+    # together through ``mix_examples``' resampling and shuffle.
+    _ScoredExample = tuple[CorpusExample, float | None]
 
 KNOWN_ARMS = ("warm", "scratch")
 
@@ -99,6 +111,10 @@ def _arm_config(base: RunConfig, args: argparse.Namespace) -> RunConfig:
     the script's ``--lr`` (default 1e-4 — a fine-tune rate, not the self-play
     peak). AdamW weight decay and the perf knobs stay the config's; net size is
     the config's unless ``--net-size <F>x<B>`` overrides it (the sizing sweep).
+
+    ``--score-head`` is the S7 A/B switch: it is the *only* difference between the two
+    arms, and because the head is built after every other head the trunk, value head and
+    policy head start from identical weights at the same seed either way.
     """
     num_filters = base.net_config.num_filters
     num_residual_blocks = base.net_config.num_residual_blocks
@@ -112,6 +128,14 @@ def _arm_config(base: RunConfig, args: argparse.Namespace) -> RunConfig:
         lr_scheduler="constant",
         num_filters=num_filters,
         num_residual_blocks=num_residual_blocks,
+        # Fall back to the base config when a flag was not passed, rather than letting
+        # argparse defaults silently overwrite settings pinned in a run-config JSON —
+        # which would quietly run the control arm when the config asked for the treatment.
+        score_head=base.net_config.score_head if args.score_head is None else args.score_head,
+        score_loss_weight=(
+            base.net_config.score_loss_weight if args.score_loss_weight is None else args.score_loss_weight
+        ),
+        score_scale=base.net_config.score_scale if args.score_scale is None else args.score_scale,
     )
     return replace(base, net_config=net_config)
 
@@ -135,6 +159,16 @@ def _release(wrapper: INeuralNetWrapper) -> None:
     gc.collect()
     if torch.cuda.is_available():
         torch.cuda.empty_cache()
+
+
+def _score_summary(score: ScoreHeadMetrics | None) -> str:
+    """The score head's held-out fit, or nothing at all when there is no head."""
+    if score is None:
+        return ""
+    return (
+        f" | score mse {score.score_mse:.4f} vs constant {score.constant_mse:.4f}"
+        f" (skill {score.score_skill:+.1%}, n {score.n_positions}, skipped {score.n_skipped})"
+    )
 
 
 def _diagnostics_summary(diagnostics: ImitationDiagnostics) -> str:
@@ -162,9 +196,11 @@ def _run_arm(
     args: argparse.Namespace,
     game: BlokusDuoGame,
     train_flat: list[CorpusExample],
+    train_margins: list[float | None],
     holdout_flat: list[CorpusExample],
     holdout_actions: list[int],
     holdout_players: list[int],
+    holdout_margins: list[float | None],
 ) -> dict[str, Any]:
     """Train one arm to its early-stopped best; checkpoint every CE improvement."""
     _seed_everything(args.seed)
@@ -175,7 +211,7 @@ def _run_arm(
 
     ckpt_path = (Path(args.ckpt_dir) / f"distill_{name}.pth.tar").resolve()
 
-    def evaluate() -> tuple[HoldoutMetrics, ImitationDiagnostics]:
+    def evaluate() -> tuple[HoldoutMetrics, ImitationDiagnostics, ScoreHeadMetrics | None]:
         metrics = evaluate_holdout(
             wrapper,  # type: ignore[arg-type]  # BaseNNetWrapper satisfies SupportsEncodedPrediction
             holdout_flat,
@@ -191,39 +227,64 @@ def _run_arm(
             encode_fn=game.encode_compact,
             batch_size=args.eval_batch_size,
         )
-        return metrics, diagnostics
+        # ``None`` for an arm without the head — nothing to report, not a fabricated zero.
+        score = evaluate_score_head(
+            wrapper,  # type: ignore[arg-type]
+            holdout_flat,
+            holdout_margins,
+            score_scale=config.net_config.score_scale,
+            encode_fn=game.encode_compact,
+            batch_size=args.eval_batch_size,
+        )
+        return metrics, diagnostics, score
 
-    def curve_row(epoch: int, metrics: HoldoutMetrics, diagnostics: ImitationDiagnostics) -> dict[str, Any]:
-        return {"epoch": epoch, **asdict(metrics), "diagnostics": asdict(diagnostics)}
+    def curve_row(
+        epoch: int,
+        metrics: HoldoutMetrics,
+        diagnostics: ImitationDiagnostics,
+        score: ScoreHeadMetrics | None,
+    ) -> dict[str, Any]:
+        # ``value_skill`` is a property, so ``asdict`` drops it — and it is the number the
+        # whole score-head experiment exists to move (plan S6), so record it explicitly.
+        return {
+            "epoch": epoch,
+            **asdict(metrics),
+            "diagnostics": asdict(diagnostics),
+            "value_skill": diagnostics.value_skill,
+            "score": None if score is None else asdict(score),
+        }
 
     curve: list[dict[str, Any]] = []
-    best, best_diagnostics = evaluate()
+    best, best_diagnostics, best_score = evaluate()
     best_epoch = 0
-    curve.append(curve_row(0, best, best_diagnostics))
+    curve.append(curve_row(0, best, best_diagnostics, best_score))
     logger.info(
-        "Arm {} epoch 0 (baseline): CE {:.4f}, value MSE {:.4f} | {}",
+        "Arm {} epoch 0 (baseline): CE {:.4f}, value MSE {:.4f} | {}{}",
         name,
         best.policy_ce,
         best.value_mse,
         _diagnostics_summary(best_diagnostics),
+        _score_summary(best_score),
     )
 
     epochs_since_improvement = 0
     for epoch in range(1, args.max_epochs + 1):
-        wrapper.train(train_flat, generation=epoch, metrics=None, eval_set=None)
-        metrics, diagnostics = evaluate()
-        curve.append(curve_row(epoch, metrics, diagnostics))
+        wrapper.train(train_flat, generation=epoch, metrics=None, eval_set=None, score_margins=train_margins)
+        metrics, diagnostics, score = evaluate()
+        curve.append(curve_row(epoch, metrics, diagnostics, score))
         logger.info(
-            "Arm {} epoch {}: CE {:.4f} (KL {:.4f}), value MSE {:.4f} | {}",
+            "Arm {} epoch {}: CE {:.4f} (KL {:.4f}), value MSE {:.4f} | {}{}",
             name,
             epoch,
             metrics.policy_ce,
             metrics.policy_kl,
             metrics.value_mse,
             _diagnostics_summary(diagnostics),
+            _score_summary(score),
         )
         if metrics.policy_ce <= best.policy_ce - args.min_delta:
-            best, best_diagnostics, best_epoch, epochs_since_improvement = metrics, diagnostics, epoch, 0
+            best, best_diagnostics, best_score = metrics, diagnostics, score
+            best_epoch, epochs_since_improvement = epoch, 0
             # ``save_checkpoint`` joins its filename onto the config's net
             # directory, so an absolute path lands exactly where asked.
             wrapper.save_checkpoint(str(ckpt_path))
@@ -248,6 +309,9 @@ def _run_arm(
         "best_epoch": best_epoch,
         "best": asdict(best),
         "best_diagnostics": asdict(best_diagnostics),
+        "best_value_skill": best_diagnostics.value_skill,
+        "best_score": None if best_score is None else asdict(best_score),
+        "score_head": config.net_config.score_head,
         "checkpoint": str(ckpt_path),
         "curve": curve,
     }
@@ -313,6 +377,27 @@ def main() -> None:
         default=True,
         help="2x order-2 symmetry augmentation on the train side (default on)",
     )
+    parser.add_argument(
+        "--score-head",
+        action=argparse.BooleanOptionalAction,
+        default=None,  # None = inherit the base config; see _arm_config
+        help="Train the auxiliary score head (final-margin regression alongside policy/value). "
+        "Never read when choosing a move; this is the S7 A/B switch and the only difference "
+        "between the two arms of that experiment.",
+    )
+    parser.add_argument(
+        "--score-loss-weight",
+        type=float,
+        default=None,
+        help="Weight of the score term in the total loss (default: the base config's)",
+    )
+    parser.add_argument(
+        "--score-scale",
+        type=float,
+        default=None,
+        help="Margin scaling for the score target: tanh(margin / scale). 25 puts the resolution "
+        "on small margins (the median is 3) and saturates the blowouts",
+    )
     parser.add_argument("--max-games", type=int, default=None, help="Subsample the corpus to this many games")
     parser.add_argument("--holdout-frac", type=float, default=0.05, help="Fraction of games held out (default 0.05)")
     parser.add_argument("--seed", type=int, default=7, help="Split + init + subsample seed (default 7)")
@@ -363,7 +448,9 @@ def main() -> None:
         if args.max_games is not None:
             games = sample_games(games, args.max_games, args.seed)
         train_games, holdout_games = split_games_holdout(games, args.holdout_frac, args.seed)
-        train_flat = build_training_examples(game_typed, train_games, epsilon=epsilon, augment=args.augment)
+        train_flat, train_margins = build_training_examples(
+            game_typed, train_games, epsilon=epsilon, augment=args.augment
+        )
     else:
         shards = game_shards(corpus / "games")
         if not shards:
@@ -380,17 +467,25 @@ def main() -> None:
             args.seed,
         )
         train_games, holdout_games = partition_by_unit(games, holdout_units)
-        pools: dict[str, list[CorpusExample]] = {
-            "games": build_training_examples(
-                game_typed,
-                train_games,
-                epsilon=epsilon,
-                augment=args.augment,
-                temperature=args.tau,
-            ),
+        # Pools carry ``(example, margin)`` pairs so the score head's target survives the
+        # mixer's resampling and shuffle — the same code path, not a parallel copy of it
+        # (a separate margin list could not stay aligned through ``rng.choice``).
+        pools: dict[str, list[_ScoredExample]] = {
+            "games": list(
+                zip(
+                    *build_training_examples(
+                        game_typed,
+                        train_games,
+                        epsilon=epsilon,
+                        augment=args.augment,
+                        temperature=args.tau,
+                    ),
+                    strict=True,
+                )
+            )
         }
         weights = {"games": max(0.0, 1.0 - args.opening_mix - args.v1_mix)}
-        opening_examples, opening_units = load_opening_examples(
+        opening_examples, opening_units, opening_margins = load_opening_examples(
             opening_shards(corpus / "opening"),
             game_typed,
             value_target=args.opening_value,
@@ -399,20 +494,26 @@ def main() -> None:
             augment=args.augment,
         )
         pools["opening"] = [
-            example for example, unit in zip(opening_examples, opening_units, strict=True) if unit not in holdout_units
+            (example, margin)
+            for example, unit, margin in zip(opening_examples, opening_units, opening_margins, strict=True)
+            if unit not in holdout_units
         ]
         weights["opening"] = args.opening_mix
         if args.v1_corpus is not None and args.v1_mix > 0.0:
             v1_games = load_corpus_games(corpus_shards(args.v1_corpus.expanduser()))
-            pools["v1"] = build_training_examples(game_typed, v1_games, epsilon=0.1, augment=args.augment)
+            pools["v1"] = list(
+                zip(*build_training_examples(game_typed, v1_games, epsilon=0.1, augment=args.augment), strict=True)
+            )
             weights["v1"] = args.v1_mix
         logger.info(
             "Source pools: {} → mixed at {}",
             {name: len(pool) for name, pool in pools.items()},
             weights,
         )
-        train_flat = mix_examples(pools, weights, seed=args.seed)
-    holdout_flat = build_training_examples(
+        mixed = mix_examples(pools, weights, seed=args.seed)
+        train_flat = [example for example, _margin in mixed]
+        train_margins = [margin for _example, margin in mixed]
+    holdout_flat, holdout_margins = build_training_examples(
         game_typed,
         holdout_games,
         epsilon=epsilon,
@@ -465,9 +566,11 @@ def main() -> None:
             args,
             game_typed,
             train_flat,
+            train_margins,
             holdout_flat,
             holdout_actions,
             holdout_players,
+            holdout_margins,
         )
 
     payload = {
@@ -484,6 +587,14 @@ def main() -> None:
         "augment": args.augment,
         "seed": args.seed,
         "lr": args.lr,
+        # The *resolved* settings, not the raw flags: a flag left unset inherits the base
+        # config, so recording the flag would say "None" for a run that trained the head.
+        # This field is what an S8 reviewer reads to know which arm actually ran.
+        "score_head": config.net_config.score_head if args.score_head is None else args.score_head,
+        "score_loss_weight": (
+            config.net_config.score_loss_weight if args.score_loss_weight is None else args.score_loss_weight
+        ),
+        "score_scale": config.net_config.score_scale if args.score_scale is None else args.score_scale,
         "timestamp": datetime.now(UTC).isoformat(),
         "holdout_leakage": leakage.to_dict(),
         "arms": arms,

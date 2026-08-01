@@ -69,6 +69,19 @@ class SupportsEncodedPrediction(Protocol):
         ...
 
 
+class SupportsScoredPrediction(Protocol):
+    """The diagnostics-only surface that also returns the auxiliary score head.
+
+    Deliberately *not* :class:`SupportsEncodedPrediction`: the score is never part of the
+    surface anything uses to choose a move, and keeping the two protocols apart is what
+    makes that visible in the type system.
+    """
+
+    def predict_encoded_with_score(self, planes: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
+        """(N, C, H, W) encoded boards → (policy probs, values, scores | None)."""
+        ...
+
+
 @dataclass(frozen=True)
 class HoldoutMetrics:
     """Out-of-sample fit of a predictor on held-out self-play examples.
@@ -170,6 +183,87 @@ def evaluate_holdout(
         target_entropy=target_entropy,
         value_mse=mse_sum / n,
         n_positions=n,
+    )
+
+
+@dataclass(frozen=True)
+class ScoreHeadMetrics:
+    """Held-out fit of the auxiliary score head (plan S6).
+
+    Attributes:
+        score_mse: Mean squared error against ``tanh(margin / score_scale)``, over the
+            held-out positions that *have* a margin.
+        constant_mse: The MSE of predicting the held-out mean target for every position —
+            the floor a head that has learnt nothing but "games are usually close" would
+            score. Without it a small ``score_mse`` reads as success when it may just be a
+            consequence of the tanh squashing everything toward the middle.
+        score_skill: ``1 − score_mse / constant_mse``. Zero means the head has learnt the
+            mean and nothing else; this is the number S8 reads to decide whether the head
+            has an easy job (skill near zero at a tiny MSE ⇒ ``score_scale`` too small).
+        n_positions: Held-out positions with a margin, i.e. those actually scored.
+        n_skipped: Held-out positions with no margin (masked out, as in training).
+    """
+
+    score_mse: float
+    constant_mse: float
+    score_skill: float
+    n_positions: int
+    n_skipped: int
+
+
+def evaluate_score_head(
+    predictor: SupportsScoredPrediction,
+    examples: Sequence[ProcessedExample],
+    margins: Sequence[float | None],
+    *,
+    score_scale: float,
+    encode_fn: Callable[[NDArray], NDArray],
+    batch_size: int = 512,
+) -> ScoreHeadMetrics | None:
+    """Score-head MSE on held-out positions, against the same target training uses.
+
+    Returns ``None`` when the predictor has no score head, or when no held-out position
+    carries a margin — both "there is nothing to report", never a fabricated zero.
+
+    Args:
+        predictor: Anything with ``predict_encoded_with_score``.
+        examples: Held-out ``(compact_board, sparse_policy, value)`` tuples.
+        margins: Raw margins index-aligned with ``examples``; ``None`` = no margin.
+        score_scale: ``NetConfig.score_scale`` — must match the value trained with, or the
+            reported MSE is against a different target than the one optimised.
+        encode_fn: ``IGame.encode_compact`` for the game the boards came from.
+        batch_size: Forward-pass batch size (memory knob only).
+    """
+    from alphablokus.training.score_target import scale_margins
+
+    if len(examples) != len(margins):
+        raise ValueError(f"{len(examples)} examples but {len(margins)} margins; they must be index-aligned")
+    if not examples:
+        raise ValueError("evaluate_score_head needs at least one example")
+
+    predicted = np.empty(len(examples), dtype=np.float64)
+    for start in range(0, len(examples), batch_size):
+        batch = examples[start : start + batch_size]
+        planes = np.stack([encode_fn(board) for board, _pi, _value in batch])
+        _, _, scores = predictor.predict_encoded_with_score(planes)
+        if scores is None:
+            return None
+        predicted[start : start + len(batch)] = scores.astype(np.float64)
+
+    targets = scale_margins(margins, score_scale).astype(np.float64)
+    scored = np.isfinite(targets)
+    if not scored.any():
+        return None
+
+    errors = predicted[scored] - targets[scored]
+    score_mse = float(np.mean(errors**2))
+    constant_mse = float(np.mean((targets[scored] - targets[scored].mean()) ** 2))
+    return ScoreHeadMetrics(
+        score_mse=score_mse,
+        constant_mse=constant_mse,
+        score_skill=0.0 if constant_mse <= 0.0 else 1.0 - score_mse / constant_mse,
+        n_positions=int(scored.sum()),
+        n_skipped=int((~scored).sum()),
     )
 
 

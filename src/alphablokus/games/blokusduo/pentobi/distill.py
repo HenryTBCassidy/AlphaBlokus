@@ -56,7 +56,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from itertools import zip_longest
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, TypeVar
 
 import numpy as np
 import pyarrow.parquet as pq
@@ -88,15 +88,22 @@ _LOG_EVERY_GAMES = 1_000
 # subtrees are not accidentally all tiny ones.
 _HOLDOUT_STRATA = 5
 
+# What :func:`mix_examples` resamples: a bare ``CorpusExample``, or an
+# ``(example, margin)`` pair when the score head's target has to travel with it.
+TPoolItem = TypeVar("TPoolItem")
+
 
 @dataclass(frozen=True)
 class CorpusGameRows:
     """One corpus game's stored rows, grouped for game-granular splitting.
 
-    Positions are in play order and the four required tuples are index-aligned: position
-    ``i`` was played by ``players[i]``, Pentobi chose ``actions[i]``, and the game outcome
-    from that side to move is ``values[i]``. ``players`` feeds the colour-conditional
-    value-calibration diagnostic (D7); ``actions`` is the top-1 accuracy target.
+    Positions are in play order and the five required tuples are index-aligned: position
+    ``i`` was played by ``players[i]``, Pentobi chose ``actions[i]``, the game outcome from
+    that side to move is ``values[i]``, and the signed final score margin from that same
+    side is ``margins[i]``. ``players`` feeds the colour-conditional value-calibration
+    diagnostic (D7); ``actions`` is the top-1 accuracy target; ``margins`` is the auxiliary
+    score head's target (docs/plans/score-auxiliary-target.md S5), stored by both the v1 and
+    v2 game schemas.
 
     The last two fields are **v2 only** and default to ``None``, so v1 corpora load and
     train exactly as before:
@@ -114,6 +121,7 @@ class CorpusGameRows:
     actions: tuple[int, ...]  # the action index Pentobi played per position
     players: tuple[int, ...]  # side to move per position: +1 White, -1 Black
     values: tuple[float, ...]  # outcome from the side to move: +1 / -1 / 0
+    margins: tuple[float, ...]  # final score margin from the side to move (e.g. +3, -21)
     policies: tuple[tuple[NDArray[np.int32], NDArray[np.float32]], ...] | None = None
     opening_unit: bytes | None = None
 
@@ -138,11 +146,12 @@ def load_corpus_games(paths: Sequence[Path]) -> list[CorpusGameRows]:
     games: list[CorpusGameRows] = []
     for path in paths:
         meta = read_shard_meta(path)
-        table = pq.read_table(path, columns=["board", "action", "player", "value", "game_id"])
+        table = pq.read_table(path, columns=["board", "action", "player", "value", "margin", "game_id"])
         boards = table.column("board").to_pylist()
         actions = table.column("action").to_pylist()
         players = table.column("player").to_pylist()
         values = table.column("value").to_pylist()
+        margins = table.column("margin").to_pylist()
         game_ids = table.column("game_id").to_pylist()
         if len(boards) != sum(meta.game_sizes):
             raise ValueError(f"{path.name}: {len(boards)} rows != game_sizes total {sum(meta.game_sizes)}")
@@ -161,6 +170,7 @@ def load_corpus_games(paths: Sequence[Path]) -> list[CorpusGameRows]:
                     actions=tuple(int(a) for a in actions[rows]),
                     players=tuple(int(p) for p in players[rows]),
                     values=tuple(float(v) for v in values[rows]),
+                    margins=tuple(float(m) for m in margins[rows]),
                 ),
             )
             cursor += size
@@ -228,12 +238,13 @@ def load_corpus_games_v2(paths: Sequence[Path], game: BlokusDuoGame) -> list[Cor
         meta = read_game_shard_meta(path)
         table = pq.read_table(
             path,
-            columns=["board", "action", "player", "value", "game_id", "policy_indices", "policy_values"],
+            columns=["board", "action", "player", "value", "margin", "game_id", "policy_indices", "policy_values"],
         )
         boards = table.column("board").to_pylist()
         actions = table.column("action").to_pylist()
         players = table.column("player").to_pylist()
         values = table.column("value").to_pylist()
+        margins = table.column("margin").to_pylist()
         game_ids = table.column("game_id").to_pylist()
         policy_indices = table.column("policy_indices").to_pylist()
         policy_values = table.column("policy_values").to_pylist()
@@ -254,6 +265,7 @@ def load_corpus_games_v2(paths: Sequence[Path], game: BlokusDuoGame) -> list[Cor
                     actions=tuple(int(a) for a in actions[rows]),
                     players=tuple(int(p) for p in players[rows]),
                     values=tuple(float(v) for v in values[rows]),
+                    margins=tuple(float(m) for m in margins[rows]),
                     policies=tuple(
                         (
                             np.frombuffer(indices, dtype=np.int32).copy(),
@@ -472,7 +484,7 @@ def build_training_examples(
     epsilon: float,
     augment: bool,
     temperature: float = 1.0,
-) -> list[CorpusExample]:
+) -> tuple[list[CorpusExample], list[float | None]]:
     """Turn corpus games into net-ready ``(board, sparse_policy, value)`` examples.
 
     Each position yields its smoothed-target example, and — with ``augment`` — its
@@ -485,6 +497,13 @@ def build_training_examples(
     ``augment=False`` the output aligns index-for-index with the flattened
     ``actions``/``players``/``values`` of ``games`` — the alignment the held-out
     diagnostics rely on.
+
+    Returns ``(examples, margins)`` — the score head's raw targets, index-aligned with
+    ``examples`` including the symmetry twin, which shares its original's margin because
+    transposing a board does not change the score
+    (docs/plans/score-auxiliary-target.md S5). Returned alongside rather than folded into
+    the example tuple: ``ProcessedExample`` keeps its ``(board, policy, value)`` shape, so
+    the score target never enters the self-play pipeline.
 
     **v2 corpora take the stored soft target instead.** When ``rows.policies`` is present
     the target is Pentobi's own distribution, softened by ``temperature`` and (only if
@@ -505,9 +524,12 @@ def build_training_examples(
             a misordered target (see the v2 plan's imitation-error block).
     """
     examples: list[CorpusExample] = []
+    margins: list[float | None] = []
     for count, rows in enumerate(games, start=1):
         stored = rows.policies if rows.policies is not None else (None,) * len(rows.boards)
-        for compact, action, value, policy in zip(rows.boards, rows.actions, rows.values, stored, strict=True):
+        for compact, action, value, margin, policy in zip(
+            rows.boards, rows.actions, rows.values, rows.margins, stored, strict=True
+        ):
             board = game.board_from_compact(compact)
             legal = np.flatnonzero(game.valid_move_masking(board, 1)).astype(np.int32)
             if policy is None:
@@ -515,13 +537,15 @@ def build_training_examples(
             else:
                 indices, values = soft_target_over_legal(policy, legal, epsilon=epsilon, temperature=temperature)
             examples.append((compact, (indices, values), value))
+            margins.append(margin)
             if augment:
                 transposed = np.ascontiguousarray(compact.T)
                 transposed_indices = np.array([game.transpose_action(int(a)) for a in indices], dtype=np.int32)
                 examples.append((transposed, (transposed_indices, values), value))
+                margins.append(margin)
         if count % _LOG_EVERY_GAMES == 0:
             logger.info("Built examples for {}/{} games ({} positions so far)", count, len(games), len(examples))
-    return examples
+    return examples, margins
 
 
 def soft_target_over_legal(
@@ -557,12 +581,17 @@ def soft_target_over_legal(
 
 
 def mix_examples(
-    pools: Mapping[str, Sequence[CorpusExample]],
+    pools: Mapping[str, Sequence[TPoolItem]],
     weights: Mapping[str, float],
     *,
     seed: int,
-) -> list[CorpusExample]:
+) -> list[TPoolItem]:
     """Combine training pools into one list with the requested sampling proportions.
+
+    Generic in the pool item so a caller that must keep a per-example side value attached
+    — the score head's margin — can mix ``(example, margin)`` pairs through this **same**
+    resampling and shuffle rather than a parallel copy of it, which could not stay aligned
+    through the ``rng.choice`` draws anyway.
 
     The v2 corpus has three sources with wildly different natural sizes — a game harvests
     ~26 rows while a whole opening node is one row, so openings are ~0.6% of the corpus by
@@ -587,7 +616,7 @@ def mix_examples(
     shares = {name: weights[name] / total_weight for name in active}
     scale = max(len(pool) / shares[name] for name, pool in active.items())
     rng = np.random.default_rng(seed)
-    mixed: list[CorpusExample] = []
+    mixed: list[TPoolItem] = []
     for name, pool in active.items():
         target = int(round(scale * shares[name]))
         replace = target > len(pool)
@@ -605,7 +634,7 @@ def load_opening_examples(
     temperature: float = 1.0,
     epsilon: float = 0.0,
     augment: bool = False,
-) -> tuple[list[CorpusExample], list[bytes | None]]:
+) -> tuple[list[CorpusExample], list[bytes | None], list[float | None]]:
     """Load the v2 opening dataset as training examples plus their holdout units.
 
     Opening rows are the positions the whole v2 thesis rests on — depths 1–3 exist in no
@@ -618,8 +647,15 @@ def load_opening_examples(
     and always trains.
 
     Returns:
-        ``(examples, units)`` — index-aligned, with the symmetry twin (when ``augment``)
-        directly after its original and sharing its unit.
+        ``(examples, units, margins)`` — index-aligned, with the symmetry twin (when
+        ``augment``) directly after its original and sharing its unit.
+
+        Every margin is ``None``. An opening node has many games through it, so it has no
+        single score margin, and the opening schema stores none: ``link`` aggregates the
+        playouts' **outcomes** (``outcome_mean``, the sign of each margin) and never their
+        magnitudes. The score head therefore skips these rows — masked out of its loss —
+        rather than being taught an invented number
+        (docs/plans/score-auxiliary-target.md S5).
     """
     # Resolve ancestry across *all* shards first. A node's depth-1 ancestor is very often
     # in a different shard from the node itself, and a per-shard walk simply fails to find
@@ -664,7 +700,7 @@ def load_opening_examples(
                 transposed_indices = np.array([game.transpose_action(int(a)) for a in indices], dtype=np.int32)
                 examples.append((transposed, (transposed_indices, values), value))
                 units.append(unit)
-    return examples, units
+    return examples, units, [None] * len(examples)
 
 
 def _opening_units(rows: dict[str, list[Any]]) -> dict[int, bytes | None]:

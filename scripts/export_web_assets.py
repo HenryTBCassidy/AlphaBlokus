@@ -150,6 +150,7 @@ def _export_onnx(
 
     from alphablokus.config import load_args
     from alphablokus.registry import instantiate_game_and_network
+    from alphablokus.training.checkpoint_compat import load_state_dict_compat
 
     config = load_args(config_path)
     if config.game != "blokusduo":
@@ -157,7 +158,7 @@ def _export_onnx(
 
     game, wrapper = instantiate_game_and_network(config)
     checkpoint = torch.load(checkpoint_path, map_location="cpu")
-    wrapper.nnet.load_state_dict(checkpoint["state_dict"])
+    load_state_dict_compat(wrapper.nnet, checkpoint["state_dict"])
     net = wrapper.nnet.to("cpu")
     net.eval()
 
