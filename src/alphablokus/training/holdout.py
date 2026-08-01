@@ -22,10 +22,17 @@ Three pieces live here so ``scripts/capacity_probe.py`` and
   (anything with ``predict_encoded``) so this framework module never imports
   ``games.*``.
 - :func:`evaluate_imitation_diagnostics` — the SL-distillation extras (plan
-  ``docs/plans/pentobi-distillation.md`` D7): held-out top-1 accuracy against
-  the expert's move (legal-restricted argmax) and value calibration split by
+  ``docs/plans/pentobi-distillation.md`` D7): held-out top-1 and top-3 accuracy
+  against the expert's move (legal-restricted) and value calibration split by
   side-to-move (colour-conditional — Blokus outcomes are heavily
   colour-skewed, so a pooled calibration curve hides a per-colour bias).
+- :func:`evaluate_score_head`, :func:`evaluate_ownership_head` and
+  :func:`evaluate_reply_head` — one held-out metric set per **auxiliary** head
+  (``docs/plans/score-auxiliary-target.md`` S6 and
+  ``docs/plans/supervised-network-improvements.md`` N4/N5). Each answers "is this
+  head learning at all", each returns ``None`` rather than a fabricated zero when the
+  head does not exist, and each reports a **baseline** alongside its raw loss: a small
+  loss against an easy baseline is not skill, and the A/B harness reads the skill.
 """
 
 from __future__ import annotations
@@ -56,6 +63,11 @@ TGameItem = TypeVar("TGameItem")
 # (matches the training-loop calibration diagnostic in ``games/base_wrapper.py``).
 _CALIBRATION_BUCKETS = 10
 
+# Rank cut-off of the second imitation-agreement figure. Three, not five: Blokus
+# positions typically have hundreds of legal moves, so a wide window would report
+# agreement that no player would recognise as "the same idea".
+_TOP_K_AGREEMENT = 3
+
 
 class SupportsEncodedPrediction(Protocol):
     """The one inference surface holdout evaluation needs (structural).
@@ -69,16 +81,16 @@ class SupportsEncodedPrediction(Protocol):
         ...
 
 
-class SupportsScoredPrediction(Protocol):
-    """The diagnostics-only surface that also returns the auxiliary score head.
+class SupportsAuxPrediction(Protocol):
+    """The diagnostics-only surface that also returns the auxiliary heads' outputs.
 
-    Deliberately *not* :class:`SupportsEncodedPrediction`: the score is never part of the
-    surface anything uses to choose a move, and keeping the two protocols apart is what
-    makes that visible in the type system.
+    Deliberately *not* :class:`SupportsEncodedPrediction`: no auxiliary head is part of
+    the surface anything uses to choose a move, and keeping the two protocols apart is
+    what makes that visible in the type system.
     """
 
-    def predict_encoded_with_score(self, planes: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray | None]:
-        """(N, C, H, W) encoded boards → (policy probs, values, scores | None)."""
+    def predict_encoded_aux(self, planes: np.ndarray) -> tuple[np.ndarray, np.ndarray, dict[str, np.ndarray]]:
+        """(N, C, H, W) encoded boards → (policy probs, values, {head: output})."""
         ...
 
 
@@ -212,7 +224,7 @@ class ScoreHeadMetrics:
 
 
 def evaluate_score_head(
-    predictor: SupportsScoredPrediction,
+    predictor: SupportsAuxPrediction,
     examples: Sequence[ProcessedExample],
     margins: Sequence[float | None],
     *,
@@ -226,7 +238,7 @@ def evaluate_score_head(
     carries a margin — both "there is nothing to report", never a fabricated zero.
 
     Args:
-        predictor: Anything with ``predict_encoded_with_score``.
+        predictor: Anything with ``predict_encoded_aux``.
         examples: Held-out ``(compact_board, sparse_policy, value)`` tuples.
         margins: Raw margins index-aligned with ``examples``; ``None`` = no margin.
         score_scale: ``NetConfig.score_scale`` — must match the value trained with, or the
@@ -245,10 +257,10 @@ def evaluate_score_head(
     for start in range(0, len(examples), batch_size):
         batch = examples[start : start + batch_size]
         planes = np.stack([encode_fn(board) for board, _pi, _value in batch])
-        _, _, scores = predictor.predict_encoded_with_score(planes)
-        if scores is None:
+        _, _, aux = predictor.predict_encoded_aux(planes)
+        if "score" not in aux:
             return None
-        predicted[start : start + len(batch)] = scores.astype(np.float64)
+        predicted[start : start + len(batch)] = aux["score"].astype(np.float64)
 
     targets = scale_margins(margins, score_scale).astype(np.float64)
     scored = np.isfinite(targets)
@@ -264,6 +276,185 @@ def evaluate_score_head(
         score_skill=0.0 if constant_mse <= 0.0 else 1.0 - score_mse / constant_mse,
         n_positions=int(scored.sum()),
         n_skipped=int((~scored).sum()),
+    )
+
+
+@dataclass(frozen=True)
+class OwnershipHeadMetrics:
+    """Held-out fit of the auxiliary ownership head (plan N4).
+
+    Attributes:
+        cross_entropy: Mean per-cell cross-entropy against the final board's ownership,
+            in nats, over the held-out cells that have a label.
+        marginal_cross_entropy: The cross-entropy of predicting the held-out **marginal**
+            class distribution for every cell — the floor a head that has learnt nothing
+            but "most cells end up owned by somebody" would score. Without it a small
+            cross-entropy reads as success when it may only reflect a skewed prior.
+        skill: ``1 − cross_entropy / marginal_cross_entropy``. Zero means the head has
+            learnt the marginal and nothing else.
+        accuracy: Fraction of labelled cells whose argmax class is correct.
+        n_positions: Held-out positions with a final board, i.e. those actually scored.
+        n_skipped: Held-out positions with no final board (masked out, as in training).
+    """
+
+    cross_entropy: float
+    marginal_cross_entropy: float
+    skill: float
+    accuracy: float
+    n_positions: int
+    n_skipped: int
+
+
+def evaluate_ownership_head(
+    predictor: SupportsAuxPrediction,
+    examples: Sequence[ProcessedExample],
+    ownership: Sequence[NDArray[np.int8] | None],
+    *,
+    encode_fn: Callable[[NDArray], NDArray],
+    batch_size: int = 512,
+) -> OwnershipHeadMetrics | None:
+    """Per-cell ownership cross-entropy/accuracy on held-out positions.
+
+    Returns ``None`` when the predictor has no ownership head, or when no held-out
+    position has a final board — both "there is nothing to report", never a fabricated
+    zero.
+
+    Args:
+        predictor: Anything with ``predict_encoded_aux``.
+        examples: Held-out ``(compact_board, sparse_policy, value)`` tuples.
+        ownership: ``{-1, 0, +1}`` maps in each position's own canonical frame,
+            index-aligned with ``examples``; ``None`` = no final board.
+        encode_fn: ``IGame.encode_compact`` for the game the boards came from.
+        batch_size: Forward-pass batch size (memory knob only).
+    """
+    if len(examples) != len(ownership):
+        raise ValueError(f"{len(examples)} examples but {len(ownership)} ownership maps; must be index-aligned")
+    if not examples:
+        raise ValueError("evaluate_ownership_head needs at least one example")
+
+    scored = [index for index, target in enumerate(ownership) if target is not None]
+    if not scored:
+        return None
+
+    log_probabilities: list[NDArray[np.float64]] = []
+    for start in range(0, len(scored), batch_size):
+        batch_indices = scored[start : start + batch_size]
+        planes = np.stack([encode_fn(examples[index][0]) for index in batch_indices])
+        _, _, aux = predictor.predict_encoded_aux(planes)
+        if "ownership" not in aux:
+            return None
+        # (n, classes, rows, cols) → (n, classes, cells): the metric is per cell and
+        # never needs the board's 2-D shape.
+        probabilities = aux["ownership"].astype(np.float64)
+        flat = probabilities.reshape(len(batch_indices), probabilities.shape[1], -1)
+        log_probabilities.append(np.log(np.clip(flat, _LOG_EPS, None)))
+
+    log_probs = np.concatenate(log_probabilities, axis=0)
+    # ``+1`` maps the stored {-1, 0, +1} map onto the head's class order, exactly as
+    # the training-side target source does.
+    labels = np.stack([np.asarray(ownership[index]).reshape(-1) + 1 for index in scored]).astype(np.int64)
+    rows = np.arange(labels.shape[0])[:, None]
+    cells = np.arange(labels.shape[1])[None, :]
+    cross_entropy = float(-log_probs[rows, labels, cells].mean())
+    accuracy = float((log_probs.argmax(axis=1) == labels).mean())
+
+    marginal = np.bincount(labels.reshape(-1), minlength=log_probs.shape[1]) / labels.size
+    marginal_cross_entropy = float(-(marginal * np.log(np.clip(marginal, _LOG_EPS, None))).sum())
+    return OwnershipHeadMetrics(
+        cross_entropy=cross_entropy,
+        marginal_cross_entropy=marginal_cross_entropy,
+        skill=0.0 if marginal_cross_entropy <= 0.0 else 1.0 - cross_entropy / marginal_cross_entropy,
+        accuracy=accuracy,
+        n_positions=len(scored),
+        n_skipped=len(examples) - len(scored),
+    )
+
+
+@dataclass(frozen=True)
+class ReplyHeadMetrics:
+    """Held-out fit of the auxiliary opponent-reply head (plan N5).
+
+    Attributes:
+        policy_ce: Mean cross-entropy of the predicted reply distribution against the
+            opponent's actual next-ply target, in nats.
+        policy_kl: ``policy_ce − target_entropy`` — the reducible part, directly
+            comparable to :attr:`HoldoutMetrics.policy_kl` for the main policy head.
+        target_entropy: Mean entropy of the reply targets, in nats.
+        top1_accuracy: Fraction of scored positions where the head's most likely reply
+            is the target's most likely reply.
+        n_positions: Held-out positions with a next ply, i.e. those actually scored.
+        n_skipped: Held-out positions with no next ply (each game's final position),
+            masked out exactly as in training.
+    """
+
+    policy_ce: float
+    policy_kl: float
+    target_entropy: float
+    top1_accuracy: float
+    n_positions: int
+    n_skipped: int
+
+
+def evaluate_reply_head(
+    predictor: SupportsAuxPrediction,
+    examples: Sequence[ProcessedExample],
+    replies: Sequence[object | None],
+    *,
+    action_size: int,
+    encode_fn: Callable[[NDArray], NDArray],
+    batch_size: int = 512,
+) -> ReplyHeadMetrics | None:
+    """Reply-head cross-entropy/KL and top-1 agreement on held-out positions.
+
+    Returns ``None`` when the predictor has no reply head, or when no held-out position
+    has a next ply — both "there is nothing to report", never a fabricated zero.
+
+    Args:
+        predictor: Anything with ``predict_encoded_aux``.
+        examples: Held-out ``(compact_board, sparse_policy, value)`` tuples.
+        replies: The opponent's next-ply distribution per position (sparse
+            ``(indices, values)`` or dense), index-aligned with ``examples``;
+            ``None`` = no next ply.
+        action_size: Dense action-space size the sparse targets index into.
+        encode_fn: ``IGame.encode_compact`` for the game the boards came from.
+        batch_size: Forward-pass batch size (memory knob only).
+    """
+    if len(examples) != len(replies):
+        raise ValueError(f"{len(examples)} examples but {len(replies)} reply targets; must be index-aligned")
+    if not examples:
+        raise ValueError("evaluate_reply_head needs at least one example")
+
+    scored = [index for index, target in enumerate(replies) if target is not None]
+    if not scored:
+        return None
+
+    ce_sum = 0.0
+    entropy_sum = 0.0
+    top1_hits = 0
+    for start in range(0, len(scored), batch_size):
+        batch_indices = scored[start : start + batch_size]
+        planes = np.stack([encode_fn(examples[index][0]) for index in batch_indices])
+        _, _, aux = predictor.predict_encoded_aux(planes)
+        if "reply" not in aux:
+            return None
+        predicted = aux["reply"].astype(np.float64)
+        targets = np.stack([as_dense(replies[index], action_size) for index in batch_indices]).astype(np.float64)
+        log_predicted = np.log(np.clip(predicted, _LOG_EPS, None))
+        ce_sum += float(-(targets * log_predicted).sum())
+        positive = targets > 0.0
+        entropy_sum += float(-(targets[positive] * np.log(targets[positive])).sum())
+        top1_hits += int((predicted.argmax(axis=1) == targets.argmax(axis=1)).sum())
+
+    n = len(scored)
+    policy_ce = ce_sum / n
+    target_entropy = entropy_sum / n
+    return ReplyHeadMetrics(
+        policy_ce=policy_ce,
+        policy_kl=policy_ce - target_entropy,
+        target_entropy=target_entropy,
+        top1_accuracy=top1_hits / n,
+        n_positions=n,
+        n_skipped=len(examples) - n,
     )
 
 
@@ -305,6 +496,11 @@ class ImitationDiagnostics:
             move is the expert's move. Legal-restricted on purpose: an illegal
             high-prior action never plays, so it should not cost the net a hit
             it would score at the board.
+        top3_accuracy: Fraction of positions where the expert's move is in the
+            predictor's top three *legal* moves. Less brittle than top-1 in a game
+            with several near-equivalent good moves, so it moves earlier and more
+            smoothly under a small improvement — which is why the A/B harness reads
+            both (plan N1).
         n_positions: Held-out positions evaluated.
         calibration: One :class:`ColourValueCalibration` per side-to-move
             present, ordered by ``player`` ascending (Black -1 first).
@@ -325,6 +521,7 @@ class ImitationDiagnostics:
     calibration: tuple[ColourValueCalibration, ...]
     value_mse: float = 0.0
     colour_only_value_mse: float = 0.0
+    top3_accuracy: float = 0.0
 
     @property
     def value_skill(self) -> float:
@@ -374,6 +571,7 @@ def evaluate_imitation_diagnostics(
         )
 
     top1_hits = 0
+    top3_hits = 0
     predicted_values = np.empty(len(examples), dtype=np.float64)
     for start in range(0, len(examples), batch_size):
         batch = examples[start : start + batch_size]
@@ -382,8 +580,12 @@ def evaluate_imitation_diagnostics(
         predicted_values[start : start + len(batch)] = values.astype(np.float64)
         for row, (_board, pi, _value) in enumerate(batch):
             support = pi[0] if isinstance(pi, tuple) else np.flatnonzero(pi)
-            best_legal = int(support[int(np.argmax(policies[row][support]))])
-            top1_hits += int(best_legal == int(expert_actions[start + row]))
+            expert = int(expert_actions[start + row])
+            # One argsort over the legal support serves both ranks; ``[::-1]`` puts the
+            # most probable legal move first.
+            ranked = support[np.argsort(policies[row][support])[::-1]]
+            top1_hits += int(int(ranked[0]) == expert)
+            top3_hits += int(expert in {int(action) for action in ranked[:_TOP_K_AGREEMENT]})
 
     player_arr = np.asarray(players, dtype=np.int64)
     outcomes = np.array([value for _board, _pi, value in examples], dtype=np.float64)
@@ -399,6 +601,7 @@ def evaluate_imitation_diagnostics(
         calibration=calibration,
         value_mse=float(np.mean((predicted_values - outcomes) ** 2)),
         colour_only_value_mse=float(np.mean((colour_only - outcomes) ** 2)),
+        top3_accuracy=top3_hits / len(examples),
     )
 
 

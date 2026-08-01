@@ -297,6 +297,8 @@ class INeuralNetWrapper(IPolicyValuePredictor, Protocol):
         metrics: MetricsCollector | None = None,
         eval_set: EvalSet | None = None,
         score_margins: Sequence[float | None] | None = None,
+        ownership_targets: Sequence[NDArray | None] | None = None,
+        reply_targets: Sequence[object | None] | None = None,
     ) -> None:
         """Train the neural network with full passes over the replay buffer.
 
@@ -312,8 +314,20 @@ class INeuralNetWrapper(IPolicyValuePredictor, Protocol):
             score_margins: Optional raw final score margins from the side to move,
                 index-aligned with ``examples`` (``None`` per entry = no margin for
                 that position). Only consumed when the net has the auxiliary score
-                head. Deliberately a separate argument so ``ProcessedExample`` keeps
-                its shape and the self-play pipeline never carries a score target.
+                head.
+            ownership_targets: Optional per-position ``{-1, 0, +1}`` final-ownership
+                maps in the position's own canonical frame, index-aligned with
+                ``examples`` (``None`` per entry = no final board). Only consumed
+                when the net has the auxiliary ownership head.
+            reply_targets: Optional per-position opponent-reply distributions over
+                the action space, index-aligned with ``examples`` (``None`` per entry
+                = no next ply). Only consumed when the net has the auxiliary reply
+                head.
+
+        Note:
+            The auxiliary targets are deliberately separate arguments so
+            ``ProcessedExample`` keeps its shape and the self-play pipeline never
+            carries one. No auxiliary head is read when choosing a move.
         """
         ...
 

@@ -74,13 +74,24 @@ def accepted_mask(arena_data: pd.DataFrame, update_threshold: float) -> pd.Serie
     )
 
 
-def _has_score_loss(df: pd.DataFrame) -> bool:
-    """Whether this run trained the auxiliary score head (plan S4).
+# Auxiliary-head loss columns and their series labels, in the order the heads are
+# built. Each is written only by runs with that head on, so its absence is the normal
+# case and simply means one fewer series.
+_AUX_LOSS_SERIES: tuple[tuple[str, str], ...] = (
+    ("score_loss", "Score (auxiliary)"),
+    ("ownership_loss", "Ownership (auxiliary)"),
+    ("reply_loss", "Reply (auxiliary)"),
+)
 
-    The column is written only by runs with the head on, so its absence is the
-    normal case and simply means one fewer series.
-    """
-    return "score_loss" in df.columns and bool(df["score_loss"].notna().any())
+# Dash patterns so several auxiliary series stay distinguishable in one legend.
+_AUX_DASH = ("dot", "dash", "dashdot")
+
+
+def _present_aux_losses(df: pd.DataFrame) -> list[tuple[str, str]]:
+    """The auxiliary-loss ``(column, label)`` pairs this run actually recorded."""
+    return [
+        (column, label) for column, label in _AUX_LOSS_SERIES if column in df.columns and bool(df[column].notna().any())
+    ]
 
 
 def make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
@@ -91,8 +102,8 @@ def make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
     raw per-batch values avoids the running-mean reset spikes that used to
     appear at epoch boundaries.
 
-    Runs with the auxiliary score head on get a fourth series (its raw MSE, before
-    the ``score_loss_weight`` that scales it into the total).
+    Runs with an auxiliary head on get an extra series per head (its raw loss, before
+    the ``<head>_loss_weight`` that scales it into the total).
     """
     sorted_df = df.sort_values(["generation", "epoch", "batch_number"])
     last_epoch = sorted_df.groupby("generation")["epoch"].max()
@@ -102,8 +113,9 @@ def make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
         "v_loss": ("v_loss", "mean"),
         "total_loss": ("total_loss", "mean"),
     }
-    if _has_score_loss(df):
-        aggregations["score_loss"] = ("score_loss", "mean")
+    aux_losses = _present_aux_losses(df)
+    for column, _label in aux_losses:
+        aggregations[column] = (column, "mean")
     agg = last_epoch_df.groupby("generation").agg(**aggregations).reset_index().sort_values("generation")
 
     fig = go.Figure()
@@ -134,14 +146,14 @@ def make_loss_per_generation(df: pd.DataFrame) -> go.Figure:
             line={"width": 2, "color": _COLORS["tertiary"]},
         )
     )
-    if "score_loss" in agg.columns:
+    for position, (column, label) in enumerate(aux_losses):
         fig.add_trace(
             go.Scatter(
                 x=agg["generation"],
-                y=agg["score_loss"],
+                y=agg[column],
                 mode="lines+markers",
-                name="Score (auxiliary)",
-                line={"width": 2, "color": _COLORS["accent"], "dash": "dot"},
+                name=label,
+                line={"width": 2, "color": _COLORS["accent"], "dash": _AUX_DASH[position % len(_AUX_DASH)]},
             )
         )
 
@@ -189,8 +201,7 @@ def make_loss_timeline(df: pd.DataFrame) -> go.Figure:
         ("pi_loss", "Policy", _COLORS["secondary"]),
         ("v_loss", "Value", _COLORS["tertiary"]),
     ]
-    if _has_score_loss(sorted_df):
-        series.append(("score_loss", "Score (auxiliary)", _COLORS["accent"]))
+    series.extend((column, label, _COLORS["accent"]) for column, label in _present_aux_losses(sorted_df))
 
     fig = go.Figure()
 

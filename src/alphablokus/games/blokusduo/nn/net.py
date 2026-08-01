@@ -8,8 +8,18 @@ import torch
 import torch.nn as nn
 from torch.nn import functional as F
 
+from alphablokus.aux_heads import AUX_HEAD_NAMES
+
 if TYPE_CHECKING:
     from alphablokus.config import NetConfig
+
+# Ownership classes per cell, in the order the head's channels emit them:
+# 0 = the opponent of the side to move holds it at the end of the game,
+# 1 = nobody holds it, 2 = the side to move holds it. The class index is
+# ``ownership + 1`` for an ownership map in ``{-1, 0, +1}``, so the label is
+# monotone in "how good for me" and the frame is the position's own canonical
+# frame — the same frame the input planes are in.
+OWNERSHIP_CLASSES = 3
 
 
 def calc_conv2d_output(
@@ -205,50 +215,29 @@ class AlphaBlokusDuo(nn.Module):
             nn.Tanh(),
         )
 
-        if config.policy_head == "conv":
-            # Action space = board_rows · board_cols · num_orientations + 1 (pass).
-            cells = self.board_rows * self.board_cols
-            num_orientations, remainder = divmod(self.action_size - 1, cells)
-            if remainder != 0:
-                raise ValueError(
-                    f"action_size {self.action_size} is not cells·O+1 for a "
-                    f"{self.board_rows}×{self.board_cols} board; conv head needs "
-                    "an (orientation, cell) action space."
-                )
-            self.policy_head: nn.Module = ConvPolicyHead(
-                num_filters=config.num_filters,
-                num_orientations=num_orientations,
-                board_rows=self.board_rows,
-                board_cols=self.board_cols,
-            )
-        else:
-            self.policy_head = nn.Sequential(
-                nn.Conv2d(
-                    in_channels=config.num_filters,
-                    out_channels=2,
-                    kernel_size=1,
-                    stride=1,
-                    bias=False,
-                ),
-                nn.BatchNorm2d(num_features=2),
-                nn.ReLU(),
-                nn.Flatten(),
-                nn.Linear(2 * conv_out, self.action_size),
-            )
+        self.policy_head: nn.Module = self._build_policy_head(config, conv_out)
 
-        # Auxiliary score head: a near-copy of the value head, predicting the bounded
+        # ------------------------------------------------------------------ #
+        # Auxiliary heads
+        # ------------------------------------------------------------------ #
+        # Every one of these is **off by default** and **never consulted when
+        # choosing a move**: ``forward`` appends the built ones after ``(log_pi,
+        # value)`` and ``predict``/``predict_batch`` drop them all.
+        #
+        # They are constructed **after every primary head, in the fixed
+        # ``AUX_HEAD_NAMES`` order, appending only**, so that at a fixed seed the
+        # trunk, value head, policy head and every *earlier* auxiliary head
+        # initialise identically whether or not a later one exists. That is what
+        # makes a one-head-at-a-time A/B measure the head rather than a shifted
+        # RNG stream (docs/plans/supervised-network-improvements.md N1).
+        #
+        # The arity of ``forward`` varies rather than absent heads returning
+        # ``None``: a ``None`` in a module's output makes it untraceable, which
+        # would break the web ONNX export even with every head switched off.
+
+        # Score head — a near-copy of the value head predicting the bounded
         # score-margin target ``tanh(margin / score_scale)`` (see
-        # ``alphablokus.training.score_target``). Built only when asked, so with
-        # ``score_head=False`` the module — and therefore its state dict, its parameter
-        # count and its forward output — is exactly the pre-score-head net.
-        #
-        # Constructed **last, after every other head**, so that at a fixed seed the
-        # trunk, value head and policy head initialise identically whether or not the
-        # score head exists: the S7 A/B arms then genuinely differ by the head alone,
-        # not by a shifted RNG stream.
-        #
-        # **Never consulted when choosing a move**: ``forward`` appends it as a third
-        # element and ``predict``/``predict_batch`` drop it.
+        # ``alphablokus.training.score_target``).
         self.score_head: nn.Module | None = None
         if config.score_head:
             self.score_head = nn.Sequential(
@@ -268,6 +257,79 @@ class AlphaBlokusDuo(nn.Module):
                 nn.Tanh(),
             )
 
+        # Ownership head — a bare 1×1 convolution to three logit planes over the
+        # board: cell held at the end of the game by the side to move, by their
+        # opponent, or by neither. Deliberately a single convolution and no
+        # normalisation: the target is per-cell and spatially local to the
+        # trunk's own features, so anything deeper would be learning capacity
+        # spent in the *head* rather than pressure applied to the *trunk*, which
+        # is the whole point of an auxiliary target.
+        self.ownership_head: nn.Module | None = None
+        if config.ownership_head:
+            self.ownership_head = nn.Conv2d(
+                in_channels=config.num_filters,
+                out_channels=OWNERSHIP_CLASSES,
+                kernel_size=1,
+                stride=1,
+                bias=True,
+            )
+
+        # Opponent-reply head — a second policy-shaped head over the same action
+        # space, predicting the opponent's reply to this position. Built by the
+        # same factory as the main policy head so the two cannot drift apart in
+        # architecture (and so ``policy_head: "fc"`` configs get an fc reply head).
+        self.reply_head: nn.Module | None = None
+        if config.reply_head:
+            self.reply_head = self._build_policy_head(config, conv_out)
+
+        # Which auxiliary heads this net actually built, in ``forward``'s output
+        # order. The single source of truth for unpacking a forward output —
+        # positional indexing is wrong the moment one head is on and an earlier
+        # one is off. Read by ``BaseNNetWrapper._split_net_outputs``.
+        self.aux_head_names: tuple[str, ...] = tuple(
+            name for name in AUX_HEAD_NAMES if getattr(self, name, None) is not None
+        )
+
+    def _build_policy_head(self, config: NetConfig, conv_out: int) -> nn.Module:
+        """Construct a policy-shaped head: ``(B, action_size)`` raw logits.
+
+        Shared by the main policy head and the auxiliary opponent-reply head, which
+        must have the same shape by definition — the reply is a move like any other.
+
+        Raises:
+            ValueError: If ``policy_head="conv"`` but the action space is not
+                ``cells·O + 1`` for this board, which the conv head requires.
+        """
+        if config.policy_head == "conv":
+            # Action space = board_rows · board_cols · num_orientations + 1 (pass).
+            cells = self.board_rows * self.board_cols
+            num_orientations, remainder = divmod(self.action_size - 1, cells)
+            if remainder != 0:
+                raise ValueError(
+                    f"action_size {self.action_size} is not cells·O+1 for a "
+                    f"{self.board_rows}×{self.board_cols} board; conv head needs "
+                    "an (orientation, cell) action space."
+                )
+            return ConvPolicyHead(
+                num_filters=config.num_filters,
+                num_orientations=num_orientations,
+                board_rows=self.board_rows,
+                board_cols=self.board_cols,
+            )
+        return nn.Sequential(
+            nn.Conv2d(
+                in_channels=config.num_filters,
+                out_channels=2,
+                kernel_size=1,
+                stride=1,
+                bias=False,
+            ),
+            nn.BatchNorm2d(num_features=2),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.Linear(2 * conv_out, self.action_size),
+        )
+
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, ...]:
         """
         Forward pass through the network.
@@ -278,19 +340,27 @@ class AlphaBlokusDuo(nn.Module):
 
         Returns:
             ``(pi, v)`` — log-softmax policy over all actions (batch_size x 17837)
-            and the value estimate for the current player (batch_size x 1) — plus a
-            third element ``score`` (batch_size x 1) **only when the auxiliary score
-            head is built** (``NetConfig.score_head``).
+            and the value estimate for the current player (batch_size x 1) — followed
+            by one element per **built** auxiliary head, in ``AUX_HEAD_NAMES`` order:
 
-            The arity varies rather than the third element being ``None``: a ``None``
-            in a module's output makes it untraceable ("Only tensors, lists, tuples of
+            - ``score`` (batch_size x 1), ``NetConfig.score_head``;
+            - ``ownership`` (batch_size x 3 x rows x cols) raw logits,
+              ``NetConfig.ownership_head``;
+            - ``reply`` (batch_size x action_size) **log-softmax**,
+              ``NetConfig.reply_head``.
+
+            The arity varies rather than absent heads being ``None``: a ``None`` in a
+            module's output makes it untraceable ("Only tensors, lists, tuples of
             tensors ... can be output from traced functions"), which would break the
-            web ONNX export even with the head switched off. With the head off the
-            output is byte-for-byte the pre-score-head 2-tuple.
+            web ONNX export even with every head switched off. With all heads off the
+            output is byte-for-byte the pre-auxiliary-head 2-tuple.
 
-            Callers unpack via ``BaseNNetWrapper._split_net_outputs``; the score is
-            dropped by ``predict``/``predict_batch``, so **no code path consults it
-            when choosing a move**.
+            Because the arity varies, callers must unpack via
+            ``BaseNNetWrapper._split_net_outputs`` (which consults
+            ``aux_head_names``) and never by position — with the score head off and
+            the ownership head on, element 2 is the *ownership* map. Every auxiliary
+            output is dropped by ``predict``/``predict_batch``, so **no code path
+            consults one when choosing a move**.
         """
 
         x = x.view(-1, self.num_input_channels, self.board_rows, self.board_cols)
@@ -302,6 +372,13 @@ class AlphaBlokusDuo(nn.Module):
         value = self.value_head(features)
 
         log_pi = F.log_softmax(pi_logits, dim=1)
-        if self.score_head is None:
+        if not self.aux_head_names:
             return log_pi, value
-        return log_pi, value, self.score_head(features)
+        outputs = [log_pi, value]
+        if self.score_head is not None:
+            outputs.append(self.score_head(features))
+        if self.ownership_head is not None:
+            outputs.append(self.ownership_head(features))
+        if self.reply_head is not None:
+            outputs.append(F.log_softmax(self.reply_head(features), dim=1))
+        return tuple(outputs)

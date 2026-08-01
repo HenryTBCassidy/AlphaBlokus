@@ -229,8 +229,12 @@ df = pd.read_parquet(config.training_data_directory)  # or any of the 13
 | `batch_number` | `int` | Batch index within the epoch |
 | `pi_loss` | `float64` | Policy-head loss for this batch (`F.kl_div`, batch-mean) |
 | `v_loss` | `float64` | Value head MSE loss for this batch |
-| `total_loss` | `float64` | `pi_loss + v_loss` (+ `score_loss_weight × score_loss` when the score head is on) for this batch |
-| `score_loss` | `float64` | **Optional.** Auxiliary score-head MSE against `tanh(margin / score_scale)`, over the batch positions that have a margin. Reserved for the auxiliary score head. **No shipped run writes it yet** — the only caller that supplies margins (`scripts/distill_sl.py`) passes no `MetricsCollector`, and the only caller that passes one (`Coach`) supplies no margins, so older runs' schema is unchanged and the report simply omits the series. See `docs/plans/score-auxiliary-target.md`. |
+| `total_loss` | `float64` | `pi_loss + v_loss`, plus `<head>_loss_weight × <head>_loss` for each auxiliary head that is on, for this batch |
+| `score_loss` | `float64` | **Optional.** Auxiliary score-head MSE against `tanh(margin / score_scale)`, over the batch positions that have a margin. See `docs/plans/score-auxiliary-target.md`. |
+| `ownership_loss` | `float64` | **Optional.** Auxiliary ownership-head cross-entropy against the final board, averaged over the batch **cells** that have a label (so it starts at ln 3 ≈ 1.10). See `docs/plans/supervised-network-improvements.md` N4. |
+| `reply_loss` | `float64` | **Optional.** Auxiliary opponent-reply-head KL against the next ply's policy target, over the batch positions that have a next ply. See `docs/plans/supervised-network-improvements.md` N5. |
+
+> **No shipped run writes any of the three auxiliary columns yet.** The only caller that supplies auxiliary targets (`scripts/distill_sl.py`) passes no `MetricsCollector` — it writes its own run JSON — and the only caller that passes one (`Coach`) supplies no targets. So older runs' schema is unchanged, the report simply omits the series, and the auxiliary numbers for an A/B come from the trainer's JSON (`scripts/ab_harness.py` reads them there).
 
 > Earlier versions also wrote `average_pi_loss` / `average_v_loss` / `average_loss` running-mean columns. These were **removed** — they reset every epoch and produced misleading start-of-epoch spikes; the reporting layer smooths the raw per-batch losses instead.
 
@@ -445,8 +449,8 @@ Every `MetricsCollector.log_*` call has a corresponding `wandb.log` payload, nam
 | `progress/*` | `log_progress`, auto-augmented in `_publish` | Per log call | `progress/wall_clock_seconds` (self) | `generation`, `epoch`, `episode`, `batch`, `generation_fraction`, `eta_seconds`, `wall_clock_seconds` |
 | `self_play/*` | `log_self_play_profiling` | Per self-play episode | `global_episode` | `num_moves`, `total_sims`, `search_time_s`, `inference_time_s`, `sims_per_second`, `inference_fraction`, `leaf_expansions`, `tree_size`, `policy_entropy` |
 | `self_play_per_gen/*` | `_publish_self_play_per_gen` (flush) | Per generation | `generation` | aggregates: `policy_entropy_mean/std`, `num_moves_mean`, `tree_size_mean`, `sims_per_second_mean`, `inference_fraction_mean` |
-| `training/*` | `log_training` | Per training batch | `global_batch` | `pi_loss`, `v_loss`, `total_loss`, `score_loss` (score head only), plus `network_policy_entropy`, `network_top1_accuracy`, `network_top5_accuracy`, `value_calibration_error` (per epoch) |
-| `training_per_gen/*` | `_publish_training_per_gen` (flush) | Per generation | `generation` | aggregates: `pi_loss`, `v_loss`, `total_loss`, `score_loss` (score head only), `network_policy_entropy`, `network_top1_accuracy`, `network_top5_accuracy`, `value_calibration_error` |
+| `training/*` | `log_training` | Per training batch | `global_batch` | `pi_loss`, `v_loss`, `total_loss`, `score_loss` / `ownership_loss` / `reply_loss` (that head only), plus `network_policy_entropy`, `network_top1_accuracy`, `network_top5_accuracy`, `value_calibration_error` (per epoch) |
+| `training_per_gen/*` | `_publish_training_per_gen` (flush) | Per generation | `generation` | aggregates: `pi_loss`, `v_loss`, `total_loss`, `score_loss` / `ownership_loss` / `reply_loss` (that head only), `network_policy_entropy`, `network_top1_accuracy`, `network_top5_accuracy`, `value_calibration_error` |
 | `arena/*` | `log_arena` | Per generation | `generation` | `wins`, `losses`, `draws`, `win_rate`, `accepted`, `acceptance_rate` (running) |
 | `elo/*` | `log_elo` | Per generation | `generation` | `rating`, `diff_vs_baseline`, `baseline_rating`, `score_rate`, `wins`, `losses`, `draws` |
 | `minimax/*` | `log_minimax` (TTT only) | Per generation | `generation` | `win_rate`, `draw_rate`, `loss_rate`, `wins`, `losses`, `draws` |

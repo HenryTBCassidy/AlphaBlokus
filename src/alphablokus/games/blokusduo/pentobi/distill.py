@@ -42,6 +42,15 @@ distribution, and v1's one-hot was the degenerate case — so the work is all he
   :func:`mix_examples` combines the three sources — opening rows, v2 game rows, v1's
   corpus as a mid-game supplement — at requested proportions rather than natural sizes.
 
+**The auxiliary heads' targets are derived here too, from data already on disk.**
+:func:`build_training_examples` returns :class:`TrainingRow` items that carry, alongside
+the ``(board, policy, value)`` example, the score head's ``margin`` (a stored column),
+the ownership head's final-board map (:func:`final_ownership`, a replay of the stored
+actions — no regeneration) and the reply head's target (the *next* position's policy
+target, by reference). They ride on the row rather than in parallel lists because
+:func:`mix_examples` resamples and shuffles, which no side list could survive in
+alignment.
+
 Shards contribute in proportion to the games they hold: :func:`sample_games` draws
 uniformly over the pooled game list (never "first N shards"), so a subsampled corpus
 keeps the deterministic opening keys' even coverage.
@@ -88,8 +97,8 @@ _LOG_EVERY_GAMES = 1_000
 # subtrees are not accidentally all tiny ones.
 _HOLDOUT_STRATA = 5
 
-# What :func:`mix_examples` resamples: a bare ``CorpusExample``, or an
-# ``(example, margin)`` pair when the score head's target has to travel with it.
+# What :func:`mix_examples` resamples — in practice a :class:`TrainingRow`, kept
+# generic so the mixer stays a pure resampler with no knowledge of the payload.
 TPoolItem = TypeVar("TPoolItem")
 
 
@@ -477,6 +486,86 @@ def measure_holdout_leakage(
     )
 
 
+@dataclass(frozen=True, slots=True)
+class TrainingRow:
+    """One net-ready training position plus every auxiliary head's target for it.
+
+    The auxiliary targets travel **with** the example rather than in parallel lists,
+    because :func:`mix_examples` resamples and shuffles the pool: a side list could not
+    survive ``rng.choice`` in alignment, and a misalignment would train each head on
+    other positions' targets while every other metric looked fine.
+
+    ``ProcessedExample`` itself is untouched — ``example`` is exactly the
+    ``(compact_board, sparse_policy, value)`` tuple the trainer has always consumed, and
+    the auxiliary targets reach ``BaseNNetWrapper.train`` as separate arguments, so the
+    self-play pipeline never carries one.
+
+    Attributes:
+        example: ``(compact_board, sparse_policy, value)``.
+        margin: Final score margin from the side to move; ``None`` = no single margin
+            (v2 opening rows). Score head, plan S5.
+        ownership: ``(rows, cols)`` ``{-1, 0, +1}`` map of who holds each cell when the
+            game ends, **in this position's own canonical frame** (``+1`` = the side to
+            move); ``None`` = no final board. Ownership head, plan N4.
+        reply: The opponent's next-ply distribution — literally the *next* position's
+            policy target, so it costs one shared reference and no extra memory;
+            ``None`` on each game's final position. Reply head, plan N5.
+    """
+
+    example: CorpusExample
+    margin: float | None
+    ownership: NDArray[np.int8] | None
+    reply: tuple[NDArray[np.int32], NDArray[np.float32]] | None
+
+
+def final_ownership(game: BlokusDuoGame, rows: CorpusGameRows) -> NDArray[np.int8] | None:
+    """The finished board's ownership map for one corpus game, White-positive.
+
+    Derived by **replaying the stored actions** from the game's first stored position —
+    no regeneration, no engine, no extra corpus column. Corpus games start after a random
+    (v1) or DAG-chosen (v2) opening prefix, so the replay begins at ``rows.boards[0]``
+    rather than at the empty board, and every subsequent ply through the game's end is
+    stored.
+
+    Returns:
+        A ``(rows, cols)`` int8 array: ``+1`` where **White** holds the cell at the end
+        of the game, ``-1`` Black, ``0`` neither. ``None`` when the replay does not reach
+        a terminal position, which would mean the stored rows are not a whole game — the
+        honest answer being "no final board here", never a half-played one.
+
+    Note:
+        The stored boards are canonical (side-to-move positive) and the recorded action
+        indices are **colour-free** — an action is a ``(square, piece-orientation)`` pair
+        — so replaying from a canonical board with an alternating player yields the final
+        grid in ``rows.players[0]``'s frame; multiplying by ``rows.players[0]`` puts it
+        in the absolute White-positive frame. Callers convert to a *position's* frame by
+        multiplying by that position's ``player`` (see :func:`build_training_examples`).
+    """
+    board = game.board_from_compact(rows.boards[0])
+    player = 1  # ``boards[0]`` is canonical, so its mover is the positive side here.
+    for action in rows.actions:
+        # Re-derive the forced passes the v2 schema deliberately does not store. A pass
+        # carries no target and no choice was made, so ``write_game_shard`` omits it and
+        # ``validate_game_shard`` re-derives it the same way — a side with no placement
+        # *must* pass, so it is a function of the position. Replaying the stored actions
+        # with strict alternation therefore places every ply after the first skipped pass
+        # for the **wrong colour**: measured on the real corpus, 16.8% of games contain
+        # such a gap. Silent, because the head is then scored against its own bad labels.
+        while not game.valid_move_masking(board, player)[: game.action_codec.pass_action_index].any():
+            board, player = game.get_next_state(board, player, game.action_codec.pass_action_index)
+        board, player = game.get_next_state(board, player, action)
+    if game.get_game_ended(board, player) == 0.0:
+        logger.warning(
+            "game {}: replaying its {} stored actions does not reach a terminal position, so it has no "
+            "final board — the ownership target is masked for every one of its rows",
+            rows.game_id,
+            len(rows.actions),
+        )
+        return None
+    absolute = np.asarray(board.to_compact(), dtype=np.int8) * rows.players[0]
+    return np.sign(absolute).astype(np.int8)
+
+
 def build_training_examples(
     game: BlokusDuoGame,
     games: Sequence[CorpusGameRows],
@@ -484,8 +573,9 @@ def build_training_examples(
     epsilon: float,
     augment: bool,
     temperature: float = 1.0,
-) -> tuple[list[CorpusExample], list[float | None]]:
-    """Turn corpus games into net-ready ``(board, sparse_policy, value)`` examples.
+    with_ownership: bool = False,
+) -> list[TrainingRow]:
+    """Turn corpus games into net-ready :class:`TrainingRow` items.
 
     Each position yields its smoothed-target example, and — with ``augment`` — its
     main-diagonal symmetry twin directly after it: the transposed compact board with
@@ -498,18 +588,16 @@ def build_training_examples(
     ``actions``/``players``/``values`` of ``games`` — the alignment the held-out
     diagnostics rely on.
 
-    Returns ``(examples, margins)`` — the score head's raw targets, index-aligned with
-    ``examples`` including the symmetry twin, which shares its original's margin because
-    transposing a board does not change the score
-    (docs/plans/score-auxiliary-target.md S5). Returned alongside rather than folded into
-    the example tuple: ``ProcessedExample`` keeps its ``(board, policy, value)`` shape, so
-    the score target never enters the self-play pipeline.
-
     **v2 corpora take the stored soft target instead.** When ``rows.policies`` is present
     the target is Pentobi's own distribution, softened by ``temperature`` and (only if
     ``epsilon > 0``) floored over the legal set; ``smooth_policy`` is not involved. The
     support is asserted to lie inside the position's legal moves — a violation means the
     corpus and the rules engine have desynced.
+
+    **The auxiliary targets each follow the example's own transform.** The symmetry twin
+    shares its original's *margin* (transposing a board does not change the score), takes
+    the *transposed* ownership map, and takes the *twin* of the next position's policy as
+    its reply target — never the original's, which would teach the head a reflected move.
 
     Args:
         game: The rules engine (rebuilds boards and legal masks; supplies the
@@ -522,30 +610,99 @@ def build_training_examples(
         temperature: v2 target temperature τ — ``p^(1/τ)`` renormalised over the stored
             support. Confidence softening only: it is order-preserving, so it cannot fix
             a misordered target (see the v2 plan's imitation-error block).
+        with_ownership: Derive each game's final board (:func:`final_ownership`) and
+            attach the per-position ownership map. Off by default so the ownership head's
+            one extra game replay per game is paid only by the arms that use it.
     """
-    examples: list[CorpusExample] = []
-    margins: list[float | None] = []
+    built: list[TrainingRow] = []
     for count, rows in enumerate(games, start=1):
-        stored = rows.policies if rows.policies is not None else (None,) * len(rows.boards)
-        for compact, action, value, margin, policy in zip(
-            rows.boards, rows.actions, rows.values, rows.margins, stored, strict=True
-        ):
-            board = game.board_from_compact(compact)
-            legal = np.flatnonzero(game.valid_move_masking(board, 1)).astype(np.int32)
-            if policy is None:
-                indices, values = smooth_policy(action, legal, epsilon)
-            else:
-                indices, values = soft_target_over_legal(policy, legal, epsilon=epsilon, temperature=temperature)
-            examples.append((compact, (indices, values), value))
-            margins.append(margin)
-            if augment:
-                transposed = np.ascontiguousarray(compact.T)
-                transposed_indices = np.array([game.transpose_action(int(a)) for a in indices], dtype=np.int32)
-                examples.append((transposed, (transposed_indices, values), value))
-                margins.append(margin)
+        built.extend(_rows_for_game(game, rows, epsilon, augment, temperature, with_ownership))
         if count % _LOG_EVERY_GAMES == 0:
-            logger.info("Built examples for {}/{} games ({} positions so far)", count, len(games), len(examples))
-    return examples, margins
+            logger.info("Built examples for {}/{} games ({} positions so far)", count, len(games), len(built))
+    return built
+
+
+def _rows_for_game(
+    game: BlokusDuoGame,
+    rows: CorpusGameRows,
+    epsilon: float,
+    augment: bool,
+    temperature: float,
+    with_ownership: bool,
+) -> list[TrainingRow]:
+    """One corpus game's :class:`TrainingRow` items, twins interleaved when augmenting.
+
+    Built in two passes because the reply target is a *lookahead*: position ``i``'s
+    target is position ``i + 1``'s policy, so every policy has to exist before any row
+    can be assembled. Building per game is also what keeps the last ply of each game
+    masked instead of borrowing the next game's first row.
+    """
+    stored = rows.policies if rows.policies is not None else (None,) * len(rows.boards)
+    policies: list[tuple[NDArray[np.int32], NDArray[np.float32]]] = []
+    twin_policies: list[tuple[NDArray[np.int32], NDArray[np.float32]]] = []
+    for compact, action, policy in zip(rows.boards, rows.actions, stored, strict=True):
+        board = game.board_from_compact(compact)
+        legal = np.flatnonzero(game.valid_move_masking(board, 1)).astype(np.int32)
+        if policy is None:
+            indices, values = smooth_policy(action, legal, epsilon)
+        else:
+            indices, values = soft_target_over_legal(policy, legal, epsilon=epsilon, temperature=temperature)
+        policies.append((indices, values))
+        if augment:
+            transposed_indices = np.array([game.transpose_action(int(a)) for a in indices], dtype=np.int32)
+            twin_policies.append((transposed_indices, values))
+
+    # At most four distinct ownership arrays per game — the final board seen from
+    # either side to move, and the transpose of each for the symmetry twins — held by
+    # reference from every row, so a corpus costs a pointer per row and not 196 bytes.
+    ownership = final_ownership(game, rows) if with_ownership else None
+    by_player: dict[int, NDArray[np.int8] | None] = {1: None, -1: None}
+    by_player_twin: dict[int, NDArray[np.int8] | None] = {1: None, -1: None}
+    if ownership is not None:
+        for side in (1, -1):
+            # ``ownership`` is White-positive; a position's frame makes its own mover
+            # positive, which is exactly a multiply by that position's ``player``.
+            in_frame = (ownership * side).astype(np.int8)
+            by_player[side] = in_frame
+            by_player_twin[side] = np.ascontiguousarray(in_frame.T)
+
+    built: list[TrainingRow] = []
+    last = len(policies) - 1
+
+    def reply_index(index: int) -> int | None:
+        """The row holding the *opponent's* answer to row ``index``, if it is stored.
+
+        Not simply ``index + 1``: a forced pass is never stored (the v2 schema derives
+        it), so when one falls between two rows the next row is the **same** side moving
+        again. Measured on the real corpus, 0.86% of pairs — teaching the head that a
+        player's own follow-up is their opponent's reply. Mask those rather than lie.
+        """
+        if index == last:
+            return None
+        return index + 1 if rows.players[index + 1] != rows.players[index] else None
+
+    for index, (compact, value, margin, player) in enumerate(
+        zip(rows.boards, rows.values, rows.margins, rows.players, strict=True)
+    ):
+        nxt = reply_index(index)
+        built.append(
+            TrainingRow(
+                example=(compact, policies[index], value),
+                margin=margin,
+                ownership=by_player[player],
+                reply=None if nxt is None else policies[nxt],
+            )
+        )
+        if augment:
+            built.append(
+                TrainingRow(
+                    example=(np.ascontiguousarray(compact.T), twin_policies[index], value),
+                    margin=margin,
+                    ownership=by_player_twin[player],
+                    reply=None if nxt is None else twin_policies[nxt],
+                )
+            )
+    return built
 
 
 def soft_target_over_legal(
@@ -588,10 +745,10 @@ def mix_examples(
 ) -> list[TPoolItem]:
     """Combine training pools into one list with the requested sampling proportions.
 
-    Generic in the pool item so a caller that must keep a per-example side value attached
-    — the score head's margin — can mix ``(example, margin)`` pairs through this **same**
-    resampling and shuffle rather than a parallel copy of it, which could not stay aligned
-    through the ``rng.choice`` draws anyway.
+    Generic in the pool item so a caller that must keep per-example side values attached
+    — the auxiliary heads' targets, carried on :class:`TrainingRow` — mixes them through
+    this **same** resampling and shuffle rather than a parallel copy of it, which could
+    not stay aligned through the ``rng.choice`` draws anyway.
 
     The v2 corpus has three sources with wildly different natural sizes — a game harvests
     ~26 rows while a whole opening node is one row, so openings are ~0.6% of the corpus by
@@ -634,8 +791,8 @@ def load_opening_examples(
     temperature: float = 1.0,
     epsilon: float = 0.0,
     augment: bool = False,
-) -> tuple[list[CorpusExample], list[bytes | None], list[float | None]]:
-    """Load the v2 opening dataset as training examples plus their holdout units.
+) -> tuple[list[TrainingRow], list[bytes | None]]:
+    """Load the v2 opening dataset as training rows plus their holdout units.
 
     Opening rows are the positions the whole v2 thesis rests on — depths 1–3 exist in no
     other dataset — and they are stored in their node's key frame, board and policy
@@ -647,15 +804,21 @@ def load_opening_examples(
     and always trains.
 
     Returns:
-        ``(examples, units, margins)`` — index-aligned, with the symmetry twin (when
-        ``augment``) directly after its original and sharing its unit.
+        ``(rows, units)`` — index-aligned, with the symmetry twin (when ``augment``)
+        directly after its original and sharing its unit.
 
-        Every margin is ``None``. An opening node has many games through it, so it has no
-        single score margin, and the opening schema stores none: ``link`` aggregates the
-        playouts' **outcomes** (``outcome_mean``, the sign of each margin) and never their
-        magnitudes. The score head therefore skips these rows — masked out of its loss —
-        rather than being taught an invented number
-        (docs/plans/score-auxiliary-target.md S5).
+        **Every auxiliary target on these rows is ``None``**, and every one for a
+        structural reason rather than an omission:
+
+        - *margin*: an opening node has many games through it, so it has no single score
+          margin, and the opening schema stores none — ``link`` aggregates the playouts'
+          **outcomes** (``outcome_mean``, the sign of each margin) and never their
+          magnitudes (docs/plans/score-auxiliary-target.md S5).
+        - *ownership*: for the same reason there is no single final board.
+        - *reply*: an opening row is a DAG node, not a ply of a specific game, so it has
+          no "next position" whose policy could be the opponent's reply.
+
+        Each head's loss masks them out rather than being taught an invented number.
     """
     # Resolve ancestry across *all* shards first. A node's depth-1 ancestor is very often
     # in a different shard from the node itself, and a per-shard walk simply fails to find
@@ -669,7 +832,7 @@ def load_opening_examples(
             ancestry_rows[name].extend(table.column(name).to_pylist())
     ancestry = _opening_units(ancestry_rows)
 
-    examples: list[CorpusExample] = []
+    built: list[TrainingRow] = []
     units: list[bytes | None] = []
     for path in paths:
         meta = read_opening_meta(path)
@@ -693,14 +856,23 @@ def load_opening_examples(
                 blend_k=blend_k,
             )
             unit = ancestry[int(rows["node_id"][index])]
-            examples.append((compact, (indices, values), value))
+            built.append(
+                TrainingRow(example=(compact, (indices, values), value), margin=None, ownership=None, reply=None)
+            )
             units.append(unit)
             if augment:
                 transposed = np.ascontiguousarray(compact.T)
                 transposed_indices = np.array([game.transpose_action(int(a)) for a in indices], dtype=np.int32)
-                examples.append((transposed, (transposed_indices, values), value))
+                built.append(
+                    TrainingRow(
+                        example=(transposed, (transposed_indices, values), value),
+                        margin=None,
+                        ownership=None,
+                        reply=None,
+                    )
+                )
                 units.append(unit)
-    return examples, units, [None] * len(examples)
+    return built, units
 
 
 def _opening_units(rows: dict[str, list[Any]]) -> dict[int, bytes | None]:

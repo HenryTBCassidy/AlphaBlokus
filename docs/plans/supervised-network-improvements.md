@@ -21,11 +21,11 @@ the score head on `feat/score-auxiliary-head` (built, unmeasured). N3 below *is*
 
 | # | Item | Effort | Priority | Done |
 |---|------|--------|----------|------|
-| N1 | The A/B harness: two runs identical but for one thing, fixed seeds, one metric set, one command | ½ day | High | |
-| N2 | Data-fraction curve (25 / 50 / 100% of the corpus) — makes every later result interpretable | 3 h box GPU | High | |
-| N3 | **Score-head A/B** (code already built — this is `score-auxiliary-target.md` S7) | ½ day box GPU | High | |
-| N4 | Ownership head: predict the final board, per cell | 2 days + ½ day box | High | |
-| N5 | Opponent-reply target: predict the reply distribution from the current position | 1 day + ½ day box | High | |
+| N1 | The A/B harness: two runs identical but for one thing, fixed seeds, one metric set, one command | ½ day | High | ✅ |
+| N2 | Data-fraction curve (25 / 50 / 100% of the corpus) — makes every later result interpretable | 3 h box GPU | High | ✅ |
+| N3 | **Score-head A/B** (code already built — this is `score-auxiliary-target.md` S7) | ½ day box GPU | High | ⚠️ |
+| N4 | Ownership head: predict the final board, per cell | 2 days + ½ day box | High | ✅ built, ⚠️ inconclusive |
+| N5 | Opponent-reply target: predict the reply distribution from the current position | 1 day + ½ day box | High | ✅ built, ⚠️ inconclusive |
 | N6 | Value-label arms: teacher blend λ ∈ {0, 0.3, 0.5}, and outcome-balanced sampling | ½ day + ½ day box | Medium | |
 | N7 | Win/draw/loss value head (IDEAS I8) | 2 days + ½ day box | Medium | |
 | N8 | Global pooling in the trunk — **gated on N4/N5 showing the trunk is the constraint** | 3–4 days + ½ day box | Medium | |
@@ -76,6 +76,67 @@ and then reused. Without this each experiment reinvents its own setup and none a
 **Deliverable:** one command that takes a list of arms and emits a single comparison table plus the
 per-arm JSON. Not a framework — a script that runs `distill_sl.py` twice and diffs the results.
 
+> **As built — `scripts/ab_harness.py`.** The first `--arm` is the control every delta is measured
+> against; each later one names the single thing it varies:
+>
+> ```bash
+> uv run python scripts/ab_harness.py \
+>     --config run_configurations/blokus_cloud_v2.json \
+>     --corpus ~/corpora/pentobi_l9_v2 --out-dir temp/ab/ownership \
+>     --arm control \
+>     --arm replicate \
+>     --arm ownership="--ownership-head" \
+>     --noise-floor-arm replicate --noise-floor-seed 8
+> ```
+>
+> It writes `<out-dir>/<arm>.json` (the untouched `distill_sl.py` run JSON), plus
+> `comparison.md` and `comparison.json`, and prints the table.
+>
+> **Three mechanisms make an unfair comparison hard to build**, rather than merely discouraged:
+>
+> 1. **Data and protocol are harness-level.** Corpus, seed, `--max-games`, holdout fraction,
+>    schedule, LR, τ and the mix weights are given *once* and forwarded verbatim. An arm cannot set
+>    them because they are not arm flags.
+> 2. **Arm flags are allow-listed** to the auxiliary-head switches and their weights. Anything else
+>    is refused *before* a GPU-hour is spent, with a message naming `--allow-varying` as the
+>    deliberate escape hatch — which is then printed in the comparison, so a reader always knows the
+>    control was loosened. (`--allow-varying max-games` — bare, no dashes, since argparse would
+>    otherwise read `--max-games` as the next option — is exactly how N2's data-fraction curve runs
+>    through this harness.)
+> 3. **The corpus is frozen before the first arm starts.** The shards present at launch are
+>    symlinked into `<out-dir>/_snapshot` and every arm reads that. Without it, a corpus still being
+>    generated grows between arms, `--max-games` samples different games for each, and the arms sit
+>    different exams — which is how the first score-head A/B (N3 below) was wasted. Symlinks, so
+>    freezing a 30 GB corpus is free. `--no-freeze-corpus` opts out for a finished corpus.
+> 4. **It re-checks afterwards.** Each arm's run JSON records the settings it *resolved* plus the
+>    **measured** holdout leakage, and those are diffed across arms; so is "did these arms differ in
+>    exactly one head". That last check reads each head's *resolved* weight and scale, not just its
+>    on/off switch, so a loss weight cannot ride along unnoticed with the head under test. Any
+>    disagreement marks the run `comparable: false`, prints a
+>    `NOT COMPARABLE` banner above the table, and exits non-zero. The table is still written —
+>    useful for diagnosis, impossible to mistake for a result.
+>
+> **The noise floor is wired in.** `--noise-floor-arm` names a **replicate**: the control's exact
+> settings, the same games and the same holdout, re-run from a different roll of the initial
+> weights (`--noise-floor-seed`, which reaches `distill_sl.py` as `--init-seed`; reseeding `--seed`
+> as well would re-split the holdout, and the floor would then measure a variation no treatment arm
+> is ever exposed to). Every other arm's delta is annotated `below noise` when
+> it does not exceed the replicate's own movement on that metric. Deltas are signed `(+)`/`(−)` by
+> whether the metric is better high or low, so nobody has to remember that CE improves downward.
+>
+> A head at weight 0 is *not* a usable floor, which is why the example above is not one: the
+> auxiliary heads are built after every primary head, so at a shared seed the trunk, policy head
+> and value head start from identical weights, and a zero-weighted term contributes no gradient.
+> The arm therefore trains bit-identically to the control, its delta is exactly 0 on every metric,
+> and `below noise` could never fire for anybody. The harness refuses that configuration up front —
+> a floor arm must carry no flags and must be differently seeded.
+>
+> The metric set is read from each arm's **best** epoch (arms early-stop at different points):
+> value skill, top-1 and **top-3** agreement (`ImitationDiagnostics.top3_accuracy`, added here),
+> per-colour bias and MSE, each auxiliary head's own loss *against its own baseline*
+> (`evaluate_score_head` / `evaluate_ownership_head` / `evaluate_reply_head` — each returns `None`
+> rather than a fabricated zero for a head the arm did not build), and the leakage figure.
+
 ## N2. Data-fraction curve
 
 Fit at 25%, 50% and 100% of the corpus and plot held-out policy agreement against data volume.
@@ -91,6 +152,31 @@ Read it as: still climbing steeply at 100% ⇒ we are data-limited, and "generat
 highest-value action regardless of what any technique does. Flattening ⇒ the corpus is adequate and
 technique work is the right lever.
 
+> **Measured 2026-07-31** on the partial stage-1 corpus (96×6 net, 6 epochs, seed 0, holdout 0.1),
+> run on the box's idle GPU while generation continued on the CPU:
+>
+> | games | held-out policy CE | top-1 | value skill |
+> | --- | --- | --- | --- |
+> | 1,000 | 4.066 | 0.207 | −0.218 |
+> | 2,000 | 3.713 | 0.231 | −0.203 |
+> | 4,000 | 3.534 | 0.251 | −0.278 |
+>
+> **We are data-limited, decisively.** Doubling the corpus buys ~0.18–0.35 nats of CE and ~2.4
+> points of top-1 each time, with no sign of flattening. Every technique result below has to be
+> read against that: a marginal gain is not evidence the technique is weak, and "generate more
+> games" outranks all of them. It also means the 10,000-game run is worth finishing and a larger
+> corpus after it is worth generating.
+>
+> **The value head is worse than useless — every arm scores negative value skill.** Predicting the
+> outcome from nothing but whose turn it is beats what the net learned, by 15–28%. That is a
+> stronger and more specific finding than the data-fraction curve itself, and it does not improve
+> with data. It is what N6 (value-label arms) and N7 (win/draw/loss head) exist to attack, and it
+> raises their priority above N8.
+>
+> *Caveat:* the corpus was still being written while these ran, so each arm sampled its games from a
+> slightly larger pool than the one before. That adds noise; it cannot manufacture a monotone
+> 0.53-nat improvement, so the trend stands. Re-run on the finished corpus for a clean curve.
+
 ## N3. Score-head A/B
 
 `score-auxiliary-target.md` S7, run under N1's protocol. The code is built and reviewed.
@@ -102,6 +188,18 @@ auxiliary targets help this network on this data at all?* Three arms — no head
 **Read it as:** a clear gain ⇒ auxiliary targets work here, proceed to N4 which is the stronger
 version of the same idea. No gain but no harm ⇒ the *idea* is unproven, and N4 is the better test
 of it before abandoning the family. A loss ⇒ stop, delete the head, skip N4 and N5.
+
+> **Attempted 2026-07-31 — the result must not be read, and the attempt is why N1 exists.** Three
+> arms were run directly through `distill_sl.py` rather than through the harness, and they were not
+> comparable. The corpus was being written while they ran, so each arm globbed a different number of
+> shards and `--max-games 4000` sampled *different games* for each — visible directly in the holdout,
+> which held 11,804 scored rows for one arm and 13,165 for another. The arms sat different exams.
+> `check_comparable` refuses exactly this (`num_games`, `holdout_leakage`), and the harness now
+> freezes a corpus snapshot before running. Re-run through `scripts/ab_harness.py`.
+>
+> For the record, and *not* as a result: CE 3.493 (off) / 3.528 (weight 0) / 3.509 (weight 0.15).
+> The weight-0 arm — which changes nothing that can affect the policy — moved further from the
+> control than the treatment did, which is the shape of pure noise.
 
 ## N4. Ownership head
 
@@ -126,6 +224,66 @@ derivable by replaying the stored actions, no regeneration. Reuses the score hea
 checkpoint-compatibility machinery wholesale. Same rules as the score head: **off by default, never
 read at play time.**
 
+> **As built.** `NetConfig.ownership_head` / `ownership_loss_weight` (default 0.15) build
+> `AlphaBlokusDuo.ownership_head`, a bare `Conv2d(num_filters → 3, 1×1)` — **579 parameters at the
+> 192×12 preset, 0.007% of the net**. Deliberately no normalisation and no depth: an auxiliary
+> target exists to apply pressure to the *trunk*, and anything deeper spends the capacity in the
+> head instead. `BaseNNetWrapper.loss_ownership` is a per-cell cross-entropy averaged over the
+> **unmasked cells only**, so it starts at ln 3 ≈ 1.10 — the same O(1) scale as the value loss,
+> which is what makes `ownership_loss_weight` comparable to `score_loss_weight`. (KataGo's quoted
+> 1.5 is against a differently-normalised loss and is deliberately *not* copied.)
+>
+> **The label is in the position's own canonical frame**, not the absolute one:
+> `distill.final_ownership` returns a White-positive map (replay the stored actions, then multiply
+> by `players[0]`), and each row multiplies that by *its own* `player`, so `+1` always means "the
+> side to move holds this cell". Class index is `ownership + 1`, so the head's channels read
+> opponent / neither / mine. The symmetry twin takes the **transposed** map. Two properties pin
+> this down in tests: the map matches an independent replay from the *empty* board with the real
+> colours, and every cell already occupied in a stored board carries `sign(stored_board)` as its
+> label — an absolute-frame label passes that for White-to-move rows and fails for every
+> Black-to-move one.
+>
+> Rows with no final board are masked, and there are two kinds: v2 opening rows (a DAG node has
+> many games through it) and — should it ever happen — a game whose stored rows do not replay to a
+> terminal position, which `final_ownership` detects and reports rather than labelling a
+> half-played board as final.
+>
+> **Still to run: the box A/B** (N1's harness, `--ownership-head` against a control).
+
+> **Measured 2026-07-31 — first controlled run, and it does not decide anything yet.** Four arms
+> through `scripts/ab_harness.py` on a frozen 400-shard snapshot of the partial corpus (3,565 games,
+> 96×6 net, 6 epochs, seed 0, holdout 0.1, leakage 0.0000 in every arm), on the box's idle GPU while
+> generation continued. `replicate` is the noise floor: identical settings and holdout, different
+> initial weights.
+>
+> | metric | control | replicate (floor) | ownership | reply |
+> | --- | --- | --- | --- | --- |
+> | policy CE | 3.4709 | 3.4558 (**±0.0151**) | 3.4598 (−0.0112, *below noise*) | 3.4503 (−0.0207) |
+> | top-1 | 0.2519 | 0.2528 (**±0.0009**) | 0.2569 (+0.0050) | 0.2559 (+0.0041) |
+> | top-3 | 0.4912 | 0.4950 (**±0.0038**) | 0.4930 (+0.0018, *below noise*) | 0.4893 (−0.0019, *below noise*) |
+> | value skill | −0.1589 | −0.0928 (**±0.0660**) | −0.1829 (−0.0240, *below noise*) | −0.2418 (−0.0829) |
+> | the head's own skill | — | — | **+0.5457**, 74.9% cell accuracy | top-1 0.0986, CE 4.9035 |
+>
+> **What is solid.** The ownership head *works as a head*: 74.9% per-cell accuracy against a 1.096-nat
+> marginal baseline. The target is learnable and the trunk has the capacity to fit it. The reply head
+> also trains, and masks 474 holdout rows that have no opponent reply — the pass-gap masking behaving
+> as designed.
+>
+> **What is not.** Neither head produces a policy gain that clearly beats noise. Ownership is below
+> the floor on CE and top-3. Reply clears the CE floor (−0.021 vs ±0.015) but **damages the value
+> head**: skill −0.083 and value MSE +0.035, both well clear of the floor and both in the wrong
+> direction. Read together with N2 — still climbing steeply at 4,000 games — this is what "the
+> experiment cannot resolve it yet" looks like, not "the technique does not work".
+>
+> **The floor itself is one sample.** A single replicate gives a *lower bound* on run-to-run
+> variation, not an estimate of it: its top-1 delta of 0.0009 is implausibly small and makes the
+> top-1 row read as significant when it probably is not. Before either head is judged, the re-run
+> needs **2–3 replicates** with the floor taken as the largest of their deltas. The harness supports
+> one today; making `--noise-floor-arm` repeatable is the concrete next change.
+>
+> **Verdict: neither adopted, neither rejected.** Re-run on the finished 10,000-game corpus, at more
+> epochs, with multiple replicates. Both heads stay off by default meanwhile.
+
 ## N5. Opponent-reply target
 
 A second policy-shaped head predicting the *opponent's* next move, from the current position.
@@ -142,6 +300,35 @@ it improved *supervised* move prediction — so the evidence covers our phase, n
 **The data is already on disk.** A game row's reply distribution is the *next* row's stored soft
 target; the loader attaches it index-shifted, masking the final ply of each game exactly as the
 score loss masks its gaps. No regeneration.
+
+> **As built.** `NetConfig.reply_head` / `reply_loss_weight` (default 0.15 — KataGo's own weight for
+> this target) build a **second policy head** through the same factory as the first, so the two
+> cannot drift apart in architecture and a `policy_head: "fc"` config gets an fc reply head.
+> **17,756 parameters at the 192×12 preset, 0.22% of the net** (the score head, for
+> comparison, costs 38,211 — 0.47%). `loss_reply` is the same batch-mean
+> KL as `loss_pi`, restricted to the unmasked rows, so the two numbers are directly comparable.
+>
+> **The target is the next row's already-transformed policy target, by reference** — the same object
+> the next example carries, after temperature and any legal-set floor — so attaching replies to a
+> corpus costs one pointer per row and nothing else. Action indices are colour-free
+> (`(square, orientation)`), so no re-indexing is needed across the canonical frame flip; the
+> symmetry twin takes the *twin's* next policy, whose support is transposed.
+>
+> Masking uses an **all-zero** dense row as the sentinel: a real target sums to 1, so it is
+> unambiguous, and `loss_reply` excludes those rows from both the numerator and the denominator.
+> Rows are built **per game**, which is what stops a game's last ply borrowing the next game's
+> first row — the failure mode that would be invisible in every other metric.
+>
+> **Cost note for the box:** with the head on, the DataLoader densifies a *second*
+> full-action-space vector per example (~71 KB), so expect the input pipeline to do roughly twice
+> the per-item work. Watch `dataloader_workers` if the GPU starts starving.
+>
+> **Still to run: the box A/B** (N1's harness, `--reply-head` against a control).
+
+> **Measured 2026-07-31.** Run in the same four-arm comparison as N4 — see the table there. The reply
+> head trains and its masking behaves correctly, its policy CE gain (−0.021) is the largest of the
+> two heads and does clear the noise floor, but it is the only arm that measurably *hurts* the value
+> head. Not adopted, not rejected; re-run on the full corpus with multiple replicates.
 
 ## N6. Value-label arms
 
