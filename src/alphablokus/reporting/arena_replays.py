@@ -1,4 +1,4 @@
-"""Arena replay payloads for the report's interactive game browser.
+"""Arena replay payloads for the report's replay browser.
 
 The browser renders boards client-side, so this module reduces each recorded
 arena game to compact JSON: for every move, the cells the move added (diffed

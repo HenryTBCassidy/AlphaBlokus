@@ -2,8 +2,8 @@
 
 Submodules:
     report        — report orchestrator (``create_html_report``): payload + assets → one HTML file
-    data          — metric tables → JSON payload (signals, verdict, per-section series)
-    arena_replays — compact replay payloads for the client-side game browser
+    data          — metric tables → JSON payload (signals, events, per-section series)
+    arena_replays — compact replay payloads for the client-side replay browser
     assets/       — the report's CSS + JS (package data; no CDN, no build step)
     pentobi_ladder — ladder result JSON persistence
     display*      — per-game board renderers (scripts + ad-hoc tooling)

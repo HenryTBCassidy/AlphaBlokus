@@ -2,33 +2,37 @@
 
 The end-of-run report is a single self-contained HTML page whose charts are
 rendered client-side from one embedded JSON payload. This module builds that
-payload. Design rules, learned the hard way (docs/research/plateau-investigation.md
-R8, docs/research/regression-and-next-steps.md §1.5):
+payload. Design rules:
 
 1. **Every table is optional.** Runs sync partially, schemas evolve, and older
    runs predate newer diagnostics. A missing table renders as an explicit
    "not recorded" state — absence of evidence must be visible, never silent.
-2. **Externally-anchored signals are separated from self-referential ones.**
-   Loss, acceptance and eval-set agreement are measured against the loop's own
-   outputs and can look healthy while the run regresses. Symmetry KL, value
-   symmetry MAE (ground-truth game invariances), the Pentobi ladder and the
-   pooled tournament are the signals that cannot be gamed by the loop, and the
-   payload tags every section accordingly (``anchored``).
-3. **Known failure signatures are computed, not eyeballed.** Exact-0.500 arena
-   scores, sub-binomial score variance, colour pinning, target-entropy collapse
-   and rising symmetry error each get an automatic status.
+2. **The report presents, it does not interpret.** Values, counts and
+   thresholds are stated; what they imply about the run is left to the reader.
+   Prose exists only to say what a metric is.
+3. **Statuses and events are a closed, documented set.** Every automatic flag
+   is a member of :class:`ReportEvent` with a deterministic trigger recorded in
+   :data:`EVENT_DEFINITIONS`, which the report renders as a key so the reader
+   sees the rule and the numbers, not just the label.
+4. **Signals record what they are measured against.** Some are measured against
+   an outside opponent or a game invariance, some against the run's own data;
+   ``anchored`` and ``measured_against`` carry that as plain fact.
 """
 
 from __future__ import annotations
 
 import datetime
 import json
+from dataclasses import dataclass
+from enum import StrEnum
 from typing import TYPE_CHECKING, Any
 
 import pandas as pd
 from loguru import logger
 
 from alphablokus.evaluation.ladder_selection import (
+    DEFAULT_CONSECUTIVE_DROPS,
+    DEFAULT_DROP,
     LadderPoint,
     checkpoint_generation,
     detect_drift,
@@ -43,36 +47,31 @@ if TYPE_CHECKING:
     from alphablokus.config import RunConfig
 
 # ---------------------------------------------------------------------------
-# Signal thresholds — each cites the run that motivated it.
+# Event thresholds.
+#
+# Every number here is quoted verbatim in the report's event key (built from
+# these constants in ``EVENT_DEFINITIONS``, so the key cannot drift from the
+# code). All of them were fitted to two runs from this project's history —
+# ``blokus_paired_gate_rerun`` and ``blokus_cloud_v3`` — the same runs used to
+# demonstrate them, so they are not validated out of sample. The report says so
+# in the key (``CALIBRATION_NOTE``).
 # ---------------------------------------------------------------------------
 
-# Symmetry KL / value-symmetry MAE trend: the paired-gate rerun's KL rose
-# 0.64 → 1.24 (~1.9×) and value MAE 0.10 → 0.25 (~2.5×) while every
-# self-referential signal looked healthy (regression-and-next-steps §1.3).
-# Trend = mean(last k) / mean(first k); a genuinely healthy run (v3) ended
-# roughly where it started.
+# Symmetry KL / value-symmetry MAE trend = mean(last k) / mean(first k).
 _TREND_WARN_RATIO = 1.20
 _TREND_ALERT_RATIO = 1.50
 
-# Self-play target-entropy collapse: gen 17 of the rerun dropped to 0.506 nats
-# against a run median of ~0.85 (ratio 0.60) and preceded the terminal slide
-# (regression-and-next-steps §1.4).
+# Self-play target entropy, as a fraction of the run's own median.
 _ENTROPY_COLLAPSE_RATIO = 0.70
 _ENTROPY_WARN_RATIO = 0.85
 
-# Arena instrument red flags (plateau-investigation §2 B8 / R8c): exact-0.500
-# scores are colour-split clones; score variance far below binomial means
-# something systematic (colour), not net strength, decides games; a white share
-# of decisive games ≥ 85% means the gate is measuring first-mover advantage.
+# Arena score checks: exact-0.500 scores, per-generation score spread against
+# the binomial expectation, and the share of decisive games taken by White.
 _SUB_BINOMIAL_FACTOR = 0.5
 _SUB_BINOMIAL_MIN_GENS = 4
 _COLOUR_PINNED_WHITE_RATE = 0.85
 
-# Pool-Elo slippage. Warn when the run finishes well below its own peak (the
-# keep-best checkpoint, not the final net, is then the run's product — v3
-# ended 46 below its gen-32 peak). Alert when the final net sits clearly below
-# the gen-0 anchor: for a warm-start run that means *worse than the donor*,
-# the rerun's signature (final −44 vs its gen-40 donor).
+# Pooled BayesElo: distance from the run's own peak, and the gen-0 anchor at 0.
 _POOL_ELO_WARN_DROP = 15.0
 _POOL_ELO_ALERT_FINAL_BELOW_ANCHOR = -10.0
 _POOL_ELO_ALERT_DROP = 60.0
@@ -80,6 +79,238 @@ _POOL_ELO_ALERT_DROP = 60.0
 # Bound embedded chart payloads: per-batch loss traces are EWM-smoothed then
 # downsampled to at most this many points per series.
 _TIMELINE_MAX_POINTS = 1200
+
+
+# ---------------------------------------------------------------------------
+# Statuses and events — the closed set the report is allowed to raise
+# ---------------------------------------------------------------------------
+
+
+class SignalStatus(StrEnum):
+    """Severity carried by a signal tile. Four values, no others.
+
+    The values double as CSS class names in ``assets/report.css``.
+    """
+
+    OK = "ok"
+    WARN = "warn"
+    ALERT = "alert"
+    MISSING = "missing"
+
+
+_STATUS_ORDER: dict[SignalStatus, int] = {
+    SignalStatus.MISSING: 0,
+    SignalStatus.OK: 1,
+    SignalStatus.WARN: 2,
+    SignalStatus.ALERT: 3,
+}
+
+
+class ReportEvent(StrEnum):
+    """Every named event the report can raise, as a closed set.
+
+    Each member has an entry in :data:`EVENT_DEFINITIONS` giving the exact
+    trigger condition (with its numeric threshold) and a plain statement of
+    what the measurement indicates. Nothing outside this enum may appear as a
+    flag in the payload.
+    """
+
+    NOT_RECORDED = "not_recorded"
+    ARENA_SCORE_EXACTLY_HALF = "arena_score_exactly_half"
+    ARENA_SCORE_SPREAD_BELOW_BINOMIAL = "arena_score_spread_below_binomial"
+    ARENA_DECISIVE_GAMES_ONE_COLOUR = "arena_decisive_games_one_colour"
+    LADDER_LATEST_BELOW_BEST = "ladder_latest_below_best"
+    LADDER_DRIFT_BREAKER_TRIPPED = "ladder_drift_breaker_tripped"
+    POOL_ELO_BELOW_PEAK = "pool_elo_below_peak"
+    POOL_ELO_FAR_BELOW_PEAK = "pool_elo_far_below_peak"
+    POOL_ELO_BELOW_ANCHOR = "pool_elo_below_anchor"
+    SYMMETRY_TREND_RISING = "symmetry_trend_rising"
+    SYMMETRY_TREND_RISING_STEEPLY = "symmetry_trend_rising_steeply"
+    TARGET_ENTROPY_GENERATION_COLLAPSE = "target_entropy_generation_collapse"
+    TARGET_ENTROPY_LATEST_BELOW_MEDIAN = "target_entropy_latest_below_median"
+
+
+@dataclass(frozen=True)
+class EventDefinition:
+    """One row of the report's event key.
+
+    Attributes:
+        label: The event, named as an event rather than a judgement.
+        status: Severity the event gives the signal that raised it.
+        trigger: The exact condition that fires it, numeric threshold included.
+        means: What the measurement indicates, stated as mechanism — no advice
+            and no claim about whether the run is good.
+    """
+
+    label: str
+    status: SignalStatus
+    trigger: str
+    means: str
+
+
+EVENT_DEFINITIONS: dict[ReportEvent, EventDefinition] = {
+    ReportEvent.NOT_RECORDED: EventDefinition(
+        label="Not recorded",
+        status=SignalStatus.MISSING,
+        trigger="The metric table this signal reads is absent from the run directory.",
+        means="The quantity was never measured for this run. The signal is neither pass nor fail.",
+    ),
+    ReportEvent.ARENA_SCORE_EXACTLY_HALF: EventDefinition(
+        label="Arena score exactly 0.500",
+        status=SignalStatus.ALERT,
+        trigger="A generation's arena score equals 0.500 to within 1e-9.",
+        means=(
+            "Arena games are played deterministically, so two nets of equal strength replay identical "
+            "games: a colour-swapped pair splits 1–1 and the score lands on exactly 0.500. A score of "
+            "exactly 0.500 records that the arena separated the two nets by nothing — it is not a "
+            "measured tie."
+        ),
+    ),
+    ReportEvent.ARENA_SCORE_SPREAD_BELOW_BINOMIAL: EventDefinition(
+        label="Arena score spread below binomial",
+        status=SignalStatus.ALERT,
+        trigger=(
+            f"Standard deviation of the per-generation scores is below {_SUB_BINOMIAL_FACTOR:g}× the "
+            "binomial σ₀ = √(p̄(1−p̄)/n̄) expected at the run's mean score p̄ and mean games per "
+            f"generation n̄, over at least {_SUB_BINOMIAL_MIN_GENS} generations."
+        ),
+        means=(
+            "Scores repeat more closely than independent games of that size would, so something "
+            "identical in every generation is contributing to the result alongside net strength."
+        ),
+    ),
+    ReportEvent.ARENA_DECISIVE_GAMES_ONE_COLOUR: EventDefinition(
+        label="Decisive arena games concentrated in one colour",
+        status=SignalStatus.ALERT,
+        trigger=f"White's share of decisive arena games is at least {_COLOUR_PINNED_WHITE_RATE:.0%}.",
+        means=(
+            "In Blokus Duo the first mover wins ~93–97% of decisive deterministic games, so an unpaired "
+            "arena score varies with which net played White as well as with net strength."
+        ),
+    ),
+    ReportEvent.LADDER_LATEST_BELOW_BEST: EventDefinition(
+        label="Latest ladder evaluation below the run's best",
+        status=SignalStatus.WARN,
+        trigger=(
+            "The most recent mini-ladder weighted score is below the highest one recorded for this run, by "
+            "more than 1e-9. There is no tuned margin: any drop fires it."
+        ),
+        means="The most recently evaluated checkpoint is not the run's highest-scoring checkpoint on the ladder.",
+    ),
+    ReportEvent.LADDER_DRIFT_BREAKER_TRIPPED: EventDefinition(
+        label="Ladder drift breaker tripped",
+        status=SignalStatus.ALERT,
+        trigger=(
+            f"{DEFAULT_CONSECUTIVE_DROPS} consecutive mini-ladder evaluations sit at least "
+            f"{DEFAULT_DROP:.2f} weighted score below the best seen so far "
+            "(evaluation/ladder_selection.py), or MiniLadder/DRIFT_ALARM exists in the run directory."
+        ),
+        means="Ladder score fell and stayed below the run's best across consecutive evaluations.",
+    ),
+    ReportEvent.POOL_ELO_BELOW_PEAK: EventDefinition(
+        label="Pool Elo below the run's peak",
+        status=SignalStatus.WARN,
+        trigger=f"Final pooled rating is at least {_POOL_ELO_WARN_DROP:.0f} Elo below the run's peak rating.",
+        means="The final checkpoint is not the highest-rated checkpoint in the pooled tournament.",
+    ),
+    ReportEvent.POOL_ELO_FAR_BELOW_PEAK: EventDefinition(
+        label="Pool Elo far below the run's peak",
+        status=SignalStatus.ALERT,
+        trigger=f"Final pooled rating is at least {_POOL_ELO_ALERT_DROP:.0f} Elo below the run's peak rating.",
+        means="Same measurement as the event above, past a wider margin.",
+    ),
+    ReportEvent.POOL_ELO_BELOW_ANCHOR: EventDefinition(
+        label="Pool Elo below the gen-0 anchor",
+        status=SignalStatus.ALERT,
+        trigger=(
+            f"Final pooled rating is {_POOL_ELO_ALERT_FINAL_BELOW_ANCHOR:.0f} Elo or lower, the gen-0 "
+            "anchor being 0 by construction."
+        ),
+        means="The final checkpoint rates below the checkpoint the run started from.",
+    ),
+    ReportEvent.SYMMETRY_TREND_RISING: EventDefinition(
+        label="Symmetry error trend rising",
+        status=SignalStatus.WARN,
+        trigger=(
+            f"mean of the last k generations ÷ mean of the first k is at least {_TREND_WARN_RATIO:.2f}, "
+            "k = min(3, generations ÷ 3), needing at least 4 generations. Applies to policy symmetry KL "
+            "and to value symmetry MAE."
+        ),
+        means=(
+            "The board's symmetries are exact game invariances, so the true policy and value are identical "
+            "across them. A rising trend means the net's outputs agree less across those transforms at the "
+            "end of the run than at the start."
+        ),
+    ),
+    ReportEvent.SYMMETRY_TREND_RISING_STEEPLY: EventDefinition(
+        label="Symmetry error trend rising steeply",
+        status=SignalStatus.ALERT,
+        trigger=f"The same ratio as the event above is at least {_TREND_ALERT_RATIO:.2f}.",
+        means="Same measurement as the event above, past a wider margin.",
+    ),
+    ReportEvent.TARGET_ENTROPY_GENERATION_COLLAPSE: EventDefinition(
+        label="Target entropy collapse in one generation",
+        status=SignalStatus.ALERT,
+        trigger=(
+            f"Some generation's mean self-play target entropy is below {_ENTROPY_COLLAPSE_RATIO:.2f}× the run's median."
+        ),
+        means=(
+            "In that generation search spread its visits over far fewer moves than the run's typical "
+            "spread, so the policy targets stored for training were correspondingly sharper."
+        ),
+    ),
+    ReportEvent.TARGET_ENTROPY_LATEST_BELOW_MEDIAN: EventDefinition(
+        label="Latest target entropy below the run median",
+        status=SignalStatus.WARN,
+        trigger=(
+            f"The last generation's mean self-play target entropy is below {_ENTROPY_WARN_RATIO:.2f}× the run's median."
+        ),
+        means="The run finished producing sharper policy targets than it produced on average.",
+    ),
+}
+
+CALIBRATION_NOTE = (
+    "Every threshold above was fitted to two runs from this project's history — blokus_paired_gate_rerun, "
+    "which regressed, and blokus_cloud_v3 — which are also the runs used to demonstrate the rules. They "
+    "have not been checked against any run outside that pair, so they are not validated out of sample. "
+    "The trigger column is the whole rule: read it and the measured value rather than the label alone."
+)
+
+
+def _event(event: ReportEvent, detail: str) -> dict[str, Any]:
+    """One raised event: its enum id, its key label, and the observed numbers."""
+    return {"id": str(event), "label": EVENT_DEFINITIONS[event].label, "detail": detail}
+
+
+def _status_of(events: list[dict[str, Any]]) -> SignalStatus:
+    """The most severe status among the raised events (``OK`` when none did)."""
+    if not events:
+        return SignalStatus.OK
+    statuses = [EVENT_DEFINITIONS[ReportEvent(e["id"])].status for e in events]
+    return max(statuses, key=lambda s: _STATUS_ORDER[s])
+
+
+def event_key_payload() -> dict[str, Any]:
+    """The report's key: every status, every event, its trigger, and the caveat."""
+    return {
+        "statuses": [
+            {"id": str(SignalStatus.OK), "label": "No event raised"},
+            {"id": str(SignalStatus.WARN), "label": "An event with a warn-level trigger was raised"},
+            {"id": str(SignalStatus.ALERT), "label": "An event with an alert-level trigger was raised"},
+            {"id": str(SignalStatus.MISSING), "label": "Not recorded — the underlying table is absent"},
+        ],
+        "events": [
+            {
+                "id": str(event),
+                "label": definition.label,
+                "status": str(definition.status),
+                "trigger": definition.trigger,
+                "means": definition.means,
+            }
+            for event, definition in EVENT_DEFINITIONS.items()
+        ],
+        "calibration_note": CALIBRATION_NOTE,
+    }
 
 
 def load_metrics(directory: Path) -> pd.DataFrame | None:
@@ -176,10 +407,13 @@ def training_payload(df: pd.DataFrame | None) -> dict[str, Any] | None:
 
 
 def arena_payload(df: pd.DataFrame | None, update_threshold: float, gate_mode: str) -> dict[str, Any] | None:
-    """Per-generation arena tallies + the automatic instrument red flags.
+    """Per-generation arena tallies plus any :class:`ReportEvent` they raise.
 
-    The red flags are the R8c checks: exact-0.500 scores, sub-binomial score
-    variance, and white-win skew (when the per-colour split was logged).
+    Three checks run over the score series: scores of exactly 0.500, the spread
+    of the per-generation scores against the binomial expectation, and the share
+    of decisive games taken by White (when the per-colour split was logged).
+    Each ``events`` entry states the count or rate observed; the trigger rule
+    and what the measurement indicates live in :data:`EVENT_DEFINITIONS`.
     """
     if df is None or df.empty:
         return None
@@ -197,11 +431,14 @@ def arena_payload(df: pd.DataFrame | None, update_threshold: float, gate_mode: s
     else:  # very old runs: reconstruct from the threshold rule
         accepted = [bool(s >= update_threshold) for s in scores]
 
-    flags: list[str] = []
+    events: list[dict[str, Any]] = []
     exact_half = int((scores.sub(0.5).abs() < 1e-9).sum())
     if exact_half > 0:
-        flags.append(
-            f"{exact_half} generation(s) scored exactly 0.500 — the signature of colour-split clones, not a true tie."
+        events.append(
+            _event(
+                ReportEvent.ARENA_SCORE_EXACTLY_HALF,
+                f"{exact_half} of {len(scores)} generations scored exactly 0.500.",
+            )
         )
     sub_binomial = False
     if len(scores) >= _SUB_BINOMIAL_MIN_GENS:
@@ -211,10 +448,12 @@ def arena_payload(df: pd.DataFrame | None, update_threshold: float, gate_mode: s
         observed_std = float(scores.std(ddof=1))
         if sigma0 > 0 and observed_std < _SUB_BINOMIAL_FACTOR * sigma0:
             sub_binomial = True
-            flags.append(
-                f"Per-generation score variance is sub-binomial (observed σ={observed_std:.3f} vs binomial "
-                f"σ₀≈{sigma0:.3f}) — outcomes are not independent draws in net strength; something systematic "
-                "is deciding games."
+            events.append(
+                _event(
+                    ReportEvent.ARENA_SCORE_SPREAD_BELOW_BINOMIAL,
+                    f"Observed σ = {observed_std:.3f} against a binomial σ₀ of {sigma0:.3f} "
+                    f"at p̄ = {mean_p:.3f} over {len(scores)} generations.",
+                )
             )
 
     white_rate: float | None = None
@@ -223,9 +462,11 @@ def arena_payload(df: pd.DataFrame | None, update_threshold: float, gate_mode: s
         if decisive > 0:
             white_rate = float(df["white_wins"].sum()) / decisive
             if white_rate >= _COLOUR_PINNED_WHITE_RATE:
-                flags.append(
-                    f"White won {white_rate:.0%} of decisive arena games — the gate is colour-pinned "
-                    "(first-mover advantage swamps net strength)."
+                events.append(
+                    _event(
+                        ReportEvent.ARENA_DECISIVE_GAMES_ONE_COLOUR,
+                        f"White won {white_rate:.0%} of the {int(decisive):,} decisive arena games.",
+                    )
                 )
 
     payload: dict[str, Any] = {
@@ -237,7 +478,7 @@ def arena_payload(df: pd.DataFrame | None, update_threshold: float, gate_mode: s
         "accepted": accepted,
         "threshold": update_threshold,
         "gate_mode": gate_mode,
-        "red_flags": flags,
+        "events": events,
         "exact_half": exact_half,
         "sub_binomial": sub_binomial,
     }
@@ -296,9 +537,9 @@ def pvc_payload(df: pd.DataFrame | None) -> dict[str, Any] | None:
 def target_entropy_payload(df: pd.DataFrame | None) -> dict[str, Any] | None:
     """Self-play policy-target entropy per generation (mean + p10/p90 band).
 
-    This is the entropy of the stored search-policy targets at harvest — the
-    structure of what the trainer is being asked to fit. A sharp collapse
-    (rerun gen 17: 0.79 → 0.506 nats) preceded the worst regression on record.
+    This is the entropy of the stored search-policy targets at harvest — how
+    widely search spread its visits over the moves it considered, and therefore
+    how sharp the targets handed to the trainer are.
     """
     if df is None or df.empty or "mean_policy_entropy" not in df.columns:
         return None
@@ -318,7 +559,7 @@ def target_entropy_payload(df: pd.DataFrame | None) -> dict[str, Any] | None:
 
 
 def rolling_elo_payload(df: pd.DataFrame | None) -> dict[str, Any] | None:
-    """Rolling arena-derived Elo (chained, self-referential telemetry)."""
+    """Rolling arena-derived Elo: a chained estimate from the run's own games."""
     if df is None or df.empty:
         return None
     df = df.sort_values("generation")
@@ -361,7 +602,7 @@ def tournament_payload(path: Path) -> dict[str, Any] | None:
 
 
 def accuracy_payload(df: pd.DataFrame | None) -> dict[str, Any] | None:
-    """Eval-set policy agreement per generation (self-referential for Blokus)."""
+    """Eval-set policy agreement per generation, against the run's own targets."""
     if df is None or df.empty:
         return None
     agg_spec: dict[str, Any] = {"top1": ("top1_accuracy", "mean"), "top5": ("top5_accuracy", "mean")}
@@ -592,46 +833,81 @@ def ladder_payload(config: RunConfig) -> dict[str, Any] | None:
 
 
 # ---------------------------------------------------------------------------
-# Front-page signals + verdict
+# Front-page signals + status summary
 # ---------------------------------------------------------------------------
+
+# What each signal is measured against — stated as fact, for the report's key.
+_MEASURED_AGAINST: dict[str, str] = {
+    "ladder": "Games against Pentobi, an outside engine.",
+    "tournament": "Pooled games between this run's own checkpoints, rated on one scale against the gen-0 anchor.",
+    "symmetry_kl": "The board's symmetries, which are exact invariances of the game's rules.",
+    "value_mae": "The board's symmetries, which are exact invariances of the game's rules.",
+    "target_entropy": "This run's own stored self-play search targets.",
+    "arena": "This run's own candidate-versus-incumbent games.",
+}
 
 
 def _signal(
     signal_id: str,
     label: str,
-    status: str,
     value: str,
     sub: str,
     *,
     anchored: bool,
+    events: list[dict[str, Any]] | None = None,
+    status: SignalStatus | None = None,
     spark: list[float] | None = None,
     href: str | None = None,
 ) -> dict[str, Any]:
+    """One front-page tile.
+
+    ``status`` defaults to the most severe status among ``events``, so a tile's
+    colour is always a consequence of a named event rather than a free choice.
+    """
+    raised = events or []
     return {
         "id": signal_id,
         "label": label,
-        "status": status,
+        "status": str(status if status is not None else _status_of(raised)),
         "value": value,
         "sub": sub,
         "anchored": anchored,
+        "measured_against": _MEASURED_AGAINST.get(signal_id, ""),
+        "events": raised,
         "spark": spark,
         "href": href,
     }
 
 
-def _trend_status(values: list[float] | None, *, rising_is_bad: bool) -> tuple[str, float | None]:
-    """Classify a metric trend as ok / warn / alert using the shared ratios."""
+def _not_recorded(
+    signal_id: str, label: str, value: str, sub: str, *, anchored: bool, href: str | None = None
+) -> dict[str, Any]:
+    """A tile for a signal whose table is absent — the one MISSING path."""
+    return _signal(
+        signal_id,
+        label,
+        value,
+        sub,
+        anchored=anchored,
+        events=[_event(ReportEvent.NOT_RECORDED, sub)],
+        status=SignalStatus.MISSING,
+        href=href,
+    )
+
+
+def _trend_events(values: list[float] | None, metric: str) -> tuple[list[dict[str, Any]], float | None]:
+    """Symmetry-trend events for a rising-error metric, plus the ratio itself."""
     if not values:
-        return "missing", None
+        return [], None
     ratio = _trend_ratio(values)
     if ratio is None:
-        return "ok", None
-    effective = ratio if rising_is_bad else (1.0 / ratio if ratio > 0 else float("inf"))
-    if effective >= _TREND_ALERT_RATIO:
-        return "alert", ratio
-    if effective >= _TREND_WARN_RATIO:
-        return "warn", ratio
-    return "ok", ratio
+        return [], None
+    detail = f"{metric} ended at {ratio:.2f}× its first-generations mean."
+    if ratio >= _TREND_ALERT_RATIO:
+        return [_event(ReportEvent.SYMMETRY_TREND_RISING_STEEPLY, detail)], ratio
+    if ratio >= _TREND_WARN_RATIO:
+        return [_event(ReportEvent.SYMMETRY_TREND_RISING, detail)], ratio
+    return [], ratio
 
 
 def build_signals(
@@ -642,57 +918,73 @@ def build_signals(
     target_entropy: dict[str, Any] | None,
     arena: dict[str, Any] | None,
 ) -> list[dict[str, Any]]:
-    """The front-page status tiles: is this run improving, or fooling itself?
+    """The front-page tiles: one per measured signal, with its raised events.
 
-    Every tile is an externally-anchored (or instrument-health) signal; the
-    self-referential metrics deliberately get no tile — loss going down is not
-    evidence of progress in this system (regression-and-next-steps §1.5).
+    Each tile states the latest value and the numbers behind any event it
+    raised. Statuses come from :data:`EVENT_DEFINITIONS`, so a tile is only
+    coloured by a named, documented rule.
     """
     signals: list[dict[str, Any]] = []
 
-    # 1. Pentobi ladder — the run's real verdict.
+    # 1. Pentobi ladder — win rate against an outside engine.
     if ladder is None:
         signals.append(
-            _signal(
+            _not_recorded(
                 "ladder",
                 "Pentobi ladder",
-                "missing",
                 "Not run",
-                "The only instrument that resolves what the arena calls a tie — run scripts/mini_ladder.py.",
+                "No PentobiLadder results and no MiniLadder history in this run directory.",
                 anchored=True,
-                href="#external",
+                href="#ladder",
             )
         )
     else:
         history = ladder["history"]
         spark = [p["weighted_score"] for p in history] if len(history) > 1 else None
         best = ladder["keep_best"]
-        if ladder["drift"] is not None or ladder["alarm_file"]:
-            status = "alert"
-            sub = "Drift circuit-breaker tripped — resume from the keep-best checkpoint."
-        elif len(history) >= 2 and history[-1]["weighted_score"] < best["weighted_score"] - 1e-9:
-            status = "warn"
-            sub = f"Latest checkpoint below keep-best {best['label']}."
-        else:
-            status = "ok"
-            sub = f"Keep-best: {best['label']}" if best else "Single evaluation."
+        events: list[dict[str, Any]] = []
+        if ladder["drift"] is not None:
+            drift = ladder["drift"]
+            events.append(
+                _event(
+                    ReportEvent.LADDER_DRIFT_BREAKER_TRIPPED,
+                    f"{drift['consecutive_drops']} consecutive evaluations below {drift['best_before']} "
+                    f"at {drift['best_score']:.3f}; tripped at {drift['tripped_at']} "
+                    f"({drift['tripped_score']:.3f}).",
+                )
+            )
+        elif ladder["alarm_file"]:
+            events.append(
+                _event(ReportEvent.LADDER_DRIFT_BREAKER_TRIPPED, "MiniLadder/DRIFT_ALARM present in the run directory.")
+            )
+        if best and len(history) >= 2 and history[-1]["weighted_score"] < best["weighted_score"] - 1e-9:
+            events.append(
+                _event(
+                    ReportEvent.LADDER_LATEST_BELOW_BEST,
+                    f"Latest {history[-1]['label']} at {history[-1]['weighted_score']:.3f}; "
+                    f"best {best['label']} at {best['weighted_score']:.3f}.",
+                )
+            )
         level = f"L{best['pentobi_level']} · " if best and best.get("pentobi_level") is not None else ""
         value = f"{level}{best['weighted_score']:.3f} weighted" if best else "—"
+        if best:
+            sub = f"Best of {len(history)} evaluation{'s' if len(history) != 1 else ''}: {best['label']}."
+        else:
+            sub = "No weighted score recorded."
         signals.append(
-            _signal("ladder", "Pentobi ladder", status, value, sub, anchored=True, spark=spark, href="#external")
+            _signal("ladder", "Pentobi ladder", value, sub, anchored=True, events=events, spark=spark, href="#ladder")
         )
 
-    # 2. Pooled BayesElo tournament — rigorous, non-saturating, independent code path.
+    # 2. Pooled BayesElo tournament — one shared scale over the run's checkpoints.
     if tournament is None:
         signals.append(
-            _signal(
+            _not_recorded(
                 "tournament",
-                "Pool Elo (BayesElo)",
-                "missing",
+                "Pool Elo",
                 "Not run",
-                "End-of-run pooled tournament absent — enable tournament.run_at_end or run scripts/tournament_elo.py.",
+                "No Tournament/tournament_ratings.parquet in this run directory.",
                 anchored=True,
-                href="#external",
+                href="#pool-elo",
             )
         )
     else:
@@ -701,113 +993,106 @@ def build_signals(
         peak_gen = tournament["gens"][ratings.index(peak)]
         final = ratings[-1]
         drop = peak - final
-        if final <= _POOL_ELO_ALERT_FINAL_BELOW_ANCHOR or drop >= _POOL_ELO_ALERT_DROP:
-            status = "alert"
-            sub = f"Peak {peak:+.0f} at gen {peak_gen} — the run ended below its gen-0 anchor."
-            if final > _POOL_ELO_ALERT_FINAL_BELOW_ANCHOR:
-                sub = f"Peak {peak:+.0f} at gen {peak_gen} — the run slid {drop:.0f} Elo off its best."
+        events = []
+        if final <= _POOL_ELO_ALERT_FINAL_BELOW_ANCHOR:
+            events.append(
+                _event(ReportEvent.POOL_ELO_BELOW_ANCHOR, f"Final rating {final:+.0f} against the gen-0 anchor at 0.")
+            )
+        if drop >= _POOL_ELO_ALERT_DROP:
+            events.append(
+                _event(
+                    ReportEvent.POOL_ELO_FAR_BELOW_PEAK,
+                    f"Peak {peak:+.0f} at generation {peak_gen}; final {final:+.0f}; difference {drop:.0f} Elo.",
+                )
+            )
         elif drop >= _POOL_ELO_WARN_DROP:
-            status = "warn"
-            sub = f"Peak {peak:+.0f} at gen {peak_gen} — the final net is not the best net; select by ladder."
-        else:
-            status = "ok"
-            sub = f"Peak {peak:+.0f} at gen {peak_gen}."
+            events.append(
+                _event(
+                    ReportEvent.POOL_ELO_BELOW_PEAK,
+                    f"Peak {peak:+.0f} at generation {peak_gen}; final {final:+.0f}; difference {drop:.0f} Elo.",
+                )
+            )
         signals.append(
             _signal(
                 "tournament",
-                "Pool Elo (BayesElo)",
-                status,
+                "Pool Elo",
                 f"{final:+.0f} final",
-                sub,
+                f"Peak {peak:+.0f} at generation {peak_gen}.",
                 anchored=True,
+                events=events,
                 spark=ratings,
-                href="#external",
+                href="#pool-elo",
             )
         )
 
-    # 3. Policy symmetry KL — ground-truth invariance; rising = drifting net.
+    # 3. Policy symmetry KL — the policy's disagreement across game symmetries.
     kl_values = symmetry["kl_mean"] if symmetry else None
-    status, ratio = _trend_status(kl_values, rising_is_bad=True)
-    if status == "missing":
+    if not kl_values:
         signals.append(
-            _signal(
+            _not_recorded(
                 "symmetry_kl",
                 "Policy symmetry KL",
-                "missing",
                 "Not recorded",
-                "SymmetryDiagnostic table absent — the earliest honest drift warning is dark.",
+                "SymmetryDiagnostic table absent from this run directory.",
                 anchored=True,
-                href="#external",
+                href="#diagnostics",
             )
         )
     else:
-        assert kl_values is not None
-        trend = f"{ratio:.2f}× vs run start" if ratio is not None else "trend n/a"
-        sub = {
-            "ok": f"Stable ({trend}).",
-            "warn": f"Rising ({trend}).",
-            "alert": f"Rising steeply ({trend}) — the rerun's regression signature.",
-        }[status]
+        events, ratio = _trend_events(kl_values, "Policy symmetry KL")
+        trend = f" {ratio:.2f}× its first-generations mean." if ratio is not None else ""
         signals.append(
             _signal(
                 "symmetry_kl",
                 "Policy symmetry KL",
-                status,
                 f"{kl_values[-1]:.3f} nats",
-                sub,
+                f"Final generation.{trend}",
                 anchored=True,
+                events=events,
                 spark=kl_values,
-                href="#external",
+                href="#diagnostics",
             )
         )
 
-    # 4. Value symmetry MAE — same instrument for the value head.
+    # 4. Value symmetry MAE — the same measurement for the value head.
     mae_values = pvc.get("value_symmetry_mae") if pvc else None
-    status, ratio = _trend_status(mae_values, rising_is_bad=True)
-    if status == "missing":
+    if not mae_values:
         signals.append(
-            _signal(
+            _not_recorded(
                 "value_mae",
                 "Value symmetry MAE",
-                "missing",
                 "Not recorded",
-                "PolicyValueConsistency table absent (or predates the value-symmetry column).",
+                "PolicyValueConsistency table absent, or predates the value-symmetry column.",
                 anchored=True,
-                href="#external",
+                href="#diagnostics",
             )
         )
     else:
-        assert mae_values is not None
-        trend = f"{ratio:.2f}× vs run start" if ratio is not None else "trend n/a"
-        sub = {
-            "ok": f"Stable ({trend}).",
-            "warn": f"Rising ({trend}).",
-            "alert": f"Rising steeply ({trend}) — value head drifting off the game's invariances.",
-        }[status]
+        events, ratio = _trend_events(mae_values, "Value symmetry MAE")
+        trend = f" {ratio:.2f}× its first-generations mean." if ratio is not None else ""
         signals.append(
             _signal(
                 "value_mae",
                 "Value symmetry MAE",
-                status,
                 f"{mae_values[-1]:.3f}",
-                sub,
+                f"Final generation.{trend}",
                 anchored=True,
+                events=events,
                 spark=mae_values,
-                href="#external",
+                href="#diagnostics",
             )
         )
 
-    # 5. Self-play target entropy — collapse detector.
+    # 5. Self-play target entropy — spread of the stored search targets.
     if target_entropy is None:
         signals.append(
-            _signal(
+            _not_recorded(
                 "target_entropy",
                 "Target entropy",
-                "missing",
                 "Not recorded",
-                "SelfPlayProfiling table absent — target-collapse events are invisible.",
+                "SelfPlayProfiling table absent from this run directory.",
                 anchored=True,
-                href="#external",
+                href="#diagnostics",
             )
         )
     else:
@@ -816,108 +1101,102 @@ def build_signals(
         min_value = min(means)
         min_gen = target_entropy["gens"][means.index(min_value)]
         latest = means[-1]
+        events = []
         if median > 0 and min_value < _ENTROPY_COLLAPSE_RATIO * median:
-            status = "alert"
-            sub = f"Collapse at gen {min_gen} ({min_value:.3f} vs median {median:.3f} nats) — the gen-17 signature."
-        elif median > 0 and latest < _ENTROPY_WARN_RATIO * median:
-            status = "warn"
-            sub = f"Latest ({latest:.3f}) sits below the run median ({median:.3f} nats)."
-        else:
-            status = "ok"
-            sub = f"Stable around {median:.3f} nats."
+            events.append(
+                _event(
+                    ReportEvent.TARGET_ENTROPY_GENERATION_COLLAPSE,
+                    f"Generation {min_gen} at {min_value:.3f} nats against a run median of {median:.3f}.",
+                )
+            )
+        if median > 0 and latest < _ENTROPY_WARN_RATIO * median:
+            events.append(
+                _event(
+                    ReportEvent.TARGET_ENTROPY_LATEST_BELOW_MEDIAN,
+                    f"Final generation at {latest:.3f} nats against a run median of {median:.3f}.",
+                )
+            )
         signals.append(
             _signal(
                 "target_entropy",
                 "Target entropy",
-                status,
                 f"{latest:.3f} nats",
-                sub,
+                f"Final generation. Run median {median:.3f} nats, minimum {min_value:.3f} at generation {min_gen}.",
                 anchored=True,
+                events=events,
                 spark=means,
-                href="#external",
+                href="#diagnostics",
             )
         )
 
-    # 6. Arena instrument health — is the gate measuring anything?
+    # 6. Arena — the run's own candidate-versus-incumbent games.
     if arena is None:
         signals.append(
-            _signal(
-                "instrument",
-                "Arena instrument",
-                "missing",
+            _not_recorded(
+                "arena",
+                "Arena score",
                 "Not recorded",
-                "ArenaData table absent.",
+                "ArenaData table absent from this run directory.",
                 anchored=False,
-                href="#instrument",
+                href="#arena",
             )
         )
     else:
-        flags = arena["red_flags"]
-        if flags:
-            status = "alert"
-            value = f"{len(flags)} red flag" + ("s" if len(flags) > 1 else "")
-            sub = flags[0]
+        events = list(arena["events"])
+        white = arena.get("white_rate")
+        if white is not None:
+            sub = f"White won {white:.0%} of decisive games."
         else:
-            status = "ok"
-            value = "No pinning signature"
-            white = arena.get("white_rate")
-            if white is not None:
-                sub = f"White won {white:.0%} of decisive games."
-            else:
-                sub = "Colour split not logged (older run)."
-            if white is None:
-                status = "warn"
-                value = "Colour split unknown"
+            sub = "Per-colour split not logged for this run."
         signals.append(
-            _signal("instrument", "Arena instrument", status, value, sub, anchored=False, href="#instrument")
+            _signal(
+                "arena",
+                "Arena score",
+                f"{arena['score'][-1]:.3f} final",
+                sub,
+                anchored=False,
+                events=events,
+                spark=arena["score"],
+                href="#arena",
+            )
         )
 
     return signals
 
 
-def build_verdict(signals: list[dict[str, Any]], ladder: dict[str, Any] | None) -> dict[str, Any]:
-    """The one-line answer at the top of the report.
+def build_status_summary(signals: list[dict[str, Any]]) -> dict[str, Any]:
+    """A count of what the signals raised, at the top of the report.
 
-    Derived only from externally-anchored signals. When no external instrument
-    ran at all, the verdict says so explicitly — that state is precisely how a
-    20-generation regression once hid behind healthy-looking internal curves.
+    Purely a tally: how many events fired, on which signals, and which signals
+    were not recorded. It draws no conclusion about the run — the events and
+    their triggers are listed in the report's key, and the charts below carry
+    the numbers.
     """
-    anchored = [s for s in signals if s["anchored"]]
-    present = [s for s in anchored if s["status"] != "missing"]
-    alerts = [s for s in present if s["status"] == "alert"]
-    warns = [s for s in present if s["status"] == "warn"]
+    raised = [(signal, event) for signal in signals for event in signal["events"]]
+    fired = [(s, e) for s, e in raised if e["id"] != str(ReportEvent.NOT_RECORDED)]
+    not_recorded = [s["label"] for s in signals if s["status"] == str(SignalStatus.MISSING)]
+    statuses = [SignalStatus(s["status"]) for s in signals if s["anchored"]]
+    present = [s for s in statuses if s is not SignalStatus.MISSING]
 
-    if not present:
-        return {
-            "status": "missing",
-            "headline": "No external evidence recorded",
-            "detail": "Every externally-anchored instrument is dark. Internal metrics below cannot certify progress "
-            "— run the Pentobi mini-ladder and the pooled tournament before trusting this run.",
-        }
-    if alerts:
-        named = ", ".join(s["label"] for s in alerts)
-        return {
-            "status": "alert",
-            "headline": "Regression signals present",
-            "detail": f"Externally-anchored alarms: {named}. Treat internal improvements as unverified.",
-        }
-    if warns:
-        named = ", ".join(s["label"] for s in warns)
-        return {
-            "status": "warn",
-            "headline": "External signals mixed",
-            "detail": f"Watch: {named}.",
-        }
-    detail = "All recorded externally-anchored signals are stable."
-    if ladder and ladder["keep_best"]:
-        best = ladder["keep_best"]
-        level = f" (beats Pentobi L{best['pentobi_level']})" if best.get("pentobi_level") is not None else ""
-        best_line = f"Keep-best checkpoint: {best['label']}{level}, weighted ladder score {best['weighted_score']:.3f}."
-        detail = best_line + " " + detail
-    missing = [s["label"] for s in anchored if s["status"] == "missing"]
-    if missing:
-        detail += f" Not recorded: {', '.join(missing)}."
-    return {"status": "ok", "headline": "Externally consistent with improvement", "detail": detail}
+    status = max(present, key=lambda s: _STATUS_ORDER[s]) if present else SignalStatus.MISSING
+
+    if fired:
+        signal_count = len({s["id"] for s, _ in fired})
+        headline = (
+            f"{len(fired)} event{'s' if len(fired) != 1 else ''} raised on {signal_count} of {len(signals)} signals"
+        )
+    elif not present:
+        headline = "No signal measured against an outside reference was recorded"
+    else:
+        headline = f"No events raised on {len(signals) - len(not_recorded)} recorded signals"
+
+    parts: list[str] = []
+    if fired:
+        parts.append("Raised: " + "; ".join(f"{e['label']} ({s['label']})" for s, e in fired) + ".")
+    if not_recorded:
+        parts.append("Not recorded: " + ", ".join(not_recorded) + ".")
+    parts.append("Triggers and thresholds are listed in the key.")
+    return {"status": str(status), "headline": headline, "detail": " ".join(parts)}
 
 
 # ---------------------------------------------------------------------------
@@ -1020,7 +1299,7 @@ def build_report_payload(config: RunConfig) -> dict[str, Any]:
     replays = build_replay_payload(replays_df, config) if replays_df is not None and not replays_df.empty else None
 
     signals = build_signals(ladder, tournament, symmetry, pvc, target_entropy, arena)
-    verdict = build_verdict(signals, ladder)
+    summary = build_status_summary(signals)
 
     generations_seen = 0
     for candidates in (arena, tables["SelfPlayProfiling"]):
@@ -1033,8 +1312,9 @@ def build_report_payload(config: RunConfig) -> dict[str, Any]:
 
     payload: dict[str, Any] = {
         "meta": meta_payload(config, generations_seen, missing),
-        "verdict": verdict,
+        "summary": summary,
         "signals": signals,
+        "event_key": event_key_payload(),
         "ladder": ladder,
         "tournament": tournament,
         "symmetry": symmetry,

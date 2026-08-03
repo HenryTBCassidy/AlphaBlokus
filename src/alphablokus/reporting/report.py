@@ -7,11 +7,12 @@ page renders everything client-side — hand-rolled SVG charts, the arena replay
 browser, light/dark theming — with no CDN, no frameworks and no build step, so
 the file opens offline from ``file://`` and survives being copied around.
 
-The front page answers one question: *is this run improving, or fooling
-itself?* Externally-anchored signals (Pentobi ladder, pooled BayesElo,
-symmetry diagnostics, target entropy) are promoted above — and visually
-separated from — the self-referential training telemetry that once masked a
-44-Elo regression (docs/research/regression-and-next-steps.md §1.5).
+The page presents the run's measurements; it does not interpret them. Signals
+measured against an outside reference (the Pentobi ladder, the pooled BayesElo
+tournament, the game's symmetries) come first, followed by the arena, the
+training curves, the replay browser and the operational telemetry. Automatic
+flags are members of a closed enum (``data.ReportEvent``) whose trigger
+conditions the page renders as a key.
 """
 
 from __future__ import annotations

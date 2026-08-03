@@ -1,5 +1,6 @@
-"""Report payload assembly (reporting/data.py): signal statuses, red flags,
-verdicts, and graceful degradation when tables are missing."""
+"""Report payload assembly (reporting/data.py): signal statuses, the closed set
+of events and its key, the status summary, and graceful degradation when tables
+are missing."""
 
 from __future__ import annotations
 
@@ -9,10 +10,14 @@ from typing import TYPE_CHECKING
 import pandas as pd
 
 from alphablokus.reporting.data import (
+    EVENT_DEFINITIONS,
+    ReportEvent,
+    SignalStatus,
     arena_payload,
     build_report_payload,
     build_signals,
-    build_verdict,
+    build_status_summary,
+    event_key_payload,
     ladder_payload,
     symmetry_payload,
     target_entropy_payload,
@@ -24,8 +29,12 @@ if TYPE_CHECKING:
     from alphablokus.config import RunConfig
 
 
+def _event_ids(payload: dict) -> list[str]:
+    return [event["id"] for event in payload["events"]]
+
+
 # ---------------------------------------------------------------------------
-# Arena red flags (plateau-investigation R8c)
+# Arena events
 # ---------------------------------------------------------------------------
 
 
@@ -42,11 +51,13 @@ def _arena_frame(scores: list[float], games: int = 100) -> pd.DataFrame:
     )
 
 
-def test_exact_half_scores_are_flagged() -> None:
+def test_exact_half_scores_raise_the_event_with_the_count() -> None:
     payload = arena_payload(_arena_frame([0.5, 0.5, 0.62, 0.44]), 0.55, "threshold")
     assert payload is not None
     assert payload["exact_half"] == 2
-    assert any("exactly 0.500" in flag for flag in payload["red_flags"])
+    assert _event_ids(payload) == [str(ReportEvent.ARENA_SCORE_EXACTLY_HALF)]
+    # The observation is the count; the mechanism lives in the key, not here.
+    assert payload["events"][0]["detail"] == "2 of 4 generations scored exactly 0.500."
 
 
 def test_sub_binomial_variance_is_flagged() -> None:
@@ -58,20 +69,20 @@ def test_sub_binomial_variance_is_flagged() -> None:
     assert payload["sub_binomial"] is True
 
 
-def test_healthy_arena_has_no_flags() -> None:
+def test_arena_with_spread_scores_raises_nothing() -> None:
     payload = arena_payload(_arena_frame([0.85, 0.75, 0.62, 0.44, 0.58, 0.71]), 0.55, "threshold")
     assert payload is not None
-    assert payload["red_flags"] == []
+    assert payload["events"] == []
 
 
-def test_colour_pinning_flagged_when_split_is_logged() -> None:
+def test_colour_concentration_raises_the_event_when_split_is_logged() -> None:
     df = _arena_frame([0.51, 0.49, 0.52, 0.50501])
     df["white_wins"] = [96, 95, 97, 93]
     df["black_wins"] = [4, 5, 3, 7]
     payload = arena_payload(df, 0.55, "threshold")
     assert payload is not None
     assert payload["white_rate"] is not None and payload["white_rate"] > 0.9
-    assert any("colour-pinned" in flag for flag in payload["red_flags"])
+    assert str(ReportEvent.ARENA_DECISIVE_GAMES_ONE_COLOUR) in _event_ids(payload)
 
 
 def test_stored_accepted_column_wins_over_threshold_rule() -> None:
@@ -158,8 +169,8 @@ def test_stable_symmetry_kl_is_ok() -> None:
     assert _signal_by_id(signals, "symmetry_kl")["status"] == "ok"
 
 
-def test_target_entropy_collapse_alerts() -> None:
-    # Gen-17-style collapse: one generation far below the run median.
+def test_target_entropy_collapse_raises_the_event_naming_the_generation() -> None:
+    # One generation far below the run median.
     frame = pd.DataFrame(
         {
             "generation": range(1, 11),
@@ -169,8 +180,10 @@ def test_target_entropy_collapse_alerts() -> None:
     entropy = target_entropy_payload(frame)
     signals = build_signals(None, None, None, None, entropy, None)
     tile = _signal_by_id(signals, "target_entropy")
-    assert tile["status"] == "alert"
-    assert "gen 7" in tile["sub"]
+    assert tile["status"] == str(SignalStatus.ALERT)
+    assert _event_ids(tile) == [str(ReportEvent.TARGET_ENTROPY_GENERATION_COLLAPSE)]
+    assert tile["events"][0]["detail"] == "Generation 7 at 0.506 nats against a run median of 0.850."
+    assert "generation 7" in tile["sub"]
 
 
 def test_tournament_final_below_anchor_alerts_and_slippage_warns() -> None:
@@ -180,20 +193,71 @@ def test_tournament_final_below_anchor_alerts_and_slippage_warns() -> None:
     assert _signal_by_id(build_signals(None, v3_like, None, None, None, None), "tournament")["status"] == "warn"
 
 
-def test_verdict_with_no_external_instruments_says_so() -> None:
+def test_summary_with_nothing_recorded_says_so() -> None:
     signals = build_signals(None, None, None, None, None, None)
-    verdict = build_verdict(signals, None)
-    assert verdict["status"] == "missing"
-    assert "No external evidence" in verdict["headline"]
+    summary = build_status_summary(signals)
+    assert summary["status"] == str(SignalStatus.MISSING)
+    assert "Not recorded:" in summary["detail"]
 
 
-def test_verdict_propagates_anchored_alerts_only() -> None:
-    # Arena-instrument alerts (anchored=False) must not drive the verdict.
+def test_summary_counts_events_without_drawing_a_conclusion() -> None:
     arena = arena_payload(_arena_frame([0.5, 0.5, 0.5, 0.5]), 0.55, "threshold")
     symmetry = symmetry_payload(_symmetry_frame([0.7, 0.72, 0.69, 0.71, 0.7, 0.7]))
     signals = build_signals(None, None, symmetry, None, None, arena)
-    assert _signal_by_id(signals, "instrument")["status"] == "alert"
-    assert build_verdict(signals, None)["status"] != "alert"
+    summary = build_status_summary(signals)
+    # The arena is not measured against an outside reference, so it does not set
+    # the summary's status — but its event is still counted and named.
+    assert _signal_by_id(signals, "arena")["status"] == str(SignalStatus.ALERT)
+    assert summary["status"] != str(SignalStatus.ALERT)
+    # Four identical 0.500 scores raise both arena events, on that one signal.
+    assert summary["headline"] == "2 events raised on 1 of 6 signals"
+    assert "Arena score exactly 0.500" in summary["detail"]
+    assert "Arena score spread below binomial" in summary["detail"]
+
+
+# ---------------------------------------------------------------------------
+# The event enum is a closed set, and the key documents all of it
+# ---------------------------------------------------------------------------
+
+
+def test_every_event_has_a_definition_with_a_numeric_trigger() -> None:
+    for event in ReportEvent:
+        definition = EVENT_DEFINITIONS[event]
+        assert definition.label and definition.means
+        if event is not ReportEvent.NOT_RECORDED:
+            assert any(char.isdigit() for char in definition.trigger), (
+                f"{event} must state its numeric threshold, got {definition.trigger!r}"
+            )
+
+
+def test_the_key_lists_every_enum_value_and_the_calibration_caveat() -> None:
+    key = event_key_payload()
+    assert [row["id"] for row in key["events"]] == [str(e) for e in ReportEvent]
+    assert [row["id"] for row in key["statuses"]] == [str(s) for s in SignalStatus]
+    assert "not validated out of sample" in key["calibration_note"]
+
+
+def test_every_raised_event_is_a_member_of_the_enum() -> None:
+    """No signal may invent a flag outside ``ReportEvent``."""
+    arena = arena_payload(_arena_frame([0.5, 0.5, 0.5, 0.5]), 0.55, "threshold")
+    symmetry = symmetry_payload(_symmetry_frame([0.64, 0.66, 0.7, 0.8, 0.9, 1.0, 1.1, 1.24]))
+    tournament = {"gens": list(range(21)), "rating": [0.0] + [5.0] * 19 + [-44.0], "n_games": [100] * 21}
+    signals = build_signals(None, tournament, symmetry, None, None, arena)
+    raised = [event["id"] for signal in signals for event in signal["events"]]
+    assert raised, "this fixture is meant to raise events"
+    for event_id in raised:
+        assert ReportEvent(event_id) in EVENT_DEFINITIONS
+
+
+def test_signal_status_is_the_worst_status_of_its_events() -> None:
+    """A tile's colour follows from named events, never from a free choice."""
+    tournament = {"gens": [0, 1, 2], "rating": [0.0, 286.0, 240.0], "n_games": [100] * 3}
+    tile = _signal_by_id(build_signals(None, tournament, None, None, None, None), "tournament")
+    assert _event_ids(tile) == [str(ReportEvent.POOL_ELO_BELOW_PEAK)]
+    assert tile["status"] == str(EVENT_DEFINITIONS[ReportEvent.POOL_ELO_BELOW_PEAK].status)
+    # Peak and final are both stated; no advice about which net to pick.
+    assert tile["sub"] == "Peak +286 at generation 1."
+    assert tile["value"] == "+240 final"
 
 
 # ---------------------------------------------------------------------------
@@ -255,9 +319,10 @@ def test_build_report_payload_on_an_empty_run_dir(test_config: RunConfig) -> Non
     """A run directory with no tables at all must still yield a valid payload
     whose signals are all explicitly 'missing' — absence is visible, not fatal."""
     payload = build_report_payload(test_config)
-    assert payload["verdict"]["status"] == "missing"
+    assert payload["summary"]["status"] == "missing"
     anchored = [s for s in payload["signals"] if s["anchored"]]
     assert anchored and all(s["status"] == "missing" for s in anchored)
     assert "ArenaData" in payload["meta"]["missing_tables"]
     assert payload["replays"] is None
+    assert payload["event_key"]["events"]  # the key ships even for an empty run
     json.dumps(payload)  # payload must be JSON-serialisable end-to-end
