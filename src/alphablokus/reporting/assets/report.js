@@ -1088,10 +1088,13 @@
     return s;
   }
 
+  var PLAY_INTERVAL_MS = 420;
+
   function ReplayBrowser(root, replays) {
     this.replays = replays;
     this.gens = Object.keys(replays.gens).map(Number).sort(function (a, b) { return a - b; });
-    this.state = { gen: this.gens[0], game: 0, move: 0, alt: null };
+    this.state = { gen: this.gens[0], game: 0, move: 0, alt: null, playing: false };
+    this.timer = null;
 
     this.side = el("div", { class: "replay-side" });
     this.main = el("div", { class: "replay-main card" });
@@ -1115,6 +1118,7 @@
   };
 
   ReplayBrowser.prototype.step = function (delta) {
+    this.pause();  // any manual step takes over from playback
     var moves = this.currentGame().moves.length;
     var next = Math.max(0, Math.min(moves, this.state.move + delta));
     if (next === this.state.move) return;
@@ -1123,7 +1127,57 @@
     this.renderMain();
   };
 
+  ReplayBrowser.prototype.goTo = function (move) {
+    this.pause();
+    this.state.move = move;
+    this.state.alt = null;
+    this.renderMain();
+  };
+
+  // ---- playback -----------------------------------------------------
+  //
+  // ``timer`` is the single source of truth for "playing": every path that
+  // leaves playback (end of game, manual step, game switch) goes through
+  // ``pause`` so a timer can never outlive the state it advances.
+
+  ReplayBrowser.prototype.pause = function () {
+    this.state.playing = false;
+    if (this.timer !== null) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  };
+
+  ReplayBrowser.prototype.togglePlay = function () {
+    if (this.state.playing) {
+      this.pause();
+      this.renderMain();
+      return;
+    }
+    // Playing from the final position restarts the game rather than doing nothing.
+    if (this.state.move >= this.currentGame().moves.length) this.state.move = 0;
+    this.state.alt = null;
+    this.state.playing = true;
+    var self = this;
+    this.timer = setInterval(function () { self.advance(); }, PLAY_INTERVAL_MS);
+    this.renderMain();
+  };
+
+  ReplayBrowser.prototype.advance = function () {
+    var total = this.currentGame().moves.length;
+    if (this.state.move >= total) {
+      this.pause();
+      this.renderMain();
+      return;
+    }
+    this.state.move += 1;
+    this.state.alt = null;
+    if (this.state.move >= total) this.pause();  // stop on the final position
+    this.renderMain();
+  };
+
   ReplayBrowser.prototype.selectGame = function (gen, gameIdx) {
+    this.pause();
     this.state.gen = gen;
     this.state.game = gameIdx;
     this.state.move = 0;
@@ -1179,11 +1233,13 @@
     var isTTT = replays.game === "tictactoe";
     var altActive = this.state.alt !== null && k < game.moves.length;
     // Moves [0, k) are placed; an active alternative previews what could
-    // replace move k, so the base position is the same either way.
+    // replace move k, so the base position is the same either way. Move k - 1
+    // is the one just played and gets the outline (unless an alternative is
+    // being previewed, which owns the highlight instead).
     for (var i = 0; i < k; i++) {
       var move = game.moves[i];
       var side = move.p === 1 ? "white" : "black";
-      var isLast = !altActive && i === paintUpTo - 1;
+      var isLast = !altActive && i === k - 1;
       for (var j = 0; j < move.cells.length; j++) {
         var cc = move.cells[j];
         svg.appendChild(svgEl("rect", { class: "board-cell " + side + (isLast ? " last" : ""),
@@ -1208,33 +1264,58 @@
     return svg;
   };
 
+  // The panel is built once and then updated in place. Re-creating it wholesale
+  // on every state change would detach the range input while it is being
+  // dragged, which ends the drag after a single jump — so the scrubber, and the
+  // containers around it, persist for the life of the browser.
+  ReplayBrowser.prototype.buildPanel = function () {
+    var self = this;
+    this.boardHolder = el("div", { class: "board-svg-holder" });
+    this.controlsHolder = el("div", { class: "replay-controls" });
+    this.scrub = el("input", { class: "replay-scrub", type: "range", min: 0, max: 1, value: 0 });
+    this.scrub.addEventListener("input", function () {
+      self.goTo(parseInt(self.scrub.value, 10));
+    });
+    this.detailHolder = el("div", { class: "replay-detail" });
+    var info = el("div", { class: "replay-info" }, this.controlsHolder, this.scrub, this.detailHolder);
+    this.main.innerHTML = "";
+    append(this.main, el("div", { class: "board-wrap" }, this.boardHolder, info));
+  };
+
   ReplayBrowser.prototype.renderMain = function () {
     var self = this;
+    if (!this.scrub) this.buildPanel();
     var game = this.currentGame();
     var k = this.state.move;
     var total = game.moves.length;
-    this.main.innerHTML = "";
 
-    var boardHolder = el("div", { class: "board-svg-holder" });
-    boardHolder.appendChild(this.boardSvg());
+    this.boardHolder.innerHTML = "";
+    this.boardHolder.appendChild(this.boardSvg());
 
-    var info = el("div", { class: "replay-info" });
+    this.scrub.setAttribute("max", total);
+    if (this.scrub.value !== String(k)) this.scrub.value = String(k);
 
-    var controls = el("div", { class: "replay-controls" },
-      el("button", { text: "⏮", disabled: k === 0 ? "disabled" : null, onclick: function () { self.state.move = 0; self.state.alt = null; self.renderMain(); } }),
-      el("button", { text: "◀", disabled: k === 0 ? "disabled" : null, onclick: function () { self.step(-1); } }),
-      el("button", { text: "▶", disabled: k === total ? "disabled" : null, onclick: function () { self.step(1); } }),
-      el("button", { text: "⏭", disabled: k === total ? "disabled" : null, onclick: function () { self.state.move = total; self.state.alt = null; self.renderMain(); } }),
-      el("span", { class: "move-counter", text: "move " + k + " / " + total }));
-    append(info, controls);
+    var info = this.detailHolder;
+    info.innerHTML = "";
 
-    var scrub = el("input", { class: "replay-scrub", type: "range", min: 0, max: total, value: k });
-    scrub.addEventListener("input", function () {
-      self.state.move = parseInt(scrub.value, 10);
-      self.state.alt = null;
-      self.renderMain();
-    });
-    append(info, scrub);
+    var playing = this.state.playing;
+    var controls = this.controlsHolder;
+    controls.innerHTML = "";
+    append(controls, [
+      el("button", { text: "⏮", title: "First move", disabled: k === 0 ? "disabled" : null,
+        onclick: function () { self.goTo(0); } }),
+      el("button", { text: "‹", title: "Previous move", disabled: k === 0 ? "disabled" : null,
+        onclick: function () { self.step(-1); } }),
+      el("button", { class: "play-button" + (playing ? " playing" : ""),
+        text: playing ? "⏸ Pause" : "▶ Play",
+        title: playing ? "Pause playback" : "Play the game through",
+        onclick: function () { self.togglePlay(); } }),
+      el("button", { text: "›", title: "Next move", disabled: k === total ? "disabled" : null,
+        onclick: function () { self.step(1); } }),
+      el("button", { text: "⏭", title: "Final position", disabled: k === total ? "disabled" : null,
+        onclick: function () { self.goTo(total); } }),
+      el("span", { class: "move-counter", text: "move " + k + " / " + total }),
+    ]);
 
     if (k > 0) {
       var last = game.moves[k - 1];
@@ -1248,7 +1329,8 @@
           el("div", { class: "prob-bar" }, el("div", { style: "width:" + Math.min(100, last.prob * 100) + "%" }))));
       }
     } else {
-      append(info, el("div", { class: "move-caption", text: "Start of game — use ▶ or the arrow keys to step through." }));
+      append(info, el("div", { class: "move-caption",
+        text: "Start of game. Play runs it through; ‹ › and the arrow keys step one move." }));
     }
 
     if (k < total) {
@@ -1258,18 +1340,18 @@
       var chips = el("div", { class: "alt-chips" });
       append(chips, el("button", {
         class: this.state.alt === null ? "active" : "",
-        onclick: function () { self.state.alt = null; self.renderMain(); },
+        onclick: function () { self.pause(); self.state.alt = null; self.renderMain(); },
       }, "Played: " + next.cap, next.prob !== null ? el("span", { class: "alt-prob", text: fmtPct(next.prob) }) : null));
       next.alts.forEach(function (alt, i) {
         append(chips, el("button", {
           class: self.state.alt === i ? "active" : "",
-          onclick: function () { self.state.alt = self.state.alt === i ? null : i; self.renderMain(); },
+          onclick: function () { self.pause(); self.state.alt = self.state.alt === i ? null : i; self.renderMain(); },
         }, "Alt " + (i + 1) + ": " + alt.cap, el("span", { class: "alt-prob", text: fmtPct(alt.prob) })));
       });
       append(info, chips);
       if (next.alts.length) {
         append(info, el("div", { class: "alt-hint",
-          text: "Selecting an alternative previews it (striped) on the pre-move board — press ▶ to see what was actually played." }));
+          text: "A selected alternative is drawn striped on the pre-move board; the percentage is its share of MCTS visits." }));
       }
     }
 
@@ -1282,9 +1364,6 @@
     append(info, el("div", { class: "replay-legend" },
       el("span", { class: "k" }, el("span", { class: "sq", style: "background:var(--white-player)" }), "White — " + whiteRole),
       el("span", { class: "k" }, el("span", { class: "sq", style: "background:var(--black-player)" }), "Black — " + blackRole)));
-
-    var wrap = el("div", { class: "board-wrap" }, boardHolder, info);
-    append(this.main, wrap);
   };
 
   // ------------------------------------------------------------------
@@ -1292,8 +1371,8 @@
   // ------------------------------------------------------------------
 
   function buildOpsSection() {
-    var s = section("ops", "Operations", "internal", "ops",
-      "Wall-clock, throughput and memory — where the generation time goes.");
+    var s = section("ops", "Operations",
+      "Wall-clock time, throughput and memory per generation.");
     var grid = el("div", { class: "card-grid" });
     var perf = DATA.perf || {};
 
