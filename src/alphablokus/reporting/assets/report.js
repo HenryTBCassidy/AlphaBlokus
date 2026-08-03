@@ -468,21 +468,37 @@
     return el("div", { class: "placeholder" }, el("strong", { text: title + " — not recorded. " }), why);
   }
 
-  function section(id, title, badgeKind, badgeText, desc) {
+  function section(id, title, desc) {
     var head = el("div", { class: "section-head" }, el("h2", { text: title }));
-    if (badgeText) append(head, el("span", { class: "badge " + badgeKind, text: badgeText }));
     var node = el("section", { class: "report-section", id: id }, head);
     if (desc) append(node, el("p", { class: "section-desc", html: desc }));
     return node;
   }
 
+  // A <details> is not expanded by an anchor jump to itself, so every route to
+  // the key (nav link, in-page link, #key in the URL) opens it explicitly.
+  function openDetails(id) {
+    var node = document.getElementById(id);
+    if (node && node.tagName === "DETAILS") node.open = true;
+    return node;
+  }
+
+  function keyLink(text) {
+    return el("a", {
+      class: "key-link", href: "#key", text: text || "See the key",
+      onclick: function () { openDetails("key"); },
+    });
+  }
+
   // ------------------------------------------------------------------
-  // Header, verdict, signal tiles
+  // Header, status summary, signal tiles, event key
   // ------------------------------------------------------------------
 
   function buildTopbar(sections) {
     var nav = el("nav");
-    sections.forEach(function (s) { append(nav, el("a", { href: "#" + s.id, text: s.label })); });
+    sections.forEach(function (s) {
+      append(nav, el("a", { href: "#" + s.id, text: s.label, onclick: function () { openDetails(s.id); } }));
+    });
     return el("div", { class: "topbar" },
       el("div", { class: "brand" }, "AlphaBlokus ", el("span", { text: "· " + DATA.meta.run_name })),
       nav,
@@ -499,14 +515,14 @@
     return header;
   }
 
-  function buildVerdict() {
-    var v = DATA.verdict;
-    return el("div", { class: "verdict " + v.status },
+  function buildSummary() {
+    var v = DATA.summary;
+    return el("div", { class: "summary " + v.status },
       el("span", { class: "dot" }),
       el("div", null,
-        el("div", { class: "s-label", style: "font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--ink-3);", text: "Is this run improving, or fooling itself?" }),
+        el("div", { class: "summary-eyebrow", text: "Signal summary" }),
         el("h2", { text: v.headline }),
-        el("p", { text: v.detail })));
+        el("p", null, v.detail, " ", keyLink("Open the key"))));
   }
 
   function buildSignals() {
@@ -516,10 +532,69 @@
         el("div", { class: "s-label", text: s.label }),
         el("div", { class: "s-value", text: s.value }),
         el("div", { class: "s-sub", text: s.sub }));
+      // "Not recorded" is already the tile's value; don't say it twice.
+      var named = (s.events || []).filter(function (e) { return e.id !== "not_recorded"; });
+      if (named.length) {
+        append(tile, el("div", { class: "s-events",
+          text: named.map(function (e) { return e.label; }).join(" · ") }));
+      }
       if (s.spark && s.spark.length > 2) append(tile, sparkline(s.spark, 52, 20));
       append(grid, tile);
     });
     return grid;
+  }
+
+  // The key: every status, every event, the exact rule that fires it, and the
+  // note that the thresholds were fitted on two runs from this project.
+  function buildKey() {
+    var k = DATA.event_key;
+    var details = el("details", { class: "event-key", id: "key" },
+      el("summary", { text: "Status and event key — every flag, its trigger and its threshold" }));
+
+    var statuses = el("div", { class: "status-key" });
+    k.statuses.forEach(function (s) {
+      append(statuses, el("span", { class: "status-key-item " + s.id },
+        el("span", { class: "status-dot" }), s.label));
+    });
+    append(details, statuses);
+
+    var table = el("table", { class: "key-table" },
+      el("tr", null,
+        el("th", { text: "event" }),
+        el("th", { text: "fires when" }),
+        el("th", { text: "what the measurement is" })));
+    k.events.forEach(function (e) {
+      append(table, el("tr", { class: "key-row " + e.status },
+        el("td", null, el("span", { class: "status-dot" }), el("span", { class: "key-label", text: e.label }),
+          el("div", { class: "key-id mono", text: e.id })),
+        el("td", { text: e.trigger }),
+        el("td", { class: "key-means", text: e.means })));
+    });
+    append(details, el("div", { class: "key-table-wrap" }, table));
+    append(details, el("p", { class: "key-caveat", text: k.calibration_note }));
+    return details;
+  }
+
+  function signalById(id) {
+    var found = DATA.signals.filter(function (s) { return s.id === id; });
+    return found.length ? found[0] : null;
+  }
+
+  // Events raised on one signal, as observation + link to the rule. The
+  // "not recorded" event is omitted: those sections render a placeholder.
+  function buildEventList(rawEvents) {
+    var events = (rawEvents || []).filter(function (e) { return e.id !== "not_recorded"; });
+    if (!events.length) return null;
+    var list = el("ul");
+    events.forEach(function (e) {
+      append(list, el("li", null,
+        el("span", { class: "event-label", text: e.label }), " — ", e.detail));
+    });
+    return el("div", { class: "event-banner" },
+      el("div", { class: "event-banner-head" },
+        el("strong", { text: events.length === 1 ? "1 event raised" : events.length + " events raised" }),
+        keyLink("Triggers and thresholds")),
+      list);
   }
 
   // ------------------------------------------------------------------
@@ -545,23 +620,15 @@
     if (!ladder || !ladder.entries.length) {
       var note = ladder && ladder.history.length
         ? "Mini-ladder history exists but no per-level result JSONs were found."
-        : "The Pentobi ladder is the only instrument that has resolved differences the arena calls a tie. " +
-          "Run scripts/mini_ladder.py (or scripts/pentobi_benchmark.py) against this run's checkpoints.";
+        : "No result JSONs in PentobiLadder/. Produced by scripts/mini_ladder.py or " +
+          "scripts/pentobi_benchmark.py, run against this run's checkpoints.";
       return placeholder("Pentobi ladder", note);
     }
 
     var body = el("div");
 
-    if (ladder.drift || ladder.alarm_file) {
-      var drift = ladder.drift;
-      append(body, el("div", { class: "flag-banner" },
-        el("strong", { text: "⚠ Drift circuit-breaker tripped. " }),
-        drift
-          ? drift.consecutive_drops + " consecutive evaluations ≥5pp below best (" + drift.best_before + " at " +
-            drift.best_score.toFixed(3) + "); tripped at " + drift.tripped_at + " (" + drift.tripped_score.toFixed(3) +
-            "). Resume from the keep-best checkpoint."
-          : "MiniLadder/DRIFT_ALARM present in the run directory."));
-    }
+    var ladderSignal = signalById("ladder");
+    if (ladderSignal) append(body, buildEventList(ladderSignal.events));
 
     var levels = [];
     ladder.entries.forEach(function (entry) {
@@ -613,46 +680,67 @@
     }
 
     var sub = ladder.from_mini_ladder
-      ? "Selection instrument: keep-best + drift circuit-breaker recomputed from MiniLadder/history.json."
-      : "Result JSONs from PentobiLadder/. No mini-ladder selection history was recorded for this run — " +
-        "keep-best below is derived from these results alone.";
+      ? "Keep-best and the drift breaker are recomputed here from MiniLadder/history.json."
+      : "Result JSONs from PentobiLadder/. No mini-ladder history was recorded for this run, so the best " +
+        "checkpoint below is taken from these results alone.";
     append(body, el("p", { class: "card-sub", style: "margin-top:10px;", text: sub }));
-    return card("Pentobi ladder — the run's verdict", "Win rate vs the Pentobi engine per difficulty level. Cells show win rate (hover for W–L–D and CI); green = winning record.", body);
+    return card("Pentobi ladder",
+      "Win rate against the Pentobi engine at each of its difficulty levels. Cells show the win rate " +
+      "(hover for W–L–D and the 95% CI); green is above 50%, red below.", body);
   }
 
-  function buildExternalSection() {
-    var s = section("external", "External evidence", "external", "cannot be gamed by the loop",
-      "Signals anchored outside the self-play loop: the Pentobi ladder, the pooled BayesElo tournament " +
-      "(an independent code path over all checkpoints), and the game's ground-truth invariances. " +
-      "In the one run that regressed 44 Elo, these were the only honest warnings — and they fired from generation 5.");
-
+  function buildLadderSection() {
+    var s = section("ladder", "Pentobi ladder",
+      "Games against Pentobi, an outside engine, at fixed difficulty levels. The weighted score sums the " +
+      "per-level win rates weighted by level.");
     append(s, buildLadderCard());
+    return s;
+  }
+
+  function buildPoolEloSection() {
+    var s = section("pool-elo", "Pool Elo",
+      "A pooled round-robin between this run's own checkpoints, rated by BayesElo on one shared scale. " +
+      "Generation 0 is fixed at 0 as the anchor, so ratings are relative to the net the run started from.");
+    if (!DATA.tournament) {
+      append(s, placeholder("Pool Elo",
+        "No Tournament/tournament_ratings.parquet. Written by tournament.run_at_end or scripts/tournament_elo.py."));
+      return s;
+    }
+    append(s, buildEventList((signalById("tournament") || {}).events));
+    append(s, chartCard("Pool Elo per checkpoint", "Rating of each checkpoint in the pooled tournament.",
+      function (body) {
+        lineChart(body, function () {
+          var pal = palette();
+          return {
+            series: [{ name: "pool Elo", x: DATA.tournament.gens, y: DATA.tournament.rating,
+              color: pal.accent, dots: true }],
+            height: 230, xInt: true, xTitle: "gen", xLabel: "generation", yLabel: "Elo vs gen-0 anchor",
+            hlines: [{ y: 0, label: "gen-0 anchor" }], includeZero: true,
+          };
+        });
+      }));
+    return s;
+  }
+
+  function buildDiagnosticsSection() {
+    var s = section("diagnostics", "Symmetry and entropy diagnostics",
+      "Two symmetry measurements, taken against the board's rotations and reflections — exact invariances of " +
+      "the rules, so the true policy and value are identical across them — and the entropy of the self-play " +
+      "targets the trainer was given.");
+
+    var events = [];
+    ["symmetry_kl", "value_mae", "target_entropy"].forEach(function (id) {
+      var sig = signalById(id);
+      if (sig) events = events.concat(sig.events);
+    });
+    append(s, buildEventList(events));
 
     var grid = el("div", { class: "card-grid" });
 
-    if (DATA.tournament) {
-      append(grid, chartCard("Pool Elo (BayesElo tournament)",
-        "Every checkpoint rated on one shared scale by a pooled round-robin — the rigorous strength curve. Gen 0 is the anchor.",
-        function (body) {
-          lineChart(body, function () {
-            var pal = palette();
-            return {
-              series: [{ name: "pool Elo", x: DATA.tournament.gens, y: DATA.tournament.rating,
-                color: pal.accent, dots: true }],
-              height: 230, xInt: true, xTitle: "gen", xLabel: "generation", yLabel: "Elo vs gen-0 anchor",
-              hlines: [{ y: 0, label: "gen-0 anchor" }], includeZero: true,
-            };
-          });
-        }));
-    } else {
-      append(grid, placeholder("Pool Elo (BayesElo)",
-        "No Tournament/tournament_ratings.parquet — enable tournament.run_at_end or run scripts/tournament_elo.py."));
-    }
-
     if (DATA.symmetry) {
       append(grid, chartCard("Policy symmetry KL",
-        "KL divergence between the policy on a position and on its symmetric transforms — a ground-truth invariance. " +
-        "A healthy net holds flat; a monotonic rise is the drift signature that preceded the L4→L3 regression.",
+        "KL divergence between the policy on a position and the policy on that position's symmetric " +
+        "transforms, mapped back. Zero means the net gives symmetric positions identical policies.",
         function (body) {
           lineChart(body, function () {
             var pal = palette();
@@ -672,8 +760,8 @@
 
     if (DATA.pvc && DATA.pvc.value_symmetry_mae) {
       append(grid, chartCard("Value symmetry MAE",
-        "Mean |V(s) − V(sym(s))| over symmetric transforms — the value head's equivariance error. " +
-        "Rose 0.10 → 0.25 during the regression while value loss looked better than ever.",
+        "Mean |V(s) − V(sym(s))| over the same transforms: how far the value head's own predictions differ " +
+        "between a position and its symmetric copies.",
         function (body) {
           lineChart(body, function () {
             var pal = palette();
@@ -691,8 +779,8 @@
 
     if (DATA.target_entropy) {
       append(grid, chartCard("Self-play target entropy",
-        "Entropy of the stored search-policy targets at harvest (band = p10–p90 across episodes). " +
-        "A sharp collapse — gen 17 of the rerun fell 0.79 → 0.51 nats — precedes the trainer chasing degenerate targets.",
+        "Entropy of the stored search-policy targets at harvest, in nats (band = p10–p90 across episodes). " +
+        "Higher means search spread its visits over more moves; lower means it concentrated them.",
         function (body) {
           lineChart(body, function () {
             var pal = palette();
@@ -716,11 +804,11 @@
   // Arena instrument section
   // ------------------------------------------------------------------
 
-  function buildInstrumentSection() {
-    var s = section("instrument", "Arena instrument", "instrument", "measurement health",
-      "The candidate-vs-incumbent arena decides (or telemeters) weight flow, but in Blokus Duo ~93–97% of decisive " +
-      "deterministic games are won by the first mover, so between near-equal nets the score is structurally pinned " +
-      "near 0.500. These checks ask whether the gate measured anything at all.");
+  function buildArenaSection() {
+    var s = section("arena", "Arena",
+      "Each generation's candidate net against the current incumbent, played deterministically. In Blokus Duo the " +
+      "first mover wins ~93–97% of decisive deterministic games, so an unpaired arena score between near-equal " +
+      "nets sits close to 0.500 regardless of the difference between them.");
 
     var arena = DATA.arena;
     if (!arena) {
@@ -728,16 +816,12 @@
       return s;
     }
 
-    if (arena.red_flags.length) {
-      var list = el("ul");
-      arena.red_flags.forEach(function (flag) { append(list, el("li", { text: flag })); });
-      append(s, el("div", { class: "flag-banner" },
-        el("strong", { text: "⚠ Instrument red flags" }), list));
+    var eventList = buildEventList(arena.events);
+    if (eventList) {
+      append(s, eventList);
     } else {
-      append(s, el("div", { class: "ok-banner",
-        text: "No pinning signature detected: no exact-0.500 scores, score variance consistent with independent games" +
-          (arena.white_rate !== null && arena.white_rate !== undefined
-            ? ", white won " + fmtPct(arena.white_rate) + " of decisive games." : ".") }));
+      append(s, el("div", { class: "no-event-banner" },
+        "No events raised on the arena score. ", keyLink("What is checked")));
     }
 
     var grid = el("div", { class: "card-grid" });
@@ -745,10 +829,10 @@
     var gateNote = arena.gate_mode === "threshold"
       ? "Gate: accept at score ≥ " + arena.threshold + "."
       : arena.gate_mode === "regression_guard"
-        ? "Gate: regression guard (reject only clear losses) — the dashed line is the nominal threshold, kept for scale."
-        : "Gate: always accept — the arena is telemetry only.";
+        ? "Gate: regression guard — reject only clear losses. The dashed line is the nominal threshold, shown for scale."
+        : "Gate: always accept; the arena result does not gate anything in this run.";
     append(grid, chartCard("Arena score per generation",
-      "score = (wins + ½·draws) / games, candidate vs incumbent. Filled points = accepted. " + gateNote,
+      "score = (wins + ½·draws) / games, candidate against incumbent. Filled points are accepted generations. " + gateNote,
       function (body) {
         lineChart(body, function () {
           var pal = palette();
@@ -765,8 +849,7 @@
 
     if (arena.white_wins) {
       append(grid, chartCard("Decisive games by colour",
-        "Who actually won arena games: the first mover (White) or the second (Black). When White takes nearly every " +
-        "decisive game, the gate is measuring colour, not strength — this chart is why the arena gate is nearly information-free.",
+        "Which side won each generation's arena games: the first mover (White) or the second (Black).",
         function (body) {
           barChart(body, function () {
             var pal = palette();
@@ -783,14 +866,13 @@
         }));
     } else {
       append(grid, placeholder("Decisive games by colour",
-        "This run predates per-colour arena logging (white_wins/black_wins) — the single groupby that would have " +
-        "caught colour pinning three runs earlier."));
+        "This run predates per-colour arena logging (the white_wins / black_wins columns)."));
     }
 
     if (DATA.rolling_elo) {
       append(grid, chartCard("Rolling arena-derived Elo",
-        "Chained estimate from the same arena games (candidate rated vs current incumbent; benchmark rolls forward on " +
-        "acceptance). Self-referential — read the trend, trust the pool tournament for the rating.",
+        "A chained estimate from the same arena games: each candidate is rated against the current incumbent and " +
+        "the benchmark rolls forward when a candidate is accepted. Anchored to this run's own chain, not a shared scale.",
         function (body) {
           lineChart(body, function () {
             var pal = palette();
@@ -827,23 +909,16 @@
   // Self-referential training telemetry
   // ------------------------------------------------------------------
 
-  function buildInternalSection() {
-    var s = section("internal", "Training telemetry", "internal", "self-referential",
-      "");
-    append(s, el("div", { class: "self-referential-note" },
-      el("span", { text: "⚠" }),
-      el("span", null,
-        "Everything in this section is measured against the loop's own outputs — its buffer, its eval set, its own " +
-        "search targets. During the 20-generation run that lost 44 Elo, loss fell, acceptance hit 100% and eval top-1 " +
-        "read 0.99. These curves diagnose ", el("em", { text: "how" }), " training moved, not ",
-        el("em", { text: "whether" }), " the run improved.")));
+  function buildTrainingSection() {
+    var s = section("training", "Training",
+      "Every metric in this section is computed from the run's own data — its replay buffer, its frozen eval set " +
+      "and its own search targets — so these curves describe how training moved, measured against those targets.");
 
     var grid = el("div", { class: "card-grid" });
 
     if (DATA.training) {
       append(grid, chartCard("Loss per generation",
-        "Mean loss over each generation's final epoch. In a gated loop falling loss tracks progress; with the gate " +
-        "open it can simply mean the loop made its own data easier to predict.",
+        "Mean loss over each generation's final epoch, against the run's own stored search targets.",
         function (body) {
           lineChart(body, function () {
             var pal = palette();
@@ -887,8 +962,8 @@
 
     if (DATA.accuracy) {
       append(grid, chartCard("Eval-set policy agreement",
-        "Net's top-1/top-5 agreement with a frozen eval set sampled from generation-1 self-play. The targets are the " +
-        "same lineage's search output — near-1.0 readings certify fit, not strength.",
+        "How often the net's top-1 and top-5 moves match a frozen eval set sampled from generation-1 self-play. " +
+        "The eval-set targets are that same lineage's search output.",
         function (body) {
           lineChart(body, function () {
             var pal = palette();
@@ -912,8 +987,9 @@
 
     if (DATA.pvc) {
       append(grid, chartCard("Policy–value consistency",
-        "Does the policy agree with a one-ply value lookahead (Q₁(a) = −V(child))? A trend, not a target: a healthy " +
-        "net rises then plateaus below 100% (the policy sees deeper than one ply). Watch for late drops.",
+        "Agreement between the policy and a one-ply value lookahead (Q₁(a) = −V(child)): Spearman ρ over the ranked " +
+        "moves, and how often both pick the same top move. The policy searches deeper than one ply, so the two " +
+        "do not coincide exactly.",
         function (body) {
           lineChart(body, function () {
             var pal = palette();
@@ -931,8 +1007,8 @@
     if (DATA.calibration) {
       append(grid, chartCard("Value-head calibration",
         "Reliability at generation " + DATA.calibration.reliability.generation +
-        ": mean actual outcome per predicted-value bucket; the diagonal is perfect calibration. " +
-        "Note: 73% of self-play outcomes are White wins, and this view is colour-blind (plateau R8a).",
+        ": the mean actual outcome in each predicted-value bucket. The diagonal is exact calibration. " +
+        "Outcomes are pooled across both colours.",
         function (body) {
           lineChart(body, function () {
             var pal = palette();
@@ -960,8 +1036,8 @@
 
     if (DATA.net_entropy) {
       append(grid, chartCard("Network policy entropy",
-        "Entropy of the raw network policy on the frozen eval set (no search). Falling entropy = sharpening priors; " +
-        "a cliff means the policy is collapsing onto few moves.",
+        "Entropy of the raw network policy on the frozen eval set, with no search applied. Lower means the priors " +
+        "put their mass on fewer moves.",
         function (body) {
           lineChart(body, function () {
             var pal = palette();
@@ -976,8 +1052,8 @@
 
     if (DATA.lr) {
       append(grid, chartCard("Learning rate",
-        "The LR the optimiser actually trained at each generation — the ground truth for schedule comparisons " +
-        "(two of three past runs ran a different schedule than their committed config).",
+        "The learning rate the optimiser actually trained at in each generation, as logged, rather than the one " +
+        "the config requested.",
         function (body) {
           lineChart(body, function () {
             var pal = palette();
@@ -998,9 +1074,10 @@
   // ------------------------------------------------------------------
 
   function buildReplaySection() {
-    var s = section("replays", "Arena replays", "instrument", "game browser",
-      "Step through recorded arena games move by move. Player 1 is the incumbent, player 2 the freshly-trained " +
-      "candidate; colours are per game. Select an alternative to see the move MCTS considered instead of the one it played.");
+    var s = section("replays", "Arena replays",
+      "Recorded arena games, move by move. Player 1 is the incumbent and player 2 the freshly-trained candidate; " +
+      "which of them played White varies per game. Selecting an alternative shows a move MCTS considered but did " +
+      "not play.");
     if (!DATA.replays) {
       append(s, placeholder("Arena replays", "No ArenaReplays partitions in this run directory."));
       return s;
@@ -1335,11 +1412,14 @@
 
   function build() {
     var navSections = [
-      { id: "external", label: "External evidence" },
-      { id: "instrument", label: "Arena instrument" },
-      { id: "internal", label: "Training telemetry" },
+      { id: "ladder", label: "Pentobi ladder" },
+      { id: "pool-elo", label: "Pool Elo" },
+      { id: "diagnostics", label: "Diagnostics" },
+      { id: "arena", label: "Arena" },
+      { id: "training", label: "Training" },
       { id: "replays", label: "Replays" },
       { id: "ops", label: "Operations" },
+      { id: "key", label: "Key" },
       { id: "config", label: "Config" },
     ];
 
@@ -1349,11 +1429,14 @@
     body.appendChild(page);
 
     append(page, buildHeader());
-    append(page, buildVerdict());
+    append(page, buildSummary());
     append(page, buildSignals());
-    append(page, buildExternalSection());
-    append(page, buildInstrumentSection());
-    append(page, buildInternalSection());
+    append(page, buildKey());
+    append(page, buildLadderSection());
+    append(page, buildPoolEloSection());
+    append(page, buildDiagnosticsSection());
+    append(page, buildArenaSection());
+    append(page, buildTrainingSection());
     append(page, buildReplaySection());
     append(page, buildOpsSection());
     append(page, buildConfig());
@@ -1366,6 +1449,9 @@
   // The DOM is built after parse, so honour any #section link in the URL now.
   if (window.location.hash) {
     var target = document.querySelector(window.location.hash);
-    if (target) target.scrollIntoView();
+    if (target) {
+      if (target.tagName === "DETAILS") target.open = true;
+      target.scrollIntoView();
+    }
   }
 })();
