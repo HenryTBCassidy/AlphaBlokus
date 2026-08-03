@@ -1,9 +1,10 @@
-"""Pentobi ladder results: JSON persistence + the report section (cloud-scale C11).
+"""Pentobi ladder results: JSON persistence (cloud-scale C11).
 
-``scripts/pentobi_benchmark.py`` writes one JSON per benchmark run into the
-run's ``PentobiLadder/`` directory; ``create_html_report`` renders whatever it
-finds there as a "Pentobi Ladder" section. Both sides share this module so the
-schema can't drift. No results directory → empty section → report unchanged.
+``scripts/pentobi_benchmark.py`` and ``scripts/mini_ladder.py`` write one JSON
+per benchmark run into the run's ``PentobiLadder/`` directory; the report's
+payload builder (``reporting.data.ladder_payload``) reads whatever it finds
+there. Both sides share this module so the schema can't drift. No results
+directory → no ladder section in the report.
 """
 
 from __future__ import annotations
@@ -68,48 +69,3 @@ def load_ladder_results(directory: Path) -> list[dict[str, Any]]:
     results = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(directory.glob("ladder_*.json"))]
     return sorted(results, key=lambda r: str(r.get("timestamp", "")))
 
-
-def build_pentobi_ladder_section(directory: Path) -> str:
-    """The report's "Pentobi Ladder" section, or ``""`` when no results exist."""
-    results = load_ladder_results(directory)
-    if not results:
-        return ""
-
-    header_levels = sorted({row["level"] for result in results for row in result["levels"]})
-    head_cells = "".join(f"<th>L{level}</th>" for level in header_levels)
-    body_rows = []
-    for result in results:
-        by_level = {row["level"]: row for row in result["levels"]}
-        cells = []
-        for level in header_levels:
-            row = by_level.get(level)
-            if row is None:
-                cells.append("<td>—</td>")
-                continue
-            beat = row["win_rate"] > 0.5
-            cells.append(
-                f'<td class="{"ladder-beat" if beat else "ladder-lost"}">'
-                f"{row['win_rate']:.0%} ({row['net_wins']}-{row['pentobi_wins']}-{row['draws']})</td>"
-            )
-        timestamp = str(result.get("timestamp", ""))[:16].replace("T", " ")
-        body_rows.append(
-            f"<tr><td>{result['net']}</td><td>{timestamp}</td>"
-            f"<td>{result['metrics']['pentobi_level']}</td>{''.join(cells)}</tr>"
-        )
-
-    return f"""<section>
-<h2>Pentobi Ladder</h2>
-<p class="section-desc">
-    Checkpoints benchmarked against pentobi-gtp (scripts/pentobi_benchmark.py).
-    "Pentobi Level" = highest level beaten at &gt;50% win rate; cells show
-    win rate (W-L-D). Green = beaten, red = not yet.
-</p>
-<style>
-.ladder-beat {{ background: #dcfce7; }}
-.ladder-lost {{ background: #fee2e2; }}
-</style>
-<table class="ladder-table">
-<tr><th>net</th><th>when</th><th>Pentobi Level</th>{head_cells}</tr>
-{"".join(body_rows)}
-</table>
-</section>"""

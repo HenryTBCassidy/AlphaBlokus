@@ -1,10 +1,12 @@
 """Reporting and visualisation: the training-run HTML report and renderers.
 
 Submodules:
-    report        — report orchestrator (``create_html_report``) + metrics loading
-    charts        — plotly figure builders
-    arena_replays — interactive replay viewer (template + section builder)
-    display*      — per-game board renderers
+    report        — report orchestrator (``create_html_report``): payload + assets → one HTML file
+    data          — metric tables → JSON payload (signals, verdict, per-section series)
+    arena_replays — compact replay payloads for the client-side game browser
+    assets/       — the report's CSS + JS (package data; no CDN, no build step)
+    pentobi_ladder — ladder result JSON persistence
+    display*      — per-game board renderers (scripts + ad-hoc tooling)
     mcts_profiling — MCTS profiling report builder
 """
 
