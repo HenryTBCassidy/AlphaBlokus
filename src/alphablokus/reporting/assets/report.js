@@ -182,6 +182,7 @@
 
   function lineChart(container, specFn) {
     var hidden = {};
+    specFn().series.forEach(function (s) { if (s.hidden) hidden[s.name] = true; });
     registerChart(function () { renderLineChart(container, specFn(), hidden); });
   }
 
@@ -658,7 +659,8 @@
             return {
               series: [
                 { name: "mean over positions", x: DATA.symmetry.gens, y: DATA.symmetry.kl_mean, color: pal.accent, dots: true },
-                { name: "worst position", x: DATA.symmetry.gens, y: DATA.symmetry.kl_max, color: pal.violet, dash: "4 3", width: 1.3 },
+                { name: "worst position (click to show)", x: DATA.symmetry.gens, y: DATA.symmetry.kl_max,
+                  color: pal.violet, dash: "4 3", width: 1.3, hidden: true },
               ],
               height: 230, xInt: true, xTitle: "gen", xLabel: "generation", yLabel: "KL (nats)",
             };
@@ -1099,8 +1101,9 @@
 
     var isTTT = replays.game === "tictactoe";
     var altActive = this.state.alt !== null && k < game.moves.length;
-    var paintUpTo = altActive ? k : k; // moves [0, k) are placed; alt previews replace move k
-    for (var i = 0; i < paintUpTo; i++) {
+    // Moves [0, k) are placed; an active alternative previews what could
+    // replace move k, so the base position is the same either way.
+    for (var i = 0; i < k; i++) {
       var move = game.moves[i];
       var side = move.p === 1 ? "white" : "black";
       var isLast = !altActive && i === paintUpTo - 1;
@@ -1190,11 +1193,6 @@
       if (next.alts.length) {
         append(info, el("div", { class: "alt-hint",
           text: "Selecting an alternative previews it (striped) on the pre-move board — press ▶ to see what was actually played." }));
-      }
-      if (this.state.alt !== null) {
-        // When previewing an alt the played move is not yet on the board.
-        boardHolder.innerHTML = "";
-        boardHolder.appendChild(this.boardSvg());
       }
     }
 
