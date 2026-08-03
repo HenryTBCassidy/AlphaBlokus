@@ -68,10 +68,14 @@ _SUB_BINOMIAL_FACTOR = 0.5
 _SUB_BINOMIAL_MIN_GENS = 4
 _COLOUR_PINNED_WHITE_RATE = 0.85
 
-# Pool-Elo slippage: how far below its own peak a run may finish before the
-# verdict flags it (the rerun finished 49 Elo below its +5.5 peak).
+# Pool-Elo slippage. Warn when the run finishes well below its own peak (the
+# keep-best checkpoint, not the final net, is then the run's product — v3
+# ended 46 below its gen-32 peak). Alert when the final net sits clearly below
+# the gen-0 anchor: for a warm-start run that means *worse than the donor*,
+# the rerun's signature (final −44 vs its gen-40 donor).
 _POOL_ELO_WARN_DROP = 15.0
-_POOL_ELO_ALERT_DROP = 30.0
+_POOL_ELO_ALERT_FINAL_BELOW_ANCHOR = -10.0
+_POOL_ELO_ALERT_DROP = 60.0
 
 # Bound embedded chart payloads: per-batch loss traces are EWM-smoothed then
 # downsampled to at most this many points per series.
@@ -695,14 +699,24 @@ def build_signals(
         peak_gen = tournament["gens"][ratings.index(peak)]
         final = ratings[-1]
         drop = peak - final
-        status = "alert" if drop >= _POOL_ELO_ALERT_DROP else "warn" if drop >= _POOL_ELO_WARN_DROP else "ok"
+        if final <= _POOL_ELO_ALERT_FINAL_BELOW_ANCHOR or drop >= _POOL_ELO_ALERT_DROP:
+            status = "alert"
+            sub = f"Peak {peak:+.0f} at gen {peak_gen} — the run ended below its gen-0 anchor."
+            if final > _POOL_ELO_ALERT_FINAL_BELOW_ANCHOR:
+                sub = f"Peak {peak:+.0f} at gen {peak_gen} — the run slid {drop:.0f} Elo off its best."
+        elif drop >= _POOL_ELO_WARN_DROP:
+            status = "warn"
+            sub = f"Peak {peak:+.0f} at gen {peak_gen} — the final net is not the best net; select by ladder."
+        else:
+            status = "ok"
+            sub = f"Peak {peak:+.0f} at gen {peak_gen}."
         signals.append(
             _signal(
                 "tournament",
                 "Pool Elo (BayesElo)",
                 status,
                 f"{final:+.0f} final",
-                f"Peak {peak:+.0f} at gen {peak_gen}." + (" Run ended below its best." if status != "ok" else ""),
+                sub,
                 anchored=True,
                 spark=ratings,
                 href="#external",

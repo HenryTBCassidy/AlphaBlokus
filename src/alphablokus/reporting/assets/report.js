@@ -1364,4 +1364,10 @@
 
   initTheme();
   build();
+
+  // The DOM is built after parse, so honour any #section link in the URL now.
+  if (window.location.hash) {
+    var target = document.querySelector(window.location.hash);
+    if (target) target.scrollIntoView();
+  }
 })();
