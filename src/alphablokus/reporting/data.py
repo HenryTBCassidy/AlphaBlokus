@@ -678,7 +678,9 @@ def build_signals(
             sub = f"Keep-best: {best['label']}" if best else "Single evaluation."
         level = f"L{best['pentobi_level']} · " if best and best.get("pentobi_level") is not None else ""
         value = f"{level}{best['weighted_score']:.3f} weighted" if best else "—"
-        signals.append(_signal("ladder", "Pentobi ladder", status, value, sub, anchored=True, spark=spark, href="#external"))
+        signals.append(
+            _signal("ladder", "Pentobi ladder", status, value, sub, anchored=True, spark=spark, href="#external")
+        )
 
     # 2. Pooled BayesElo tournament — rigorous, non-saturating, independent code path.
     if tournament is None:
@@ -741,7 +743,11 @@ def build_signals(
     else:
         assert kl_values is not None
         trend = f"{ratio:.2f}× vs run start" if ratio is not None else "trend n/a"
-        sub = {"ok": f"Stable ({trend}).", "warn": f"Rising ({trend}).", "alert": f"Rising steeply ({trend}) — the rerun's regression signature."}[status]
+        sub = {
+            "ok": f"Stable ({trend}).",
+            "warn": f"Rising ({trend}).",
+            "alert": f"Rising steeply ({trend}) — the rerun's regression signature.",
+        }[status]
         signals.append(
             _signal(
                 "symmetry_kl",
@@ -773,7 +779,11 @@ def build_signals(
     else:
         assert mae_values is not None
         trend = f"{ratio:.2f}× vs run start" if ratio is not None else "trend n/a"
-        sub = {"ok": f"Stable ({trend}).", "warn": f"Rising ({trend}).", "alert": f"Rising steeply ({trend}) — value head drifting off the game's invariances."}[status]
+        sub = {
+            "ok": f"Stable ({trend}).",
+            "warn": f"Rising ({trend}).",
+            "alert": f"Rising steeply ({trend}) — value head drifting off the game's invariances.",
+        }[status]
         signals.append(
             _signal(
                 "value_mae",
@@ -851,11 +861,16 @@ def build_signals(
             status = "ok"
             value = "No pinning signature"
             white = arena.get("white_rate")
-            sub = f"White won {white:.0%} of decisive games." if white is not None else "Colour split not logged (older run)."
+            if white is not None:
+                sub = f"White won {white:.0%} of decisive games."
+            else:
+                sub = "Colour split not logged (older run)."
             if white is None:
                 status = "warn"
                 value = "Colour split unknown"
-        signals.append(_signal("instrument", "Arena instrument", status, value, sub, anchored=False, href="#instrument"))
+        signals.append(
+            _signal("instrument", "Arena instrument", status, value, sub, anchored=False, href="#instrument")
+        )
 
     return signals
 
@@ -897,7 +912,8 @@ def build_verdict(signals: list[dict[str, Any]], ladder: dict[str, Any] | None) 
     if ladder and ladder["keep_best"]:
         best = ladder["keep_best"]
         level = f" (beats Pentobi L{best['pentobi_level']})" if best.get("pentobi_level") is not None else ""
-        detail = f"Keep-best checkpoint: {best['label']}{level}, weighted ladder score {best['weighted_score']:.3f}. " + detail
+        best_line = f"Keep-best checkpoint: {best['label']}{level}, weighted ladder score {best['weighted_score']:.3f}."
+        detail = best_line + " " + detail
     missing = [s["label"] for s in anchored if s["status"] == "missing"]
     if missing:
         detail += f" Not recorded: {', '.join(missing)}."

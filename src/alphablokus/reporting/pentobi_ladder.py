@@ -68,4 +68,3 @@ def load_ladder_results(directory: Path) -> list[dict[str, Any]]:
         return []
     results = [json.loads(path.read_text(encoding="utf-8")) for path in sorted(directory.glob("ladder_*.json"))]
     return sorted(results, key=lambda r: str(r.get("timestamp", "")))
-

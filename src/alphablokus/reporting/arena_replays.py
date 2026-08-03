@@ -81,10 +81,7 @@ def _move_cells(before: IBoard, after: IBoard) -> list[list[int]]:
     placement = getattr(after, "placement_grid", None)
     cells: list[list[int]] = []
     for row, col in changed:
-        if placement is not None:
-            label = int(abs(placement[row, col]))
-        else:
-            label = int(after_2d[row, col])
+        label = int(abs(placement[row, col])) if placement is not None else int(after_2d[row, col])
         cells.append([int(row), int(col), label])
     return cells
 
