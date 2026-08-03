@@ -31,7 +31,7 @@ src/alphablokus/
 ├── evaluation/   # arena, players, acceptance, Elo, symmetry diagnostic
 ├── storage/      # MetricsCollector (parquet + W&B), SelfPlayStore, sparse policy
 ├── games/        # base_wrapper + tictactoe/ + blokusduo/ (movegen/, pentobi/, jax/, nn/)
-├── reporting/    # HTML report (report/charts/arena_replays/display*)
+├── reporting/    # HTML report (report/data/arena_replays/assets/display*)
 └── testing/      # shipped test utilities (position caches)
 ```
 

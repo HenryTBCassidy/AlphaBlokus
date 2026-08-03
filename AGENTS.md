@@ -46,7 +46,7 @@ Game-agnostic framework (`src/alphablokus/`) with pluggable game implementations
 - `evaluation/` — arena, players, acceptance rule, Elo, symmetry diagnostic
 - `storage/` — `MetricsCollector` (hive parquet + W&B mirror), `SelfPlayStore`, sparse policy codec
 - `games/` — `tictactoe/` (reference impl + minimax oracle), `blokusduo/` (board/codec/game/pieces + `movegen/`, `pentobi/`, `jax/`, `nn/`)
-- `reporting/` — interactive HTML report (Plotly charts, arena replay viewer)
+- `reporting/` — self-contained HTML run report (JSON payload + hand-rolled SVG charts, arena replay browser; no CDN/build step)
 - `testing/` — shipped test utilities (position caches)
 
 **Core protocols** (in `alphablokus/interfaces.py`):

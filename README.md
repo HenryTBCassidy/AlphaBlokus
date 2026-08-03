@@ -60,7 +60,7 @@ src/alphablokus/
 ├── training/           # Coach generation loop, replay buffer, eval set, memory diagnostics
 ├── evaluation/         # Arena, acceptance gate, Elo, pooled BayesElo tournament
 ├── storage/            # Parquet metrics + self-play stores, sparse policy codec, W&B mirror
-├── reporting/          # Self-contained interactive HTML report (Plotly + arena replay viewer)
+├── reporting/          # Self-contained interactive HTML report (offline SVG charts + arena replay browser)
 └── games/
     ├── tictactoe/      # Reference implementation + minimax oracle
     └── blokusduo/      # Board/rules/codecs, move-gen tables, Pentobi GTP, JAX backend, ResNet
