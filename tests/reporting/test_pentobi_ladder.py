@@ -1,4 +1,4 @@
-"""Pentobi ladder persistence + report section (reporting/pentobi_ladder.py)."""
+"""Pentobi ladder persistence (reporting/pentobi_ladder.py)."""
 
 from __future__ import annotations
 
@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING
 import pytest
 
 from alphablokus.reporting.pentobi_ladder import (
-    build_pentobi_ladder_section,
     load_ladder_results,
     parse_levels,
     write_ladder_result,
@@ -67,23 +66,6 @@ def test_write_then_load_roundtrip_drops_records(tmp_path: Path) -> None:
     assert all("records" not in row for row in result["levels"])
 
 
-def test_section_empty_without_results(tmp_path: Path) -> None:
-    assert build_pentobi_ladder_section(tmp_path / "nowhere") == ""
-    assert build_pentobi_ladder_section(tmp_path) == ""  # exists but empty
-
-
-def test_section_renders_beat_and_lost_levels(tmp_path: Path) -> None:
-    write_ladder_result(
-        tmp_path,
-        net="accepted_20.pth.tar",
-        sims=400,
-        games_per_level=20,
-        per_level=[_per_level(1, 15), _per_level(2, 4)],
-        metrics={"pentobi_level": 1, "score": 0.475, "weighted_score": 0.38},
-    )
-    html = build_pentobi_ladder_section(tmp_path)
-    assert "Pentobi Ladder" in html
-    assert "accepted_20.pth.tar" in html
-    assert "ladder-beat" in html and "ladder-lost" in html
-    assert "75% (15-5-0)" in html
-    assert "<th>L1</th><th>L2</th>" in html
+def test_load_from_missing_or_empty_directory(tmp_path: Path) -> None:
+    assert load_ladder_results(tmp_path / "nowhere") == []
+    assert load_ladder_results(tmp_path) == []  # exists but empty

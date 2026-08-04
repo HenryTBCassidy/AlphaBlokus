@@ -361,7 +361,7 @@ For the "Pentobi Level" metric, if the win rate is between 50-60% over 100 games
 
 ## 3. Visualisation
 
-Generate an interactive HTML report (using Plotly) per training run. The reporting infrastructure already exists in the framework (`{run_directory}/Reporting/`).
+Generate an interactive HTML report (self-contained, offline SVG charts) per training run. The reporting infrastructure already exists in the framework (`{run_directory}/Reporting/`).
 
 ### Pentobi Heatmap (the money plot)
 

@@ -435,7 +435,7 @@ W&B is an **additive** reporting layer — it does not replace any of the parque
 | Use case | Best tool |
 |----------|-----------|
 | Watch a long unattended run from another machine / phone | **W&B dashboard** (live, browser-based, no `rsync` needed) |
-| Retrospective deep-dive after a run finished | **HTML report** (rendered from local parquets, fully offline, rich Plotly visuals) |
+| Retrospective deep-dive after a run finished | **HTML report** (rendered from local parquets, fully offline, self-contained SVG charts + replay browser) |
 | Compare runs against each other | W&B (built-in run comparison) |
 | Archival / reproducibility | Parquets in `temp/<run_name>/` (source of truth) |
 | Air-gapped / no network | Set `wandb.mode: "disabled"` or omit the `wandb` block entirely |

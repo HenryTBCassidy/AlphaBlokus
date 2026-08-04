@@ -1,23 +1,36 @@
 """Build the AlphaBlokus W&B workspace via the `wandb-workspaces` SDK.
 
 Run this once per W&B project (e.g. after the first run, or when the project
-gets reset). The script creates a saved view named "AlphaBlokus default"
-with the agreed section ordering and panel grouping. Re-running is safe —
-the SDK upserts by view name.
+gets reset). The script creates a saved view named "AlphaBlokus default".
+Re-running is safe — the SDK upserts by view name.
 
 Usage::
 
     uv run python scripts/setup_wandb_workspace.py \
         --entity henrycassidy --project alphablokus-poc
 
-The dashboard follows the chronological order of a single training cycle:
+Design (2026-08 cut-down). The dashboard is what gets watched *mid-flight*,
+and the previous 30-panel layout buried the signal: during the
+``blokus_paired_gate_rerun`` regression every prominent panel (loss ↓,
+acceptance 100%, eval top-1 0.99) looked healthy while the only honest
+warnings — policy symmetry KL and value symmetry MAE, computed against the
+game's ground-truth invariances — sat in an unwatched parquet
+(docs/research/regression-and-next-steps.md §1.5). So:
 
-  Run progress → Self-play → Training loss → Learning quality
-  → Arena → Strength → Operational
+* The **first, open section** is exclusively externally-anchored health:
+  symmetry KL, value symmetry MAE, self-play target entropy (the gen-17
+  collapse detector) and the arena colour split (is the gate measuring
+  strength, or first-mover advantage?).
+* Strength/gate telemetry and training loss follow, explicitly labelled
+  self-referential — useful trends, but they cannot certify progress.
+* Progress (generation / ETA) stays for glanceability; everything
+  operational is collapsed at the bottom.
+* Cut entirely: per-episode duplicates of per-gen panels, epoch/episode/batch
+  sawtooths, top-5 agreement, minimax (TTT-only), the retired frozen-gen-0
+  Elo keys — clutter that nobody watched and that crowded out the warnings.
 
-so a glance tells you both where you are in the run and what's happening.
-Each section's panels match the ``define_metric`` namespaces wired in
-``core/storage.py``.
+Each panel's metric matches the ``define_metric`` namespaces wired in
+``storage/metrics.py``.
 """
 
 from __future__ import annotations
@@ -36,10 +49,8 @@ def _line(
     smoothing: float | None = None,
     y_range: tuple[float | None, float | None] = (None, None),
 ) -> wr.LinePlot:
-    """Convenience wrapper around ``wr.LinePlot`` with the common defaults
-    we use across the dashboard: explicit x-axis, optional smoothing, optional
-    y-range. Title is shown above the panel in the W&B UI.
-    """
+    """``wr.LinePlot`` with the dashboard's defaults: explicit x-axis,
+    optional exponential smoothing, optional y-range."""
     kwargs: dict = {
         "title": title,
         "x": x,
@@ -52,22 +63,80 @@ def _line(
     return wr.LinePlot(**kwargs)
 
 
-def _bar(title: str, metrics: list[str], *, x: str = "generation") -> wr.BarPlot:  # noqa: ARG001
-    """Bar chart — used for per-gen wins/losses/draws breakdowns. The ``x``
-    argument is accepted for symmetry with ``_line`` but BarPlot's x-axis is
-    always the (numerical) bar value, so it's ignored here.
-    """
-    return wr.BarPlot(title=title, metrics=metrics)
-
-
 def build_sections() -> list[ws.Section]:
-    """Return the full ordered list of sections for the workspace.
-
-    Section ordering matches Henry's chronological-cycle preference:
-    Run progress → Self-play → Training → Learning quality → Arena
-    → Strength → Operational.
-    """
+    """The full ordered section list: honest warnings first, ops last."""
     return [
+        ws.Section(
+            name="Is it improving? — externally anchored",
+            is_open=True,
+            panels=[
+                _line(
+                    "Policy symmetry KL (rising = drifting off game invariances)",
+                    ["learning_quality/symmetry_kl_mean", "learning_quality/symmetry_kl_max"],
+                ),
+                _line(
+                    "Value symmetry MAE (rising = value head drifting)",
+                    ["pvc/value_symmetry_mae"],
+                ),
+                _line(
+                    "Self-play target entropy (a cliff = target collapse, e.g. rerun gen 17)",
+                    ["self_play_per_gen/policy_entropy_mean"],
+                ),
+                _line(
+                    "Arena white-win share of decisive games (≥0.85 = colour-pinned gate)",
+                    ["arena/white_win_rate"],
+                    y_range=(0.0, 1.05),
+                ),
+            ],
+        ),
+        ws.Section(
+            name="Strength & gate telemetry — self-referential",
+            is_open=True,
+            panels=[
+                _line(
+                    "Rolling arena-derived Elo (chained; trend only)",
+                    ["elo/rolling"],
+                ),
+                _line(
+                    "Arena score vs incumbent (near-equal nets pin to ~0.50)",
+                    ["elo/score_rate"],
+                    y_range=(0.0, 1.05),
+                ),
+                _line(
+                    "Accepted (per gen, 0/1) + running acceptance rate",
+                    ["arena/accepted", "arena/acceptance_rate"],
+                    y_range=(-0.05, 1.05),
+                ),
+            ],
+        ),
+        ws.Section(
+            name="Training",
+            is_open=True,
+            panels=[
+                _line(
+                    "Per-gen losses (total / pi / v)",
+                    [
+                        "training_per_gen/total_loss",
+                        "training_per_gen/pi_loss",
+                        "training_per_gen/v_loss",
+                    ],
+                ),
+                _line(
+                    "Per-batch loss (smoothed)",
+                    [
+                        "training/total_loss",
+                        "training/pi_loss",
+                        "training/v_loss",
+                    ],
+                    x="global_batch",
+                    smoothing=0.8,
+                ),
+                _line(
+                    "Learning rate actually applied",
+                    ["training_per_gen/learning_rate"],
+                ),
+            ],
+        ),
         ws.Section(
             name="Run progress",
             is_open=True,
@@ -81,178 +150,6 @@ def build_sections() -> list[ws.Section]:
                     "ETA (seconds remaining)",
                     ["progress/eta_seconds"],
                     x="progress/wall_clock_seconds",
-                ),
-                _line(
-                    "Generation fraction",
-                    ["progress/generation_fraction"],
-                    x="progress/wall_clock_seconds",
-                    y_range=(0.0, 1.05),
-                ),
-                _line(
-                    "Epoch within current generation",
-                    ["progress/epoch"],
-                    x="progress/wall_clock_seconds",
-                ),
-                _line(
-                    "Episode within current generation",
-                    ["progress/episode"],
-                    x="progress/wall_clock_seconds",
-                ),
-                _line(
-                    "Batch within current epoch",
-                    ["progress/batch"],
-                    x="progress/wall_clock_seconds",
-                ),
-            ],
-        ),
-        ws.Section(
-            name="Self-play",
-            is_open=True,
-            panels=[
-                _line(
-                    "MCTS policy entropy (per-gen mean)",
-                    ["self_play_per_gen/policy_entropy_mean"],
-                ),
-                _line(
-                    "Mean game length",
-                    ["self_play_per_gen/num_moves_mean"],
-                ),
-                _line(
-                    "Mean MCTS tree size",
-                    ["self_play_per_gen/tree_size_mean"],
-                ),
-                _line(
-                    "MCTS sims/second",
-                    ["self_play_per_gen/sims_per_second_mean"],
-                ),
-                _line(
-                    "MCTS policy entropy (per-episode)",
-                    ["self_play/policy_entropy"],
-                    x="global_episode",
-                    smoothing=0.6,
-                ),
-                _line(
-                    "Game length (per-episode)",
-                    ["self_play/num_moves"],
-                    x="global_episode",
-                    smoothing=0.6,
-                ),
-            ],
-        ),
-        ws.Section(
-            name="Training loss",
-            is_open=True,
-            panels=[
-                _line(
-                    "Per-gen losses (pi / v / total)",
-                    [
-                        "training_per_gen/total_loss",
-                        "training_per_gen/pi_loss",
-                        "training_per_gen/v_loss",
-                    ],
-                ),
-                _line(
-                    "Total loss",
-                    ["training_per_gen/total_loss"],
-                ),
-                _line(
-                    "Policy loss",
-                    ["training_per_gen/pi_loss"],
-                ),
-                _line(
-                    "Value loss",
-                    ["training_per_gen/v_loss"],
-                ),
-                _line(
-                    "Per-batch loss (raw, smoothed)",
-                    [
-                        "training/total_loss",
-                        "training/pi_loss",
-                        "training/v_loss",
-                    ],
-                    x="global_batch",
-                    smoothing=0.8,
-                ),
-            ],
-        ),
-        ws.Section(
-            name="Learning quality",
-            is_open=True,
-            panels=[
-                _line(
-                    "Net top-1 agreement (vs minimax for TTT, vs MCTS for Blokus)",
-                    ["training_per_gen/network_top1_accuracy"],
-                    y_range=(0.0, 1.05),
-                ),
-                _line(
-                    "Net top-5 agreement",
-                    ["training_per_gen/network_top5_accuracy"],
-                    y_range=(0.0, 1.05),
-                ),
-                _line(
-                    "Value-head calibration error",
-                    ["training_per_gen/value_calibration_error"],
-                ),
-                _line(
-                    "Network policy entropy",
-                    ["training_per_gen/network_policy_entropy"],
-                ),
-            ],
-        ),
-        ws.Section(
-            name="Arena (new vs prev)",
-            is_open=True,
-            panels=[
-                _line(
-                    "Arena win rate",
-                    ["arena/win_rate"],
-                    y_range=(0.0, 1.05),
-                ),
-                _line(
-                    "Acceptance rate (running)",
-                    ["arena/acceptance_rate"],
-                    y_range=(0.0, 1.05),
-                ),
-                _line(
-                    "Accepted (per gen, 0/1)",
-                    ["arena/accepted"],
-                    y_range=(-0.05, 1.05),
-                ),
-                _bar(
-                    "Arena wins / losses / draws",
-                    ["arena/wins", "arena/losses", "arena/draws"],
-                ),
-            ],
-        ),
-        ws.Section(
-            name="Strength (Elo + minimax)",
-            is_open=True,
-            panels=[
-                _line(
-                    "Elo rating (anchored at gen-0 baseline = 400)",
-                    ["elo/rating"],
-                ),
-                _line(
-                    "Elo difference vs baseline",
-                    ["elo/diff_vs_baseline"],
-                ),
-                _line(
-                    "Score rate vs gen-0",
-                    ["elo/score_rate"],
-                    y_range=(0.0, 1.05),
-                ),
-                _line(
-                    "vs minimax: win / draw / loss rate (TTT only)",
-                    [
-                        "minimax/win_rate",
-                        "minimax/draw_rate",
-                        "minimax/loss_rate",
-                    ],
-                    y_range=(0.0, 1.05),
-                ),
-                _bar(
-                    "vs minimax: wins / losses / draws (TTT only)",
-                    ["minimax/wins", "minimax/losses", "minimax/draws"],
                 ),
             ],
         ),
@@ -274,9 +171,20 @@ def build_sections() -> list[ws.Section]:
                     ["throughput/samples_per_second"],
                 ),
                 _line(
+                    "Self-play search throughput (sims/sec, per-gen mean)",
+                    ["self_play_per_gen/sims_per_second_mean"],
+                ),
+                _line(
                     "Self-play inference fraction",
                     ["self_play_per_gen/inference_fraction_mean"],
                     y_range=(0.0, 1.05),
+                ),
+                _line(
+                    "Replay buffer fill + emergent reuse",
+                    [
+                        "training_per_gen/buffer_fill_fraction",
+                        "training_per_gen/emergent_reuse",
+                    ],
                 ),
             ],
         ),
