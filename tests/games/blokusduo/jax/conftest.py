@@ -10,7 +10,19 @@ if TYPE_CHECKING:
     from pathlib import Path
 
 
-def make_search_config(tmp_path, num_filters: int = 16, blocks: int = 1, num_sims: int = 60) -> RunConfig:
+#: The dtypes the parity matrix runs under. Production self-play runs bfloat16
+#: (``jax_selfplay.dtype``), while every correctness test used to run fp32 — so
+#: the numerics that actually generate training data were never the numerics
+#: under test. Both legs now run.
+PARITY_DTYPES = ("float32", "bfloat16")
+
+
+def make_search_config(
+    tmp_path,
+    num_filters: int = 16,
+    blocks: int = 1,
+    num_sims: int = 60,
+) -> RunConfig:
     return RunConfig(
         game="blokusduo",
         run_name="test_jax_search",
@@ -34,7 +46,12 @@ def make_search_config(tmp_path, num_filters: int = 16, blocks: int = 1, num_sim
     )
 
 
-def make_backend_config(tmp_path: Path, num_eps: int = 3, num_sims: int = 8) -> RunConfig:
+def make_backend_config(
+    tmp_path: Path,
+    num_eps: int = 3,
+    num_sims: int = 8,
+    dtype: str = "float32",
+) -> RunConfig:
     return RunConfig(
         game="blokusduo",
         run_name="test_jaxplay",
@@ -56,6 +73,6 @@ def make_backend_config(tmp_path: Path, num_eps: int = 3, num_sims: int = 8) -> 
             num_residual_blocks=1,
         ),
         selfplay_backend="jax",
-        jax_selfplay=JaxSelfPlayConfig(batch_size=2, top_k=32, dtype="float32", wave_plies=16),
+        jax_selfplay=JaxSelfPlayConfig(batch_size=2, top_k=32, dtype=dtype, wave_plies=16),
         seed=7,
     )

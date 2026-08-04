@@ -5,7 +5,6 @@
   "num_generations": 40,
   "num_eps": 10000,
   "replay_buffer_games": 60000,
-  "temp_threshold": 12,
   "update_threshold": 0.55,
   "root_directory": "/workspace/",
   "load_model": true,
@@ -24,8 +23,6 @@
     "num_mcts_sims": 256,
     "cpuct": 2.5,
     "mcts_batch_size": 16,
-    "dirichlet_epsilon": 0.25,
-    "dirichlet_alpha": 0.03,
     "search_policy": "gumbel",
     "gumbel_max_considered": 64
   },

@@ -48,6 +48,7 @@ from __future__ import annotations
 import argparse
 import math
 import multiprocessing as mp
+import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -503,6 +504,11 @@ def main() -> None:
     if args.games < 2:
         workers = 1
 
+    # Time the whole ladder. It is the plan's backbone measurement and its cost
+    # used to be recorded nowhere on disk, so scheduling anything around it was
+    # guesswork.
+    ladder_start = time.perf_counter()
+
     if workers == 1:
         # --- Serial path: build the net once in-process (bit-for-bit as before). ---
         if args.mps:
@@ -576,10 +582,12 @@ def main() -> None:
                 flush=True,
             )
 
+    ladder_duration_s = time.perf_counter() - ladder_start
     metrics = compute_headline_metrics(per_level)
     print(
         f"[benchmark] Pentobi Level={metrics['pentobi_level']} "
-        f"Score={metrics['score']:.3f} Weighted={metrics['weighted_score']:.3f}",
+        f"Score={metrics['score']:.3f} Weighted={metrics['weighted_score']:.3f} "
+        f"in {ladder_duration_s:.1f}s",
         flush=True,
     )
 
@@ -591,6 +599,7 @@ def main() -> None:
         games_per_level=args.games,
         per_level=per_level,
         metrics=metrics,
+        duration_s=ladder_duration_s,
     )
     print(f"[benchmark] ladder JSON → {ladder_path} (rendered by --report-only)", flush=True)
 

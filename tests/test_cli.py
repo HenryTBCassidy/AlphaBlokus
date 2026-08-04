@@ -66,7 +66,13 @@ def test_report_renders_when_learn_crashes(tmp_path: Path, monkeypatch: pytest.M
         original_train(self, *args, **kwargs)  # type: ignore[arg-type]
 
     monkeypatch.setattr(BaseNNetWrapper, "train", train_then_crash)
-    monkeypatch.setattr("sys.argv", ["alphablokus", "--config", str(config_path)])
+    # The config lives in a tmp dir with no git repository, so the provenance
+    # guard cannot check it against a commit and refuses by default (A5). This
+    # test is about crash-safe reporting, so it takes the documented override.
+    monkeypatch.setattr(
+        "sys.argv",
+        ["alphablokus", "--config", str(config_path), "--allow-uncommitted-config"],
+    )
 
     with pytest.raises(RuntimeError, match="injected training crash"):
         cli.main()

@@ -1,10 +1,10 @@
 {
   "game": "blokusduo",
-  "run_name": "lr_ab_constant",
+  "run_name": "blokus_pilot_b6",
   "seed": 42,
-  "num_generations": 30,
+  "num_generations": 15,
   "num_eps": 10000,
-  "replay_buffer_games": 40000,
+  "replay_buffer_games": 60000,
   "update_threshold": 0.55,
   "root_directory": "./temp/",
   "load_model": true,
@@ -13,22 +13,33 @@
   "use_optimised_movegen": true,
   "minimax_games_per_gen": 0,
   "symmetry_diagnostic_positions": 100,
-  "num_arena_matches": 40,
+  "num_arena_matches": 100,
+  "arena_opening_temp": 1.0,
+  "arena_opening_moves": 4,
+  "paired_arena": true,
+  "gate_mode": "always",
+  "arena_crash_floor": 0.25,
+  "ladder_check_every": 5,
+  "ladder_drift_drop": 0.05,
+  "ladder_drift_consecutive": 2,
+  "eval_set_rebuild_every": 5,
   "mcts_config": {
-    "num_mcts_sims": 64,
+    "num_mcts_sims": 256,
     "cpuct": 2.5,
     "mcts_batch_size": 16,
     "search_policy": "gumbel",
-    "gumbel_max_considered": 16
+    "gumbel_max_considered": 64
   },
   "net_config": {
     "preset": "large",
-    "learning_rate": 0.001,
+    "learning_rate": 0.00025,
+    "weight_decay": 0.0001,
     "dropout": 0.3,
     "epochs": 1,
     "batch_size": 1024,
     "cuda": true,
-    "lr_scheduler": "constant",
+    "lr_scheduler": "cosine",
+    "lr_eta_min": 0.0001,
     "policy_head": "conv",
     "fp16_inference": true,
     "perf": {
@@ -43,18 +54,27 @@
       "persistent_workers": true,
       "prefetch_factor": 4,
       "log_every_batches": 25
-    },
-    "allow_high_warm_start_lr": true
+    }
+  },
+  "tournament": {
+    "run_at_end": true,
+    "opening_temp": 1.0,
+    "opening_moves": 4,
+    "num_mcts_sims": 32,
+    "games_per_pairing": 30
   },
   "wandb": {
     "project": "alphablokus-poc",
     "entity": null,
     "tags": [
-      "lr-ab",
-      "constant",
+      "pilot",
+      "b6",
       "gumbel",
       "large",
-      "30gen"
+      "gate-off",
+      "keep-best-by-ladder",
+      "drift-breaker",
+      "cosine-2.5e-4"
     ],
     "mode": "online"
   },
@@ -64,6 +84,6 @@
     "top_k": 64,
     "dtype": "bfloat16",
     "wave_plies": 32,
-    "xla_mem_fraction": 0.6
+    "xla_mem_fraction": 0.8
   }
 }

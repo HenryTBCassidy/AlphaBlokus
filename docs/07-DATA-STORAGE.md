@@ -32,15 +32,25 @@ Both paths are set in `RunConfig` (`alphablokus/config.py`). Every property belo
 ├── EloRatings/                   Elo vs frozen gen-0 baseline (per gen)
 ├── MinimaxResults/               Results vs perfect-play minimax — TTT only (per gen)
 ├── SymmetryDiagnostic/           Policy-symmetry KL per reference position (per gen)
+├── ColourValueDiagnostic/        Value skill vs colour / colour×phase baselines (per epoch, per colour)
+├── RunProgress/                  Cumulative games, optimiser steps, passes-per-position (per gen)
 ├── ArenaReplays/                 Recorded arena games: moves + top-K policies (per gen)
 │   └── generation=N/<file>.parquet   (each of the above follows this layout)
 │
-├── EvalSet/                      Frozen held-out positions (boards/policies/values .npy + marker)
-├── Nets/                         Model checkpoints (.pth.tar)
-└── Logs/                         Log files
+├── EvalSet/                      Held-out positions (.npy arrays + provenance sidecar)
+├── PentobiLadder/                Ladder result JSONs (incl. wall-clock duration_s)
+├── Nets/                         Model checkpoints (.pth.tar) + best_by_ladder.json
+├── config.resolved.json          Fully-resolved RunConfig, written every launch
+├── run_provenance.json           Code commit, config-commit state, input-data hashes
+└── Logs/                         Log files (+ progress.json resume marker)
 ```
 
-Each hive-partitioned directory contains `generation=N/<name>.parquet` subdirectories; `pd.read_parquet(dir)` reconstructs the `generation` column from the path. `EvalSet/` is the one non-parquet metrics directory — three `.npy` arrays plus a `targets_kind.txt` marker (`minimax_v1` for TTT, `selfplay_v1` otherwise).
+Each hive-partitioned directory contains `generation=N/<name>.parquet` subdirectories; `pd.read_parquet(dir)` reconstructs the `generation` column from the path. `EvalSet/` is the one non-parquet metrics directory — `boards.npy`, `target_policies.npy`, `target_values.npy`, `compact_boards.npy` and `source_game_ids.npy`, plus a `targets_kind.txt` marker (`minimax_v1` for TTT, `selfplay_v1` otherwise), a `source_fingerprints.json` holdout list, and a `metadata.json` sidecar recording the vintage (`built_at_generation`) and source-game count.
+
+Two files in `EvalSet/` are load-bearing:
+
+- **`source_game_ids.npy`** — every position in a self-play game shares one outcome label, so any confidence interval over the eval set must be a game-cluster bootstrap over these ids (`alphablokus.bootstrap`), never a position-level resample; the latter is roughly `sqrt(positions per game)` too narrow. Eval sets built before this file existed have no ids, and interval-bearing diagnostics skip rather than compute a wrong interval.
+- **`source_fingerprints.json`** — content hashes of the games the positions came from. `ReplayBuffer.exclude_games` withholds those whole games from the training flatten, which is what makes the set *held out*. Excluding only the sampled positions would not work: their symmetry twins and same-game siblings carry the same label. Persisted because buffer indices do not survive a resume but content hashes do. An eval set without this file cannot be held out and is rebuilt rather than reused.
 
 ---
 
@@ -392,6 +402,46 @@ These three are logged by `BaseNNetWrapper.train()` after each epoch when an `Ev
 | `symmetry_idx` | `int` | Which non-identity symmetry (Blokus has 1: the transpose) |
 | `kl_divergence` | `float` | KL between the net's policy on the symmetric board and the symmetric image of its policy. 0 = equivariant |
 | `top1_match` | `bool` | Whether the argmax matched under the symmetry |
+
+---
+
+### ColourValueDiagnostic — is the value head just a colour prior?
+
+**Path:** `ColourValueDiagnostic/generation=N/colour_value.parquet` · **Granularity:** one row per side-to-move · **Logged by:** `BaseNNetWrapper.train` via `MetricsCollector.log_colour_value_diagnostic()`
+
+Value skill is `1 - mse/baseline_mse`: zero means the head has learnt the first-mover prior and nothing else. Two baselines are reported because colour-only is too easy to beat for the wrong reason — game phase also predicts the outcome — so **`skill_vs_colour_phase` is the honest number**. All intervals are **game-cluster bootstraps** over `EvalSet.source_game_ids` (see `alphablokus.bootstrap`); a position-level interval on this statistic is roughly `sqrt(positions per game)` too narrow. Absent for runs predating the metric and for eval sets built without source game ids.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `colour` | `int` | +1 White to move, −1 Black to move |
+| `n_positions` / `n_games` | `int` | Positions with this side to move, and the distinct source games behind them (`n_games` is the effective sample size) |
+| `mean_prediction` / `mean_target` | `float` | Mean predicted value and mean actual outcome for this colour |
+| `bias` | `float` | `mean_prediction − mean_target` — this colour's calibration bias in one number |
+| `colour_value_mse` | `float` | Value MSE restricted to this colour |
+| `value_mse` | `float` | Pooled value MSE (repeated per row so a row stands alone) |
+| `colour_only_mse` / `colour_phase_mse` | `float` | Baseline MSEs: predicting each colour's, and each colour×phase cell's, mean outcome |
+| `skill_vs_colour` + `_lo` / `_hi` | `float` | Skill against the colour-only baseline, with its 95% game-cluster interval |
+| `skill_vs_colour_phase` + `_lo` / `_hi` | `float` | Skill against the colour×phase baseline, with its interval |
+| `colour_target_correlation` | `float` | How strongly outcomes track mover colour |
+| `colour_prediction_correlation` | `float` | How strongly the head's output tracks mover colour. Materially exceeding the previous column means the net is more certain that colour decides the game than the game is |
+| `total_positions` / `total_games` / `n_excluded` | `int` | Pooled counts; `n_excluded` are positions whose mover could not be inferred (post-pass parity ambiguity) and were dropped, never guessed |
+| `eval_set_generation` | `int` | Vintage of the eval set these numbers were measured against. **Rows with different vintages are not one curve** — the positions differ |
+
+---
+
+### RunProgress — the run's budget in comparable units
+
+**Path:** `RunProgress/generation=N/progress.parquet` · **Granularity:** one row per generation · **Logged by:** `Coach` via `MetricsCollector.log_run_progress()`
+
+"Generation" bundles games-per-generation, epochs and buffer staleness into one word, so no two runs' generations mean the same thing. These are the units that compare. The cumulative totals survive `--resume` (restored from `Logs/progress.json`).
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `total_games` / `total_positions` | `int` | Self-play games and positions generated so far, counted as produced rather than as configured |
+| `total_optimiser_steps` | `int` | Gradient steps taken so far — the actual amount of training, independent of chunking |
+| `buffer_games` / `buffer_positions` | `int` | Current replay-buffer fill |
+| `passes_per_position` | `float` | `epochs × (buffer_games / games_per_generation)` — how many times a position is trained on over its lifetime. Emergent, not a knob; the run that degraded was at ~12 |
+| `epochs` | `int` | Passes over the buffer per generation |
 
 ---
 

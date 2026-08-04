@@ -91,7 +91,9 @@ def _artefacts(config: RunConfig) -> dict[str, Any]:
             kernels,
             search,
             batch_size=jax_config.batch_size,
-            temp_threshold=config.temp_threshold,
+            # Gumbel plays the search winner every ply, so the actor never builds
+            # the temperature branch and the value is inert — don't demand one.
+            temp_threshold=(0 if mcts.search_policy == "gumbel" else config.sampling_temp_threshold),
             wave_plies=jax_config.wave_plies,
             use_search_action=mcts.search_policy == "gumbel",
         )
@@ -164,7 +166,10 @@ def generate_self_play_games(
         dtype=config.jax_selfplay.dtype,
     )
 
-    rng_key = jax.random.fold_in(jax.random.PRNGKey(config.seed or 0), generation)
+    # ``or 0`` would make an explicit seed of 0 indistinguishable from "unseeded",
+    # silently collapsing two arms of a multi-seed sweep into one.
+    seed = 0 if config.seed is None else config.seed
+    rng_key = jax.random.fold_in(jax.random.PRNGKey(seed), generation)
     carry = artefacts["initial_carry"]()
     harvester = artefacts["make_harvester"]()
     run_wave = artefacts["run_wave"]

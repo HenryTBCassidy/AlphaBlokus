@@ -39,15 +39,22 @@ def write_ladder_result(
     games_per_level: int,
     per_level: list[dict[str, Any]],
     metrics: dict[str, Any],
+    duration_s: float | None = None,
 ) -> Path:
     """Persist one benchmark run's ladder results for the HTML report.
 
     ``per_level`` rows are the benchmark's stats dicts (any ``records`` key —
     the raw game replays — is dropped; replays belong to the benchmark's own
     HTML report, not the training report).
+
+    ``duration_s`` is the ladder's wall-clock cost. The ladder is the backbone
+    measurement of the current plan — it is the only instrument that has ever
+    resolved a difference the arena called a tie — and until now its cost was
+    recorded nowhere on disk, which made scheduling everything downstream of it
+    guesswork. Optional so older readers and callers keep working.
     """
     timestamp = datetime.now(UTC)
-    payload = {
+    payload: dict[str, Any] = {
         "net": net,
         "sims": sims,
         "games_per_level": games_per_level,
@@ -55,6 +62,8 @@ def write_ladder_result(
         "levels": [{k: v for k, v in row.items() if k != "records"} for row in per_level],
         "metrics": metrics,
     }
+    if duration_s is not None:
+        payload["duration_s"] = round(float(duration_s), 2)
     directory.mkdir(parents=True, exist_ok=True)
     safe_net = net.replace("/", "_")
     path = directory / f"ladder_{safe_net}_{timestamp.strftime('%Y%m%dT%H%M%SZ')}.json"

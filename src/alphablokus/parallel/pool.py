@@ -374,7 +374,7 @@ def _worker_play_self_play_episode(
     examples = play_self_play_episode(
         _WORKER_GAME,
         mcts,
-        _WORKER_CONFIG.temp_threshold,
+        _WORKER_CONFIG.sampling_temp_threshold,
     )
     stats = mcts.get_episode_stats()
     return examples, stats

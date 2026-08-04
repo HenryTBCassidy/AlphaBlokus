@@ -5,7 +5,6 @@
   "num_generations": 60,
   "num_eps": 10000,
   "replay_buffer_games": 60000,
-  "temp_threshold": 12,
   "update_threshold": 0.55,
   "root_directory": "/workspace/",
   "load_model": false,
@@ -23,8 +22,6 @@
     "num_mcts_sims": 128,
     "cpuct": 2.5,
     "mcts_batch_size": 16,
-    "dirichlet_epsilon": 0.25,
-    "dirichlet_alpha": 0.03,
     "search_policy": "gumbel",
     "gumbel_max_considered": 32
   },
@@ -64,7 +61,14 @@
   "wandb": {
     "project": "alphablokus-poc",
     "entity": null,
-    "tags": ["cloud", "gumbel", "xl", "scratch", "always-gate", "external-keep-best"],
+    "tags": [
+      "cloud",
+      "gumbel",
+      "xl",
+      "scratch",
+      "always-gate",
+      "external-keep-best"
+    ],
     "mode": "online"
   },
   "object_store": {

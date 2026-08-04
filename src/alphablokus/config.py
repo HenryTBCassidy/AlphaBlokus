@@ -102,7 +102,12 @@ class JaxSelfPlayConfig:
     # quality at K=64 still beats the python K=16 virtual-loss yardstick — see
     # the G4/G7 notes in docs/plans/archive/jax-selfplay-pipeline.md.
     top_k: int = 64
-    dtype: str = "bfloat16"  # net inference dtype: "bfloat16" or "float32"
+    # Net inference dtype for jax self-play. A ``Literal`` rather than a bare
+    # ``str`` because the read sites resolve "anything that isn't exactly
+    # 'float32'" to bfloat16 (``jax/checkpoint.py``, ``jax/search.py``) — so a
+    # typo like "bf16" or "float16" used to silently select bfloat16 instead of
+    # failing. Production runs bfloat16; the parity tests exercise both.
+    dtype: Literal["float32", "bfloat16"] = "bfloat16"
     wave_plies: int = 32  # scan horizon between host-side harvests
 
     # Fraction of VRAM XLA may claim (XLA_PYTHON_CLIENT_MEM_FRACTION). 0.4
@@ -312,6 +317,14 @@ class NetConfig:
     # scheduler. Only consulted when ``lr_scheduler == "step"``.
     lr_gamma: float = 0.1
 
+    # Escape hatch for ``validate_active_path_knobs``' warm-continuation LR check.
+    # A warm start builds a fresh optimiser and a fresh LR schedule, so
+    # ``learning_rate`` is applied at full strength to an already-converged net —
+    # the setting behind every ≤0 continuation in the run ledger. Set True only
+    # when a run is *deliberately* sweeping the rate (e.g. the offline B3 sweep
+    # arms), never to silence the check on a real training run.
+    allow_high_warm_start_lr: bool = False
+
     # Half-precision (fp16) inference. When True AND running on CUDA, the
     # forward pass in predict/predict_batch runs under torch.autocast(fp16) —
     # faster on GPUs with Tensor Cores (e.g. the 3060 Ti), inference-only so no
@@ -458,7 +471,6 @@ class RunConfig:
     run_name: str  # Unique identifier for this training run
     num_generations: int  # Number of complete self-play -> train -> evaluate cycles
     num_eps: int  # Number of complete self-play games per generation (fresh games F)
-    temp_threshold: int  # Move number after which temperature is set to ~0
     update_threshold: float  # Win rate required for new network to be accepted (0 to 1)
     # Number of evaluation games between old/new networks. Doubles as the
     # rolling arena-derived Elo sample size (that metric reuses these games), so
@@ -488,6 +500,26 @@ class RunConfig:
     # ``epochs × (B / num_eps)`` — logged, not a knob. e.g. ``B=5000``,
     # ``num_eps=1000``, ``epochs=1`` ⇒ reuse 5 (run2's regime).
     replay_buffer_games: int = 5000
+
+    # Move number after which self-play exploration temperature collapses to ~0.
+    #
+    # Read **only** by the python/PUCT self-play path (``selfplay/episode.py``,
+    # ``parallel/pool.py``) and by the jax actor's sampling branch. Under Gumbel
+    # search the engine plays the Sequential-Halving winner every ply, so the
+    # temperature branch is never built (``jax/actors.py`` — ``use_search_action``
+    # is True) and this knob does nothing at all. ``None`` is the correct value
+    # for a Gumbel run; ``validate_active_path_knobs`` refuses a Gumbel config
+    # that sets it, and the python path raises if it is missing.
+    temp_threshold: int | None = None
+
+    # How often to resample the eval set used for per-epoch diagnostics, in
+    # generations. 0 (default) = build once from generation 1 and freeze it,
+    # which is the historical behaviour and the reason a run's dashboards could
+    # improve while its real strength fell: a set frozen from the run's
+    # weakest-ever data gets easier as the net improves. A pilot should set 5.
+    # Rebuilding changes what the metrics are measured against, so each metric
+    # carries its eval set's vintage (``EvalSet.built_at_generation``).
+    eval_set_rebuild_every: int = 0
 
     # Which engine generates self-play games. ``"python"`` is the original
     # CPU-worker path (serial or ``num_parallel_workers``-way parallel);
@@ -583,6 +615,49 @@ class RunConfig:
     # a genuine regression. Ignored by the other gate modes.
     guard_floor: float = 0.48
 
+    # --- Promotion by ladder, not by gate (docs/plans/archive/post-regression-recovery.md P3/P4/P7) ---
+    #
+    # The candidate-vs-incumbent arena cannot resolve strength in this game: ~96%
+    # of decisive deterministic games go to White, per-generation scores collapse
+    # into 0.485–0.530 (std 0.011 where independent Bernoulli play would give
+    # ~0.050), and the Pentobi ladder is the only instrument that has ever
+    # resolved a difference the arena called a tie. So the arena stops being the
+    # promotion signal — set ``gate_mode: "always"`` and it keeps running purely
+    # as telemetry and a crash detector (see ``arena_crash_floor``), while the
+    # run's actual product is chosen by ``select_best`` over ladder results and
+    # protected by the drift circuit-breaker.
+    #
+    # The ladder itself is run out-of-process by ``scripts/mini_ladder.py`` (it
+    # needs the ``pentobi-gtp`` binary and its own CPU workers). These knobs make
+    # the training loop *consume* its results: it reads ``MiniLadder/history.json``
+    # and ``PentobiLadder/*.json`` after each generation, arms the breaker, and
+    # records the keep-best choice.
+
+    # Read ladder results and evaluate the drift circuit-breaker every N
+    # generations. 0 (default) disables, preserving today's behaviour. A pilot
+    # should set 5, matching the cadence the ladder is actually run at.
+    ladder_check_every: int = 0
+
+    # Drift circuit-breaker: stop the run when the ladder's weighted score has
+    # dropped by at least ``ladder_drift_drop`` from its best-so-far on
+    # ``ladder_drift_consecutive`` consecutive ladder evaluations. This is a
+    # catastrophe stop, not a gate — it exists so a run that is actively
+    # destroying the net stops burning box time, which is exactly what
+    # ``blokus_paired_gate_rerun`` did for 20 generations (ladder 0.344 → 0.298
+    # with every internal signal reading healthy). Defaults mirror
+    # ``evaluation/ladder_selection.py`` so the report and the loop agree.
+    ladder_drift_drop: float = 0.05
+    ladder_drift_consecutive: int = 2
+
+    # Arena-as-crash-detector floor. With the gate off the arena score is no
+    # longer load-bearing, but a score this far below parity does not mean "the
+    # candidate is slightly worse" — it means something broke (a net that fails
+    # to load, an all-pass policy, a corrupted checkpoint). Logged as a loud
+    # warning and flagged in the report; it never rejects a candidate. 0
+    # disables. 0.25 is far below anything the instrument's measured 0.485–0.530
+    # spread can produce by chance.
+    arena_crash_floor: float = 0.25
+
     # TTT-specific: games per generation to play vs a perfect-play minimax
     # opponent. Only used when ``game == "tictactoe"``. 0 disables.
     minimax_games_per_gen: int = 20
@@ -664,6 +739,26 @@ class RunConfig:
     # under-full batch. The size-OR-timeout rule self-corrects, so this is a
     # safe backstop rather than a tuned knife-edge.
     server_max_wait_ms: float = 5.0
+
+    @property
+    def sampling_temp_threshold(self) -> int:
+        """``temp_threshold`` for a path that actually samples moves.
+
+        Raises rather than defaulting, because a silent 0 would mean "play greedily
+        from move 1" — a real change to self-play diversity that would be invisible
+        in the config. Only call this from a path that genuinely reads the value;
+        Gumbel does not (see the field's comment).
+
+        Raises:
+            ValueError: If ``temp_threshold`` is unset.
+        """
+        if self.temp_threshold is None:
+            raise ValueError(
+                "temp_threshold is unset, but this self-play path samples moves and needs it. "
+                "Set it in the config (a typical value is 12). It is only omittable for Gumbel "
+                "search, which plays the Sequential-Halving winner every ply."
+            )
+        return self.temp_threshold
 
     @property
     def run_directory(self) -> Path:
@@ -826,6 +921,31 @@ class RunConfig:
         """
         return self.run_directory / "PolicyValueConsistency"
 
+    @property
+    def colour_value_directory(self) -> Path:
+        """Directory for the per-generation colour-conditional value diagnostic.
+
+        Stores value skill against a colour-only and a colour×phase baseline, with
+        game-cluster confidence intervals, split by side-to-move. Answers whether
+        the value head reads positions or has only learnt the first-mover prior —
+        which matters because Gumbel's completed-Q target substitutes the value net
+        for every unvisited action. Written by
+        :meth:`MetricsCollector.log_colour_value_diagnostic`. Absent for runs
+        predating this metric, and for eval sets built without source game ids.
+        """
+        return self.run_directory / "ColourValueDiagnostic"
+
+    @property
+    def run_progress_directory(self) -> Path:
+        """Directory for the run's cumulative budget in comparable units.
+
+        Total self-play games, total optimiser steps and passes-per-position — the
+        units that mean the same thing across runs, unlike "generation". Written by
+        :meth:`MetricsCollector.log_run_progress`; the totals survive a resume.
+        Absent for runs predating this metric.
+        """
+        return self.run_directory / "RunProgress"
+
 
 def load_args(config_path: str | Path) -> RunConfig:
     """
@@ -851,7 +971,106 @@ def load_args(config_path: str | Path) -> RunConfig:
         args_json.pop("elo_games_per_gen")
 
     _resolve_net_preset(args_json)
+    validate_active_path_knobs(args_json, source=str(config_path))
     return fromdict(RunConfig, args_json)
+
+
+# Knobs the Gumbel self-play path reads nowhere, with the reason. Each entry is
+# ``(section, key, why)`` where ``section`` is a nested config object or None for
+# a top-level ``RunConfig`` key.
+#
+# These are not merely defaulted-and-unused: under Gumbel the code that would
+# read them is never built. ``jax/search.py`` takes ``root_log_pi = log_pi`` for
+# gumbel and never calls ``masked_root_logits``, so the Dirichlet mix is
+# unreachable; ``jax/actors.py`` omits the temperature branch entirely when
+# ``use_search_action`` is True, which it is for gumbel. Leaving them in a config
+# implies root-noise and temperature exploration that does not exist, so anyone
+# who tunes them tunes nothing.
+_GUMBEL_IGNORED_KNOBS: tuple[tuple[str | None, str, str], ...] = (
+    (
+        "mcts_config",
+        "dirichlet_epsilon",
+        "Gumbel bypasses root Dirichlet noise entirely (jax/search.py: root_log_pi = log_pi)",
+    ),
+    ("mcts_config", "dirichlet_alpha", "only read when dirichlet_epsilon > 0, which Gumbel never reaches"),
+    (
+        None,
+        "temp_threshold",
+        "Gumbel plays the Sequential-Halving winner every ply; the actor's temperature branch is not built",
+    ),
+)
+
+# A warm continuation that starts at the from-scratch peak learning rate is the
+# single most reliably harmful setting in this project's history: the only run
+# with a decaying schedule produced most of the project's total progress, and
+# every constant-1e-3 continuation since produced ≤0. 2.5e-4 is the documented
+# continuation rate (AGENTS.md gotcha 11); B3 pins the final number.
+WARM_CONTINUATION_MAX_LR = 2.5e-4
+
+
+def validate_active_path_knobs(args_json: dict, *, source: str = "config") -> None:
+    """Refuse a config that sets knobs the active code path ignores.
+
+    Two classes of error, both of which have already cost this project real
+    runs:
+
+    1. A knob the active search path never reads (see
+       :data:`_GUMBEL_IGNORED_KNOBS`). Unknown JSON keys are silently dropped by
+       ``dataclass_wizard``, so without this check a stale ``dirichlet_epsilon``
+       in a Gumbel config looks like a live exploration setting forever.
+    2. A knob the active path *needs* and the config omits, or sets to something
+       known to be harmful — a warm continuation at the from-scratch peak LR.
+
+    Args:
+        args_json: Raw parsed JSON, after preset resolution. Inspected as a dict
+            rather than as a ``RunConfig`` because the whole point is to catch
+            keys the dataclass would discard.
+        source: Path or label naming the config, for the error message.
+
+    Raises:
+        ValueError: If any check fails. The message names every offending key and
+            says what to do about it, because these are all fixed by editing the
+            config.
+    """
+    mcts = args_json.get("mcts_config") or {}
+    net = args_json.get("net_config") or {}
+    is_gumbel = mcts.get("search_policy") == "gumbel"
+
+    problems: list[str] = []
+
+    if is_gumbel:
+        for section, key, why in _GUMBEL_IGNORED_KNOBS:
+            holder = args_json if section is None else args_json.get(section) or {}
+            if key in holder:
+                dotted = key if section is None else f"{section}.{key}"
+                problems.append(f"  - {dotted} = {holder[key]!r} is ignored under search_policy 'gumbel': {why}")
+    elif args_json.get("temp_threshold") is None:
+        # The python/PUCT self-play path genuinely reads this one.
+        problems.append(
+            "  - temp_threshold is required by the python/PUCT self-play path "
+            "(selfplay/episode.py) but is missing or null"
+        )
+
+    if args_json.get("load_model") and not net.get("allow_high_warm_start_lr", False):
+        learning_rate = net.get("learning_rate")
+        if isinstance(learning_rate, (int, float)) and learning_rate > WARM_CONTINUATION_MAX_LR:
+            problems.append(
+                f"  - net_config.learning_rate = {learning_rate!r} on a warm continuation "
+                f"(load_model: true). A warm start builds a fresh optimiser and a fresh LR "
+                f"schedule (cli.py), so this is the *peak* rate applied to an already-converged "
+                f"net. Use <= {WARM_CONTINUATION_MAX_LR} (e.g. lr_scheduler 'cosine' with "
+                f"learning_rate 2.5e-4 and lr_eta_min 1e-4), or set "
+                f"net_config.allow_high_warm_start_lr: true if this run is deliberately "
+                f"sweeping the rate."
+            )
+
+    if problems:
+        raise ValueError(
+            f"{source} sets knobs the active configuration ignores or must not use:\n"
+            + "\n".join(problems)
+            + "\nDelete the ignored keys (they are no-ops that imply behaviour the run "
+            "does not have) and fix the rest."
+        )
 
 
 def _resolve_net_preset(args_json: dict) -> None:

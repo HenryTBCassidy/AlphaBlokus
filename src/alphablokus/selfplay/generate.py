@@ -88,7 +88,7 @@ def _generate_serial(
     """Sequential in-process loop: a fresh MCTS per episode."""
     for episode_idx in tqdm(range(config.num_eps), desc="Self Play"):
         mcts = MCTS(game, nnet, config.mcts_config)
-        sink(play_self_play_episode(game, mcts, config.temp_threshold))
+        sink(play_self_play_episode(game, mcts, config.sampling_temp_threshold))
         log_stats(episode_idx, mcts.get_episode_stats())
 
 

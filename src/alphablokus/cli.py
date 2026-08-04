@@ -4,11 +4,13 @@ import argparse
 import dataclasses
 import json
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from alphablokus.config import load_args
+from alphablokus.provenance import check_config_is_committed, write_provenance
 from alphablokus.registry import instantiate_game_and_network
 from alphablokus.reporting import create_html_report
 from alphablokus.storage.object_store import create_object_store, sync_up_guarded
@@ -96,6 +98,13 @@ def main() -> None:
         help="Continue a crashed/stopped run from its last completed generation "
         "(reuses the frozen Elo baseline; continues generation numbering).",
     )
+    parser.add_argument(
+        "--allow-uncommitted-config",
+        action="store_true",
+        help="Start even though the config file differs from (or is untracked by) git. "
+        "Recorded in the run's provenance. Use while iterating on a config; do not use "
+        "for a run whose result you intend to quote.",
+    )
     cli_args = parser.parse_args()
     args = load_args(cli_args.config)
 
@@ -103,12 +112,28 @@ def main() -> None:
         create_html_report(args)
         return
 
+    # Refuse to start when the committed config does not describe this run (A5).
+    # Before anything is written, so a rejected launch leaves no trace.
+    config_path = Path(cli_args.config)
+    config_state = check_config_is_committed(
+        config_path,
+        allow_uncommitted=cli_args.allow_uncommitted_config,
+    )
+
     args.run_directory.mkdir(parents=True, exist_ok=True)
 
     # Persist the fully-resolved config at launch so what actually ran is never
     # ambiguous again (S4b). Written every launch (fresh + resume) so a resumed
     # run records the config it resumed under too.
     persist_resolved_config(args)
+
+    # Stamp code version + config-commit state + input-data manifest alongside it.
+    write_provenance(
+        args,
+        config_path=config_path,
+        config_state=config_state,
+        override_used=cli_args.allow_uncommitted_config,
+    )
 
     # Add rotating file sink alongside default stderr
     log_dir = args.log_directory
@@ -133,6 +158,7 @@ def main() -> None:
         logger.info("Resuming run after generation {} (loading latest.pth.tar)", last_gen)
         nnet.load_checkpoint("latest.pth.tar")
         c = Coach(game, nnet, args, resume=True, resume_wandb_run_id=marker.get("wandb_run_id"))
+        c.restore_cumulative_totals(marker)
         c.load_self_play_history_for_resume(last_gen)
         start_generation = last_gen + 1
     else:

@@ -23,7 +23,7 @@ import numpy as np
 import pytest
 
 from tests.games.blokusduo.conftest import DEV_CACHE_PATH
-from tests.games.blokusduo.jax.conftest import make_search_config
+from tests.games.blokusduo.jax.conftest import PARITY_DTYPES, make_search_config
 
 if TYPE_CHECKING:
     from alphablokus.games.blokusduo.game import BlokusDuoGame
@@ -76,10 +76,31 @@ def setup(tmp_path_factory, blokus_game_module: BlokusDuoGame):
     return game, nnet, params, kernels, boards, players, states
 
 
+@pytest.fixture(scope="module")
+def params_by_dtype(setup) -> dict[str, object]:
+    """The same net's parameters converted to each parity dtype.
+
+    Both halves of the dtype choice have to move together: ``SearchConfig.dtype``
+    sets the *input encoding* dtype while the *parameter* dtype comes from
+    ``params_to_device``. Setting only one raises a dtype mismatch inside the
+    conv — production sets both from ``jax_selfplay.dtype`` (``jax/backend.py``),
+    so the tests must too.
+    """
+    _game, nnet, _params, _kernels, *_ = setup
+    state_dict = nnet.nnet.state_dict()
+    return {
+        dtype: params_to_device(convert_state_dict(state_dict, num_residual_blocks=1), dtype=dtype)
+        for dtype in PARITY_DTYPES
+    }
+
+
 @pytest.mark.skipif(not DEV_CACHE_PATH.exists(), reason="dev_5000 cache not built")
-def test_structural_invariants(setup) -> None:
-    game, _nnet, params, kernels, _boards, players, states = setup
-    search = make_search(kernels, SearchConfig(num_simulations=SIMS, top_k=128, cpuct=2.5))
+@pytest.mark.parametrize("dtype", PARITY_DTYPES)
+def test_structural_invariants(setup, params_by_dtype, dtype: str) -> None:
+    """Structural invariants must hold in the dtype production actually runs."""
+    game, _nnet, _params, kernels, _boards, players, states = setup
+    params = params_by_dtype[dtype]
+    search = make_search(kernels, SearchConfig(num_simulations=SIMS, top_k=128, cpuct=2.5, dtype=dtype))
     result = search(params, jax.random.PRNGKey(0), states)
 
     weights = np.asarray(result.action_weights)
@@ -162,21 +183,74 @@ def test_python_noise_floor_yardstick(python_distributions) -> None:
 
 
 @pytest.mark.skipif(not DEV_CACHE_PATH.exists(), reason="dev_5000 cache not built")
-def test_agreement_with_python_mcts(setup, python_distributions) -> None:
-    """jax-vs-python agreement must reach the python-vs-python noise floor."""
-    _game, _nnet, params, kernels, _boards, _players, states = setup
+@pytest.mark.parametrize("dtype", PARITY_DTYPES)
+def test_agreement_with_python_mcts(setup, python_distributions, params_by_dtype, dtype: str) -> None:
+    """jax-vs-python agreement must reach the python-vs-python noise floor.
+
+    Run in both dtypes. The python oracle is fp32 in both cases — it is the
+    reference — so the bf16 leg measures "does reduced-precision search still
+    agree with the tested path", which is the question production depends on and
+    which nothing checked before. bf16 gets extra slack because rounding
+    legitimately reorders near-tied logits in the top-k window.
+    """
+    _game, _nnet, _params, kernels, _boards, _players, states = setup
     k1, k16 = python_distributions
-    search = make_search(kernels, SearchConfig(num_simulations=SIMS, top_k=128, cpuct=2.5))
+    params = params_by_dtype[dtype]
+    search = make_search(kernels, SearchConfig(num_simulations=SIMS, top_k=128, cpuct=2.5, dtype=dtype))
     result = search(params, jax.random.PRNGKey(0), states)
     jax_dense = np.asarray(dense_policy(result.action_weights, result.topk_ids, kernels.action_size))
 
+    slack = 0.10 if dtype == "float32" else 0.20
     floor_top1 = min(_top1_agreement(k1, k16), 0.95)
     floor_overlap = min(_mean_overlap(k1, k16), 0.95)
     top1_vs_k1 = _top1_agreement(jax_dense, k1)
     overlap_vs_k1 = _mean_overlap(jax_dense, k1)
-    assert top1_vs_k1 >= floor_top1 - 0.10, (
-        f"jax-vs-python top-1 {top1_vs_k1:.2f} below python noise floor {floor_top1:.2f}"
+    assert top1_vs_k1 >= floor_top1 - slack, (
+        f"{dtype} jax-vs-python top-1 {top1_vs_k1:.2f} below python noise floor {floor_top1:.2f}"
     )
-    assert overlap_vs_k1 >= floor_overlap - 0.10, (
-        f"jax-vs-python overlap {overlap_vs_k1:.2f} below python noise floor {floor_overlap:.2f}"
+    assert overlap_vs_k1 >= floor_overlap - slack, (
+        f"{dtype} jax-vs-python overlap {overlap_vs_k1:.2f} below python noise floor {floor_overlap:.2f}"
+    )
+
+
+@pytest.mark.skipif(not DEV_CACHE_PATH.exists(), reason="dev_5000 cache not built")
+def test_bf16_top_k_selection_agrees_with_fp32(setup, params_by_dtype) -> None:
+    """The specific bf16 risk: which actions survive the top-k truncation.
+
+    The jax search truncates to the prior's top-``k`` of 17,837 actions at the
+    root *and* at every child (``jax/search.py`` ``topk_legal``), and
+    ``lax.top_k`` breaks ties by lowest index. Under bf16 the logits are rounded
+    before that comparison, so a near-tie can reshuffle which actions are
+    searchable at all — and an action outside the window can never be searched,
+    never enter a training target, and never be corrected.
+
+    This pins how much churn there is. Measured here: **97.6%** of the top-64
+    window is shared between fp32 and bf16 on this net, i.e. bf16 changes which
+    actions are searchable for roughly 1 action in 40.
+
+    Two caveats on reading that number. It is a small random net, whose 17,837
+    logits are near-uniform — the worst case for tie reordering, so a trained net
+    with a concentrated prior should churn less. And it is *below* the ">99.5%
+    selection agreement" figure the plan proposes as the threshold for closing the
+    bf16 question, so the question should be settled on a trained net at
+    production width rather than on this test.
+
+    The bound below is deliberately loose: its job is to fail if the churn ever
+    becomes large, not to re-assert the measurement.
+    """
+    _game, _nnet, _params, kernels, _boards, _players, states = setup
+    fp32 = make_search(kernels, SearchConfig(num_simulations=SIMS, top_k=64, cpuct=2.5, dtype="float32"))
+    bf16 = make_search(kernels, SearchConfig(num_simulations=SIMS, top_k=64, cpuct=2.5, dtype="bfloat16"))
+
+    fp32_ids = np.asarray(fp32(params_by_dtype["float32"], jax.random.PRNGKey(0), states).topk_ids)
+    bf16_ids = np.asarray(bf16(params_by_dtype["bfloat16"], jax.random.PRNGKey(0), states).topk_ids)
+
+    overlaps = [
+        len(set(fp32_row.tolist()) & set(bf16_row.tolist())) / len(fp32_row)
+        for fp32_row, bf16_row in zip(fp32_ids, bf16_ids, strict=True)
+    ]
+    mean_overlap = float(np.mean(overlaps))
+    assert mean_overlap >= 0.90, (
+        f"bf16 top-{fp32_ids.shape[1]} window shares only {mean_overlap:.1%} of its actions with fp32 — "
+        "reduced precision is materially changing which actions are searchable"
     )
