@@ -45,7 +45,7 @@ def main() -> None:
         game, nnet, eval_cfg(cfg.mcts_config, args.sims), temp=0.0, opening_temp=1.0, opening_moves=4
     )
 
-    pentobi = PentobiPlayer(game, args.level, seed=1)
+    pentobi = PentobiPlayer(game, args.level, seed=1, nobook=True)
     try:
         nw, pw, d, records = Arena(net_player, pentobi, game).play_games(args.games, record=True)
     finally:

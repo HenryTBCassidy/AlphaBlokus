@@ -262,3 +262,36 @@ def _minimal_config() -> RunConfig:
             num_residual_blocks=1,
         ),
     )
+
+
+# ---------------------------------------------------------------------------
+# 4. A seed makes a run reproducible — including the temp=0 tie-break.
+# ---------------------------------------------------------------------------
+
+
+def test_seeded_players_replay_the_same_game(ttt_game: TicTacToeGame, mcts_config: MCTSConfig) -> None:
+    """Two identically-seeded players must produce identical move sequences.
+
+    Seeding the opening sampler alone was not enough: MCTS breaks a tie on visit
+    counts by drawing from numpy's *global* RNG, and with 2 simulations over 9 legal
+    moves (or 400 over Blokus's 17,837) top counts tie constantly. A benchmark that
+    recorded ``--seed`` while its play depended on process entropy was not
+    reproducible, whatever the payload claimed.
+    """
+    from alphablokus.evaluation.arena import Arena
+
+    nnet = NNetWrapper(ttt_game, _minimal_config())  # one net: a fresh one re-randomises its weights
+
+    def moves_with(seed: int) -> tuple[int, ...]:
+        player = NetworkPlayer(ttt_game, nnet, mcts_config, temp=0.0, seed=seed)
+        _, record = Arena(player, player, ttt_game).play_game(record=True)
+        assert record is not None
+        return tuple(move.action for move in record.moves)
+
+    assert moves_with(11) == moves_with(11)
+
+
+def test_an_unseeded_player_still_uses_the_global_rng(ttt_game: TicTacToeGame, mcts_config: MCTSConfig) -> None:
+    """No seed keeps the pre-existing behaviour, so self-play is unchanged."""
+    nnet = NNetWrapper(ttt_game, _minimal_config())
+    assert NetworkPlayer(ttt_game, nnet, mcts_config)._mcts._rng is None

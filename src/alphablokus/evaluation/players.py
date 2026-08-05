@@ -113,6 +113,7 @@ class NetworkPlayer:
         temp: float = 0.0,
         opening_temp: float = 0.0,
         opening_moves: int = 0,
+        seed: int | None = None,
     ) -> None:
         """Create a network-backed player.
 
@@ -125,6 +126,14 @@ class NetworkPlayer:
                 resets each game via :meth:`startGame`.
             opening_moves: Number of the player's own opening plies to which
                 ``opening_temp`` applies before reverting to ``temp``.
+            seed: Seed for this player's own RNG, used for opening sampling **and**
+                handed to its MCTS for the temp=0 tie-break. ``None`` keeps the
+                legacy behaviour of drawing from numpy's global RNG, which nothing
+                seeds — so evaluation runs were not reproducible while the
+                *opponent* (``PentobiPlayer``) was carefully reseeded per game.
+                Pass a seed for any run whose result gets compared to another;
+                seeding the opening sampler alone is not enough, because visit
+                counts tie often enough for the tie-break to change the game.
         """
         # Local import to avoid a cycle (mcts imports from alphablokus.interfaces).
         from alphablokus.search.mcts import MCTS
@@ -136,7 +145,8 @@ class NetworkPlayer:
         self._opening_temp = opening_temp
         self._opening_moves = opening_moves
         self._move_count = 0
-        self._mcts = MCTS(game, nnet, mcts_config)
+        self._rng = np.random.default_rng(seed) if seed is not None else None
+        self._mcts = MCTS(game, nnet, mcts_config, rng=self._rng)
         self._last_pi: np.ndarray | None = None
 
     def __call__(self, board: IBoard) -> int:
@@ -162,6 +172,8 @@ class NetworkPlayer:
 
         if temp == 0:
             return int(np.argmax(pi_play))
+        if self._rng is not None:
+            return int(self._rng.choice(len(pi_play), p=pi_play))
         return int(np.random.choice(len(pi_play), p=pi_play))
 
     def get_last_policy(self) -> np.ndarray | None:
@@ -176,7 +188,9 @@ class NetworkPlayer:
         """
         from alphablokus.search.mcts import MCTS
 
-        self._mcts = MCTS(self._game, self._nnet, self._mcts_config)
+        # Same RNG object, deliberately: the stream continues across games rather
+        # than restarting, so games in a match are independent draws.
+        self._mcts = MCTS(self._game, self._nnet, self._mcts_config, rng=self._rng)
 
     # Arena's existing convention: if a player has ``startGame``, it's called
     # before each game starts. Use it to reset the MCTS tree so games don't
