@@ -311,3 +311,56 @@ def test_payload_is_json_shaped() -> None:
     import json
 
     json.dumps(payload)  # must be strictly serialisable
+
+
+def test_degenerate_eval_set_returns_no_reading_instead_of_raising() -> None:
+    """An eval set whose outcome is perfectly predicted by colour yields None, not a crash.
+
+    The colour baseline's error is exactly zero when every colour group is
+    internally constant, so ``_skill`` is undefined (nan) in every resample and
+    the bootstrap has nothing to build an interval from. This is a *diagnostic*:
+    it must report "no reading" and leave training alone. Before this was handled,
+    the ValueError escaped through ``BaseNNetWrapper.train`` and killed the run.
+    """
+    boards: list[np.ndarray] = []
+    targets: list[float] = []
+    game_ids: list[int] = []
+    for game in range(8):
+        white_to_move = game % 2 == 0
+        for position in range(3):
+            pieces = 2 + position * 5
+            boards.append(_board(pieces, pieces) if white_to_move else _board(pieces - 1, pieces))
+            # Outcome is a pure function of mover colour -> zero baseline error.
+            targets.append(1.0 if white_to_move else -1.0)
+            game_ids.append(game)
+
+    result = compute_colour_value_diagnostic(
+        np.zeros(len(targets)),
+        np.array(targets),
+        boards,
+        np.array(game_ids),
+        n_resamples=200,
+        seed=0,
+    )
+    assert result is None
+
+
+def test_single_position_per_colour_phase_group_does_not_raise() -> None:
+    """A tiny eval set makes the colour x phase groups singletons — still no crash.
+
+    The colour x phase baseline has many more groups than the colour-only one, so
+    it is the fragile one: with one position per group its error is zero by
+    construction, whatever the outcomes are.
+    """
+    boards = [_board(2, 2), _board(7, 7), _board(1, 2), _board(6, 7)]
+    targets = np.array([1.0, -1.0, -1.0, 1.0])
+    game_ids = np.array([0, 1, 2, 3])
+    result = compute_colour_value_diagnostic(
+        np.array([0.5, -0.5, 0.25, -0.25]),
+        targets,
+        boards,
+        game_ids,
+        n_resamples=200,
+        seed=0,
+    )
+    assert result is None or np.isfinite(result.skill_vs_colour.point)

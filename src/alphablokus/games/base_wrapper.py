@@ -956,10 +956,18 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                         eval_set_size=len(eval_set),
                         value_symmetry_mae=self._compute_value_symmetry_mae(eval_set),
                     )
-                colour_value = self._compute_colour_value_diagnostic(
-                    eval_set,
-                    diagnostics["predicted_values"],
-                )
+                # Diagnostics are observers: a broken instrument must never take
+                # the training run down with it. The diagnostic already degrades
+                # to None on a degenerate eval set; this is the backstop for
+                # anything it cannot anticipate.
+                try:
+                    colour_value = self._compute_colour_value_diagnostic(
+                        eval_set,
+                        diagnostics["predicted_values"],
+                    )
+                except Exception:
+                    logger.exception("Colour-value diagnostic failed; continuing training without it.")
+                    colour_value = None
                 if colour_value is not None:
                     metrics.log_colour_value_diagnostic(
                         generation=generation,

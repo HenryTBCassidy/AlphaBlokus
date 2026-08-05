@@ -246,26 +246,36 @@ class Coach:
         # spliced via the donor's weight hash (S3).
         self._write_anchor_provenance()
 
-    def learn(self, start_generation: int = 1) -> None:
+    def learn(self, start_generation: int = 1) -> bool:
         """Run the generation loop, finalising metrics/W&B even on crash.
 
         Args:
             start_generation: 1 for a fresh run; ``last_completed + 1`` when
                 resuming (artifacts are keyed by generation, so a partial run
                 appends rather than overwrites).
+
+        Returns:
+            True if the run completed its generations normally; False if the drift
+            circuit-breaker stopped it early. The caller must not treat a drift
+            stop as normal completion — the whole point of the breaker is to stop
+            spending compute, so end-of-run work like the pooled tournament has to
+            be skipped. Artifacts are on disk either way and the run is resumable.
         """
         try:
-            self._learn_loop(start_generation=start_generation)
+            return self._learn_loop(start_generation=start_generation)
         finally:
             # Ensure W&B (if active) is finalised even on crash/interrupt.
             self.metrics.close()
 
-    def _learn_loop(self, start_generation: int = 1) -> None:
+    def _learn_loop(self, start_generation: int = 1) -> bool:
         """Inner training loop. Separated so ``learn`` can wrap it in try/finally.
 
         ``start_generation`` is 1 for a fresh run and ``last_completed + 1`` when
         resuming; every per-generation artifact is keyed by generation number, so
         starting partway through appends rather than overwriting earlier work.
+
+        Returns:
+            True on normal completion, False if the drift breaker stopped the run.
         """
         for generation in range(start_generation, self.config.num_generations + 1):
             logger.info(f"Starting Generation #{generation} ...")
@@ -428,10 +438,14 @@ class Coach:
             if self._check_ladder_and_drift(generation):
                 logger.error(
                     "Drift circuit-breaker tripped — stopping the run at generation {}. "
-                    "Everything up to and including this generation is on disk and resumable.",
+                    "Everything up to and including this generation is on disk and resumable. "
+                    "End-of-run work (e.g. the pooled tournament) is skipped: the breaker exists "
+                    "to stop spending compute.",
                     generation,
                 )
-                return
+                return False
+
+        return True
 
     def _log_memory_snapshot(self, generation: int, stage: CycleStage) -> None:
         """Snapshot RSS / peak-RSS / GPU memory after ``stage`` → console + metrics.

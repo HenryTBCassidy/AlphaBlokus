@@ -195,13 +195,24 @@ def main() -> None:
     # so a finally-render recovers a report from whatever generations completed
     # (the same data --report-only reads). See docs/plans/archive/harden-long-runs.md H2.
     try:
-        c.learn(start_generation=start_generation)
+        completed_normally = c.learn(start_generation=start_generation)
         # Normal completion only (a crash skips this): optionally play the
         # post-hoc pool BayesElo tournament so the report includes the rigorous,
         # non-saturating strength curve without a manual step. Crash-safe — a
         # tournament failure must never lose the run's training artifacts (all
         # already on disk), so log and fall through to the report render.
-        if args.tournament.run_at_end:
+        #
+        # A drift stop is NOT normal completion: the breaker fired precisely to
+        # stop spending compute, so launching a pooled tournament straight after
+        # would defeat it. The report still renders and artifacts still sync,
+        # below, so nothing measured is lost.
+        if not completed_normally:
+            logger.warning(
+                "Run stopped early by the drift circuit-breaker — skipping the end-of-run "
+                "tournament. Run it manually if you want it: python -m scripts.tournament_elo "
+                "--config <cfg>.",
+            )
+        if args.tournament.run_at_end and completed_normally:
             try:
                 from alphablokus.evaluation.tournament_run import run_tournament
 

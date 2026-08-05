@@ -60,6 +60,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 import numpy as np
+from loguru import logger
 
 from alphablokus.bootstrap import BootstrapResult, game_cluster_bootstrap
 
@@ -319,20 +320,41 @@ def compute_colour_value_diagnostic(
 
     # Bootstrap the two skill numbers. The baseline is refit inside every
     # resample, because the baseline is part of the estimator being measured.
-    skill_vs_colour = game_cluster_bootstrap(
-        _skill_statistic(predictions, targets, colours),
-        game_ids,
-        n_resamples=n_resamples,
-        confidence=confidence,
-        seed=seed,
-    )
-    skill_vs_colour_phase = game_cluster_bootstrap(
-        _skill_statistic(predictions, targets, colour_phase_keys),
-        game_ids,
-        n_resamples=n_resamples,
-        confidence=confidence,
-        seed=seed + 1,
-    )
+    #
+    # Both bootstraps can legitimately fail to produce an interval: ``_skill``
+    # returns nan when the baseline has zero error, and ``game_cluster_bootstrap``
+    # raises once too few resamples are finite. A baseline has zero error whenever
+    # every one of its groups is internally constant — which happens if the sample
+    # is small enough that groups hold one position each (the colour x phase
+    # baseline has many more groups, so it is the fragile one), or if the outcome
+    # is perfectly predicted by mover colour. This is a **diagnostic**: an eval set
+    # too degenerate to measure must return "no reading", never abort the training
+    # run that called it.
+    try:
+        skill_vs_colour = game_cluster_bootstrap(
+            _skill_statistic(predictions, targets, colours),
+            game_ids,
+            n_resamples=n_resamples,
+            confidence=confidence,
+            seed=seed,
+        )
+        skill_vs_colour_phase = game_cluster_bootstrap(
+            _skill_statistic(predictions, targets, colour_phase_keys),
+            game_ids,
+            n_resamples=n_resamples,
+            confidence=confidence,
+            seed=seed + 1,
+        )
+    except ValueError as exc:
+        logger.warning(
+            "Colour-value diagnostic unavailable this generation ({} positions, {} games): {}. "
+            "The baseline it measures against has no error to improve on, so skill is undefined. "
+            "Training is unaffected; raise the eval-set size for a reading.",
+            len(predictions),
+            int(np.unique(game_ids).size),
+            exc,
+        )
+        return None
 
     slices: list[ColourSlice] = []
     for colour in (WHITE_TO_MOVE, BLACK_TO_MOVE):
