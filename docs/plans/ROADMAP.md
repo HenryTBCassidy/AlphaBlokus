@@ -34,7 +34,7 @@ document and each maps to one commit.
 |---|---|---|
 | **Instruments** | archived | ✅ Done — PR #69 merged |
 | **Bug sweep** | archived | ✅ Done — PR #70 merged |
-| **Benchmark integrity** | [`fair-pentobi-benchmark.md`](fair-pentobi-benchmark.md) | 🔄 Code done in PR #71 (open, CI green); 3 of 11 items measured |
+| **Benchmark integrity** | `fair-pentobi-benchmark.md` — **arrives with PR #71**, not yet on main | 🔄 Code done in PR #71 (open, CI green); 3 of 11 items measured |
 | **Free measurements** | this file, below | 🔄 2 of 7 done; 1 slipped; the pilot is the gate on spending |
 | **Value head** | [`supervised-network-improvements.md`](supervised-network-improvements.md) N6/N7 | ⬜ Not started. **Now the most promising direction** |
 | Corpus v2 | [`pentobi-corpus-v2.md`](pentobi-corpus-v2.md) | ⏸ Parked — 9/16 done, needs a 3-day box run |
@@ -90,7 +90,7 @@ one-command box runs, not multi-commit work.
 | ID | Item | State |
 |---|---|---|
 | M1 | Ladder the checkpoints around the best net, to check we warm-start from the right one | ✅ Done. gen-40 is the best; gen-32 ties it, gen-36 is worse. Question closed |
-| M2 | Eval-time search scaling at the top levels | ➡️ Superseded — became F9/F10 in [`fair-pentobi-benchmark.md`](fair-pentobi-benchmark.md) |
+| M2 | Eval-time search scaling at the top levels | ➡️ Superseded — became F9/F10 in `fair-pentobi-benchmark.md` (lands with PR #71) |
 | M3 | Learning-rate sweep on a frozen buffer | ⛔ **Blocked** — both historical replay buffers were deleted, and no generate-only entry point exists |
 | M4 | Width shadow test (`top_k` 64 vs 128) | Written on `feat/width-shadow-probe`, never run. Deferred until after the pilot by design — 15–30 box hours, informs a later run only |
 | M5 | bfloat16 vs float32 self-play A/B | ⚠️ **Slipped.** Harness exists (`scripts/validate_jax_search.py --dtype`), short, free, never run |
