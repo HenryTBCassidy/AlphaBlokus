@@ -122,6 +122,21 @@ def main() -> None:
 
     args.run_directory.mkdir(parents=True, exist_ok=True)
 
+    # Add rotating file sink alongside default stderr
+    log_dir = args.log_directory
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logger.add(log_dir / "alpha.log", rotation="10 MB", retention=3)
+
+    if cli_args.resume:
+        # With an object store configured, an interrupted cloud run resumes on a
+        # fresh machine: pull the run directory down FIRST. The restore
+        # force-downloads the run directory, so anything stamped before it —
+        # config.resolved.json and run_provenance.json — would be overwritten by
+        # the previous launch's copy, and this launch's record silently lost.
+        # Stamping after the restore also means the input manifest hashes the
+        # eval set this launch will actually train against.
+        restore_run_from_object_store(args)
+
     # Persist the fully-resolved config at launch so what actually ran is never
     # ambiguous again (S4b). Written every launch (fresh + resume) so a resumed
     # run records the config it resumed under too.
@@ -135,20 +150,14 @@ def main() -> None:
         override_used=cli_args.allow_uncommitted_config,
     )
 
-    # Add rotating file sink alongside default stderr
-    log_dir = args.log_directory
-    log_dir.mkdir(parents=True, exist_ok=True)
-    logger.add(log_dir / "alpha.log", rotation="10 MB", retention=3)
-
     start = time.perf_counter()
 
     logger.info(f"Loading game: {args.game}")
     game, nnet = instantiate_game_and_network(args)
 
     if cli_args.resume:
-        # With an object store configured, an interrupted cloud run resumes on
-        # a fresh machine: pull the run directory down before reading markers.
-        restore_run_from_object_store(args)
+        # The object-store restore already ran above, before provenance was
+        # stamped — the run directory on disk is current here.
         marker = read_progress_marker(args)
         if marker is None:
             raise SystemExit(

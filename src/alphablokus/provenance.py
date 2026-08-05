@@ -143,12 +143,21 @@ def data_manifest(config: RunConfig, config_path: Path | None) -> list[dict[str,
         candidates.append(config_path)
     if config.load_model:
         candidates.append(config.net_directory / "best.pth.tar")
+    # Every persisted eval-set component, not a subset: the policy targets and
+    # metadata change what the diagnostics report, and source_fingerprints.json
+    # decides which replay games are excluded from training. Hashing only some
+    # of them lets two materially different runs share an eval-set manifest.
     eval_dir = config.eval_set_directory
     candidates.extend(
         [
             eval_dir / "boards.npy",
+            eval_dir / "compact_boards.npy",
+            eval_dir / "target_policies.npy",
             eval_dir / "target_values.npy",
+            eval_dir / "targets_kind.txt",
             eval_dir / "source_game_ids.npy",
+            eval_dir / "source_fingerprints.json",
+            eval_dir / "metadata.json",
         ]
     )
     return [_describe_file(path) for path in candidates if path.exists()]

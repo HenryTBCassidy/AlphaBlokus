@@ -332,6 +332,8 @@ class Coach:
             )
             training_end = time.perf_counter()
             self.metrics.log_timing(generation, CycleStage.TRAINING, training_end - training_start)
+            # After training, so the optimiser-step count is this generation's.
+            self._log_run_progress(generation, len(train_examples))
 
             # Memory snapshot after training phase
             self._log_memory_snapshot(generation, CycleStage.TRAINING)
@@ -1001,13 +1003,27 @@ class Coach:
             staleness_gens=staleness_gens,
             emergent_reuse=emergent_reuse,
         )
-        # The same regime in units that compare across runs, persisted to parquet.
+
+    def _log_run_progress(self, generation: int, buffer_positions: int) -> None:
+        """Persist the cross-run budget row: games, positions, optimiser steps.
+
+        Must be called **after** ``nnet.train()`` for this generation. Called
+        before it, ``optimiser_steps`` still holds the previous generation's
+        total — generation 1 would record zero steps and every later row would
+        lag by one, which makes the step count inconsistent with the games and
+        positions counted beside it (A9 budgets in exactly these units).
+        """
+        epochs = self.config.net_config.epochs
+        buffer_capacity_games = self.replay_buffer.capacity_games
+        fresh_games = max(self.config.num_eps, 1)
+        emergent_reuse = epochs * (buffer_capacity_games / fresh_games)
+        optimiser_steps = getattr(self.nnet, "optimiser_steps", 0)
         self.metrics.log_run_progress(
             generation=generation,
             total_games=self._total_games,
             total_positions=self._total_positions,
-            total_optimiser_steps=getattr(self.nnet, "optimiser_steps", 0),
-            buffer_games=buffer_games,
+            total_optimiser_steps=optimiser_steps,
+            buffer_games=len(self.replay_buffer),
             buffer_positions=buffer_positions,
             passes_per_position=emergent_reuse,
             epochs=epochs,
@@ -1017,7 +1033,7 @@ class Coach:
             generation,
             self._total_games,
             self._total_positions,
-            getattr(self.nnet, "optimiser_steps", 0),
+            optimiser_steps,
             emergent_reuse,
         )
 

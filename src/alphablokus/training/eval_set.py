@@ -240,7 +240,19 @@ def build_or_load_eval_set(
     order = rng.permutation(len(non_empty))
 
     # Never claim more than a fixed share of the buffer, since the chosen games
-    # leave training entirely.
+    # leave training entirely. With a single game in the buffer there is no
+    # holdout that leaves anything to train on, so build no eval set at all
+    # rather than withholding the whole buffer — `max(1, ...)` would otherwise
+    # claim the sole game and `flat_examples()` would return nothing, silently
+    # skipping training on one-game runs.
+    if len(non_empty) < 2:
+        logger.warning(
+            "Not building an eval set: the buffer holds {} non-empty game(s), and withholding any of "
+            "them would leave no training data. Raise num_eps to get a held-out set.",
+            len(non_empty),
+        )
+        return None
+
     max_games = max(1, int(len(non_empty) * MAX_EVAL_GAME_FRACTION))
     budget = min(size, max_games * MAX_EVAL_POSITIONS_PER_GAME)
     if budget < size:
