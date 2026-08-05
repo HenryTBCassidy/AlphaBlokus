@@ -209,6 +209,25 @@ def test_endgame_negamax_exact(setup) -> None:
                 break
         return best
 
+    def count_tree(board, player, budget):
+        """Count every descendant, with no pruning.
+
+        ``negamax`` stops expanding a node once it finds a winning child, so its
+        node counter *understates* the tree. The search under test follows priors
+        and Gumbel noise, not negamax's move order, so it may well explore the
+        branches negamax skipped — meaning a position that negamax "solved" in
+        300 nodes can still need more than 512 simulations. The solvability gate
+        therefore has to be the unpruned size, counted here.
+        """
+        budget[0] += 1
+        if budget[0] > node_cap:
+            raise RecursionError
+        if game.get_game_ended(board, player) != 0:
+            return
+        for a in legal_actions(board, player):
+            nb, np_ = game.get_next_state(board, player, a)
+            count_tree(nb, np_, budget)
+
     positions = []  # (board, player, {action: exact class})
     playouts = 0
     while len(positions) < 4 and playouts < 240:
@@ -225,14 +244,17 @@ def test_endgame_negamax_exact(setup) -> None:
             if depth < 2 or not (2 <= len(acts) <= 16):
                 continue
             try:
+                # Gate on the UNPRUNED tree size, shared across every root action,
+                # so an accepted position is one the search can fully enumerate
+                # whatever move order it happens to follow.
+                size_budget = [0]
+                count_tree(b, p, size_budget)
+                # Then classify with pruning — cheaper, and its node count is
+                # deliberately not used for the gate.
                 classes = {}
-                # One budget shared across every root action, so the counter is
-                # the size of the position's whole tree. Overrunning it raises
-                # RecursionError and the position is dropped.
-                solve_budget = [0]
                 for a in acts:
                     nb, np_ = game.get_next_state(b, p, a)
-                    classes[a] = -negamax(nb, np_, solve_budget)
+                    classes[a] = -negamax(nb, np_, [0])
             except RecursionError:
                 continue
             if len(set(classes.values())) >= 2 and len(positions) < 4:
