@@ -651,6 +651,7 @@ class MetricsCollector:
         mean_entropy: float,
         std_entropy: float,
         eval_set_size: int,
+        eval_set_generation: int | None = None,
     ) -> None:
         """Record the network's mean policy entropy on the held-out eval set.
 
@@ -666,6 +667,7 @@ class MetricsCollector:
                 "mean_entropy": mean_entropy,
                 "std_entropy": std_entropy,
                 "eval_set_size": eval_set_size,
+                "eval_set_generation": eval_set_generation,
             }
         )
         self._publish(
@@ -686,6 +688,7 @@ class MetricsCollector:
         eval_set_size: int,
         mcts_top1_accuracy: float | None = None,
         mcts_top5_accuracy: float | None = None,
+        eval_set_generation: int | None = None,
     ) -> None:
         """Record network policy agreement on the frozen eval set.
 
@@ -702,7 +705,7 @@ class MetricsCollector:
           training works. ``None`` when the eval set can't be re-searched
           (older eval sets without persisted compact boards).
         """
-        record = {
+        record: dict[str, Any] = {
             "generation": generation,
             "epoch": epoch,
             "top1_accuracy": top1_accuracy,
@@ -713,6 +716,7 @@ class MetricsCollector:
             record["mcts_top1_accuracy"] = mcts_top1_accuracy
         if mcts_top5_accuracy is not None:
             record["mcts_top5_accuracy"] = mcts_top5_accuracy
+        record["eval_set_generation"] = eval_set_generation
         self._policy_accuracy_records.append(record)
         payload: dict[str, Any] = {
             "training/network_top1_accuracy": top1_accuracy,
@@ -733,6 +737,7 @@ class MetricsCollector:
         bucket_centers: NDArray,
         bucket_means: NDArray,
         bucket_counts: NDArray,
+        eval_set_generation: int | None = None,
     ) -> None:
         """Record a reliability diagram for the value head.
 
@@ -753,6 +758,7 @@ class MetricsCollector:
                     "bucket_center": float(centre),
                     "bucket_mean_actual": float(mean_v) if not np.isnan(mean_v) else None,
                     "bucket_count": int(count),
+                    "eval_set_generation": eval_set_generation,
                 }
             )
 
@@ -777,6 +783,7 @@ class MetricsCollector:
         pvc_spearman: float,
         eval_set_size: int,
         value_symmetry_mae: float | None = None,
+        eval_set_generation: int | None = None,
     ) -> None:
         """Record policy–value consistency on the frozen eval set.
 
@@ -799,7 +806,7 @@ class MetricsCollector:
         symmetry group, so this sits near 0; a rising value means the value head
         isn't respecting the symmetry.
         """
-        record = {
+        record: dict[str, Any] = {
             "generation": generation,
             "epoch": epoch,
             "pvc_argmax_match": pvc_argmax_match,
@@ -808,6 +815,7 @@ class MetricsCollector:
         }
         if value_symmetry_mae is not None:
             record["value_symmetry_mae"] = value_symmetry_mae
+        record["eval_set_generation"] = eval_set_generation
         self._policy_value_consistency_records.append(record)
         payload: dict[str, Any] = {
             "pvc/argmax_match": pvc_argmax_match,

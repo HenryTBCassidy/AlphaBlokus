@@ -922,12 +922,18 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             # Per-epoch held-out diagnostics on the frozen eval set.
             if eval_set is not None and len(eval_set) > 0 and metrics is not None:
                 diagnostics = self._compute_eval_set_diagnostics(eval_set)
+                # Every eval-set diagnostic carries the vintage of the set it was
+                # measured on. With eval_set_rebuild_every enabled the positions
+                # change mid-run, so a series spanning two vintages has a dataset
+                # boundary in it that is easy to misread as a change in the net.
+                vintage = eval_set.built_at_generation
                 metrics.log_training_entropy(
                     generation=generation,
                     epoch=epoch,
                     mean_entropy=diagnostics["entropy_mean"],
                     std_entropy=diagnostics["entropy_std"],
                     eval_set_size=len(eval_set),
+                    eval_set_generation=vintage,
                 )
                 mcts_agreement = self._compute_mcts_agreement(eval_set)
                 metrics.log_policy_accuracy(
@@ -938,6 +944,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                     eval_set_size=len(eval_set),
                     mcts_top1_accuracy=mcts_agreement[0] if mcts_agreement is not None else None,
                     mcts_top5_accuracy=mcts_agreement[1] if mcts_agreement is not None else None,
+                    eval_set_generation=vintage,
                 )
                 metrics.log_value_calibration(
                     generation=generation,
@@ -945,6 +952,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                     bucket_centers=diagnostics["calib_centers"],
                     bucket_means=diagnostics["calib_means"],
                     bucket_counts=diagnostics["calib_counts"],
+                    eval_set_generation=vintage,
                 )
                 pvc = self._compute_policy_value_consistency(eval_set)
                 if pvc is not None:
@@ -955,6 +963,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                         pvc_spearman=pvc["pvc_spearman"],
                         eval_set_size=len(eval_set),
                         value_symmetry_mae=self._compute_value_symmetry_mae(eval_set),
+                        eval_set_generation=vintage,
                     )
                 # Diagnostics are observers: a broken instrument must never take
                 # the training run down with it. The diagnostic already degrades
@@ -973,7 +982,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                         generation=generation,
                         epoch=epoch,
                         diagnostic=colour_value,
-                        eval_set_generation=eval_set.built_at_generation,
+                        eval_set_generation=vintage,
                     )
 
         # Reclaim the on-disk memmap scratch (a whole buffer's worth, ~GBs) so it

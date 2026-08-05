@@ -36,6 +36,10 @@ if TYPE_CHECKING:
     from alphablokus.config import RunConfig
 
 PROVENANCE_FILENAME = "run_provenance.json"
+# Append-only log of every launch's provenance. ``run_provenance.json`` holds the
+# most recent launch and is overwritten; this keeps the earlier ones, which is the
+# only place a resumed warm start's ORIGINAL donor checkpoint hash survives.
+PROVENANCE_HISTORY_FILENAME = "run_provenance_history.jsonl"
 
 # Read in chunks so a multi-hundred-MB checkpoint doesn't land in RAM whole.
 _HASH_CHUNK_BYTES = 1 << 20
@@ -288,6 +292,7 @@ def write_provenance(
         The path written, or None on failure.
     """
     path = config.run_directory / PROVENANCE_FILENAME
+    history_path = config.run_directory / PROVENANCE_HISTORY_FILENAME
     try:
         payload = build_provenance(
             config,
@@ -295,8 +300,20 @@ def write_provenance(
             config_state=config_state,
             override_used=override_used,
         )
+        # Append every launch's record before overwriting the current one. Without
+        # this, a resumed warm start destroys the very fact this module exists to
+        # capture: the manifest hashes ``best.pth.tar``, which on a resume is the
+        # run's own latest accepted net rather than the original donor, so the
+        # donor hash is overwritten by an unrelated checkpoint and lost for good.
+        # The history file is append-only, so launch 1's donor hash survives every
+        # later launch.
+        try:
+            with history_path.open("a", encoding="utf-8") as handle:
+                handle.write(json.dumps(payload, default=str) + "\n")
+        except OSError as hist_err:
+            logger.warning("Could not append to provenance history {} ({}); continuing.", history_path, hist_err)
         path.write_text(json.dumps(payload, indent=2, default=str), encoding="utf-8")
-        logger.info("Wrote run provenance to {}", path)
+        logger.info("Wrote run provenance to {} (launch history: {})", path, history_path)
         return path
     except Exception as err:  # pragma: no cover - defensive; never blocks a run
         logger.warning("Could not write provenance to {} ({}); continuing.", path, err)
