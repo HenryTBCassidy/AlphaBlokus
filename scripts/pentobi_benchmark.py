@@ -57,8 +57,10 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from alphablokus.config import RunConfig, load_args
-from alphablokus.evaluation.arena import Arena
+from alphablokus.evaluation.arena import Arena, ColourTally
+from alphablokus.evaluation.ladder_selection import SCORING_WIN_DRAW_HALF
 from alphablokus.evaluation.players import NetworkPlayer
+from alphablokus.games.blokusduo.pentobi.book import BookProbe, probe_book
 from alphablokus.games.blokusduo.pentobi.gtp import find_pentobi_gtp
 from alphablokus.games.blokusduo.pentobi.player import PentobiPlayer
 from alphablokus.registry import instantiate_game, instantiate_game_and_network
@@ -71,9 +73,10 @@ EVAL_SIMS_DEFAULT = 400
 REPLAYS_PER_LEVEL = 4  # games embedded per level in the report (keeps it readable)
 DEFAULT_WORKERS_WHEN_PARALLEL = 4  # VRAM-safe default on the 8 GB 3060 Ti; lower on CUDA OOM
 
-# Scoring convention recorded in every payload. Results written before 2026-08-05
-# carry no "scoring" key and counted draws as losses.
-SCORING_WIN_DRAW_HALF = "win_draw_half"
+# ``SCORING_WIN_DRAW_HALF`` (imported above) is the convention stamped into every
+# payload's ``metrics``. It lives in ``evaluation/ladder_selection`` because that is
+# where it is read back: the selection logic uses it to tell a pre-2026-08-05
+# draws-as-losses result from a current one and put both on the same scale.
 
 # Where each condition's results live. They MUST stay in separate directories:
 # Coach's cadence check (keep-best-by-ladder + the drift circuit-breaker) reads
@@ -83,9 +86,6 @@ SCORING_WIN_DRAW_HALF = "win_draw_half"
 CONDITION_LADDER = "ladder"  # longitudinal instrument: 400 sims, book off, L1-9
 CONDITION_FAIR_FIGHT = "fair-fight"  # equal-time, book on, top levels only
 CONDITION_DIRNAMES = {CONDITION_LADDER: "PentobiLadder", CONDITION_FAIR_FIGHT: "PentobiFairFight"}
-
-# Type alias for a single worker's return: (net_wins, pentobi_wins, draws, records).
-ChunkResult = tuple[int, int, int, "list[GameRecord]"]
 
 
 def _eval_mcts_config(base, sims: int, batch: int = 1):
@@ -132,6 +132,7 @@ def level_result(
     *,
     white_games: int = 0,
     white_wins: int = 0,
+    white_draws: int = 0,
     net_seconds: list[float] | None = None,
     pentobi_seconds: list[float] | None = None,
 ) -> dict:
@@ -145,10 +146,13 @@ def level_result(
     wins-only fraction, for continuity with published figures, but nothing derives
     from it.
 
-    ``white_games`` / ``white_wins`` record the colour split. Blokus Duo's first
-    mover takes ~75% of decisive games, and a pooled half-and-half score is
+    ``white_games`` / ``white_wins`` / ``white_draws`` record the colour split, and
+    ``white_score`` scores it on the same draws-as-half definition. Blokus Duo's
+    first mover takes ~75% of decisive games, and a pooled half-and-half score is
     therefore *flatter* than a logistic in the true strength gap — so recovering an
-    unbiased Elo needs the split, which aggregation used to discard.
+    unbiased Elo needs the split (``evaluation/ladder_elo.py``), which aggregation
+    used to discard. Callers that genuinely did not measure it leave it at zero;
+    ``white_score`` is then absent rather than a misleading 0.0.
     """
     played = net_wins + pentobi_wins + draws
     effective = net_wins + 0.5 * draws
@@ -163,8 +167,11 @@ def level_result(
         "ci": _wilson_ci(effective, played),
         "white_games": white_games,
         "white_wins": white_wins,
+        "white_draws": white_draws,
         "records": records,
     }
+    if white_games:
+        result["white_score"] = (white_wins + 0.5 * white_draws) / white_games
     for key, seconds in (("net_seconds_per_move", net_seconds), ("pentobi_seconds_per_move", pentobi_seconds)):
         if seconds:
             result[key] = {
@@ -206,15 +213,32 @@ def benchmark_level(game, net_player, level: int, games: int, seed: int | None, 
     """Play ``games`` net-vs-Pentobi games at one level (half each colour) via the Arena."""
     pentobi = PentobiPlayer(game, level, seed=seed, nobook=nobook)
     try:
-        # net is player1; play_games splits half/half by colour and swaps internally.
-        net_wins, pentobi_wins, draws, records = Arena(
-            net_player,
-            pentobi,
-            game,
-        ).play_games(games, record=True)
+        # net is player1; play_games_by_colour splits half/half by colour and swaps
+        # internally, and keeps the two halves apart so the split is recorded rather
+        # than reconstructed (it is not recoverable from a pooled tally).
+        as_white, as_black, records = Arena(net_player, pentobi, game).play_games_by_colour(games, record=True)
     finally:
         pentobi.close()
-    return level_result(level, net_wins, pentobi_wins, draws, records)
+    return _level_result_from_tallies(level, as_white, as_black, records)
+
+
+def _level_result_from_tallies(
+    level: int,
+    as_white: ColourTally,
+    as_black: ColourTally,
+    records: list,
+) -> dict:
+    """Assemble a level result from the two colour halves (see :func:`level_result`)."""
+    return level_result(
+        level,
+        as_white.wins + as_black.wins,
+        as_white.losses + as_black.losses,
+        as_white.draws + as_black.draws,
+        records,
+        white_games=as_white.games,
+        white_wins=as_white.wins,
+        white_draws=as_white.draws,
+    )
 
 
 # --------------------------------------------------------------------------- #
@@ -223,6 +247,21 @@ def benchmark_level(game, net_player, level: int, games: int, seed: int | None, 
 # The pure helpers below (chunking, seed planning, aggregation) are unit-tested
 # in isolation; the Pentobi-specific execution is covered by end-to-end runs.
 # --------------------------------------------------------------------------- #
+
+
+@dataclass(frozen=True)
+class ChunkOutcome:
+    """One worker's return: its two colour halves, plus any captured records.
+
+    The halves are returned separately rather than pooled because the colour split
+    cannot be reconstructed downstream — most chunks run with ``record=False``, and
+    even with records a pooled ``(wins, losses, draws)`` tally has already lost it.
+    The ladder's Elo conversion needs it (``evaluation/ladder_elo.py``).
+    """
+
+    as_white: ColourTally
+    as_black: ColourTally
+    records: list[GameRecord]
 
 
 @dataclass(frozen=True)
@@ -292,13 +331,24 @@ def _plan_tasks(levels: list[int], games: int, workers: int, seed: int) -> list[
     return tasks
 
 
-def _aggregate_level(level: int, chunk_results: list[ChunkResult]) -> dict:
+def _sum_tallies(tallies: list[ColourTally]) -> ColourTally:
+    """Add up per-chunk colour tallies."""
+    return ColourTally(
+        games=sum(t.games for t in tallies),
+        wins=sum(t.wins for t in tallies),
+        losses=sum(t.losses for t in tallies),
+        draws=sum(t.draws for t in tallies),
+    )
+
+
+def _aggregate_level(level: int, chunk_results: list[ChunkOutcome]) -> dict:
     """Sum a level's chunk results into the same dict shape as :func:`benchmark_level`."""
-    net_wins = sum(r[0] for r in chunk_results)
-    pentobi_wins = sum(r[1] for r in chunk_results)
-    draws = sum(r[2] for r in chunk_results)
-    records = [rec for r in chunk_results for rec in r[3]]
-    return level_result(level, net_wins, pentobi_wins, draws, records)
+    return _level_result_from_tallies(
+        level,
+        _sum_tallies([r.as_white for r in chunk_results]),
+        _sum_tallies([r.as_black for r in chunk_results]),
+        [rec for r in chunk_results for rec in r.records],
+    )
 
 
 def _play_chunk(
@@ -315,7 +365,7 @@ def _play_chunk(
     mps: bool,
     collect_records: bool,
     nobook: bool,
-) -> ChunkResult:
+) -> ChunkOutcome:
     """Worker entry point: play ``n_games`` net-vs-Pentobi at one level, in its own process.
 
     Takes only plain picklable args — it rebuilds the game, net and engine itself
@@ -326,6 +376,12 @@ def _play_chunk(
     Device policy: run the net on CUDA when the config asks for it and it's
     available, unless ``cpu_net`` forces CPU (to scale past the VRAM cap). On the
     Mac, ``mps`` opts into Metal inference (ignored under ``cpu_net``).
+
+    Both players are seeded from ``seed_base``: Pentobi reseeds ``seed_base + game``
+    per game, and the net's opening sampler gets the same base. ``_plan_tasks``
+    hands every task a disjoint seed window, so the arms are reproducible *and* no
+    two chunks replay the same game. Leaving the net's RNG unseeded here made a
+    parallel run irreproducible while its payload still recorded ``--seed``.
     """
     import os
 
@@ -351,16 +407,17 @@ def _play_chunk(
         temp=0.0,
         opening_temp=opening_temp,
         opening_moves=opening_moves,
+        seed=seed_base,
     )
     pentobi = PentobiPlayer(game, level, seed=seed_base, nobook=nobook)
     try:
-        net_wins, pentobi_wins, draws, records = Arena(net_player, pentobi, game).play_games(
+        as_white, as_black, records = Arena(net_player, pentobi, game).play_games_by_colour(
             n_games,
             record=collect_records,
         )
     finally:
         pentobi.close()
-    return net_wins, pentobi_wins, draws, records
+    return ChunkOutcome(as_white=as_white, as_black=as_black, records=records)
 
 
 def benchmark_levels_parallel(
@@ -387,7 +444,7 @@ def benchmark_levels_parallel(
     """
     tasks = _plan_tasks(levels, games, workers, seed)
     ctx = mp.get_context("spawn")  # never fork: workers init Torch/CUDA (and JAX is imported elsewhere)
-    results_by_level: dict[int, list[ChunkResult]] = {level: [] for level in levels}
+    results_by_level: dict[int, list[ChunkOutcome]] = {level: [] for level in levels}
 
     with ProcessPoolExecutor(max_workers=workers, mp_context=ctx) as pool:
         futures = {
@@ -411,10 +468,14 @@ def benchmark_levels_parallel(
         }
         for future in as_completed(futures):
             task = futures[future]
-            net_wins, pentobi_wins, draws, records = future.result()
-            results_by_level[task.level].append((net_wins, pentobi_wins, draws, records))
+            outcome = future.result()
+            results_by_level[task.level].append(outcome)
+            wins = outcome.as_white.wins + outcome.as_black.wins
+            losses = outcome.as_white.losses + outcome.as_black.losses
+            draws = outcome.as_white.draws + outcome.as_black.draws
             print(
-                f"  level {task.level} chunk ({task.n_games} games): net {net_wins}-{pentobi_wins}-{draws}",
+                f"  level {task.level} chunk ({task.n_games} games): net {wins}-{losses}-{draws} "
+                f"(as white {outcome.as_white.wins}-{outcome.as_white.losses}-{outcome.as_white.draws})",
                 flush=True,
             )
 
@@ -430,7 +491,65 @@ def benchmark_levels_parallel(
 PENTOBI_DUO_SIMS_BY_LEVEL = {1: 3, 2: 21, 3: 77, 4: 213, 5: 861, 6: 7280, 7: 221867, 8: 1109339, 9: 5546695}
 
 
-def build_context(args, config: RunConfig, *, workers: int) -> dict:
+def condition_conflicts(condition: str, *, nobook: bool, sims: int) -> str | None:
+    """Reject a run whose settings do not match the instrument it claims to be.
+
+    The ``ladder`` condition is not a label, it is a fixed yardstick: 400 simulations
+    for our side and a book-free Pentobi. That is what makes a score against each
+    level comparable to gen-40's, and what ``Coach`` promotes and stops runs on.
+    Its output directory and the ``condition`` key both defend against a *foreign*
+    result being read as longitudinal — but neither defends against a run that says
+    ``ladder`` while changing the yardstick, and ``--condition`` defaults to
+    ``ladder``, so ``--book`` or ``--sims 6400`` alone silently does exactly that.
+
+    Args:
+        condition: The requested condition.
+        nobook: Whether Pentobi's opening book is disabled.
+        sims: Simulations given to our net.
+
+    Returns:
+        A message explaining the conflict, or ``None`` if the settings are coherent.
+    """
+    if condition != CONDITION_LADDER:
+        return None
+    problems = []
+    if not nobook:
+        problems.append("--book (the ladder's whole history is book-free)")
+    if sims != EVAL_SIMS_DEFAULT:
+        problems.append(f"--sims {sims} (the ladder is fixed at {EVAL_SIMS_DEFAULT})")
+    if not problems:
+        return None
+    return (
+        f"The {CONDITION_LADDER!r} condition is incompatible with {' and '.join(problems)}. "
+        f"A result on a different scale must not enter the longitudinal series that drives "
+        f"keep-best-by-ladder and the drift circuit-breaker: record it as a one-off instead "
+        f"(scripts/pentobi_benchmark.py --condition {CONDITION_FAIR_FIGHT})."
+    )
+
+
+def book_probe_conflict(probe: BookProbe) -> str | None:
+    """Reject a book-on run whose engine demonstrably has no book loaded.
+
+    Args:
+        probe: What :func:`~alphablokus.games.blokusduo.pentobi.book.probe_book` observed.
+
+    Returns:
+        A fatal message if the engine searched instead of answering from its book, or
+        ``None`` when the book engaged *or* the probe could not run at all. An
+        unrunnable probe is not a failure — the binary lives only on the box — so it
+        warns and is recorded as unverified rather than blocking the run.
+    """
+    if probe.engaged is not False:
+        return None
+    return (
+        f"--book was requested but Pentobi searched its opening move ({probe.detail}), so no book "
+        "is loaded. Symlink the books beside the binary "
+        "(cd <pentobi-gtp dir> && ln -sfn ~/code/pentobi/opening_books/*.blksgf .) and rerun. "
+        "Refusing to record book: true for a book-free run."
+    )
+
+
+def build_context(args, config: RunConfig, *, workers: int, book_probe: dict | None = None) -> dict:
     """Everything needed to reproduce or trust this run, recorded beside the result.
 
     The ladder used to store the net name, sims and games/level, and nothing else —
@@ -458,7 +577,13 @@ def build_context(args, config: RunConfig, *, workers: int) -> dict:
         },
         "pentobi": {
             "threads": 1,  # PentobiPlayer's default; recorded because it sets wall-clock, not strength
+            # What we asked for, and — for a book-on run — what a probe observed. The
+            # two are different claims: dropping --nobook only *requests* the book, and
+            # an engine whose directory holds no .blksgf files plays book-free anyway
+            # (see games/blokusduo/pentobi/book.py). ``book`` stays the requested value
+            # so older readers keep working; trust ``book_probe`` for what happened.
             "book": not args.nobook,
+            "book_probe": book_probe,
             "nominal_sims_by_level": {str(k): PENTOBI_DUO_SIMS_BY_LEVEL[k] for k in sorted(PENTOBI_DUO_SIMS_BY_LEVEL)},
         },
         "harness": {
@@ -618,6 +743,10 @@ def main() -> None:
             "pentobi-gtp not found — build it (docs/plans/archive/pentobi-harness.md H2) or set $PENTOBI_GTP_PATH.",
         )
 
+    conflict = condition_conflicts(args.condition, nobook=args.nobook, sims=args.sims)
+    if conflict is not None:
+        raise SystemExit(conflict)
+
     config: RunConfig = load_args(args.config)
 
     if args.sweep:
@@ -626,6 +755,27 @@ def main() -> None:
         levels = parse_levels(args.levels)
     else:
         levels = [args.level if args.level else 1]
+
+    # A book-on run must show that a book actually loaded before it spends hours
+    # writing "book: true". Omitting --nobook only *requests* the book; the engine
+    # looks for its .blksgf files beside the binary and plays book-free without them,
+    # which is exactly how every measurement in this project's history came to face a
+    # book-free Pentobi while the setting reported otherwise. Probe at the highest
+    # level about to be played — the book is consulted per position, and the timing
+    # evidence is level-dependent.
+    book_probe: dict | None = None
+    if not args.nobook:
+        probe = probe_book(max(levels))
+        book_probe = probe.as_dict()
+        conflict = book_probe_conflict(probe)
+        if conflict is not None:
+            raise SystemExit(conflict)
+        if probe.engaged is None:
+            print(
+                "[benchmark] WARNING: could not verify the opening book (no engine to probe with). "
+                "The payload records it as unverified.",
+                flush=True,
+            )
 
     # Resolve worker count: explicit --workers wins; otherwise use the config's
     # ``num_parallel_workers`` when it opts into parallelism, else the VRAM-safe
@@ -746,7 +896,7 @@ def main() -> None:
         metrics=metrics,
         duration_s=ladder_duration_s,
         condition=args.condition,
-        context=build_context(args, config, workers=workers),
+        context=build_context(args, config, workers=workers, book_probe=book_probe),
     )
     print(f"[benchmark] ladder JSON → {ladder_path} (rendered by --report-only)", flush=True)
 

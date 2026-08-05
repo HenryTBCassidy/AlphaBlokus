@@ -20,6 +20,8 @@ import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from loguru import logger
+
 if TYPE_CHECKING:
     from collections.abc import Mapping, Sequence
 
@@ -111,21 +113,97 @@ def is_longitudinal(payload: Mapping[str, Any]) -> bool:
     return str(payload.get("condition", LADDER_CONDITION)) == LADDER_CONDITION
 
 
+# Scoring conventions, as recorded in ``metrics.scoring``. Payloads written before
+# 2026-08-05 carry no such key and counted a draw as a loss; everything since scores
+# a draw as half a win (fair-pentobi-benchmark F6).
+SCORING_WIN_DRAW_HALF = "win_draw_half"
+SCORING_WINS_ONLY = "wins_only"
+
+
+def _rescore_from_levels(rows: Sequence[Mapping[str, Any]]) -> tuple[float, float] | None:
+    """Recompute ``(weighted_score, score)`` from per-level tallies, draws as half.
+
+    Returns ``None`` when the rows are missing or lack a tally, in which case the
+    caller has to fall back to the stored numbers.
+    """
+    weighted_num = 0.0
+    weighted_den = 0.0
+    effective = 0.0
+    games = 0.0
+    for row in rows:
+        try:
+            level = int(row["level"])
+            played = int(row["games"])
+            wins_and_draws = int(row["net_wins"]) + 0.5 * int(row["draws"])
+        except (KeyError, TypeError, ValueError):
+            return None
+        weighted_num += level * wins_and_draws
+        weighted_den += level * played
+        effective += wins_and_draws
+        games += played
+    if weighted_den <= 0 or games <= 0:
+        return None
+    return weighted_num / weighted_den, effective / games
+
+
+def normalised_scores(payload: Mapping[str, Any]) -> tuple[float | None, float | None]:
+    """``(weighted_score, score)`` on the current draw convention, whatever the payload's.
+
+    Selection compares these numbers across checkpoints, so they must all be on one
+    scale. A run laddered either side of 2026-08-05 holds both conventions: the old
+    payloads counted draws as losses, which on this project's real ladder results
+    reads **0.7–1.0 pp lower** than the current definition. Since keep-best picks the
+    strict maximum, a new checkpoint could be crowned on the convention change alone
+    — a bogus promotion of the size the ladder is meant to detect.
+
+    Legacy payloads are therefore recomputed from their own per-level tallies, which
+    they all store (``level`` / ``games`` / ``net_wins`` / ``draws``), rather than
+    excluded: the recomputation is exact, so the run's history stays intact and
+    comparable. Payloads with no usable tallies keep their stored numbers and warn —
+    there is nothing better available, and dropping them would silently shorten the
+    drift history.
+
+    ``metrics.pentobi_level`` is deliberately left as stored: no decision reads it
+    (it is reported, not selected on), and it only moves under the new convention
+    when a level sits within half the draw rate of 0.5.
+    """
+    metrics = payload.get("metrics", {})
+    stored_weighted = float(metrics["weighted_score"]) if "weighted_score" in metrics else None
+    stored_score = float(metrics["score"]) if "score" in metrics else None
+    if str(metrics.get("scoring", SCORING_WINS_ONLY)) == SCORING_WIN_DRAW_HALF:
+        return stored_weighted, stored_score
+    rescored = _rescore_from_levels(payload.get("levels") or [])
+    if rescored is None:
+        logger.warning(
+            "Ladder result for {} predates the draws-as-half convention and has no per-level "
+            "tallies to recompute from; comparing its score against newer results understates it "
+            "by roughly half the draw rate.",
+            payload.get("net", "<unknown net>"),
+        )
+        return stored_weighted, stored_score
+    return rescored
+
+
 def ladder_point_from_payload(payload: Mapping[str, Any]) -> LadderPoint:
     """Build a :class:`LadderPoint` from a ladder JSON payload.
 
     Accepts the schema written by ``reporting/pentobi_ladder.write_ladder_result``
     (``scripts/pentobi_benchmark.py``'s output): ``net`` + a ``metrics`` dict
-    with ``weighted_score`` / ``pentobi_level`` / ``score``.
+    with ``weighted_score`` / ``pentobi_level`` / ``score``. Scores are normalised
+    onto the current draw convention by :func:`normalised_scores` so a history
+    spanning the 2026-08-05 change is still one comparable series.
     """
     label = str(payload["net"])
     metrics = payload["metrics"]
+    weighted, score = normalised_scores(payload)
+    if weighted is None:
+        raise KeyError(f"ladder payload for {label!r} has no metrics.weighted_score")
     return LadderPoint(
         label=label,
-        weighted_score=float(metrics["weighted_score"]),
+        weighted_score=weighted,
         generation=checkpoint_generation(label),
         pentobi_level=int(metrics["pentobi_level"]) if "pentobi_level" in metrics else None,
-        score=float(metrics["score"]) if "score" in metrics else None,
+        score=score,
     )
 
 

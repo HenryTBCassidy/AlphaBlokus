@@ -91,6 +91,45 @@ def test_default_written_condition_is_the_ladder(tmp_path: Path) -> None:
     assert is_longitudinal(loaded)
 
 
+def test_the_ladder_condition_rejects_a_book_on_run() -> None:
+    """``--condition`` defaults to ``ladder``, so ``--book`` alone would poison the series.
+
+    The output directory and the ``condition`` key defend against a *foreign* payload
+    being read as longitudinal. Neither defends against a run that claims to be the
+    ladder while changing the yardstick — and since the default condition is the
+    ladder, passing ``--book`` and nothing else did exactly that.
+    """
+    from scripts.pentobi_benchmark import CONDITION_LADDER, EVAL_SIMS_DEFAULT, condition_conflicts
+
+    message = condition_conflicts(CONDITION_LADDER, nobook=False, sims=EVAL_SIMS_DEFAULT)
+    assert message is not None
+    assert "--book" in message
+    assert "fair-fight" in message  # the message names the escape hatch
+
+
+def test_the_ladder_condition_rejects_a_changed_simulation_budget() -> None:
+    """The fixed 400 sims are what make a per-level score convertible to one Elo scale."""
+    from scripts.pentobi_benchmark import CONDITION_LADDER, condition_conflicts
+
+    message = condition_conflicts(CONDITION_LADDER, nobook=True, sims=6400)
+    assert message is not None
+    assert "6400" in message
+
+
+def test_the_ladder_condition_accepts_its_own_settings() -> None:
+    from scripts.pentobi_benchmark import CONDITION_LADDER, EVAL_SIMS_DEFAULT, condition_conflicts
+
+    assert condition_conflicts(CONDITION_LADDER, nobook=True, sims=EVAL_SIMS_DEFAULT) is None
+
+
+@pytest.mark.parametrize(("nobook", "sims"), [(False, 4800), (True, 400), (False, 400)])
+def test_a_one_off_condition_may_use_any_settings(nobook: bool, sims: int) -> None:
+    """Only the longitudinal series is constrained; a one-off comparison is free."""
+    from scripts.pentobi_benchmark import CONDITION_FAIR_FIGHT, condition_conflicts
+
+    assert condition_conflicts(CONDITION_FAIR_FIGHT, nobook=nobook, sims=sims) is None
+
+
 def test_pentobi_player_requires_an_explicit_book_decision() -> None:
     """``nobook`` is keyword-only with no default, on purpose.
 

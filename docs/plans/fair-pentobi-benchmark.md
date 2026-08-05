@@ -337,3 +337,25 @@ Discovered while writing this plan, folded in above rather than left implicit:
   build-path accident is what caused the original defect.
 - Recomputing gen-40's published numbers under F6's draw convention — a change to every
   historical figure, so it needs stating rather than doing quietly.
+- **A third defence for the condition separation.** Directories and `is_longitudinal()`
+  both guard against a *foreign* payload being read as longitudinal; neither guards
+  against a run that says `--condition ladder` while changing the yardstick, and that
+  condition is the default. `condition_conflicts()` now rejects `--book` or a non-400
+  `--sims` on the ladder condition and names `--condition fair-fight` as the way out.
+- **A book-engagement preflight, not just a recorded flag** (F1). Dropping `--nobook`
+  only *requests* the book, so `probe_book()` (`games/blokusduo/pentobi/book.py`) plays
+  one opening move before the run and aborts if the engine searched it — a book hit has
+  no search tree, so `move_values` is empty. The probe's observation is recorded next to
+  the requested value; where the binary is absent it degrades to "unverified" rather
+  than failing.
+- **Legacy payloads are rescored, not excluded** (F6). A run laddered either side of
+  2026-08-05 holds both conventions, and keep-best takes a strict maximum, so the
+  0.7–1.0 pp uplift measured on this project's own ladder files could crown a
+  checkpoint on the convention change alone. `normalised_scores()` recomputes the old
+  payloads from their per-level tallies, which every one of them stores, so the history
+  stays intact and one scale.
+- **The colour split needed an Arena change** (F4/F7). `play_games` pools the halves and
+  the split is unrecoverable afterwards — most benchmark chunks run with
+  `record=False` — so `Arena.play_games_by_colour` returns the two `ColourTally` halves
+  and `play_games` is now a sum over it. Without this the recorded split was `0/0`,
+  which is unusable as the colour-aware Elo's input.

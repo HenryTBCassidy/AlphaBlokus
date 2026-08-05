@@ -108,3 +108,42 @@ def test_resign_colour_swap_correctness(ttt_game: TicTacToeGame):
     assert one_won == 0  # the resigner never wins
     assert two_won == 4  # the opponent wins all games (both halves)
     assert draws == 0
+
+
+def test_play_games_by_colour_splits_the_halves(ttt_game: TicTacToeGame):
+    """The colour split must be measured, not reconstructed.
+
+    ``play_games`` pools the two halves, and the split is unrecoverable from the pooled
+    tally — yet Blokus Duo's first mover takes ~75% of decisive games, so an unbiased
+    Elo cannot be fitted without it. An always-resigning player1 makes the expected
+    split exact: it loses every game as either colour.
+    """
+    as_white, as_black, _ = Arena(_resigner, _random_player, ttt_game).play_games_by_colour(6)
+    assert (as_white.games, as_white.wins, as_white.losses, as_white.draws) == (3, 0, 3, 0)
+    assert (as_black.games, as_black.wins, as_black.losses, as_black.draws) == (3, 0, 3, 0)
+    assert as_white.score == 0.0
+
+
+def test_play_games_by_colour_agrees_with_the_pooled_tally(ttt_game: TicTacToeGame):
+    """The split halves must sum to exactly what ``play_games`` reports."""
+    np.random.seed(7)
+    pooled = Arena(_random_player, _random_player, ttt_game).play_games(8)
+    np.random.seed(7)
+    as_white, as_black, _ = Arena(_random_player, _random_player, ttt_game).play_games_by_colour(8)
+    assert (as_white.wins + as_black.wins) == pooled[0]
+    assert (as_white.losses + as_black.losses) == pooled[1]
+    assert (as_white.draws + as_black.draws) == pooled[2]
+    assert as_white.games + as_black.games == 8
+
+
+def test_colour_tally_scores_a_draw_as_half():
+    from alphablokus.evaluation.arena import ColourTally
+
+    assert ColourTally(games=10, wins=4, losses=4, draws=2).score == 0.5
+    assert ColourTally(games=0, wins=0, losses=0, draws=0).score == 0.0
+
+
+def test_records_are_tagged_with_the_colour_they_were_played_as(ttt_game: TicTacToeGame):
+    """``player1_was_white`` still marks the half, so replays stay interpretable."""
+    _, _, records = Arena(_random_player, _random_player, ttt_game).play_games_by_colour(4, record=True)
+    assert [r.player1_was_white for r in records] == [True, True, False, False]

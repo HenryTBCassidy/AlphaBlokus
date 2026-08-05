@@ -62,6 +62,15 @@ DRIFT_ALARM_EXIT_CODE = 3
 DEFAULT_LEVELS = "3-6"
 DEFAULT_GAMES_PER_LEVEL = 50
 
+# The mini ladder is *only* the longitudinal instrument: it writes into the run's
+# ``PentobiLadder/`` directory and its history drives keep-best and the drift
+# circuit-breaker. So Pentobi's book stays off, unconditionally and with no flag to
+# turn it on — every ladder number the project has ever quoted is book-free, and a
+# book-on result on that series would be a different scale wearing the same name.
+# ``PentobiPlayer`` requires the choice to be stated explicitly, which is what caught
+# this call site: it passed no book state at all and raised TypeError.
+LONGITUDINAL_NOBOOK = True
+
 
 def _history_path(config: RunConfig) -> Path:
     return config.run_directory / "MiniLadder" / "history.json"
@@ -93,9 +102,22 @@ def _points_from_history(rows: list[dict[str, Any]]) -> list[LadderPoint]:
     ]
 
 
-def _run_one_net(config_path: str, config: RunConfig, net: str, args: argparse.Namespace) -> LadderPoint:
-    """Ladder one checkpoint via pentobi_benchmark's parallel sweep."""
+def _run_one_net(config_path: str, config: RunConfig, net: str, args: argparse.Namespace) -> tuple[LadderPoint, float]:
+    """Ladder one checkpoint via pentobi_benchmark's parallel sweep.
+
+    Returns:
+        ``(point, duration_s)`` — the ladder point and its wall-clock cost.
+    """
     levels = parse_levels(args.levels)
+    # This script only ever writes the longitudinal series, so its settings have to be
+    # the ladder's: the same check the full benchmark applies to --condition ladder.
+    conflict = pentobi_benchmark.condition_conflicts(
+        pentobi_benchmark.CONDITION_LADDER,
+        nobook=LONGITUDINAL_NOBOOK,
+        sims=args.sims,
+    )
+    if conflict is not None:
+        raise SystemExit(conflict)
     workers = args.workers if args.workers is not None else max(config.num_parallel_workers, 1)
     # Time the ladder: it is the plan's backbone measurement and its cost was
     # previously recorded nowhere, making everything downstream unschedulable.
@@ -113,6 +135,7 @@ def _run_one_net(config_path: str, config: RunConfig, net: str, args: argparse.N
         seed=args.seed,
         cpu_net=args.cpu_net,
         mps=args.mps,
+        nobook=LONGITUDINAL_NOBOOK,
     )
     duration_s = time.perf_counter() - ladder_start
     metrics = pentobi_benchmark.compute_headline_metrics(per_level)
@@ -122,7 +145,8 @@ def _run_one_net(config_path: str, config: RunConfig, net: str, args: argparse.N
         flush=True,
     )
     # Same JSON the full benchmark writes, so the training report's Pentobi
-    # Ladder section picks mini-ladder results up too.
+    # Ladder section picks mini-ladder results up too — including the comparison
+    # context, without which a payload cannot say what it faced (F4).
     write_ladder_result(
         config.pentobi_ladder_directory,
         net=net,
@@ -131,6 +155,12 @@ def _run_one_net(config_path: str, config: RunConfig, net: str, args: argparse.N
         per_level=per_level,
         metrics=metrics,
         duration_s=duration_s,
+        condition=pentobi_benchmark.CONDITION_LADDER,
+        context=pentobi_benchmark.build_context(
+            argparse.Namespace(**{**vars(args), "nobook": LONGITUDINAL_NOBOOK}),
+            config,
+            workers=max(workers, 1),
+        ),
     )
     point = LadderPoint(
         label=net,

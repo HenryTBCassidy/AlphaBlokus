@@ -82,6 +82,87 @@ def test_timing_keys_absent_when_not_measured() -> None:
     assert "net_seconds_per_move" not in row
 
 
+# --------------------------------------------------------------------------- #
+# Legacy payloads: a run laddered either side of 2026-08-05 holds both
+# conventions, and keep-best compares the stored numbers directly.
+# --------------------------------------------------------------------------- #
+
+
+def _legacy_payload() -> dict:
+    """A pre-2026-08-05 ladder payload: no ``scoring`` key, draws counted as losses."""
+    levels = [
+        {"level": 1, "games": 100, "net_wins": 79, "pentobi_wins": 20, "draws": 1},
+        {"level": 2, "games": 100, "net_wins": 60, "pentobi_wins": 38, "draws": 2},
+    ]
+    weighted = sum(row["level"] * row["net_wins"] for row in levels) / sum(
+        row["level"] * row["games"] for row in levels
+    )
+    return {
+        "net": "accepted_10.pth.tar",
+        "levels": levels,
+        "metrics": {"weighted_score": weighted, "score": 139 / 200, "pentobi_level": 2},
+    }
+
+
+def test_a_legacy_payload_is_rescored_from_its_own_tallies() -> None:
+    """Draws must not read as a strength change when the convention changed.
+
+    Recomputing is exact — every legacy payload stores its per-level tallies — so the
+    history stays intact instead of being excluded.
+    """
+    from alphablokus.evaluation.ladder_selection import normalised_scores
+
+    payload = _legacy_payload()
+    weighted, score = normalised_scores(payload)
+    # (1*79.5 + 2*61) / (1*100 + 2*100)
+    assert weighted == pytest.approx((79.5 + 122) / 300)
+    assert score == pytest.approx((79.5 + 61) / 200)
+    assert weighted > payload["metrics"]["weighted_score"]  # the uplift the raw compare would credit
+
+
+def test_rescoring_a_legacy_payload_removes_a_bogus_promotion() -> None:
+    """The concrete defect: a new checkpoint crowned by the convention, not by strength.
+
+    On this project's real ladder files the uplift is 0.7-1.0 pp, so a *weaker* new
+    checkpoint can out-score an older one on stored numbers alone.
+    """
+    from alphablokus.evaluation.ladder_selection import ladder_point_from_payload, select_best
+
+    legacy = _legacy_payload()  # rescores to 0.6717
+    newer = {
+        "net": "accepted_20.pth.tar",
+        "levels": [
+            {"level": 1, "games": 100, "net_wins": 78, "pentobi_wins": 21, "draws": 1},
+            {"level": 2, "games": 100, "net_wins": 60, "pentobi_wins": 38, "draws": 2},
+        ],
+        "metrics": {"weighted_score": (78.5 + 122) / 300, "score": 0.695, "scoring": SCORING_WIN_DRAW_HALF},
+    }
+    assert newer["metrics"]["weighted_score"] > legacy["metrics"]["weighted_score"]  # stored: newer "wins"
+
+    points = [ladder_point_from_payload(legacy), ladder_point_from_payload(newer)]
+    assert select_best(points).label == "accepted_10.pth.tar"  # rescored: the older net really is better
+
+
+def test_a_current_payload_is_taken_as_written() -> None:
+    """No recomputation when the payload already states the convention."""
+    from alphablokus.evaluation.ladder_selection import normalised_scores
+
+    payload = {
+        "net": "accepted_30.pth.tar",
+        "levels": [{"level": 9, "games": 100, "net_wins": 20, "pentobi_wins": 76, "draws": 4}],
+        "metrics": {"weighted_score": 0.22, "score": 0.22, "scoring": SCORING_WIN_DRAW_HALF},
+    }
+    assert normalised_scores(payload) == (0.22, 0.22)
+
+
+def test_a_legacy_payload_without_tallies_keeps_its_stored_score() -> None:
+    """Nothing better is available; dropping it would shorten the drift history."""
+    from alphablokus.evaluation.ladder_selection import normalised_scores
+
+    payload = {"net": "donor.pth.tar", "metrics": {"weighted_score": 0.31}}
+    assert normalised_scores(payload) == (0.31, None)
+
+
 def test_pentobi_level_budgets_match_the_engine_source() -> None:
     """From ``counts_duo`` in libpentobi_mcts/Player.cpp (Pentobi 31.0-dev).
 
