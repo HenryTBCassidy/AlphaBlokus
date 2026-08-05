@@ -180,7 +180,16 @@ def test_endgame_negamax_exact(setup) -> None:
     never ranks a losing move above a winning one (C3)."""
     game, params, kernels = setup
     rng = random.Random(1234)
-    node_cap = 20_000
+    # Only demand optimal play on positions the search could actually solve. The
+    # network here is randomly initialised, so it contributes no useful prior or
+    # value — the search finds the optimal move only by enumerating the tree. If
+    # the position's whole tree exceeds the simulation budget, a *correct* Gumbel
+    # MCTS can still miss the optimal move, and the assertion below would fail
+    # for budget reasons rather than the sign error it is meant to catch. So the
+    # node cap is the simulation budget, shared across all root actions, and any
+    # position that overruns it is skipped rather than asserted on.
+    num_simulations = 512
+    node_cap = num_simulations
 
     def legal_actions(board, player):
         return [int(a) for a in np.nonzero(game.valid_move_masking(board, player))[0]]
@@ -202,7 +211,7 @@ def test_endgame_negamax_exact(setup) -> None:
 
     positions = []  # (board, player, {action: exact class})
     playouts = 0
-    while len(positions) < 4 and playouts < 60:
+    while len(positions) < 4 and playouts < 240:
         playouts += 1
         board, player = game.initialise_board(), 1
         history = []
@@ -217,20 +226,29 @@ def test_endgame_negamax_exact(setup) -> None:
                 continue
             try:
                 classes = {}
+                # One budget shared across every root action, so the counter is
+                # the size of the position's whole tree. Overrunning it raises
+                # RecursionError and the position is dropped.
+                solve_budget = [0]
                 for a in acts:
                     nb, np_ = game.get_next_state(b, p, a)
-                    classes[a] = -negamax(nb, np_, [0])
+                    classes[a] = -negamax(nb, np_, solve_budget)
             except RecursionError:
                 continue
             if len(set(classes.values())) >= 2 and len(positions) < 4:
                 positions.append((b, p, classes))
-    assert len(positions) >= 2, "could not collect discriminating endgames"
+    if len(positions) < 2:
+        pytest.skip(
+            f"could not collect 2 discriminating endgames solvable within {node_cap} nodes "
+            f"in {playouts} playouts — no assertion is safe to make"
+        )
 
     states = GameState(
         *(np.stack(rows) for rows in zip(*(numpy_state_from_board(b, p) for b, p, _ in positions), strict=True))
     )
     search = make_search(
-        kernels, SearchConfig(num_simulations=512, top_k=64, policy="gumbel", gumbel_max_considered=64)
+        kernels,
+        SearchConfig(num_simulations=num_simulations, top_k=64, policy="gumbel", gumbel_max_considered=64),
     )
     result = search(params, jax.random.PRNGKey(99), states)
     chosen = np.asarray(result.chosen_global)

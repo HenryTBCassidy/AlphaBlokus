@@ -66,14 +66,35 @@ def wrapper(ttt_game, test_config):
     return NNetWrapper(ttt_game, replace(test_config, net_config=net_config, num_generations=8))
 
 
+def _steps(wrapper) -> dict:
+    """Adam's per-parameter update counter, which only a persisted optimizer keeps."""
+    state = wrapper.optimizer.state_dict()["state"]
+    return {k: (v["step"].item() if torch.is_tensor(v["step"]) else v["step"]) for k, v in state.items()}
+
+
 def test_adam_moments_persist_across_accepted_generations(wrapper, ttt_game) -> None:
     examples = _make_examples(ttt_game)
     wrapper.train(examples, generation=1)
     after_g1 = _moments(wrapper)
+    steps_g1 = _steps(wrapper)
     assert after_g1, "training must populate Adam state"
+    assert steps_g1 and all(step > 0 for step in steps_g1.values())
+
     wrapper.train(examples, generation=2)
     after_g2 = _moments(wrapper)
+    steps_g2 = _steps(wrapper)
     assert not _moments_equal(after_g1, after_g2), "moments must keep accumulating, not reset"
+
+    # The decisive check. Changed moments alone do NOT prove persistence: an
+    # optimizer recreated on every train() call would also produce different
+    # moments in generation 2, because generation 1 moved the weights. Only the
+    # step counter separates the two — a fresh optimizer restarts it at zero.
+    assert steps_g2.keys() == steps_g1.keys()
+    for key, first in steps_g1.items():
+        assert steps_g2[key] == 2 * first, (
+            f"param {key}: Adam step must be cumulative across generations "
+            f"(got {steps_g2[key]}, expected {2 * first} after two equal-sized generations)"
+        )
 
 
 def test_reject_reload_reverts_weights_and_moments_together(wrapper, ttt_game) -> None:
