@@ -96,10 +96,32 @@ class MCTS:
     4. Backpropagation: Update statistics for all visited nodes
     """
 
-    def __init__(self, game: IGame, nnet: IPolicyValuePredictor, config: MCTSConfig) -> None:
+    def __init__(
+        self,
+        game: IGame,
+        nnet: IPolicyValuePredictor,
+        config: MCTSConfig,
+        rng: np.random.Generator | None = None,
+    ) -> None:
+        """Create a search.
+
+        Args:
+            game: Rules engine driving the search.
+            nnet: Policy/value predictor evaluated at the leaves.
+            config: Search settings.
+            rng: Randomness source for the two draws a search makes — the temp=0
+                tie-break and the root Dirichlet noise. ``None`` (the default)
+                keeps drawing from numpy's global RNG, so self-play behaviour is
+                unchanged bit-for-bit. Pass a seeded generator for a run whose
+                result is compared to another: at 400 simulations over 17,837
+                actions, top visit counts tie often, so an unseeded tie-break
+                alone makes a benchmark irreproducible however carefully the
+                players are seeded.
+        """
         self.game = game
         self.nnet = nnet
         self.config = config
+        self._rng = rng
         self._detailed = config.profiling_level == "detailed"
         self._profiling = config.profiling_level != "none"
 
@@ -227,7 +249,7 @@ class MCTS:
             legal = self._root_legal_actions(canonical_board)
             probs: list[float] = [0.0] * len(counts)
             if temp == 0:
-                probs[int(np.random.choice(legal))] = 1.0
+                probs[int(self._choice(legal))] = 1.0
             else:
                 for action in legal:
                     probs[int(action)] = 1.0 / len(legal)
@@ -237,7 +259,7 @@ class MCTS:
         # occur between visited (hence legal) actions because raw_total > 0.
         if temp == 0:
             best_actions = np.array(np.argwhere(counts == np.max(counts))).flatten()
-            best_action = np.random.choice(best_actions)
+            best_action = self._choice(best_actions)
             probs = [0.0] * len(counts)
             probs[best_action] = 1.0
             return probs
@@ -264,6 +286,12 @@ class MCTS:
         if root is not None:
             counts[root.acts] = root.n
         return counts
+
+    def _choice(self, actions: NDArray[np.integer]) -> int:
+        """Draw one action uniformly, from this search's RNG when it has one."""
+        if self._rng is not None:
+            return int(self._rng.choice(actions))
+        return int(np.random.choice(actions))
 
     def _root_legal_actions(self, canonical_board: IBoard) -> NDArray[np.int32]:
         """Legal action ids at the root, from the expanded node when available."""
@@ -570,7 +598,8 @@ class MCTS:
         legal = node.acts  # ascending legal ids; node.priors is aligned to it
         if len(legal) == 0:
             return
-        noise = np.random.dirichlet([self.config.dirichlet_alpha] * len(legal))
+        alpha = [self.config.dirichlet_alpha] * len(legal)
+        noise = self._rng.dirichlet(alpha) if self._rng is not None else np.random.dirichlet(alpha)
         # Sparse priors are already aligned to ``legal``, so perturb element-wise
         # (the dense path fancy-indexed ``priors[legal]`` — same values, same order).
         priors = node.priors.copy()
