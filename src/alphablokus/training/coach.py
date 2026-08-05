@@ -5,7 +5,7 @@ import json
 import os
 import time
 from functools import partial
-from typing import TYPE_CHECKING, TypeAlias
+from typing import TYPE_CHECKING, Any, TypeAlias
 
 import numpy as np
 import pandas as pd
@@ -13,11 +13,18 @@ import torch
 from loguru import logger
 from numpy.typing import NDArray
 
+from alphablokus.evaluation.acceptance import acceptance_score
 from alphablokus.evaluation.arena import Arena, GameRecord
 from alphablokus.evaluation.elo import compute_elo
+from alphablokus.evaluation.ladder_selection import (
+    detect_drift,
+    ladder_point_from_payload,
+    select_best,
+)
 from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper
 from alphablokus.registry import resolve_oracle
+from alphablokus.reporting.pentobi_ladder import load_ladder_results
 from alphablokus.search.mcts import MCTS
 from alphablokus.selfplay.generate import generate_games
 from alphablokus.storage.metrics import (
@@ -27,7 +34,7 @@ from alphablokus.storage.metrics import (
 )
 from alphablokus.storage.object_store import create_object_store, sync_up_guarded
 from alphablokus.training.diagnostics import check_ram_budget, get_memory_snapshot
-from alphablokus.training.eval_set import build_or_load_eval_set
+from alphablokus.training.eval_set import build_or_load_eval_set, should_rebuild
 from alphablokus.training.replay_buffer import ReplayBuffer
 
 if TYPE_CHECKING:
@@ -35,7 +42,6 @@ if TYPE_CHECKING:
 
     from alphablokus.config import RunConfig
     from alphablokus.search.stats import MCTSEpisodeStats
-    from alphablokus.selfplay.episode import ProcessedExample
 
 # Type aliases for improved readability
 TrainingExample: TypeAlias = tuple[IBoard, int, NDArray, float | None]  # (board, player, policy, value)
@@ -195,6 +201,13 @@ class Coach:
         self._eval_set: EvalSet | None = None
         self._eval_set_size: int = 200
 
+        # Cumulative budget in units that compare across runs (see
+        # ``MetricsCollector.log_run_progress``). Restored from the progress marker
+        # on resume so a continued run reports its lineage's totals, not this
+        # process's.
+        self._total_games: int = 0
+        self._total_positions: int = 0
+
         # Reference positions for the post-training symmetry diagnostic.
         # Lazily built on first call to ``_evaluate_symmetry_diagnostic`` and
         # reused across generations so the per-gen KL trend is comparable.
@@ -233,26 +246,36 @@ class Coach:
         # spliced via the donor's weight hash (S3).
         self._write_anchor_provenance()
 
-    def learn(self, start_generation: int = 1) -> None:
+    def learn(self, start_generation: int = 1) -> bool:
         """Run the generation loop, finalising metrics/W&B even on crash.
 
         Args:
             start_generation: 1 for a fresh run; ``last_completed + 1`` when
                 resuming (artifacts are keyed by generation, so a partial run
                 appends rather than overwrites).
+
+        Returns:
+            True if the run completed its generations normally; False if the drift
+            circuit-breaker stopped it early. The caller must not treat a drift
+            stop as normal completion — the whole point of the breaker is to stop
+            spending compute, so end-of-run work like the pooled tournament has to
+            be skipped. Artifacts are on disk either way and the run is resumable.
         """
         try:
-            self._learn_loop(start_generation=start_generation)
+            return self._learn_loop(start_generation=start_generation)
         finally:
             # Ensure W&B (if active) is finalised even on crash/interrupt.
             self.metrics.close()
 
-    def _learn_loop(self, start_generation: int = 1) -> None:
+    def _learn_loop(self, start_generation: int = 1) -> bool:
         """Inner training loop. Separated so ``learn`` can wrap it in try/finally.
 
         ``start_generation`` is 1 for a fresh run and ``last_completed + 1`` when
         resuming; every per-generation artifact is keyed by generation number, so
         starting partway through appends rather than overwriting earlier work.
+
+        Returns:
+            True on normal completion, False if the drift breaker stopped the run.
         """
         for generation in range(start_generation, self.config.num_generations + 1):
             logger.info(f"Starting Generation #{generation} ...")
@@ -278,6 +301,11 @@ class Coach:
             self_play_end = time.perf_counter()
             self.metrics.log_timing(generation, CycleStage.SELF_PLAY, self_play_end - self_play_start)
 
+            # Count what was actually generated, not what was configured — a
+            # generation can come up short (a crashed worker, a capped wave).
+            self._total_games += self.replay_buffer.fresh_game_count
+            self._total_positions += self.replay_buffer.fresh_position_count
+
             self._log_memory_snapshot(generation, CycleStage.SELF_PLAY)
 
             # Persist this generation's fresh games (file index = generation - 1).
@@ -287,11 +315,13 @@ class Coach:
             # snapshot it so any regression shows up in the run, not post-mortem.
             self._log_memory_snapshot(generation, CycleStage.SAVE)
 
-            train_examples = self.replay_buffer.flat_shuffled_examples()
+            # Build/load the eval set used for per-epoch network diagnostics, and
+            # withhold its source games from training. This has to happen BEFORE
+            # the buffer is flattened, or the "held-out" positions end up in the
+            # training set — which is exactly what used to happen.
+            self._ensure_eval_set(generation)
 
-            # Build/load the frozen eval set used for per-epoch network
-            # entropy logging. First gen's self-play is the source.
-            self._ensure_eval_set(train_examples)
+            train_examples = self.replay_buffer.flat_examples()
 
             # Preserve current best network
             self.nnet.save_checkpoint(filename="temp.pth.tar")
@@ -312,6 +342,8 @@ class Coach:
             )
             training_end = time.perf_counter()
             self.metrics.log_timing(generation, CycleStage.TRAINING, training_end - training_start)
+            # After training, so the optimiser-step count is this generation's.
+            self._log_run_progress(generation, len(train_examples))
 
             # Memory snapshot after training phase
             self._log_memory_snapshot(generation, CycleStage.TRAINING)
@@ -338,6 +370,7 @@ class Coach:
 
             arena_end = time.perf_counter()
             accepted = self._should_accept_new_network(nwins, pwins, draws)
+            self._check_arena_for_crash(generation, nwins, pwins, draws)
             white_wins, black_wins = _colour_split(game_records)
             self.metrics.log_arena(
                 generation,
@@ -399,6 +432,21 @@ class Coach:
             # boundary (never a half-finished generation).
             self._write_progress_marker(generation)
 
+            # Promotion and catastrophe-stop are read from the Pentobi ladder, not
+            # from the arena. Done after the marker so a stop always leaves a
+            # resumable, fully-committed generation behind.
+            if self._check_ladder_and_drift(generation):
+                logger.error(
+                    "Drift circuit-breaker tripped — stopping the run at generation {}. "
+                    "Everything up to and including this generation is on disk and resumable. "
+                    "End-of-run work (e.g. the pooled tournament) is skipped: the breaker exists "
+                    "to stop spending compute.",
+                    generation,
+                )
+                return False
+
+        return True
+
     def _log_memory_snapshot(self, generation: int, stage: CycleStage) -> None:
         """Snapshot RSS / peak-RSS / GPU memory after ``stage`` → console + metrics.
 
@@ -433,6 +481,12 @@ class Coach:
         payload = {
             "last_completed_generation": generation,
             "wandb_run_id": self.metrics.wandb_run_id,
+            # Cumulative budget, so a resumed run continues the count instead of
+            # restarting it (these were previously in-memory only and reset on
+            # resume, which made the totals unusable for a run that crashed).
+            "total_games": self._total_games,
+            "total_positions": self._total_positions,
+            "total_optimiser_steps": getattr(self.nnet, "optimiser_steps", 0),
         }
         tmp = path.with_suffix(".json.tmp")
         tmp.write_text(json.dumps(payload), encoding="utf-8")
@@ -719,16 +773,213 @@ class Coach:
             )
         self.metrics.log_symmetry_diagnostic(generation, position_results)
 
-    def _ensure_eval_set(self, train_examples: list[ProcessedExample]) -> None:
-        """Build/load the frozen eval set once (see :func:`build_or_load_eval_set`)."""
-        if self._eval_set is not None:
+    def _ensure_eval_set(self, generation: int) -> None:
+        """Build/load the eval set and withhold its source games from training.
+
+        Three things this has to get right, each of which was previously wrong:
+
+        - **Held out.** The set's source games are excluded from
+          ``ReplayBuffer.flat_examples`` for as long as the set is in use.
+          Previously the eval positions were sampled from the training buffer and
+          then trained on — for ``replay_buffer_games / num_eps`` generations at
+          ``epochs`` passes each — so every "held-out" per-epoch diagnostic was
+          in-sample early in a run and then silently changed meaning as those
+          positions aged out. An eval set from disk with no recorded fingerprints
+          cannot be held out, so it is rebuilt rather than trusted.
+        - **Refreshed.** With ``eval_set_rebuild_every`` set, the set is resampled
+          every N generations instead of being frozen from generation 1's
+          weakest-ever data. Diagnostics carry the vintage
+          (``EvalSet.built_at_generation``) because different vintages measure
+          different positions and must not be read as one curve.
+        - **Clustered.** Every position records its source game so intervals can be
+          game-cluster bootstraps (:mod:`alphablokus.bootstrap`).
+        """
+        rebuild = should_rebuild(generation, self.config.eval_set_rebuild_every)
+        if self._eval_set is not None and not rebuild:
             return
-        self._eval_set = build_or_load_eval_set(
+        if rebuild:
+            logger.info(
+                "Rebuilding the eval set from generation #{}'s buffer (cadence every {} generations)",
+                generation,
+                self.config.eval_set_rebuild_every,
+            )
+        eval_set = build_or_load_eval_set(
             self.config,
             self.game,
             self._oracle,
-            train_examples,
+            self.replay_buffer.games,
             self._eval_set_size,
+            generation=generation,
+            force_rebuild=rebuild,
+        )
+
+        # A set loaded from disk without fingerprints predates the holdout fix: its
+        # source games cannot be identified, so it is *not* held out. Reporting its
+        # numbers as held-out is what made a degrading run look healthy, so rebuild
+        # instead of inheriting the defect.
+        if eval_set is not None and not eval_set.source_fingerprints and self.replay_buffer.games:
+            logger.warning(
+                "The eval set on disk records no source-game fingerprints, so its games cannot be "
+                "withheld from training and its diagnostics would be in-sample. Rebuilding it from "
+                "generation #{}'s buffer.",
+                generation,
+            )
+            eval_set = build_or_load_eval_set(
+                self.config,
+                self.game,
+                self._oracle,
+                self.replay_buffer.games,
+                self._eval_set_size,
+                generation=generation,
+                force_rebuild=True,
+            )
+
+        self._eval_set = eval_set
+        if eval_set is not None:
+            self.replay_buffer.exclude_games(set(eval_set.source_fingerprints))
+            logger.info(
+                "Eval set: {} positions from {} source games (vintage gen {}); {} of those games are "
+                "in the buffer and withheld from training.",
+                len(eval_set),
+                eval_set.n_source_games,
+                eval_set.built_at_generation,
+                self.replay_buffer.held_out_game_count(),
+            )
+
+    def _check_arena_for_crash(self, generation: int, nwins: int, pwins: int, draws: int) -> None:
+        """Use the arena as a crash detector rather than a promotion signal.
+
+        With ``gate_mode: "always"`` the arena score no longer decides anything —
+        which is correct, because it cannot resolve strength in this game (~96% of
+        decisive deterministic games go to White, and per-generation scores collapse
+        into 0.485–0.530 where independent play would give a spread four times
+        wider). But a score far *below* that floor is not "slightly worse": it means
+        something broke — a checkpoint that failed to load, a policy collapsed to
+        all-pass, a net serving garbage. That is worth a loud warning, and it never
+        rejects a candidate.
+        """
+        floor = self.config.arena_crash_floor
+        if floor <= 0:
+            return
+        total = nwins + pwins + draws
+        if total == 0:
+            return
+        score = acceptance_score(nwins, pwins, draws)
+        if score < floor:
+            logger.error(
+                "ARENA CRASH DETECTOR: generation {} scored {:.3f} over {} games, below the {:.2f} floor. "
+                "The arena cannot resolve small strength differences, so a score this low almost "
+                "certainly means something is broken (checkpoint load, degenerate policy) rather than "
+                "a slightly weaker candidate. Investigate before trusting this generation.",
+                generation,
+                score,
+                total,
+                floor,
+            )
+
+    def _check_ladder_and_drift(self, generation: int) -> bool:
+        """Consume ladder results: record keep-best, and arm the drift breaker.
+
+        The ladder itself runs out-of-process (``scripts/mini_ladder.py``) because it
+        needs the ``pentobi-gtp`` binary and its own CPU workers. This method is the
+        training loop's side of that contract: on the configured cadence it reads
+        whatever ladder results exist, records which checkpoint is currently best by
+        ladder, and evaluates the drift circuit-breaker.
+
+        Both mechanisms already existed and had never run in a real run
+        (``evaluation/ladder_selection.py``; ``docs/plans/archive/post-regression-recovery.md``
+        P3/P4/P7 — P7, the wiring, was the unticked row). This arms them without
+        reimplementing them.
+
+        Returns:
+            True when the drift breaker has tripped and the run should stop.
+        """
+        cadence = self.config.ladder_check_every
+        if cadence <= 0 or generation % cadence != 0:
+            return False
+
+        results = load_ladder_results(self.config.pentobi_ladder_directory)
+        points = [ladder_point_from_payload(r) for r in results if "weighted_score" in r.get("metrics", {})]
+        if not points:
+            logger.info(
+                "Ladder check at generation {}: no ladder results in {} yet. Run "
+                "scripts/mini_ladder.py against this run's checkpoints to populate it.",
+                generation,
+                self.config.pentobi_ladder_directory,
+            )
+            return False
+
+        best = select_best(points)
+        logger.info(
+            "Ladder check at generation {}: best by ladder is {} (weighted {:.3f}) over {} laddered checkpoint(s)",
+            generation,
+            best.label,
+            best.weighted_score,
+            len(points),
+        )
+        # Record the choice next to the checkpoints. The run's product is this
+        # file's answer, not ``best.pth.tar`` — with the gate off, ``best.pth.tar``
+        # is simply the latest candidate.
+        selection_path = self.config.net_directory / "best_by_ladder.json"
+        try:
+            selection_path.parent.mkdir(parents=True, exist_ok=True)
+            selection_path.write_text(
+                json.dumps(
+                    {
+                        "checked_at_generation": generation,
+                        "label": best.label,
+                        "generation": best.generation,
+                        "weighted_score": best.weighted_score,
+                        "pentobi_level": best.pentobi_level,
+                        "laddered_checkpoints": len(points),
+                    },
+                    indent=2,
+                ),
+                encoding="utf-8",
+            )
+        except OSError as err:
+            logger.warning("Could not record the keep-best selection to {} ({}).", selection_path, err)
+
+        alarm = detect_drift(
+            points,
+            drop=self.config.ladder_drift_drop,
+            consecutive=self.config.ladder_drift_consecutive,
+        )
+        if alarm is None:
+            return False
+        logger.error(
+            "DRIFT CIRCUIT-BREAKER: ladder fell to {:.3f} at {} after a best of {:.3f} at {} "
+            "({} consecutive drops of >= {:.2f}). Resume from {} rather than the latest checkpoint.",
+            alarm.tripped_at.weighted_score,
+            alarm.tripped_at.label,
+            alarm.best_before.weighted_score,
+            alarm.best_before.label,
+            alarm.consecutive_drops,
+            self.config.ladder_drift_drop,
+            alarm.best_before.label,
+        )
+        return True
+
+    def restore_cumulative_totals(self, marker: dict[str, Any]) -> None:
+        """Continue the run's game/position/optimiser-step counts across a resume.
+
+        Called on the ``--resume`` path with the progress marker. Absent keys mean
+        the marker predates these counters, in which case the totals stay at zero
+        and the run under-reports its lineage rather than inventing a number.
+        """
+        self._total_games = int(marker.get("total_games", 0) or 0)
+        self._total_positions = int(marker.get("total_positions", 0) or 0)
+        steps = int(marker.get("total_optimiser_steps", 0) or 0)
+        # ``optimiser_steps`` lives on ``BaseNNetWrapper``, not on the
+        # ``INeuralNetWrapper`` protocol, so probe for it rather than widening the
+        # protocol for a counter.
+        if hasattr(self.nnet, "optimiser_steps"):
+            self.nnet.optimiser_steps = steps
+        logger.info(
+            "Resumed cumulative budget: {} games, {} positions, {} optimiser steps",
+            self._total_games,
+            self._total_positions,
+            steps,
         )
 
     def _log_training_dynamics(self, generation: int, buffer_positions: int) -> None:
@@ -765,6 +1016,39 @@ class Coach:
             buffer_positions=buffer_positions,
             staleness_gens=staleness_gens,
             emergent_reuse=emergent_reuse,
+        )
+
+    def _log_run_progress(self, generation: int, buffer_positions: int) -> None:
+        """Persist the cross-run budget row: games, positions, optimiser steps.
+
+        Must be called **after** ``nnet.train()`` for this generation. Called
+        before it, ``optimiser_steps`` still holds the previous generation's
+        total — generation 1 would record zero steps and every later row would
+        lag by one, which makes the step count inconsistent with the games and
+        positions counted beside it (A9 budgets in exactly these units).
+        """
+        epochs = self.config.net_config.epochs
+        buffer_capacity_games = self.replay_buffer.capacity_games
+        fresh_games = max(self.config.num_eps, 1)
+        emergent_reuse = epochs * (buffer_capacity_games / fresh_games)
+        optimiser_steps = getattr(self.nnet, "optimiser_steps", 0)
+        self.metrics.log_run_progress(
+            generation=generation,
+            total_games=self._total_games,
+            total_positions=self._total_positions,
+            total_optimiser_steps=optimiser_steps,
+            buffer_games=len(self.replay_buffer),
+            buffer_positions=buffer_positions,
+            passes_per_position=emergent_reuse,
+            epochs=epochs,
+        )
+        logger.info(
+            "Gen {} budget so far: {} games, {} positions, {} optimiser steps, ~{:.1f} passes/position",
+            generation,
+            self._total_games,
+            self._total_positions,
+            optimiser_steps,
+            emergent_reuse,
         )
 
     def _record_rolling_elo(

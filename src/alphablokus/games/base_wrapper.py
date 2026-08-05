@@ -19,6 +19,7 @@ from torch.utils.data import DataLoader, Dataset
 from tqdm import tqdm
 
 from alphablokus.aux_heads import AUX_HEAD_NAMES, aux_key
+from alphablokus.evaluation.colour_value import compute_colour_value_diagnostic
 from alphablokus.interfaces import IBoard, IGame, INeuralNetWrapper, IPolicyValuePredictor
 from alphablokus.storage.sparse_policy import as_dense
 
@@ -38,7 +39,10 @@ if TYPE_CHECKING:
     from collections.abc import Callable, Mapping, Sequence
     from pathlib import Path
 
+    from numpy.typing import NDArray
+
     from alphablokus.config import RunConfig
+    from alphablokus.evaluation.colour_value import ColourValueDiagnostic
     from alphablokus.selfplay.episode import ProcessedExample
     from alphablokus.storage.metrics import EvalSet, MetricsCollector
 
@@ -369,6 +373,17 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             weight_decay=self.net_config.weight_decay,
         )
         self.scheduler: LRScheduler | None = self._create_scheduler()
+
+        # Fixed resampling seed for the colour-conditional value diagnostic, so a
+        # generation's reported intervals are reproducible and two runs at the same
+        # config draw the same resamples.
+        # ``or 0`` would make an explicit seed of 0 look unseeded — see A13.
+        self._colour_diagnostic_seed: int = 0 if config.seed is None else config.seed
+
+        # Cumulative optimiser steps this net has taken. Restored on resume by the
+        # Coach (see ``PROGRESS_MARKER_FILENAME``) so the count is a property of
+        # the training lineage, not of one process.
+        self.optimiser_steps: int = 0
 
     def _maybe_compile(self) -> nn.Module:
         """torch.compile the net when ``perf.compile`` is set, falling back to eager.
@@ -875,6 +890,10 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                 else:
                     total_loss.backward()
                     self.optimizer.step()
+                # Count every optimiser step taken by this net, ever. "Generation"
+                # bundles games, epochs and buffer staleness into one word, so no
+                # two runs' generations are comparable; optimiser steps are.
+                self.optimiser_steps += 1
 
             # Partial window at epoch end (only reachable when log_window > 1).
             self._flush_loss_window(window, pi_losses, v_losses, t, metrics, generation, epoch, len(loader) - 1)
@@ -903,12 +922,18 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             # Per-epoch held-out diagnostics on the frozen eval set.
             if eval_set is not None and len(eval_set) > 0 and metrics is not None:
                 diagnostics = self._compute_eval_set_diagnostics(eval_set)
+                # Every eval-set diagnostic carries the vintage of the set it was
+                # measured on. With eval_set_rebuild_every enabled the positions
+                # change mid-run, so a series spanning two vintages has a dataset
+                # boundary in it that is easy to misread as a change in the net.
+                vintage = eval_set.built_at_generation
                 metrics.log_training_entropy(
                     generation=generation,
                     epoch=epoch,
                     mean_entropy=diagnostics["entropy_mean"],
                     std_entropy=diagnostics["entropy_std"],
                     eval_set_size=len(eval_set),
+                    eval_set_generation=vintage,
                 )
                 mcts_agreement = self._compute_mcts_agreement(eval_set)
                 metrics.log_policy_accuracy(
@@ -919,6 +944,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                     eval_set_size=len(eval_set),
                     mcts_top1_accuracy=mcts_agreement[0] if mcts_agreement is not None else None,
                     mcts_top5_accuracy=mcts_agreement[1] if mcts_agreement is not None else None,
+                    eval_set_generation=vintage,
                 )
                 metrics.log_value_calibration(
                     generation=generation,
@@ -926,6 +952,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                     bucket_centers=diagnostics["calib_centers"],
                     bucket_means=diagnostics["calib_means"],
                     bucket_counts=diagnostics["calib_counts"],
+                    eval_set_generation=vintage,
                 )
                 pvc = self._compute_policy_value_consistency(eval_set)
                 if pvc is not None:
@@ -936,6 +963,26 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
                         pvc_spearman=pvc["pvc_spearman"],
                         eval_set_size=len(eval_set),
                         value_symmetry_mae=self._compute_value_symmetry_mae(eval_set),
+                        eval_set_generation=vintage,
+                    )
+                # Diagnostics are observers: a broken instrument must never take
+                # the training run down with it. The diagnostic already degrades
+                # to None on a degenerate eval set; this is the backstop for
+                # anything it cannot anticipate.
+                try:
+                    colour_value = self._compute_colour_value_diagnostic(
+                        eval_set,
+                        diagnostics["predicted_values"],
+                    )
+                except Exception:
+                    logger.exception("Colour-value diagnostic failed; continuing training without it.")
+                    colour_value = None
+                if colour_value is not None:
+                    metrics.log_colour_value_diagnostic(
+                        generation=generation,
+                        epoch=epoch,
+                        diagnostic=colour_value,
+                        eval_set_generation=vintage,
                     )
 
         # Reclaim the on-disk memmap scratch (a whole buffer's worth, ~GBs) so it
@@ -1032,7 +1079,43 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
             "calib_centers": bucket_centers,
             "calib_means": bucket_means,
             "calib_counts": bucket_counts,
+            # Returned so the colour-conditional diagnostic can reuse this
+            # forward pass instead of running the net over the eval set twice.
+            "predicted_values": pred_v,
         }
+
+    def _compute_colour_value_diagnostic(
+        self,
+        eval_set: EvalSet,
+        predicted_values: NDArray,
+    ) -> ColourValueDiagnostic | None:
+        """Colour-conditional value skill on the eval set, with game-cluster CIs.
+
+        Answers whether the value head reads positions or has only learnt the
+        first-mover prior — the mechanism that would corrupt Gumbel's
+        completed-Q training targets at every simulation count and net size.
+
+        Returns ``None`` (and logs why once) when the eval set cannot support the
+        measurement: no compact boards to infer the mover from, or no source game
+        ids, in which case an interval would have to treat correlated positions as
+        independent and would be confidently wrong.
+        """
+        if eval_set.compact_boards is None:
+            return None
+        if eval_set.source_game_ids is None:
+            logger.debug(
+                "Skipping the colour-conditional value diagnostic: this eval set has no "
+                "source game ids, so its intervals cannot be game-clustered. It will "
+                "appear once the eval set is rebuilt."
+            )
+            return None
+        return compute_colour_value_diagnostic(
+            predicted_values,
+            eval_set.target_values,
+            eval_set.compact_boards,
+            eval_set.source_game_ids,
+            seed=self._colour_diagnostic_seed,
+        )
 
     def _compute_mcts_agreement(self, eval_set: EvalSet) -> tuple[float, float] | None:
         """Agreement of the raw net policy with the net's *own* MCTS on the eval set.

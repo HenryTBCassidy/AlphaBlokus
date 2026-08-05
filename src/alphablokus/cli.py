@@ -4,11 +4,13 @@ import argparse
 import dataclasses
 import json
 import time
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from loguru import logger
 
 from alphablokus.config import load_args
+from alphablokus.provenance import check_config_is_committed, write_provenance
 from alphablokus.registry import instantiate_game_and_network
 from alphablokus.reporting import create_html_report
 from alphablokus.storage.object_store import create_object_store, sync_up_guarded
@@ -96,6 +98,13 @@ def main() -> None:
         help="Continue a crashed/stopped run from its last completed generation "
         "(reuses the frozen Elo baseline; continues generation numbering).",
     )
+    parser.add_argument(
+        "--allow-uncommitted-config",
+        action="store_true",
+        help="Start even though the config file differs from (or is untracked by) git. "
+        "Recorded in the run's provenance. Use while iterating on a config; do not use "
+        "for a run whose result you intend to quote.",
+    )
     cli_args = parser.parse_args()
     args = load_args(cli_args.config)
 
@@ -103,17 +112,43 @@ def main() -> None:
         create_html_report(args)
         return
 
+    # Refuse to start when the committed config does not describe this run (A5).
+    # Before anything is written, so a rejected launch leaves no trace.
+    config_path = Path(cli_args.config)
+    config_state = check_config_is_committed(
+        config_path,
+        allow_uncommitted=cli_args.allow_uncommitted_config,
+    )
+
     args.run_directory.mkdir(parents=True, exist_ok=True)
+
+    # Add rotating file sink alongside default stderr
+    log_dir = args.log_directory
+    log_dir.mkdir(parents=True, exist_ok=True)
+    logger.add(log_dir / "alpha.log", rotation="10 MB", retention=3)
+
+    if cli_args.resume:
+        # With an object store configured, an interrupted cloud run resumes on a
+        # fresh machine: pull the run directory down FIRST. The restore
+        # force-downloads the run directory, so anything stamped before it —
+        # config.resolved.json and run_provenance.json — would be overwritten by
+        # the previous launch's copy, and this launch's record silently lost.
+        # Stamping after the restore also means the input manifest hashes the
+        # eval set this launch will actually train against.
+        restore_run_from_object_store(args)
 
     # Persist the fully-resolved config at launch so what actually ran is never
     # ambiguous again (S4b). Written every launch (fresh + resume) so a resumed
     # run records the config it resumed under too.
     persist_resolved_config(args)
 
-    # Add rotating file sink alongside default stderr
-    log_dir = args.log_directory
-    log_dir.mkdir(parents=True, exist_ok=True)
-    logger.add(log_dir / "alpha.log", rotation="10 MB", retention=3)
+    # Stamp code version + config-commit state + input-data manifest alongside it.
+    write_provenance(
+        args,
+        config_path=config_path,
+        config_state=config_state,
+        override_used=cli_args.allow_uncommitted_config,
+    )
 
     start = time.perf_counter()
 
@@ -121,9 +156,8 @@ def main() -> None:
     game, nnet = instantiate_game_and_network(args)
 
     if cli_args.resume:
-        # With an object store configured, an interrupted cloud run resumes on
-        # a fresh machine: pull the run directory down before reading markers.
-        restore_run_from_object_store(args)
+        # The object-store restore already ran above, before provenance was
+        # stamped — the run directory on disk is current here.
         marker = read_progress_marker(args)
         if marker is None:
             raise SystemExit(
@@ -133,6 +167,7 @@ def main() -> None:
         logger.info("Resuming run after generation {} (loading latest.pth.tar)", last_gen)
         nnet.load_checkpoint("latest.pth.tar")
         c = Coach(game, nnet, args, resume=True, resume_wandb_run_id=marker.get("wandb_run_id"))
+        c.restore_cumulative_totals(marker)
         c.load_self_play_history_for_resume(last_gen)
         start_generation = last_gen + 1
     else:
@@ -160,13 +195,24 @@ def main() -> None:
     # so a finally-render recovers a report from whatever generations completed
     # (the same data --report-only reads). See docs/plans/archive/harden-long-runs.md H2.
     try:
-        c.learn(start_generation=start_generation)
+        completed_normally = c.learn(start_generation=start_generation)
         # Normal completion only (a crash skips this): optionally play the
         # post-hoc pool BayesElo tournament so the report includes the rigorous,
         # non-saturating strength curve without a manual step. Crash-safe — a
         # tournament failure must never lose the run's training artifacts (all
         # already on disk), so log and fall through to the report render.
-        if args.tournament.run_at_end:
+        #
+        # A drift stop is NOT normal completion: the breaker fired precisely to
+        # stop spending compute, so launching a pooled tournament straight after
+        # would defeat it. The report still renders and artifacts still sync,
+        # below, so nothing measured is lost.
+        if not completed_normally:
+            logger.warning(
+                "Run stopped early by the drift circuit-breaker — skipping the end-of-run "
+                "tournament. Run it manually if you want it: python -m scripts.tournament_elo "
+                "--config <cfg>.",
+            )
+        if args.tournament.run_at_end and completed_normally:
             try:
                 from alphablokus.evaluation.tournament_run import run_tournament
 

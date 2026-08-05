@@ -768,6 +768,9 @@ def ladder_payload(config: RunConfig) -> dict[str, Any] | None:
                 "weighted_score": round(float(result["metrics"]["weighted_score"]), 4)
                 if "weighted_score" in result["metrics"]
                 else None,
+                # Wall-clock cost of this ladder. Absent for ladders run before it
+                # was recorded, so the report treats it as optional.
+                "duration_s": round(float(result["duration_s"]), 1) if "duration_s" in result else None,
             }
         )
 

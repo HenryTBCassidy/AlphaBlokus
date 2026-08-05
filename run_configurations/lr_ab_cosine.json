@@ -5,7 +5,6 @@
   "num_generations": 30,
   "num_eps": 10000,
   "replay_buffer_games": 40000,
-  "temp_threshold": 12,
   "update_threshold": 0.55,
   "root_directory": "./temp/",
   "load_model": true,
@@ -19,8 +18,6 @@
     "num_mcts_sims": 64,
     "cpuct": 2.5,
     "mcts_batch_size": 16,
-    "dirichlet_epsilon": 0.25,
-    "dirichlet_alpha": 0.03,
     "search_policy": "gumbel",
     "gumbel_max_considered": 16
   },
@@ -47,12 +44,19 @@
       "persistent_workers": true,
       "prefetch_factor": 4,
       "log_every_batches": 25
-    }
+    },
+    "allow_high_warm_start_lr": true
   },
   "wandb": {
     "project": "alphablokus-poc",
     "entity": null,
-    "tags": ["lr-ab", "cosine", "gumbel", "large", "30gen"],
+    "tags": [
+      "lr-ab",
+      "cosine",
+      "gumbel",
+      "large",
+      "30gen"
+    ],
     "mode": "online"
   },
   "selfplay_backend": "jax",

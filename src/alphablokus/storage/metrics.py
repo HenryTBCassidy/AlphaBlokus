@@ -26,6 +26,7 @@ if TYPE_CHECKING:
 
     from alphablokus.config import RunConfig
     from alphablokus.evaluation.arena import GameRecord
+    from alphablokus.evaluation.colour_value import ColourValueDiagnostic
 
 
 # Training-loss columns written only by runs with that auxiliary head on
@@ -51,10 +52,11 @@ class CycleStage(StrEnum):
 
 @dataclass(frozen=True)
 class EvalSet:
-    """Frozen held-out positions used for per-epoch network diagnostics.
+    """Held-out positions used for per-epoch network diagnostics.
 
-    Sampled once from the first generation's self-play and reused unchanged for
-    every subsequent epoch. The three fields are aligned by index:
+    Sampled from the replay buffer and rebuilt every
+    ``RunConfig.eval_set_rebuild_every`` generations (0 = build once and freeze,
+    the historical behaviour). The fields are aligned by index:
 
     - ``boards[i]``: model-channel encoded board at position i
     - ``target_policies[i]``: MCTS-improved policy that was actually used to
@@ -68,15 +70,50 @@ class EvalSet:
       board (``IGame.board_from_compact``) and search it with the current net's
       MCTS. ``None`` for older eval sets, in which case the MCTS-agreement
       diagnostic is skipped.
+    - ``source_game_ids[i]`` (optional): which self-play game position i came
+      from. Positions from one game share an outcome label, so **every
+      confidence interval over this set must be a game-cluster bootstrap over
+      these ids** (:mod:`alphablokus.bootstrap`), never a
+      position-level resample. ``None`` for eval sets built before provenance
+      was recorded, in which case interval-bearing diagnostics are skipped
+      rather than computed wrongly.
+
+    Attributes:
+        source_fingerprints: Content hashes of the source games, which the replay
+            buffer withholds from training (``ReplayBuffer.exclude_games``). This
+            is what makes the set genuinely held out: dropping only the sampled
+            positions would leave their symmetry twins and same-game siblings —
+            carrying the same outcome label — in training. Empty for eval sets
+            built before this existed, which are therefore **not** held out.
+        built_at_generation: Generation whose buffer the set was sampled from.
+            ``None`` for eval sets predating this field. Diagnostics from
+            different vintages are **not** comparable — the positions differ —
+            so this is logged alongside every metric computed from the set.
     """
 
     boards: NDArray
     target_policies: NDArray
     target_values: NDArray
     compact_boards: NDArray | None = None
+    source_game_ids: NDArray | None = None
+    source_fingerprints: tuple[str, ...] = ()
+    built_at_generation: int | None = None
 
     def __len__(self) -> int:
         return len(self.boards)
+
+    @property
+    def n_source_games(self) -> int | None:
+        """Distinct source games — the effective sample size for diagnostics.
+
+        ``None`` when provenance was not recorded. This is usually far smaller
+        than ``len(self)``: symmetry augmentation stores each position twice and
+        a game contributes many positions, so a 200-position set can carry a
+        small fraction of that many independent observations.
+        """
+        if self.source_game_ids is None:
+            return None
+        return int(np.unique(self.source_game_ids).size)
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +185,8 @@ class MetricsCollector:
     _policy_accuracy_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _value_calibration_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _policy_value_consistency_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _colour_value_records: list[dict] = field(default_factory=list, init=False, repr=False)
+    _run_progress_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _rolling_elo_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _minimax_records: list[dict] = field(default_factory=list, init=False, repr=False)
     _arena_replay_records: list[dict] = field(default_factory=list, init=False, repr=False)
@@ -612,6 +651,7 @@ class MetricsCollector:
         mean_entropy: float,
         std_entropy: float,
         eval_set_size: int,
+        eval_set_generation: int | None = None,
     ) -> None:
         """Record the network's mean policy entropy on the held-out eval set.
 
@@ -627,6 +667,7 @@ class MetricsCollector:
                 "mean_entropy": mean_entropy,
                 "std_entropy": std_entropy,
                 "eval_set_size": eval_set_size,
+                "eval_set_generation": eval_set_generation,
             }
         )
         self._publish(
@@ -647,6 +688,7 @@ class MetricsCollector:
         eval_set_size: int,
         mcts_top1_accuracy: float | None = None,
         mcts_top5_accuracy: float | None = None,
+        eval_set_generation: int | None = None,
     ) -> None:
         """Record network policy agreement on the frozen eval set.
 
@@ -663,7 +705,7 @@ class MetricsCollector:
           training works. ``None`` when the eval set can't be re-searched
           (older eval sets without persisted compact boards).
         """
-        record = {
+        record: dict[str, Any] = {
             "generation": generation,
             "epoch": epoch,
             "top1_accuracy": top1_accuracy,
@@ -674,6 +716,7 @@ class MetricsCollector:
             record["mcts_top1_accuracy"] = mcts_top1_accuracy
         if mcts_top5_accuracy is not None:
             record["mcts_top5_accuracy"] = mcts_top5_accuracy
+        record["eval_set_generation"] = eval_set_generation
         self._policy_accuracy_records.append(record)
         payload: dict[str, Any] = {
             "training/network_top1_accuracy": top1_accuracy,
@@ -694,6 +737,7 @@ class MetricsCollector:
         bucket_centers: NDArray,
         bucket_means: NDArray,
         bucket_counts: NDArray,
+        eval_set_generation: int | None = None,
     ) -> None:
         """Record a reliability diagram for the value head.
 
@@ -714,6 +758,7 @@ class MetricsCollector:
                     "bucket_center": float(centre),
                     "bucket_mean_actual": float(mean_v) if not np.isnan(mean_v) else None,
                     "bucket_count": int(count),
+                    "eval_set_generation": eval_set_generation,
                 }
             )
 
@@ -738,6 +783,7 @@ class MetricsCollector:
         pvc_spearman: float,
         eval_set_size: int,
         value_symmetry_mae: float | None = None,
+        eval_set_generation: int | None = None,
     ) -> None:
         """Record policy–value consistency on the frozen eval set.
 
@@ -760,7 +806,7 @@ class MetricsCollector:
         symmetry group, so this sits near 0; a rising value means the value head
         isn't respecting the symmetry.
         """
-        record = {
+        record: dict[str, Any] = {
             "generation": generation,
             "epoch": epoch,
             "pvc_argmax_match": pvc_argmax_match,
@@ -769,6 +815,7 @@ class MetricsCollector:
         }
         if value_symmetry_mae is not None:
             record["value_symmetry_mae"] = value_symmetry_mae
+        record["eval_set_generation"] = eval_set_generation
         self._policy_value_consistency_records.append(record)
         payload: dict[str, Any] = {
             "pvc/argmax_match": pvc_argmax_match,
@@ -778,6 +825,131 @@ class MetricsCollector:
         if value_symmetry_mae is not None:
             payload["pvc/value_symmetry_mae"] = value_symmetry_mae
         self._publish(payload)
+
+    def log_run_progress(
+        self,
+        generation: int,
+        total_games: int,
+        total_positions: int,
+        total_optimiser_steps: int,
+        buffer_games: int,
+        buffer_positions: int,
+        passes_per_position: float,
+        epochs: int,
+    ) -> None:
+        """Record the run's cumulative budget in comparable units.
+
+        "Generation" bundles games per generation, epochs and buffer staleness into
+        one word, so no two runs' generations mean the same thing — which is a large
+        part of why the run ledger is hard to reason about. These are the units that
+        do compare across runs:
+
+        - ``total_games``: self-play games generated so far.
+        - ``total_optimiser_steps``: gradient steps taken so far — the actual amount
+          of training, independent of how it was chunked.
+        - ``passes_per_position``: how many times a position is trained on over its
+          lifetime in the buffer, ``epochs × (buffer_games / games_per_generation)``.
+          This is the data-reuse regime, and it is emergent rather than a knob: the
+          run that degraded was doing ~12 passes per position.
+
+        Unlike the older W&B-only ``log_training_dynamics``, this is persisted to
+        parquet, and the totals survive a resume (the Coach restores them from the
+        progress marker) — so a resumed run reports its lineage's budget rather
+        than restarting from zero.
+        """
+        self._run_progress_records.append(
+            {
+                "generation": generation,
+                "total_games": total_games,
+                "total_positions": total_positions,
+                "total_optimiser_steps": total_optimiser_steps,
+                "buffer_games": buffer_games,
+                "buffer_positions": buffer_positions,
+                "passes_per_position": passes_per_position,
+                "epochs": epochs,
+            }
+        )
+        self._publish(
+            {
+                "progress/total_games": total_games,
+                "progress/total_positions": total_positions,
+                "progress/total_optimiser_steps": total_optimiser_steps,
+                "progress/passes_per_position": passes_per_position,
+                "generation": generation,
+            }
+        )
+
+    def log_colour_value_diagnostic(
+        self,
+        generation: int,
+        epoch: int,
+        diagnostic: ColourValueDiagnostic,
+        eval_set_generation: int | None = None,
+    ) -> None:
+        """Record the colour-conditional value diagnostic (one row per colour).
+
+        The question: does the value head read the position, or has it only learnt
+        that the first mover usually wins? ``skill_vs_colour`` is
+        ``1 - mse/colour_only_mse``; ``skill_vs_colour_phase`` also removes game
+        phase, and is the honest number. Zero means the head has learnt the colour
+        prior and nothing else.
+
+        Both come with a **game-cluster** confidence interval — positions within a
+        game share an outcome label, so a position-level interval is roughly
+        ``sqrt(positions per game)`` too narrow, and the kill criteria in the plan
+        are read through these numbers.
+
+        One row per side-to-move (plus the pooled statistics repeated on each, so a
+        single row is self-contained), following the row-per-sub-entity shape of
+        ``log_value_calibration``. ``eval_set_generation`` records which vintage of
+        the eval set the numbers were measured against — rebuilt sets are different
+        positions, so rows with different vintages must not be read as one curve.
+        """
+        skill = diagnostic.skill_vs_colour
+        skill_phase = diagnostic.skill_vs_colour_phase
+        for slice_ in diagnostic.slices:
+            record: dict[str, Any] = {
+                "generation": generation,
+                "epoch": epoch,
+                "colour": slice_.colour,
+                "n_positions": slice_.n_positions,
+                "n_games": slice_.n_games,
+                "mean_prediction": slice_.mean_prediction,
+                "mean_target": slice_.mean_target,
+                "bias": slice_.bias,
+                "colour_value_mse": slice_.value_mse,
+                # Pooled statistics, repeated per row so a row stands alone.
+                "value_mse": diagnostic.value_mse,
+                "colour_only_mse": diagnostic.colour_only_mse,
+                "colour_phase_mse": diagnostic.colour_phase_mse,
+                "skill_vs_colour": skill.point,
+                "skill_vs_colour_lo": skill.lo,
+                "skill_vs_colour_hi": skill.hi,
+                "skill_vs_colour_phase": skill_phase.point,
+                "skill_vs_colour_phase_lo": skill_phase.lo,
+                "skill_vs_colour_phase_hi": skill_phase.hi,
+                "colour_target_correlation": diagnostic.colour_target_correlation,
+                "colour_prediction_correlation": diagnostic.colour_prediction_correlation,
+                "total_positions": diagnostic.n_positions,
+                "total_games": diagnostic.n_games,
+                "n_excluded": diagnostic.n_excluded,
+            }
+            if eval_set_generation is not None:
+                record["eval_set_generation"] = eval_set_generation
+            self._colour_value_records.append(record)
+
+        self._publish(
+            {
+                "colour_value/skill_vs_colour": skill.point,
+                "colour_value/skill_vs_colour_lo": skill.lo,
+                "colour_value/skill_vs_colour_hi": skill.hi,
+                "colour_value/skill_vs_colour_phase": skill_phase.point,
+                "colour_value/colour_prediction_correlation": diagnostic.colour_prediction_correlation,
+                "colour_value/colour_target_correlation": diagnostic.colour_target_correlation,
+                "colour_value/n_games": diagnostic.n_games,
+                "generation": generation,
+            }
+        )
 
     def log_rolling_elo(
         self,
@@ -1171,6 +1343,26 @@ class MetricsCollector:
             )
             count += len(self._policy_value_consistency_records)
             self._policy_value_consistency_records.clear()
+
+        if self._colour_value_records:
+            self._write_partition(
+                pd.DataFrame(self._colour_value_records),
+                config.colour_value_directory,
+                generation,
+                "colour_value.parquet",
+            )
+            count += len(self._colour_value_records)
+            self._colour_value_records.clear()
+
+        if self._run_progress_records:
+            self._write_partition(
+                pd.DataFrame(self._run_progress_records),
+                config.run_progress_directory,
+                generation,
+                "progress.parquet",
+            )
+            count += len(self._run_progress_records)
+            self._run_progress_records.clear()
 
         if self._rolling_elo_records:
             self._write_partition(

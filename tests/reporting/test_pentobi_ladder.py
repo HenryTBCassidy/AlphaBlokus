@@ -69,3 +69,42 @@ def test_write_then_load_roundtrip_drops_records(tmp_path: Path) -> None:
 def test_load_from_missing_or_empty_directory(tmp_path: Path) -> None:
     assert load_ladder_results(tmp_path / "nowhere") == []
     assert load_ladder_results(tmp_path) == []  # exists but empty
+
+
+def test_unreadable_ladder_payload_is_skipped_not_raised(tmp_path: Path) -> None:
+    """A malformed ladder file must not crash the training run that reads it.
+
+    Ladder results are produced out of process by ``scripts/mini_ladder.py`` and
+    consumed by ``Coach``'s cadence check mid-run. Before this was handled, a
+    half-written or truncated payload raised ``JSONDecodeError`` straight through
+    the cadence check and killed training — when the correct behaviour is simply
+    to postpone the check to the next generation.
+    """
+    good = write_ladder_result(
+        tmp_path,
+        net="accepted_1.pth.tar",
+        sims=400,
+        games_per_level=10,
+        per_level=[{"level": 1, "games": 10, "net_wins": 6, "pentobi_wins": 4, "draws": 0, "win_rate": 0.6}],
+        metrics={"weighted_score": 0.6},
+    )
+    assert good.exists()
+    (tmp_path / "ladder_truncated_20260101T000000Z.json").write_text('{"net": "x", "metr', encoding="utf-8")
+
+    results = load_ladder_results(tmp_path)
+    assert len(results) == 1
+    assert results[0]["net"] == "accepted_1.pth.tar"
+
+
+def test_ladder_result_is_renamed_into_place(tmp_path: Path) -> None:
+    """The write leaves no ``.partial`` file behind, so readers never glob one."""
+    write_ladder_result(
+        tmp_path,
+        net="accepted_2.pth.tar",
+        sims=400,
+        games_per_level=10,
+        per_level=[{"level": 1, "games": 10, "net_wins": 5, "pentobi_wins": 5, "draws": 0, "win_rate": 0.5}],
+        metrics={"weighted_score": 0.5},
+    )
+    assert not list(tmp_path.glob("*.partial"))
+    assert len(list(tmp_path.glob("ladder_*.json"))) == 1

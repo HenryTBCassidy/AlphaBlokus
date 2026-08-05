@@ -33,6 +33,7 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+import time
 from dataclasses import asdict
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -96,6 +97,9 @@ def _run_one_net(config_path: str, config: RunConfig, net: str, args: argparse.N
     """Ladder one checkpoint via pentobi_benchmark's parallel sweep."""
     levels = parse_levels(args.levels)
     workers = args.workers if args.workers is not None else max(config.num_parallel_workers, 1)
+    # Time the ladder: it is the plan's backbone measurement and its cost was
+    # previously recorded nowhere, making everything downstream unschedulable.
+    ladder_start = time.perf_counter()
     per_level = pentobi_benchmark.benchmark_levels_parallel(
         config_path=config_path,
         net_ckpt=net,
@@ -110,7 +114,13 @@ def _run_one_net(config_path: str, config: RunConfig, net: str, args: argparse.N
         cpu_net=args.cpu_net,
         mps=args.mps,
     )
+    duration_s = time.perf_counter() - ladder_start
     metrics = pentobi_benchmark.compute_headline_metrics(per_level)
+    print(
+        f"[mini-ladder] {net}: ladder took {duration_s:.1f}s "
+        f"({len(levels)} levels x {args.games} games at {args.sims} sims, {max(workers, 1)} workers)",
+        flush=True,
+    )
     # Same JSON the full benchmark writes, so the training report's Pentobi
     # Ladder section picks mini-ladder results up too.
     write_ladder_result(
@@ -120,14 +130,16 @@ def _run_one_net(config_path: str, config: RunConfig, net: str, args: argparse.N
         games_per_level=args.games,
         per_level=per_level,
         metrics=metrics,
+        duration_s=duration_s,
     )
-    return LadderPoint(
+    point = LadderPoint(
         label=net,
         weighted_score=float(metrics["weighted_score"]),
         generation=checkpoint_generation(net),
         pentobi_level=int(metrics["pentobi_level"]),
         score=float(metrics["score"]),
     )
+    return point, duration_s
 
 
 def main() -> None:
@@ -172,7 +184,7 @@ def main() -> None:
     nets = sorted(args.nets, key=lambda n: (checkpoint_generation(n) is None, checkpoint_generation(n) or 0))
     for net in nets:
         print(f"[mini-ladder] {net}: levels {args.levels}, {args.games} games/level, {args.sims} sims", flush=True)
-        point = _run_one_net(args.config, config, net, args)
+        point, duration_s = _run_one_net(args.config, config, net, args)
         print(
             f"[mini-ladder] {net}: weighted {point.weighted_score:.3f} "
             f"(level {point.pentobi_level}, score {point.score:.3f})",
@@ -183,6 +195,7 @@ def main() -> None:
         row["games_per_level"] = args.games
         row["levels"] = args.levels
         row["timestamp"] = datetime.now(UTC).isoformat()
+        row["duration_s"] = round(duration_s, 2)
         history.append(row)
         _save_history(history_path, history)
 
