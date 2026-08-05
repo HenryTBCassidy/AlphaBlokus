@@ -48,6 +48,7 @@ from __future__ import annotations
 import argparse
 import math
 import multiprocessing as mp
+import statistics
 import time
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, replace
@@ -70,6 +71,19 @@ EVAL_SIMS_DEFAULT = 400
 REPLAYS_PER_LEVEL = 4  # games embedded per level in the report (keeps it readable)
 DEFAULT_WORKERS_WHEN_PARALLEL = 4  # VRAM-safe default on the 8 GB 3060 Ti; lower on CUDA OOM
 
+# Scoring convention recorded in every payload. Results written before 2026-08-05
+# carry no "scoring" key and counted draws as losses.
+SCORING_WIN_DRAW_HALF = "win_draw_half"
+
+# Where each condition's results live. They MUST stay in separate directories:
+# Coach's cadence check (keep-best-by-ladder + the drift circuit-breaker) reads
+# every ladder_*.json in one directory as a single series, and comparing a
+# book-on 300-game L9-only score against a book-free 100-game L1-9 weighted score
+# would corrupt promotion decisions and could trip the catastrophe stop on nothing.
+CONDITION_LADDER = "ladder"  # longitudinal instrument: 400 sims, book off, L1-9
+CONDITION_FAIR_FIGHT = "fair-fight"  # equal-time, book on, top levels only
+CONDITION_DIRNAMES = {CONDITION_LADDER: "PentobiLadder", CONDITION_FAIR_FIGHT: "PentobiFairFight"}
+
 # Type alias for a single worker's return: (net_wins, pentobi_wins, draws, records).
 ChunkResult = tuple[int, int, int, "list[GameRecord]"]
 
@@ -91,8 +105,15 @@ def _eval_mcts_config(base, sims: int, batch: int = 1):
     )
 
 
-def _wilson_ci(wins: int, n: int, z: float = 1.96) -> tuple[float, float]:
-    """95% Wilson score interval for a win rate (better than normal approx at the tails)."""
+def _wilson_ci(wins: float, n: int, z: float = 1.96) -> tuple[float, float]:
+    """95% Wilson score interval for a score (better than normal approx at the tails).
+
+    ``wins`` may be fractional: a drawn game counts half, so the score this
+    interval brackets is ``(wins + 0.5 * draws) / games``. The Wilson formula is
+    defined for any proportion in [0, 1], so half-counts are fine; the interval is
+    marginally optimistic because a draw carries less variance than a coin-flip
+    win, which is the conservative direction to be wrong in.
+    """
     if n == 0:
         return (0.0, 0.0)
     p = wins / n
@@ -100,6 +121,62 @@ def _wilson_ci(wins: int, n: int, z: float = 1.96) -> tuple[float, float]:
     centre = (p + z * z / (2 * n)) / denom
     half = z * math.sqrt(p * (1 - p) / n + z * z / (4 * n * n)) / denom
     return (max(0.0, centre - half), min(1.0, centre + half))
+
+
+def level_result(
+    level: int,
+    net_wins: int,
+    pentobi_wins: int,
+    draws: int,
+    records: list,
+    *,
+    white_games: int = 0,
+    white_wins: int = 0,
+    net_seconds: list[float] | None = None,
+    pentobi_seconds: list[float] | None = None,
+) -> dict:
+    """Assemble one level's result dict, scoring draws as half a win.
+
+    Draws used to be counted as losses by ``win_rate``, the Wilson interval and the
+    headline metrics, while every Elo analysis scored them as half — so two numbers
+    in the same report were computed on different definitions (~20 Elo at the
+    tails). ``score`` is now the single definition everywhere:
+    ``(wins + 0.5 * draws) / games``. ``win_rate`` is retained as the raw
+    wins-only fraction, for continuity with published figures, but nothing derives
+    from it.
+
+    ``white_games`` / ``white_wins`` record the colour split. Blokus Duo's first
+    mover takes ~75% of decisive games, and a pooled half-and-half score is
+    therefore *flatter* than a logistic in the true strength gap — so recovering an
+    unbiased Elo needs the split, which aggregation used to discard.
+    """
+    played = net_wins + pentobi_wins + draws
+    effective = net_wins + 0.5 * draws
+    result = {
+        "level": level,
+        "games": played,
+        "net_wins": net_wins,
+        "pentobi_wins": pentobi_wins,
+        "draws": draws,
+        "score": effective / played if played else 0.0,
+        "win_rate": net_wins / played if played else 0.0,
+        "ci": _wilson_ci(effective, played),
+        "white_games": white_games,
+        "white_wins": white_wins,
+        "records": records,
+    }
+    for key, seconds in (("net_seconds_per_move", net_seconds), ("pentobi_seconds_per_move", pentobi_seconds)):
+        if seconds:
+            result[key] = {
+                "mean": statistics.mean(seconds),
+                # The median matters as much as the mean here: Pentobi weights its
+                # per-move budget by 0.7*exp(0.1*ply), and a book hit returns in
+                # ~0.5s against ~26s for a searched move, so the mean alone is a
+                # poor summary of how long it actually thinks.
+                "median": statistics.median(seconds),
+                "moves": len(seconds),
+            }
+    return result
 
 
 def _record_to_actions(game, record) -> list[dict]:
@@ -125,9 +202,9 @@ def _record_to_actions(game, record) -> list[dict]:
     return actions
 
 
-def benchmark_level(game, net_player, level: int, games: int, seed: int | None) -> dict:
+def benchmark_level(game, net_player, level: int, games: int, seed: int | None, *, nobook: bool) -> dict:
     """Play ``games`` net-vs-Pentobi games at one level (half each colour) via the Arena."""
-    pentobi = PentobiPlayer(game, level, seed=seed)
+    pentobi = PentobiPlayer(game, level, seed=seed, nobook=nobook)
     try:
         # net is player1; play_games splits half/half by colour and swaps internally.
         net_wins, pentobi_wins, draws, records = Arena(
@@ -137,18 +214,7 @@ def benchmark_level(game, net_player, level: int, games: int, seed: int | None) 
         ).play_games(games, record=True)
     finally:
         pentobi.close()
-    played = net_wins + pentobi_wins + draws
-    win_rate = net_wins / played if played else 0.0
-    return {
-        "level": level,
-        "games": played,
-        "net_wins": net_wins,
-        "pentobi_wins": pentobi_wins,
-        "draws": draws,
-        "win_rate": win_rate,
-        "ci": _wilson_ci(net_wins, played),
-        "records": records,
-    }
+    return level_result(level, net_wins, pentobi_wins, draws, records)
 
 
 # --------------------------------------------------------------------------- #
@@ -232,18 +298,7 @@ def _aggregate_level(level: int, chunk_results: list[ChunkResult]) -> dict:
     pentobi_wins = sum(r[1] for r in chunk_results)
     draws = sum(r[2] for r in chunk_results)
     records = [rec for r in chunk_results for rec in r[3]]
-    played = net_wins + pentobi_wins + draws
-    win_rate = net_wins / played if played else 0.0
-    return {
-        "level": level,
-        "games": played,
-        "net_wins": net_wins,
-        "pentobi_wins": pentobi_wins,
-        "draws": draws,
-        "win_rate": win_rate,
-        "ci": _wilson_ci(net_wins, played),
-        "records": records,
-    }
+    return level_result(level, net_wins, pentobi_wins, draws, records)
 
 
 def _play_chunk(
@@ -259,6 +314,7 @@ def _play_chunk(
     cpu_net: bool,
     mps: bool,
     collect_records: bool,
+    nobook: bool,
 ) -> ChunkResult:
     """Worker entry point: play ``n_games`` net-vs-Pentobi at one level, in its own process.
 
@@ -296,7 +352,7 @@ def _play_chunk(
         opening_temp=opening_temp,
         opening_moves=opening_moves,
     )
-    pentobi = PentobiPlayer(game, level, seed=seed_base)
+    pentobi = PentobiPlayer(game, level, seed=seed_base, nobook=nobook)
     try:
         net_wins, pentobi_wins, draws, records = Arena(net_player, pentobi, game).play_games(
             n_games,
@@ -320,6 +376,7 @@ def benchmark_levels_parallel(
     seed: int,
     cpu_net: bool,
     mps: bool,
+    nobook: bool,
 ) -> list[dict]:
     """Run the whole level sweep across a ``spawn`` pool and aggregate per level.
 
@@ -348,6 +405,7 @@ def benchmark_levels_parallel(
                 cpu_net,
                 mps,
                 task.collect_records,
+                nobook,
             ): task
             for task in tasks
         }
@@ -363,17 +421,73 @@ def benchmark_levels_parallel(
     return [_aggregate_level(level, results_by_level[level]) for level in levels]
 
 
+# Pentobi's per-level simulation budget, from `counts_duo` in
+# libpentobi_mcts/Player.cpp (Pentobi 31.0-dev). Recorded so a result states what
+# it was up against instead of leaving the reader to guess that "level 9" means
+# 5.5 million simulations against our 400. NOTE: this is the engine's *target*;
+# realised effort is lower and per-move budgets are weighted 0.7*exp(0.1*ply)
+# (x0.6 for duo), so treat these as the nominal scale, not a measurement.
+PENTOBI_DUO_SIMS_BY_LEVEL = {1: 3, 2: 21, 3: 77, 4: 213, 5: 861, 6: 7280, 7: 221867, 8: 1109339, 9: 5546695}
+
+
+def build_context(args, config: RunConfig, *, workers: int) -> dict:
+    """Everything needed to reproduce or trust this run, recorded beside the result.
+
+    The ladder used to store the net name, sims and games/level, and nothing else —
+    so a payload could not tell you whether Pentobi had its book, how many threads
+    it used, what search settings our side ran, or which seed produced the games.
+    Two results that differed in all of those looked identical on disk.
+    """
+    import platform
+
+    import torch
+
+    return {
+        "net": {
+            "sims": args.sims,
+            "mcts_batch_size": args.batch,
+            "sim_schedule": "flat",  # pinned by _eval_mcts_config
+            "dirichlet_epsilon": 0.0,  # pinned by _eval_mcts_config
+            "opening_temp": args.opening_temp,
+            "opening_moves": args.opening_moves,
+            "temp": 0.0,
+            "seed": args.seed,
+            "num_filters": config.net_config.num_filters,
+            "num_residual_blocks": config.net_config.num_residual_blocks,
+            "cuda": config.net_config.cuda and not args.cpu_net,
+        },
+        "pentobi": {
+            "threads": 1,  # PentobiPlayer's default; recorded because it sets wall-clock, not strength
+            "book": not args.nobook,
+            "nominal_sims_by_level": {str(k): PENTOBI_DUO_SIMS_BY_LEVEL[k] for k in sorted(PENTOBI_DUO_SIMS_BY_LEVEL)},
+        },
+        "harness": {
+            "workers": workers,
+            "games_per_level": args.games,
+            "platform": platform.platform(),
+            "torch": torch.__version__,
+        },
+    }
+
+
 def compute_headline_metrics(per_level: list[dict]) -> dict:
     """Pentobi Level / Score / Weighted Score per docs/05-EVALUATION.md §2."""
-    beaten = [r["level"] for r in per_level if r["win_rate"] > 0.5]
+
+    def effective(row: dict) -> float:
+        return row["net_wins"] + 0.5 * row["draws"]
+
+    beaten = [r["level"] for r in per_level if r["score"] > 0.5]
     total_games = sum(r["games"] for r in per_level)
-    total_wins = sum(r["net_wins"] for r in per_level)
-    weighted_num = sum(r["level"] * r["net_wins"] for r in per_level)
+    weighted_num = sum(r["level"] * effective(r) for r in per_level)
     weighted_den = sum(r["level"] * r["games"] for r in per_level)
     return {
         "pentobi_level": max(beaten) if beaten else 0,
-        "score": total_wins / total_games if total_games else 0.0,
+        "score": sum(effective(r) for r in per_level) / total_games if total_games else 0.0,
         "weighted_score": weighted_num / weighted_den if weighted_den else 0.0,
+        # Self-describing, so a reader never has to guess which definition produced
+        # a number. Payloads without this key predate 2026-08-05 and scored draws
+        # as losses; their weighted_score runs ~1-2pp lower than this one.
+        "scoring": SCORING_WIN_DRAW_HALF,
     }
 
 
@@ -475,6 +589,28 @@ def main() -> None:
         help="Use Apple MPS (Metal) for inference when available (default on)",
     )
     ap.add_argument("--no-mps", dest="mps", action="store_false", help="Force CPU instead of MPS")
+    book = ap.add_mutually_exclusive_group(required=True)
+    book.add_argument(
+        "--nobook",
+        dest="nobook",
+        action="store_true",
+        help="Disable Pentobi's opening book. Use for the longitudinal ladder: every result "
+        "before 2026-08-05 was book-free (by accident), so this keeps history comparable.",
+    )
+    book.add_argument(
+        "--book",
+        dest="nobook",
+        action="store_false",
+        help="Let Pentobi use its opening book, i.e. the engine as shipped. Requires the "
+        "*.blksgf files to sit beside the pentobi-gtp binary; the run verifies engagement.",
+    )
+    ap.add_argument(
+        "--condition",
+        choices=sorted(CONDITION_DIRNAMES),
+        default=CONDITION_LADDER,
+        help="Which instrument this run belongs to. Decides the output directory and is "
+        "recorded in the payload; Coach only ever reads the 'ladder' condition.",
+    )
     args = ap.parse_args()
 
     if find_pentobi_gtp() is None:
@@ -536,11 +672,12 @@ def main() -> None:
             temp=0.0,
             opening_temp=args.opening_temp,
             opening_moves=args.opening_moves,
+            seed=args.seed,
         )
         per_level = []
         for level in levels:
             print(f"[benchmark] level {level}: {args.games} games...", flush=True)
-            r = benchmark_level(game, net_player, level, args.games, args.seed)
+            r = benchmark_level(game, net_player, level, args.games, args.seed, nobook=args.nobook)
             print(
                 f"  net {r['net_wins']}-{r['pentobi_wins']}-{r['draws']} "
                 f"(win rate {r['win_rate']:.0%}, 95% CI [{r['ci'][0]:.0%}, {r['ci'][1]:.0%}])",
@@ -574,6 +711,7 @@ def main() -> None:
             seed=args.seed,
             cpu_net=args.cpu_net,
             mps=args.mps,
+            nobook=args.nobook,
         )
         for r in per_level:
             print(
@@ -591,15 +729,24 @@ def main() -> None:
         flush=True,
     )
 
-    # Persist the ladder summary where the training report picks it up.
+    # Persist the summary in the directory belonging to this condition. The
+    # longitudinal ladder keeps its historical home; anything else is quarantined
+    # so Coach's cadence check can never absorb it into the promotion series.
+    out_dir = (
+        config.pentobi_ladder_directory
+        if args.condition == CONDITION_LADDER
+        else config.pentobi_ladder_directory.parent / CONDITION_DIRNAMES[args.condition]
+    )
     ladder_path = write_ladder_result(
-        config.pentobi_ladder_directory,
+        out_dir,
         net=args.net or "freshnet",
         sims=args.sims,
         games_per_level=args.games,
         per_level=per_level,
         metrics=metrics,
         duration_s=ladder_duration_s,
+        condition=args.condition,
+        context=build_context(args, config, workers=workers),
     )
     print(f"[benchmark] ladder JSON → {ladder_path} (rendered by --report-only)", flush=True)
 
@@ -613,6 +760,8 @@ def main() -> None:
             "config": args.config,
             "sims": args.sims,
             "games": args.games,
+            "book": "off" if args.nobook else "on",
+            "condition": args.condition,
             "timestamp": datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC"),
         },
         out,

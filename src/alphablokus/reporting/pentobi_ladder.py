@@ -43,12 +43,20 @@ def write_ladder_result(
     per_level: list[dict[str, Any]],
     metrics: dict[str, Any],
     duration_s: float | None = None,
+    condition: str = "ladder",
+    context: dict[str, Any] | None = None,
 ) -> Path:
     """Persist one benchmark run's ladder results for the HTML report.
 
     ``per_level`` rows are the benchmark's stats dicts (any ``records`` key —
     the raw game replays — is dropped; replays belong to the benchmark's own
     HTML report, not the training report).
+
+    ``condition`` names the instrument: ``"ladder"`` for the longitudinal
+    fixed-400/book-free series that Coach reads for promotion and drift, anything
+    else for a one-off comparison. ``context`` records the full comparison setup
+    (both sides' search settings, Pentobi's book/threads, seeds, hardware) so a
+    payload is self-describing instead of relying on the reader's memory.
 
     ``duration_s`` is the ladder's wall-clock cost. The ladder is the backbone
     measurement of the current plan — it is the only instrument that has ever
@@ -67,6 +75,12 @@ def write_ladder_result(
     }
     if duration_s is not None:
         payload["duration_s"] = round(float(duration_s), 2)
+    # Which instrument produced this. Payloads without the key are pre-2026-08-05
+    # longitudinal-ladder results, which is why the default is "ladder" rather than
+    # something explicit — see ``LADDER_CONDITION`` in evaluation/ladder_selection.
+    payload["condition"] = condition
+    if context is not None:
+        payload["context"] = context
     directory.mkdir(parents=True, exist_ok=True)
     safe_net = net.replace("/", "_")
     path = directory / f"ladder_{safe_net}_{timestamp.strftime('%Y%m%dT%H%M%SZ')}.json"

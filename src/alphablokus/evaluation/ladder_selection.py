@@ -86,6 +86,31 @@ def checkpoint_generation(label: str) -> int | None:
     return int(match.group(1)) if match else None
 
 
+# The only condition Coach may promote or stop a run on. Everything else — an
+# equal-time comparison, a book-on run, a search-scaling arm — is a one-off
+# measurement on a different scale, and folding it into this series would compare
+# scores that are not comparable.
+LADDER_CONDITION = "ladder"
+
+
+def is_longitudinal(payload: Mapping[str, Any]) -> bool:
+    """Whether this payload belongs to the longitudinal ladder series.
+
+    Payloads written before 2026-08-05 have no ``condition`` key and are all
+    longitudinal ladder results, so a missing key means yes.
+
+    This filter is load-bearing rather than tidy-minded. ``Coach._check_ladder_and_drift``
+    reads *every* ``ladder_*.json`` in one directory as a single series and feeds it
+    to keep-best-by-ladder and the drift circuit-breaker. A fair-fight result (book
+    on, 300 games, level 9 only) has a weighted score that means something entirely
+    different from a 100-game book-free L1-9 sweep, so absorbing one would corrupt
+    promotion and could trip the catastrophe stop on nothing. Conditions are kept in
+    separate directories as the first line of defence; this is the second, so that
+    pointing them at one directory is still safe.
+    """
+    return str(payload.get("condition", LADDER_CONDITION)) == LADDER_CONDITION
+
+
 def ladder_point_from_payload(payload: Mapping[str, Any]) -> LadderPoint:
     """Build a :class:`LadderPoint` from a ladder JSON payload.
 
