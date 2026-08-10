@@ -148,7 +148,7 @@ docs/
 │   ├── REMOTE-TRAINING.md   # Runbook for running training on the home box over SSH
 │   └── AI-CONTEXT.md        # Extended context, architecture rationale, gotchas
 ├── research/                # Deep investigations (jax A/B, profiling, Pentobi internals, …)
-└── plans/                   # Top-level = in-flight (none currently); archive/ = completed, kept for context
+└── plans/                   # ROADMAP.md = the index. Top level = active, future/ = parked, archive/ = done
     └── archive/                       # ~40 completed plans — the project's full history, e.g.:
         ├── oom-hardening.md           #   Sparse on-disk policies + OOM guardrails (O1–O9)
         ├── refactor-repo-architecture.md #  src/ package restructure
