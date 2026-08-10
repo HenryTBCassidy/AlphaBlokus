@@ -1,5 +1,12 @@
 # Pentobi distillation corpus v2 — strong openings + soft targets
 
+> **Status: PARKED (2026-08-10).** 9 of 16 items done. The remaining work (V12 stage-1
+> generation) needs ~3 days of box time, and the 2026-08 investigation ranked the **value head**
+> above more corpus work — see [`ROADMAP.md`](ROADMAP.md). **V11 (book-strength measurement) is
+> now live and cheap**: the opening book was activated on 2026-08-05, so the book-on vs book-off
+> delta is measurable and is what converts every historical book-free number onto the "as
+> shipped" scale.
+
 The v1 expert corpus ([`pentobi-distillation.md`](archive/pentobi-distillation.md) D1–D5) generated cleanly,
 validated perfectly, and **failed the D8 ladder gate**: the distilled nets (`96x6` weighted 0.088,
 `256x16` similar) came out far below v3 gen-40 (0.344) — ~55% at Pentobi L1, ~0% at L6+. The sizing

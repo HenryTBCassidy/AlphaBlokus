@@ -1,5 +1,11 @@
 # Supervised-phase network improvements
 
+> **Status: N6/N7 ARE THE PRIORITY (2026-08-10).** This document is the home of the **value head**
+> workstream (formerly "Stream D"). N6 (outcome-balanced value sampling, weighted *conditionally
+> on colour*) and N7 (win/draw/loss head) are the next work on the project, because the 2026-08
+> investigation found the network — not search — is the constraint. Read
+> [`ROADMAP.md`](ROADMAP.md) for the prerequisite and the trap in N6 before starting.
+
 Turns the shortlist in [`../research/alphazero-technique-review.md`](../research/alphazero-technique-review.md)
 §3A/§3B into sequenced work. Everything here acts on the **stage-1 v2 corpus** and can therefore
 move the V15 ladder gate; the self-play techniques (§3C) are blocked on that gate and get their own
