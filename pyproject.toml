@@ -67,6 +67,11 @@ packages = ["src/alphablokus"]
 [tool.ruff]
 target-version = "py311"
 line-length = 120
+# Archived one-off probe scripts, preserved exactly as they were executed during the
+# 2026-08 investigation. They are evidence, not maintained code: reformatting them
+# would misrepresent what actually ran, and the findings they produced cite their
+# line numbers.
+extend-exclude = ["docs/research/investigation-2026-08"]
 
 [tool.ruff.lint]
 select = [
