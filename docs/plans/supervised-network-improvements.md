@@ -1,5 +1,11 @@
 # Supervised-phase network improvements
 
+> **Status: N6/N7 ARE THE PRIORITY (2026-08-10).** This document is the home of the **value head**
+> workstream (formerly "Stream D"). N6 (outcome-balanced value sampling, weighted *conditionally
+> on colour*) and N7 (win/draw/loss head) are the next work on the project, because the 2026-08
+> investigation found the network — not search — is the constraint. Read
+> [`ROADMAP.md`](ROADMAP.md) for the prerequisite and the trap in N6 before starting.
+
 Turns the shortlist in [`../research/alphazero-technique-review.md`](../research/alphazero-technique-review.md)
 §3A/§3B into sequenced work. Everything here acts on the **stage-1 v2 corpus** and can therefore
 move the V15 ladder gate; the self-play techniques (§3C) are blocked on that gate and get their own
@@ -12,7 +18,7 @@ found to be confounded by a *side effect* of adding the head (it shifted the dat
 magnitude four times the effect being measured. Each row below is therefore build → measure →
 **keep or delete**, and a row that improves nothing is deleted rather than left in.
 
-**Depends on:** [`pentobi-corpus-v2.md`](pentobi-corpus-v2.md) V12 (the corpus, generating now) and
+**Depends on:** [`pentobi-corpus-v2.md`](future/pentobi-corpus-v2.md) V12 (the corpus, generating now) and
 the score head on `feat/score-auxiliary-head` (built, unmeasured). N3 below *is* that plan's S7.
 
 ---

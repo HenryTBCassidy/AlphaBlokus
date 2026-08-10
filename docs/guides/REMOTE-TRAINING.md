@@ -28,6 +28,40 @@ Two changes supersede much of this guide (full Linux rewrite pending):
 
 All four verified 2026-06-12, including after an unattended reboot of the box.
 
+### ⚠ Can't reach the box? Check the **Mac-side dev tunnel first** — before anything else
+
+**Do this in order. Do not conclude "the box is down" until step 3.** On 2026-08-05 a session
+diagnosed the box as dead (LAN timed out, `gpu-anywhere` refused) and stalled a day of GPU work;
+the box was up the whole time and the only fault was the **Mac-side** `devtunnel connect` process
+having died. This is the single most likely cause of "I can't reach gpu-linux", so it is checked
+first.
+
+```bash
+launchctl list | grep devtunnel-ssh
+```
+
+The middle column is the last exit status. `-15`/`-9` (killed) or a non-zero code means the Mac-side
+connector is dead and nothing is listening on `localhost:2222` — the box is irrelevant. Restart it:
+
+```bash
+launchctl kickstart -k gui/501/com.henrycassidy.devtunnel-ssh
+```
+
+Then re-test with `ssh gpu-anywhere 'echo ok'`. Full triage:
+
+| # | Check | Result | Meaning |
+|---|-------|--------|---------|
+| 1 | `launchctl list \| grep devtunnel-ssh` | killed / non-zero exit | **Mac-side connector dead** — `launchctl kickstart -k gui/501/com.henrycassidy.devtunnel-ssh`. Most common cause. |
+| 2 | `devtunnel show gpu-linux-ssh.uks1` | 0 host connections | **Box-side service died** — restart `devtunnel-ssh` via the VS Code browser tunnel (route 3) or the Tailscale console (route 4). |
+| 2 | ″ | 1 host connection | Box side is fine; the fault is the Mac client (step 1) or a stale token. |
+| 3 | Both routes fail *and* step 2 shows no host | Box genuinely down/asleep | Power/BIOS. Only now is this the diagnosis. |
+
+**A LAN timeout on its own means nothing.** `ssh gpu-linux` (192.168.0.13) only works when the Mac is
+on the home LAN, and it fails silently — with a plain `Operation timed out` and 100% ICMP loss — whenever
+the Mac is on a corporate network or VPN. On 2026-08-05 the LAN route was still timing out *after* the
+box was confirmed healthy and reachable over the tunnel. **Treat `gpu-anywhere` as the primary route and
+`gpu-linux` as a home-only fast path**; never infer box state from the LAN route.
+
 ### Box invariants (don't undo these)
 
 - **Sleep is masked**: `systemctl mask sleep.target suspend.target hibernate.target hybrid-sleep.target` — an unattended box must never doze.
@@ -270,7 +304,8 @@ For shell scripts longer than one line: write to a file locally, `scp` to PC, ru
 | `An expression was expected after '('` | PowerShell parsed `()` in your Python | Base64-encode the Python |
 | nvidia-smi from Windows shows no python process | Windows nvidia-smi only sees Windows processes | Query inside WSL: `wsl -- bash -lc "nvidia-smi"` |
 | Two W&B runs with the same name | `wandb.init(name=config.run_name)` collides on re-runs | We now append a UTC timestamp suffix — see `alphablokus/storage/metrics.py` `_init_wandb` |
-| `ssh: Operation timed out` to `<gpu-host>` | PC dropped off the tailnet (sleep, Tailscale service stopped, VPN interference) — `tailscale status` shows `offline, last seen Xh ago` | See [Tailscale connectivity recovery](#tailscale-connectivity-recovery) below |
+| `ssh: Operation timed out` / `Connection refused` to `gpu-linux` or `gpu-anywhere` (**Linux era — start here**) | Usually the **Mac-side dev tunnel died**, not the box. A LAN timeout alone proves nothing. | See [Can't reach the box?](#-cant-reach-the-box-check-the-mac-side-dev-tunnel-first--before-anything-else) at the top — check `launchctl list \| grep devtunnel-ssh` before any other diagnosis |
+| `ssh: Operation timed out` to `<gpu-host>` | (Windows/Tailscale era.) PC dropped off the tailnet (sleep, Tailscale service stopped, VPN interference) — `tailscale status` shows `offline, last seen Xh ago` | See [Tailscale connectivity recovery](#tailscale-connectivity-recovery) below |
 | PC `active` in `tailscale status` but `tailscale ping` and SSH both time out | Mac-side Tailscale system extension stuck — typically a `MagicSock function ReceiveIPv4 is not running` health warning | Force-kill **both** `Tailscale` and `IPNExtension` on the Mac, then relaunch — see recovery section below |
 
 ---

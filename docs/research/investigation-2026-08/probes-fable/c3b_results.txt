@@ -1,0 +1,13 @@
+== collecting positions (same seed as round 1)
+  12 mixed positions, 4 forced
+== gumbel sims ladder (solved / inverted-pairs; a sign bug would NOT improve with sims)
+  sims=  128: solved 8/12  inverted pairs 72/300  per-pos [(5, True, '2/27'), (5, True, '7/14'), (4, False, '25/32'), (4, True, '2/27'), (3, True, '0/26'), (4, False, '14/34'), (2, True, '0/5'), (5, True, '0/36'), (4, False, '0/5'), (3, False, '2/16'), (2, True, '4/24'), (6, True, '16/54')]
+  sims=  512: solved 10/12  inverted pairs 48/300  per-pos [(5, True, '0/27'), (5, True, '7/14'), (4, True, '1/32'), (4, True, '0/27'), (3, True, '0/26'), (4, False, '34/34'), (2, True, '0/5'), (5, True, '0/36'), (4, True, '0/5'), (3, False, '0/16'), (2, True, '0/24'), (6, True, '6/54')]
+  sims= 2048: solved 10/12  inverted pairs 30/300  per-pos [(5, True, '0/27'), (5, True, '1/14'), (4, True, '0/32'), (4, True, '0/27'), (3, True, '0/26'), (4, False, '29/34'), (2, True, '0/5'), (5, True, '0/36'), (4, True, '0/5'), (3, False, '0/16'), (2, True, '0/24'), (6, True, '0/54')]
+== python full-action PUCT reference at 512 sims
+  python: solved 11/12  per-pos [(5, False), (5, True), (4, True), (4, True), (3, True), (4, True), (2, True), (5, True), (4, True), (3, True), (2, True), (6, True)]
+== forced single-action positions (aggregated weights)
+  forced[0]: chosen=17836 expected=17836 mass=1.0000
+  forced[1]: chosen=17836 expected=17836 mass=1.0000
+  forced[2]: chosen=17836 expected=17836 mass=1.0000
+  forced[3]: chosen=17836 expected=17836 mass=1.0000

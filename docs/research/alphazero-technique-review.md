@@ -759,5 +759,5 @@ value of a review is knowing what *not* to churn:
 
 **Internal**: [`corpus-quality-principles.md`](corpus-quality-principles.md) ·
 [`corpus-generation-literature.md`](corpus-generation-literature.md) ·
-[`jax-pipeline-ab.md`](jax-pipeline-ab.md) · [`../plans/pentobi-corpus-v2.md`](../plans/pentobi-corpus-v2.md) ·
-[`../plans/score-auxiliary-target.md`](../plans/score-auxiliary-target.md) · [`../IDEAS.md`](../IDEAS.md)
+[`jax-pipeline-ab.md`](jax-pipeline-ab.md) · [`../plans/pentobi-corpus-v2.md`](../plans/future/pentobi-corpus-v2.md) ·
+[`../plans/score-auxiliary-target.md`](../plans/future/score-auxiliary-target.md) · [`../IDEAS.md`](../IDEAS.md)

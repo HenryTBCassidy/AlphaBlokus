@@ -1,0 +1,11 @@
+== collecting (same seed)
+  pos5: d=4, classes histogram [-1, -1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1, 1]
+  pos9: d=3, classes histogram [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 0]
+  gumbel sims=512 pos5: chosen class=1 (best 1, ok=True) weights by class: {-1: 'n=2 mean_w=0.0000 max_w=0.0000', 1: 'n=17 mean_w=0.0588 max_w=0.6740'}
+  gumbel sims=512 pos9: chosen class=0 (best 0, ok=True) weights by class: {-1: 'n=16 mean_w=0.0029 max_w=0.0106', 0: 'n=1 mean_w=0.9539 max_w=0.9539'}
+  gumbel sims=2048 pos5: chosen class=1 (best 1, ok=True) weights by class: {-1: 'n=2 mean_w=0.0000 max_w=0.0000', 1: 'n=17 mean_w=0.0588 max_w=0.5078'}
+  gumbel sims=2048 pos9: chosen class=0 (best 0, ok=True) weights by class: {-1: 'n=16 mean_w=0.0070 max_w=0.0254', 0: 'n=1 mean_w=0.8883 max_w=0.8883'}
+== python full-action PUCT at 512 sims
+  python pos5: chosen class=1 (best 1, ok=True) visit share by class: {-1: 'n=2 mean_pi=0.0000 max_pi=0.0000', 1: 'n=17 mean_pi=0.0588 max_pi=1.0000'}
+  python pos9: chosen class=-1 (best 0, ok=False) visit share by class: {-1: 'n=16 mean_pi=0.0625 max_pi=1.0000', 0: 'n=1 mean_pi=0.0000 max_pi=0.0000'}
+done

@@ -1,34 +1,33 @@
 {
   "game": "blokusduo",
-  "run_name": "blokus_xl_scratch",
+  "run_name": "blokus_cloud_v3",
   "seed": 42,
   "num_generations": 60,
   "num_eps": 10000,
   "replay_buffer_games": 60000,
+  "temp_threshold": 12,
   "update_threshold": 0.55,
-  "root_directory": "/workspace/",
-  "load_model": false,
+  "root_directory": "./temp/",
+  "load_model": true,
   "num_parallel_workers": 8,
   "worker_cuda": true,
   "use_optimised_movegen": true,
+  "elo_games_per_gen": 20,
   "minimax_games_per_gen": 0,
   "symmetry_diagnostic_positions": 100,
-  "num_arena_matches": 200,
-  "arena_opening_temp": 1.0,
-  "arena_opening_moves": 4,
-  "paired_arena": true,
-  "gate_mode": "always",
+  "num_arena_matches": 100,
   "mcts_config": {
     "num_mcts_sims": 128,
     "cpuct": 2.5,
     "mcts_batch_size": 16,
+    "dirichlet_epsilon": 0.25,
+    "dirichlet_alpha": 0.03,
     "search_policy": "gumbel",
     "gumbel_max_considered": 32
   },
   "net_config": {
-    "preset": "xl",
+    "preset": "large",
     "learning_rate": 0.001,
-    "weight_decay": 0.0001,
     "dropout": 0.3,
     "epochs": 1,
     "batch_size": 1024,
@@ -44,19 +43,11 @@
       "channels_last": true,
       "compile": true,
       "dataloader_workers": 8,
-      "dataloader_context": "spawn",
       "pin_memory": true,
       "persistent_workers": true,
       "prefetch_factor": 4,
       "log_every_batches": 25
     }
-  },
-  "tournament": {
-    "run_at_end": true,
-    "opening_temp": 1.0,
-    "opening_moves": 4,
-    "num_mcts_sims": 32,
-    "games_per_pairing": 30
   },
   "wandb": {
     "project": "alphablokus-poc",
@@ -64,18 +55,11 @@
     "tags": [
       "cloud",
       "gumbel",
-      "xl",
-      "scratch",
-      "always-gate",
-      "external-keep-best"
+      "large",
+      "60gen",
+      "v2"
     ],
     "mode": "online"
-  },
-  "object_store": {
-    "bucket": "REPLACE_ME-alphablokus-runs",
-    "prefix": null,
-    "endpoint_url": "https://REPLACE_ME.r2.cloudflarestorage.com",
-    "region": null
   },
   "selfplay_backend": "jax",
   "jax_selfplay": {
@@ -83,6 +67,6 @@
     "top_k": 64,
     "dtype": "bfloat16",
     "wave_plies": 32,
-    "xla_mem_fraction": 0.8
+    "xla_mem_fraction": 0.6
   }
 }
