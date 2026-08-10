@@ -42,13 +42,33 @@ class PentobiPlayer:
         game: BlokusDuoGame,
         level: int,
         *,
+        nobook: bool,
         binary: str | None = None,
         threads: int = 1,
         seed: int | None = None,
     ) -> None:
+        """Create a Pentobi-backed player.
+
+        Args:
+            nobook: Whether to disable Pentobi's opening book. **Required, with no
+                default, on purpose.** Until 2026-08-05 the book was inactive by
+                accident — ``pentobi_gtp/Main.cpp`` looks for ``.blksgf`` files
+                beside the binary and the build directory held none, while
+                ``param_base`` still reported ``use_book 1``. So every measurement
+                in the project's history faced a book-free Pentobi without anyone
+                choosing that. Symlinking the books in fixed it, which means a
+                rebuild or a moved binary can silently flip it back. Forcing every
+                caller to state the book explicitly is what stops that recurring —
+                and the value is recorded in each result payload.
+                ``True`` for the longitudinal ladder (keeps history comparable),
+                ``False`` for a "Pentobi as shipped" comparison.
+        """
         self._translator = PentobiMoveTranslator(game)
-        self._engine = PentobiGtp(level, binary=binary, threads=threads, seed=seed)
+        self._engine = PentobiGtp(level, binary=binary, threads=threads, seed=seed, nobook=nobook)
         self._base_seed = seed
+        self.nobook = nobook
+        self.level = level
+        self.threads = threads
         self._game_index = 0
         self._my_color: str | None = None
         self._opp_color: str | None = None

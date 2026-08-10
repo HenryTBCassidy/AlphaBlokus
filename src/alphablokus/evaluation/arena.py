@@ -46,6 +46,28 @@ class MoveRecord:
 
 
 @dataclass(frozen=True)
+class ColourTally:
+    """One colour's half of a match, from ``player1``'s point of view.
+
+    Attributes:
+        games: Games played in this half.
+        wins: Games ``player1`` won.
+        losses: Games ``player1`` lost.
+        draws: Drawn games.
+    """
+
+    games: int
+    wins: int
+    losses: int
+    draws: int
+
+    @property
+    def score(self) -> float:
+        """``(wins + draws/2) / games`` — the draw convention used project-wide."""
+        return (self.wins + 0.5 * self.draws) / self.games if self.games else 0.0
+
+
+@dataclass(frozen=True)
 class GameRecord:
     """A recorded arena game — moves + final outcome.
 
@@ -250,58 +272,103 @@ class Arena:
             ``(player1_wins, player2_wins, draws, records)``. ``records`` is an
             empty list when ``record=False``.
         """
-        num = int(num / 2)
-        one_won = 0
-        two_won = 0
+        as_white, as_black, records = self.play_games_by_colour(num, verbose=verbose, record=record, top_k=top_k)
+        return (
+            as_white.wins + as_black.wins,
+            as_white.losses + as_black.losses,
+            as_white.draws + as_black.draws,
+            records,
+        )
+
+    def play_games_by_colour(
+        self,
+        num: int,
+        verbose: bool = False,
+        record: bool = False,
+        top_k: int = 5,
+    ) -> tuple[ColourTally, ColourTally, list[GameRecord]]:
+        """:meth:`play_games`, but keeping the two colour halves apart.
+
+        Identical play — same games in the same order — reported per colour
+        instead of pooled. The split is not a nicety in Blokus Duo: the first
+        mover takes ~75% of decisive games, so a pooled half-and-half score is
+        *flatter* in the true strength gap than a logistic and cannot be inverted
+        to an unbiased Elo without knowing how each colour did
+        (:mod:`alphablokus.evaluation.ladder_elo`). Pooling used to discard it,
+        and it cannot be recovered from ``records`` when ``record=False``.
+
+        Args:
+            num: Number of games (rounded down to the nearest even number).
+            verbose: Whether to display each game state.
+            record: If True, also return a ``GameRecord`` per game.
+            top_k: How many top moves to record per move when ``record=True``.
+
+        Returns:
+            ``(player1_as_white, player1_as_black, records)``.
+        """
+        half = int(num / 2)
+        as_white, white_records = self._play_half(
+            half,
+            player1_is_white=True,
+            desc="Arena.playGames (1)",
+            verbose=verbose,
+            record=record,
+            top_k=top_k,
+        )
+        # Swap the slots so the original player2 starts the second half, then
+        # swap back so the Arena ends in the state it began in.
+        self.player1, self.player2 = self.player2, self.player1
+        as_black, black_records = self._play_half(
+            half,
+            player1_is_white=False,
+            desc="Arena.playGames (2)",
+            verbose=verbose,
+            record=record,
+            top_k=top_k,
+        )
+        self.player1, self.player2 = self.player2, self.player1
+        return as_white, as_black, [*white_records, *black_records]
+
+    def _play_half(
+        self,
+        num: int,
+        *,
+        player1_is_white: bool,
+        desc: str,
+        verbose: bool,
+        record: bool,
+        top_k: int,
+    ) -> tuple[ColourTally, list[GameRecord]]:
+        """Play one colour half, tallied and recorded in *original* player1's frame.
+
+        In the second half the Arena's slots are swapped, so :meth:`play_game`
+        reports from the swapped player1's (i.e. original player2's) point of
+        view; negating its outcome puts the result back in original player1's
+        frame. Anything that is neither +1 nor −1 is a draw (the game may report
+        a small float).
+        """
+        wins = 0
+        losses = 0
         draws = 0
         records: list[GameRecord] = []
-
-        # First half: player1 starts
-        for _ in tqdm(range(num), desc="Arena.playGames (1)"):
+        for _ in tqdm(range(num), desc=desc):
             game_result, rec = self.play_game(verbose=verbose, record=record, top_k=top_k)
-            if game_result == 1:
-                one_won += 1
-            elif game_result == -1:
-                two_won += 1
+            outcome = game_result if player1_is_white else -game_result
+            if outcome == 1:
+                wins += 1
+            elif outcome == -1:
+                losses += 1
             else:
                 draws += 1
             if rec is not None:
-                # First half: player1 played as White (cur_player=1 starts).
                 records.append(
                     GameRecord(
                         moves=rec.moves,
-                        outcome=rec.outcome,
-                        player1_was_white=True,
+                        outcome=rec.outcome if player1_is_white else -rec.outcome,
+                        player1_was_white=player1_is_white,
                     )
                 )
-
-        # Swap players for second half
-        self.player1, self.player2 = self.player2, self.player1
-
-        # Second half: original player2 starts
-        for _ in tqdm(range(num), desc="Arena.playGames (2)"):
-            game_result, rec = self.play_game(verbose=verbose, record=record, top_k=top_k)
-            if game_result == -1:
-                one_won += 1
-            elif game_result == 1:
-                two_won += 1
-            else:
-                draws += 1
-            if rec is not None:
-                # Second half: the (swapped) self.player1 is actually original
-                # player2. From original-player1's perspective, they played as
-                # Black this game.
-                records.append(
-                    GameRecord(
-                        moves=rec.moves,
-                        outcome=-rec.outcome,
-                        player1_was_white=False,
-                    )
-                )
-
-        # Swap back so the Arena ends in its original state.
-        self.player1, self.player2 = self.player2, self.player1
-        return one_won, two_won, draws, records
+        return ColourTally(games=num, wins=wins, losses=losses, draws=draws), records
 
     def play_games_paired(
         self,
