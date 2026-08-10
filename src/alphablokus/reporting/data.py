@@ -36,7 +36,9 @@ from alphablokus.evaluation.ladder_selection import (
     LadderPoint,
     checkpoint_generation,
     detect_drift,
+    is_longitudinal,
     ladder_point_from_payload,
+    normalised_scores,
     select_best,
 )
 from alphablokus.reporting.pentobi_ladder import load_ladder_results
@@ -746,6 +748,10 @@ def ladder_payload(config: RunConfig) -> dict[str, Any] | None:
     entries: list[dict[str, Any]] = []
     for result in results:
         levels = sorted(result["levels"], key=lambda row: int(row["level"]))
+        # Normalised onto the current draws-as-half convention, so a curve spanning
+        # 2026-08-05 shows a strength change rather than a scoring change — and shows
+        # the same number Coach selects on.
+        weighted_score, _ = normalised_scores(result)
         entries.append(
             {
                 "net": result["net"],
@@ -765,9 +771,7 @@ def ladder_payload(config: RunConfig) -> dict[str, Any] | None:
                     for row in levels
                 ],
                 "pentobi_level": result["metrics"].get("pentobi_level"),
-                "weighted_score": round(float(result["metrics"]["weighted_score"]), 4)
-                if "weighted_score" in result["metrics"]
-                else None,
+                "weighted_score": round(weighted_score, 4) if weighted_score is not None else None,
                 # Wall-clock cost of this ladder. Absent for ladders run before it
                 # was recorded, so the report treats it as optional.
                 "duration_s": round(float(result["duration_s"]), 1) if "duration_s" in result else None,
@@ -792,8 +796,13 @@ def ladder_payload(config: RunConfig) -> dict[str, Any] | None:
             logger.warning("Could not parse mini-ladder history at {} ({}).", history_path, err)
 
     # Selection points: prefer the mini-ladder history (evaluation-ordered);
-    # fall back to the ladder result JSONs themselves.
-    points = history_points or [ladder_point_from_payload(r) for r in results if "weighted_score" in r["metrics"]]
+    # fall back to the ladder result JSONs themselves. The condition filter mirrors
+    # ``Coach._check_ladder_and_drift`` exactly — the report must not crown a
+    # checkpoint the training run would not, so a one-off comparison that landed in
+    # this directory is displayed above but never selected on.
+    points = history_points or [
+        ladder_point_from_payload(r) for r in results if "weighted_score" in r["metrics"] and is_longitudinal(r)
+    ]
     if not entries and not points:
         return None
 

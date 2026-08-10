@@ -18,6 +18,7 @@ from alphablokus.evaluation.arena import Arena, GameRecord
 from alphablokus.evaluation.elo import compute_elo
 from alphablokus.evaluation.ladder_selection import (
     detect_drift,
+    is_longitudinal,
     ladder_point_from_payload,
     select_best,
 )
@@ -899,7 +900,14 @@ class Coach:
             return False
 
         results = load_ladder_results(self.config.pentobi_ladder_directory)
-        points = [ladder_point_from_payload(r) for r in results if "weighted_score" in r.get("metrics", {})]
+        # Only the longitudinal condition. A one-off comparison (equal-time, book on,
+        # a search-scaling arm) has a weighted score on a different scale entirely, and
+        # promoting or stopping on it would be reading two instruments as one.
+        points = [
+            ladder_point_from_payload(r)
+            for r in results
+            if "weighted_score" in r.get("metrics", {}) and is_longitudinal(r)
+        ]
         if not points:
             logger.info(
                 "Ladder check at generation {}: no ladder results in {} yet. Run "
