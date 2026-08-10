@@ -99,10 +99,15 @@ Conclusion (6) plus (7) is why **Value head** is now ranked above further measur
 These were "Stream B". All cost £0. Kept here rather than in their own plan because most are
 one-command box runs, not multi-commit work.
 
+**Not listed here:** anything about *how fairly* we measure against Pentobi — including the
+equal-thinking-time comparison — lives in
+[`fair-pentobi-benchmark.md`](fair-pentobi-benchmark.md) as F1–F11, and nowhere else. An earlier
+version of this table carried a "superseded, became F9" row, which meant the same experiment
+appeared twice under two labels. One home per item.
+
 | ID | Item | State |
 |---|---|---|
 | M1 | Ladder the checkpoints around the best net, to check we warm-start from the right one | ✅ Done. gen-40 is the best; gen-32 ties it, gen-36 is worse. Question closed |
-| M2 | Eval-time search scaling at the top levels | ➡️ Superseded — became F9/F10 in [`fair-pentobi-benchmark.md`](fair-pentobi-benchmark.md) |
 | M3 | Learning-rate sweep on a frozen buffer | ⛔ **Blocked** — both historical replay buffers were deleted, and no generate-only entry point exists |
 | M4 | Width shadow test (`top_k` 64 vs 128) | Written on `feat/width-shadow-probe`, never run. Deferred until after the pilot by design — 15–30 box hours, informs a later run only |
 | M5 | bfloat16 vs float32 self-play A/B | ⚠️ **Slipped.** Harness exists (`scripts/validate_jax_search.py --dtype`), short, free, never run |
