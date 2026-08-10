@@ -10,7 +10,7 @@ number the project has ever quoted is against a weaker-than-shipped opponent.
 
 Prerequisites: none. Everything through F6 is £0 and most of it needs no GPU.
 Companion docs: [`05-EVALUATION.md`](../05-EVALUATION.md),
-[`pentobi-corpus-v2.md`](pentobi-corpus-v2.md) (fact 13 — the book), and
+[`pentobi-corpus-v2.md`](future/pentobi-corpus-v2.md) (fact 13 — the book), and
 [`plan-format`](../guides/PLAN-FORMAT.md).
 
 ---
@@ -50,8 +50,8 @@ objective measure.
 | # | Item | Effort | GPU? | Priority | Done |
 |---|---|---|---|---|---|
 | F1 | Activate Pentobi's opening book and verify engagement | 1 h | no | **Critical** | ✅ |
-| F2 | Pentobi L7 vs L9 head-to-head — is the top of the ladder flat? | 3 h box | no | **Critical** | 🔄 |
-| F3 | Measure Pentobi's *realised* effort per move; explain 14.7× vs 25× | 2 h box | no | **Critical** | |
+| F2 | Pentobi L7 vs L9 head-to-head — is the top of the ladder flat? | 3 h box | no | **Critical** | ✅ |
+| F3 | Measure Pentobi's *realised* effort per move; explain 14.7× vs 25× | 2 h box | no | **Critical** | ✅ |
 | F4 | Record the full comparison context in every ladder result | 3 h | no | High | ✅ |
 | F5 | Seed the net's RNG; audit opening diversity per arm | 3 h | no | High | ✅ |
 | F6 | Unify draw handling to score = W + D/2 everywhere | 1 h | no | High | ✅ |
@@ -121,7 +121,7 @@ uses `nobook=False`.
 
 ---
 
-## F2. Pentobi L7 vs L9 head-to-head 🔄
+## F2. Pentobi L7 vs L9 head-to-head ✅
 
 **The question.** Our net scores 0.17 / 0.21 / 0.22 against L7 / L8 / L9 — flat, or even
 inverted. Two explanations, and they imply opposite strategies:
@@ -151,8 +151,32 @@ cd ~/code/pentobi/build/twogtp
 Memory: each L9 engine preallocates ~1.96 GB, so 3 threads/batch × 2 batches = 12 engines
 ≈ 15 GB of 31 GB. Do not raise the thread count.
 
-**Decision rule.** Pooled across both colour batches, at 200 games the SE on the score is
-~3.5pp:
+### Result (2026-08-10): saturation refuted
+
+200 games, colour-balanced, `--nobook`, 6 engines on the box:
+
+| Batch | L9's score vs L7 |
+|---|---|
+| A — L7 moves first | 0.730 |
+| B — L9 moves first | 0.690 |
+| **Pooled** | **0.710**, 95% CI [0.647, 0.773] = **+156 Elo** |
+
+The lower bound clears the pre-registered 0.64 threshold, and the two colour batches agree, so
+this is not a first-mover artefact. **Pentobi level 9 is genuinely much stronger than level 7.**
+
+Consequences:
+
+- **"Beat level 9" is not "beat level 7".** The target does not stop moving, and the earlier
+  reading that Pentobi saturates above level 7 is **withdrawn** — it came from three of our own
+  ladder cells whose intervals are ±87 Elo each, which this plan's own F7 section predicted would
+  happen.
+- Our net's flat 0.17 / 0.21 / 0.22 across L7–L9 is therefore about **our net**, not about
+  Pentobi. We sit far enough below all three rungs that the scores compress into a floor.
+- Combined with F7's colour correction (~280 Elo at level 9, not 220) and the ~12× thinking-time
+  deficit being only ~3.6 doublings, **search is not the lever; the network is the constraint.**
+
+**Decision rule as pre-registered.** Pooled across both colour batches, at 200 games the SE on the
+score is ~3.5pp:
 - **L9 scores ≤ 0.55** → saturation is real and engine-side. "Beat L9" ≈ "beat L7"; retarget
   the goal at L7 and treat L8/L9 as the same rung.
 - **L9 scores ≥ 0.64** (~100 Elo) → Pentobi keeps improving; our flat scores are about our net.
@@ -183,8 +207,26 @@ proxy (the `visits` column reads 0 in practice, so it cannot be used). Then read
 and max-node handling in `libpentobi_mcts/Player.cpp` and `libboardgame_mcts/SearchBase.h` on
 the box, and check whether level touches anything besides the count.
 
-**Output.** A realised-effort number per level to quote instead of the table, or a documented
-statement that the table holds.
+### Result (2026-08-10): the table is nominal, not realised ✅
+
+`twogtp` records CPU seconds per engine per game, so F2's run measured this for free:
+
+| Engine | CPU-s per game | Nominal sims |
+|---|---|---|
+| Level 7 | 14 | 221,867 |
+| Level 9 | 195 | 5,546,695 |
+
+**Realised ratio 13.9×, against the table's 25×.** Two independent methods agree — the earlier
+wall-clock measurement gave 14.7× — so level 9 does **not** receive its tabled budget on this
+box. Cause not yet isolated between the per-move weighting (`0.7·exp(0.1·ply)`, ×0.6 for duo) and
+a tree/memory cap; F2's result rules out the strong version of the truncation story, since level 9
+is still much stronger than level 7.
+
+**Consequence:** quote realised effort, not `counts_duo`, whenever a ratio is load-bearing. The
+table remains the right thing to *record* (it is what the engine was asked for) and is what
+`PENTOBI_DUO_SIMS_BY_LEVEL` stores.
+
+**Still open:** whether level changes anything besides the playout count — never checked.
 
 ---
 

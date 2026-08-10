@@ -1,7 +1,7 @@
 # Pentobi distillation — expert corpus, SL imitation, RL beyond
 
 > **Archived: superseded and split (2026-07-30).** Phase 1's data half (D1–D5) was rebuilt as
-> [`pentobi-corpus-v2.md`](../pentobi-corpus-v2.md) after this plan's corpus failed its own gate;
+> [`pentobi-corpus-v2.md`](../future/pentobi-corpus-v2.md) after this plan's corpus failed its own gate;
 > D6/D7's dataloader and trainer survive and are still the code in use; D8's gate criterion moved
 > to that plan as row V15, unchanged (+10 pp at any of L5–L7 after SL alone).
 >
@@ -24,7 +24,7 @@ reusable corpus of Pentobi L9 games. Phases 2–3 (separate branches) build the 
 > **Status 2026-07-27 — the corpus half is being rebuilt.** Stage 1 of D5 ran (13 k L9 games), D6/D7
 > were built, and **D8's ladder gate failed**: the distilled nets came out far below v3 gen-40. The
 > post-mortem blamed the *corpus*, on two counts — junk unharvested openings and one-hot policy
-> targets — so the generator is being replaced by [`pentobi-corpus-v2.md`](../pentobi-corpus-v2.md),
+> targets — so the generator is being replaced by [`pentobi-corpus-v2.md`](../future/pentobi-corpus-v2.md),
 > which supersedes the two decisions marked below. D6/D7 (dataloader + trainer) and D8's gate
 > criterion survive unchanged; the 13 k v1 corpus is kept as a mid-game supplement.
 

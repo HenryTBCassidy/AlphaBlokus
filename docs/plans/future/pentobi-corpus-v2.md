@@ -2,20 +2,20 @@
 
 > **Status: PARKED (2026-08-10).** 9 of 16 items done. The remaining work (V12 stage-1
 > generation) needs ~3 days of box time, and the 2026-08 investigation ranked the **value head**
-> above more corpus work — see [`ROADMAP.md`](ROADMAP.md). **V11 (book-strength measurement) is
+> above more corpus work — see [`ROADMAP.md`](../ROADMAP.md). **V11 (book-strength measurement) is
 > now live and cheap**: the opening book was activated on 2026-08-05, so the book-on vs book-off
 > delta is measurable and is what converts every historical book-free number onto the "as
 > shipped" scale.
 
-The v1 expert corpus ([`pentobi-distillation.md`](archive/pentobi-distillation.md) D1–D5) generated cleanly,
+The v1 expert corpus ([`pentobi-distillation.md`](../archive/pentobi-distillation.md) D1–D5) generated cleanly,
 validated perfectly, and **failed the D8 ladder gate**: the distilled nets (`96x6` weighted 0.088,
 `256x16` similar) came out far below v3 gen-40 (0.344) — ~55% at Pentobi L1, ~0% at L6+. The sizing
 sweep ruled out capacity (18× params bought +1.8 pp top-1). This plan replaces the corpus
 *generator*, not the training half: D6/D7's dataloader and SL trainer stay, D8's gate stays, and the
 v1 shards stay on disk as a mid-game supplement. Everything below is Blokus Duo / `pentobi-gtp` only.
-Companion documents: [`archive/corpus-search-space-store.md`](archive/corpus-search-space-store.md) (the persistent
+Companion documents: [`archive/corpus-search-space-store.md`](../archive/corpus-search-space-store.md) (the persistent
 search-space DAG + allocation-plan store this plan builds on) and
-[`../research/corpus-generation-literature.md`](../research/corpus-generation-literature.md) (what
+[`../research/corpus-generation-literature.md`](../../research/corpus-generation-literature.md) (what
 AlphaGo/KataGo/Lc0/Stockfish-NNUE/ChessBench and the imitation-learning literature say about
 engine-generated corpora — several defaults below cite it).
 
@@ -49,7 +49,7 @@ would be self-defeating.
 |---|------|--------|----------|------|
 | V1 | GTP layer: `reg_genmove` / `move_values` + `MoveValues` parser (strip `[PIECE]`, signed values) + fixture tests; make `--nobook` an explicit `PentobiGtp` flag | 2 h | High | ✅ |
 | V2 | **Confidently-wrong base-rate probe** (top-8 children of ~30 allocated nodes independently evaluated) + residual engine probes (argmax-vs-`genmove`, pass/terminal edge cases, drive-pattern overhead) | 4 h box | High | |
-| V3 | Search-space store: execute [`archive/corpus-search-space-store.md`](archive/corpus-search-space-store.md) S1–S6 (SQLite DAG + allocation plans + playout registry + export + coverage) | 1.5 days | High | ✅ |
+| V3 | Search-space store: execute [`archive/corpus-search-space-store.md`](../archive/corpus-search-space-store.md) S1–S6 (SQLite DAG + allocation plans + playout registry + export + coverage) | 1.5 days | High | ✅ |
 | V4 | Phase A — `plan`: budget-proportional allocation (`w ∝ p^(1/T)`, split floor R), emergent depth, search-on-demand mapping, mirror-pair merging, book-line floors | 1 day | High | ✅ |
 | V5 | Phase B — `generate`: fulfilment-driven scheduling against the active plan, prefix replay, harvest **every** ply, full-strength continuations | ½ day | High | ✅ |
 | V6 | Schema v2 (games shards + `export-opening` parquet, plan provenance in footers), validator, `docs/07-DATA-STORAGE.md` | ½ day | High | ✅ |
@@ -90,7 +90,7 @@ distillation thesis (not just the generator) is what's wrong, and Phase 3 RL spe
 
 **If it fires, Phase 3 begins** — RL warm-start from the distilled base, the continuous Pentobi-mix
 and opponent-pool diversity. That recipe is D9–D11 of the archived umbrella plan
-([`archive/pentobi-distillation.md`](archive/pentobi-distillation.md)) and gets spawned as its own
+([`archive/pentobi-distillation.md`](../archive/pentobi-distillation.md)) and gets spawned as its own
 plan then; it is not tracked here, because a corpus plan should not own the RL phase.
 
 ---
@@ -327,7 +327,7 @@ Output: a short table appended to this section; V4's defaults are confirmed or r
 
 ## V3. Search-space store
 
-Execute [`archive/corpus-search-space-store.md`](archive/corpus-search-space-store.md) S1–S6: the position-keyed
+Execute [`archive/corpus-search-space-store.md`](../archive/corpus-search-space-store.md) S1–S6: the position-keyed
 SQLite DAG (symmetry-canonical node keys — **decided**, with mirror-pair weight merging at
 symmetric nodes; full child lists as queryable edges; content-derived seeds), the **allocation
 plans** (`plans`/`plan_nodes`: every plan's per-node game targets stored, planned-vs-actual
@@ -513,7 +513,7 @@ event); the weight is a V14 arm.
 Size: ~32 × 12 B ≈ 400 B/row vs v1's ~100 B — a ~300 k-row stage-1 corpus is ~120 MB. Fine for R2
 and box RAM.
 
-**Effort:** ½ day. Update [`../07-DATA-STORAGE.md`](../07-DATA-STORAGE.md) in the same commit.
+**Effort:** ½ day. Update [`../07-DATA-STORAGE.md`](../../07-DATA-STORAGE.md) in the same commit.
 
 ## V7. CLI + diagnostics
 
@@ -662,7 +662,7 @@ budget (store D-e), which deepens where budgets now split and never invalidates 
 
 At a fixed position count, many openings once each or fewer openings several times? The literature
 leans breadth with a small per-opening threshold
-([`../research/corpus-generation-literature.md`](../research/corpus-generation-literature.md) §7),
+([`../research/corpus-generation-literature.md`](../../research/corpus-generation-literature.md) §7),
 and stage 1's allocation already sits between the extremes (mean ≈ 8 games/start). Because every
 start holds ≥ 2 and up to ~32 replicas, the ablation needs **zero extra generation** — it is two
 training subsets of the stage-1 corpus:
@@ -687,14 +687,14 @@ trade top-1 agreement against search-corrigibility, not to fix ordering), an **o
 (pure `outcome` vs the default blend), an **opening mix-weight arm** (V6 row-mix note), and one
 arm with the v1 corpus mixed in at ~25% as a mid-game supplement. Read held-out top-1 **and
 top-3**-vs-Pentobi and per-colour value calibration on the subtree-level holdout; net size from
-the [distillation-net-sizing](../research/distillation-net-sizing.md) provisional pick, re-checked
+the [distillation-net-sizing](../../research/distillation-net-sizing.md) provisional pick, re-checked
 against the larger corpus per D8's caveat.
 
 **Effort:** 1 day box GPU.
 
 ## V15. D8 ladder gate
 
-Unchanged from [`pentobi-distillation.md`](archive/pentobi-distillation.md) D8: `scripts/mini_ladder.py`,
+Unchanged from [`pentobi-distillation.md`](../archive/pentobi-distillation.md) D8: `scripts/mini_ladder.py`,
 L1–L9 × 50 games × 400 sims, the chosen net plus the v3 gen-40 baseline, **gate = +10 pp at any of
 L5–L7 after SL alone** — against book-enabled or book-free Pentobi per V11's verdict. If v2 clears
 it, Phase 3 (D9–D11) unblocks and the corpus scales via a re-plan top-up. If it fails a second

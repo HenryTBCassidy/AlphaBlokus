@@ -4,6 +4,12 @@ The index for `docs/plans/`. Read this first; it tells you which plans are live,
 workstream is for, and what the next decision is. Every plan doc is a checklist; this is the
 map over them.
 
+**Folder convention.** `docs/plans/` holds only what is **actively being worked**.
+`docs/plans/future/` holds plans that are real but parked — deliberately not started, with the
+reason recorded in each. `docs/plans/archive/` holds finished work, kept for context. A plan moves
+out of the top level the moment nobody is working it; if you find something at the top level that
+nobody is touching, move it rather than leaving it to rot.
+
 Last updated: 2026-08-10.
 
 ---
@@ -34,11 +40,11 @@ document and each maps to one commit.
 |---|---|---|
 | **Instruments** | archived | ✅ Done — PR #69 merged |
 | **Bug sweep** | archived | ✅ Done — PR #70 merged |
-| **Benchmark integrity** | `fair-pentobi-benchmark.md` — **arrives with PR #71**, not yet on main | 🔄 Code done in PR #71 (open, CI green); 3 of 11 items measured |
+| **Benchmark integrity** | [`fair-pentobi-benchmark.md`](fair-pentobi-benchmark.md) | 🔄 **Live.** Code merged (#71); F1–F7 done, **F9 the fair fight is the outstanding one** |
 | **Free measurements** | this file, below | 🔄 2 of 7 done; 1 slipped; the pilot is the gate on spending |
 | **Value head** | [`supervised-network-improvements.md`](supervised-network-improvements.md) N6/N7 | ⬜ Not started. **Now the most promising direction** |
-| Corpus v2 | [`pentobi-corpus-v2.md`](pentobi-corpus-v2.md) | ⏸ Parked — 9/16 done, needs a 3-day box run |
-| Auxiliary heads | [`score-auxiliary-target.md`](score-auxiliary-target.md) | ⏸ Parked — code built, A/B never run |
+| Corpus v2 | [`future/pentobi-corpus-v2.md`](future/pentobi-corpus-v2.md) | ⏸ Parked — 9/16 done, needs a 3-day box run |
+| Auxiliary heads | [`future/score-auxiliary-target.md`](future/score-auxiliary-target.md) | ⏸ Parked — code built, A/B never run |
 
 ---
 
@@ -71,12 +77,18 @@ The load-bearing conclusions, with what has changed since:
    Pentobi number in the project's history faced a book-free opponent. Fixed 2026-08-05 by
    symlinking the books; the strength this is worth is unmeasured (V11).
 6. **Level 9 is genuinely ~156 Elo stronger than level 7** (measured 2026-08-10, 200
-   colour-balanced games, engine vs engine). An earlier claim that Pentobi *saturates* above
-   level 7 was wrong — it came from three of our own ladder cells whose intervals are ±87 Elo
-   each.
-7. **Where the project actually stands:** the best net is ~280 Elo below level 9 once the
-   first-mover advantage is corrected for, and equal thinking time buys only ~70–145 Elo.
-   **Search is not the lever; the network is the constraint.**
+   colour-balanced games, engine vs engine, pooled score 0.710, CI [0.647, 0.773]). An earlier
+   claim that Pentobi *saturates* above level 7 was wrong — it came from three of our own ladder
+   cells whose intervals are ±87 Elo each. Realised effort is 13.9× between those levels, against
+   a tabled 25×, so quote realised effort whenever a ratio is load-bearing.
+7. **Where the project probably stands — but this is NOT yet measured fairly.** Every net-vs-Pentobi
+   number the project owns was taken at **400 simulations for us against Pentobi's own budget**,
+   with Pentobi thinking ~12× longer per move at level 9. On that footing the best net is ~280 Elo
+   below level 9 once first-mover advantage is corrected for. Estimating from the ~3.6 doublings of
+   thinking time involved, equal time would buy ~70–145 Elo — which would leave a gap, and is the
+   basis for "search is not the lever; the network is the constraint". **That estimate has never
+   been tested. F9 is the experiment that tests it and it has not been run.** Until it has, treat
+   the ranking of the value head above further search work as well-founded but not proven.
 
 Conclusion (6) plus (7) is why **Value head** is now ranked above further measurement.
 
@@ -90,7 +102,7 @@ one-command box runs, not multi-commit work.
 | ID | Item | State |
 |---|---|---|
 | M1 | Ladder the checkpoints around the best net, to check we warm-start from the right one | ✅ Done. gen-40 is the best; gen-32 ties it, gen-36 is worse. Question closed |
-| M2 | Eval-time search scaling at the top levels | ➡️ Superseded — became F9/F10 in `fair-pentobi-benchmark.md` (lands with PR #71) |
+| M2 | Eval-time search scaling at the top levels | ➡️ Superseded — became F9/F10 in [`fair-pentobi-benchmark.md`](fair-pentobi-benchmark.md) |
 | M3 | Learning-rate sweep on a frozen buffer | ⛔ **Blocked** — both historical replay buffers were deleted, and no generate-only entry point exists |
 | M4 | Width shadow test (`top_k` 64 vs 128) | Written on `feat/width-shadow-probe`, never run. Deferred until after the pilot by design — 15–30 box hours, informs a later run only |
 | M5 | bfloat16 vs float32 self-play A/B | ⚠️ **Slipped.** Harness exists (`scripts/validate_jax_search.py --dtype`), short, free, never run |

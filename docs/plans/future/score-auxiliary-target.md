@@ -2,7 +2,7 @@
 
 > **Status: PARKED (2026-08-10).** Code is built and merged; the A/B that would decide whether to
 > keep it (S7/S8) has never run. Three auxiliary heads are now in this position — built, default
-> off, unmeasured. Do not add a fourth before one is decided. See [`ROADMAP.md`](ROADMAP.md).
+> off, unmeasured. Do not add a fourth before one is decided. See [`ROADMAP.md`](../ROADMAP.md).
 
 Adds a third output to the Blokus net predicting the **final score margin**, trained
 alongside the existing policy and value heads and **never read at play time**. The aim is
