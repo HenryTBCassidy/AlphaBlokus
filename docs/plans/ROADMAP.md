@@ -81,7 +81,13 @@ The load-bearing conclusions, with what has changed since:
    claim that Pentobi *saturates* above level 7 was wrong — it came from three of our own ladder
    cells whose intervals are ±87 Elo each. Realised effort is 13.9× between those levels, against
    a tabled 25×, so quote realised effort whenever a ratio is load-bearing.
-7. **Where the project probably stands — but this is NOT yet measured fairly.** Every net-vs-Pentobi
+7. **The fair fight is measured (2026-08-11).** At equal thinking time, with Pentobi's book on, our
+   best net scores **0.315** at level 9 (CI [0.232, 0.411]) — so we lose, and it is resolved. Two
+   refinements to what was previously written here: 10× more search moved us from 0.22 to 0.315
+   against a *stronger* opponent, so **"search is not the lever" was too strong** — it is real but
+   insufficient. And the split by colour is the actual finding: **0.630 as first mover (we beat level
+   9), 0.000 as second mover across 50 games.** A colour-handling defect has not yet been ruled out.
+8. **Previously written here, now superseded by (7):** Every net-vs-Pentobi
    number the project owns was taken at **400 simulations for us against Pentobi's own budget**,
    with Pentobi thinking ~12× longer per move at level 9. On that footing the best net is ~280 Elo
    below level 9 once first-mover advantage is corrected for. Estimating from the ~3.6 doublings of
