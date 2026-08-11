@@ -32,3 +32,8 @@ docs/research/*.html
 *.gif
 *.webp
 
+# Local multi-agent working protocol (role charters, box queue, raw results).
+# How we work on this laptop, not project documentation. Deliberately untracked —
+# NOTE: this means a fresh worktree will not contain it, so sessions read it from
+# the main checkout by absolute path. Project *findings* belong in docs/, not here.
+agents/
