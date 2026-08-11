@@ -94,4 +94,5 @@ Point the new chat at its charter by absolute path and state its scope. For exam
 > the **value head** scope. Your plan is `docs/plans/supervised-network-improvements.md`, items
 > N6 and N7.
 
-The Integrator keeps the list of live scopes in [`scopes.md`](scopes.md).
+The Integrator keeps the list of live scopes in [`scopes.md`](scopes.md) and the state of every
+branch in [`branches.md`](branches.md).
