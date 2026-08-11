@@ -4,7 +4,14 @@ Workers append jobs here. The [GPU-runner](gpu-runner.md) drains it top-down wit
 moves finished entries to the Done log at the bottom with a pointer to
 [`box-results.md`](box-results.md).
 
-**There is one GPU.** Jobs run one at a time. A job without a **kill condition** gets bounced.
+**There is one GPU.** Jobs run one at a time.
+
+**Every job needs a stop condition.** Two kinds are acceptable, and the entry must say which:
+- **Fixed completion** — "run exactly this and stop" (a measurement whose every outcome is useful).
+- **Kill condition** — "stop early if X", for jobs that would otherwise continue into more arms.
+
+A job with neither gets bounced. So does a job whose **command is not copy-pasteable** — no prose, no
+brace expansion, no placeholders. If it needs three runs, write three commands.
 
 ## Format — copy this block
 
@@ -15,13 +22,24 @@ moves finished entries to the Done log at the bottom with a pointer to
 - **Question it answers:** <one sentence — what changes depending on the outcome>
 - **Command:** <exact command, including the config and every flag>
 - **Expected cost:** <wall-clock, workers, RAM>
-- **Kill condition:** <what result means stop rather than continue>
+- **Stop condition:** fixed-completion *or* kill-condition — say which, and what it is
 - **Prerequisites:** <other queue ids, or none>
 ```
 
 ---
 
 ## Pending
+
+### W1 — extend `--condition` beyond two values *(code task, not a box job)*
+- **For:** the benchmark scope — **Priority:** high, it blocks F10
+- **Why:** `--condition` accepts only `ladder` and `fair-fight`, but the queue already needs
+  `search-scaling`, `colour-check` and `book-delta`. The mechanism exists to keep incomparable scales
+  apart, and having only two labels forces genuinely different experiments to share a directory —
+  which is the thing it was built to prevent. F12 had to be run mislabelled as `fair-fight` for
+  exactly this reason.
+- **Where:** `CONDITION_DIRNAMES` in `scripts/pentobi_benchmark.py`; `is_longitudinal()` in
+  `evaluation/ladder_selection.py` must keep filtering everything except `ladder`.
+- **Not a box job** — listed here only because two queued jobs are blocked on it.
 
 ### F12 — is 0-for-50 as second mover real, or a colour-handling bug?
 - **Requested by:** benchmark — **Priority:** **critical** — it gates how F9 is read
@@ -43,24 +61,48 @@ moves finished entries to the Done log at the bottom with a pointer to
 - **Plan item:** `docs/plans/fair-pentobi-benchmark.md` F10
 - **Question it answers:** how many Elo does *our* net gain per doubling of its own search? Decides
   whether more search is a route to level 9 at all, and how far F9's single point can be extrapolated.
-- **Command:** `scripts/pentobi_benchmark.py --config run_configurations/blokus_cloud_v3_eval.json
-  --net accepted_40.pth.tar --levels 8,9 --games 100 --sims {400,1600,6400} --book
-  --condition search-scaling --workers 6 --seed 11` (three runs, one per sim count)
+- **Blocked on:** W1 below — `--condition` currently accepts only `ladder` and `fair-fight`, so a
+  search-scaling arm has nowhere to write that is not one of those two scales.
+- **Commands** (three runs, sequential; `<cond>` becomes `search-scaling` once W1 lands):
+  ```bash
+  uv run python scripts/pentobi_benchmark.py --config run_configurations/blokus_cloud_v3_eval.json \
+    --net accepted_40.pth.tar --levels 8,9 --games 100 --sims 400  --book --condition <cond> \
+    --workers 6 --seed 11 --out temp/benchmarks/f10_sims400.html
+  uv run python scripts/pentobi_benchmark.py --config run_configurations/blokus_cloud_v3_eval.json \
+    --net accepted_40.pth.tar --levels 8,9 --games 100 --sims 1600 --book --condition <cond> \
+    --workers 6 --seed 11 --out temp/benchmarks/f10_sims1600.html
+  uv run python scripts/pentobi_benchmark.py --config run_configurations/blokus_cloud_v3_eval.json \
+    --net accepted_40.pth.tar --levels 8,9 --games 100 --sims 6400 --book --condition <cond> \
+    --workers 6 --seed 11 --out temp/benchmarks/f10_sims6400.html
+  ```
 - **Expected cost:** ~10–14 h total at 6 workers. RAM ~22 GB.
-- **Kill condition:** if the 400→6,400 slope is under ~10 Elo per doubling, search is not the lever —
-  stop and do not add a 25,600 arm.
-- **Prerequisites:** none. **Note:** opening diversity shrinks as sims rise, so record distinct
-  ply-8 positions per arm; the noise floor grows along the treatment axis.
+- **Stop condition:** kill-condition — if the 400→6,400 slope is under ~10 Elo per doubling, search
+  is not the lever; stop and do not add a 25,600 arm.
+- **Prerequisites:** W1. **Note:** opening diversity shrinks as sims rise, so record distinct ply-8
+  positions per arm; the noise floor grows along the treatment axis.
 
 ### F11 — what is Pentobi's opening book worth?
 - **Requested by:** benchmark — **Priority:** medium
 - **Plan item:** `docs/plans/fair-pentobi-benchmark.md` F11 (= `future/pentobi-corpus-v2.md` V11)
 - **Question it answers:** converts every historical book-free number onto the "as shipped" scale.
   Without it, pre- and post-2026-08-05 results sit on two scales with an unknown offset.
-- **Command:** `twogtp` book-on L9 vs book-off L9, **two colour-swapped batches of 100** (twogtp has
-  no colour-alternation flag, and Duo's first mover takes ~75% of decisive games).
-- **Expected cost:** ~4 h, 6 engines, no GPU.
-- **Kill condition:** none needed — any result is informative.
+- **Commands** (two batches, colour-swapped — `twogtp` has no colour-alternation flag and Duo's first
+  mover takes ~75% of decisive games, so an unswapped run measures colour, not the book):
+  ```bash
+  P=/home/henry/code/pentobi/build/pentobi_gtp/pentobi-gtp
+  O=/home/henry/AlphaBlokus/temp/benchmarks/f11 && mkdir -p $O
+  cd ~/code/pentobi/build/twogtp
+  ./twogtp --game duo --nugames 100 --threads 3 \
+    --black "$P --game duo --level 9 --quiet"          \
+    --white "$P --game duo --level 9 --quiet --nobook" --file $O/A_bookfirst
+  ./twogtp --game duo --nugames 100 --threads 3 \
+    --black "$P --game duo --level 9 --quiet --nobook" \
+    --white "$P --game duo --level 9 --quiet"          --file $O/B_nobookfirst
+  ```
+  Result column in the `.dat` files is **black's** score (1 win / 0.5 draw / 0 loss).
+- **Expected cost:** ~4 h, 6 engines (~12 GB — each L9 engine preallocates ~1.9 GB), no GPU.
+- **Stop condition:** fixed-completion — both 100-game batches finish. Every outcome is informative,
+  so there is nothing to kill early on.
 - **Prerequisites:** none.
 
 ### M5 — bfloat16 vs float32 self-play A/B
@@ -72,7 +114,7 @@ moves finished entries to the Done log at the bottom with a pointer to
 - **Command:** `scripts/validate_jax_search.py --dtype bfloat16` and `--dtype float32`, same
   checkpoint and positions.
 - **Expected cost:** hours.
-- **Kill condition (pre-registered):** ≥99% top-64 overlap **and** target-distribution KL below the
+- **Stop condition:** fixed-completion, judged against a pre-registered rule — ≥99% top-64 overlap **and** target-distribution KL below the
   noise floor closes the question. Anything worse and self-play moves to fp32 or a mixed policy.
 - **Prerequisites:** none.
 

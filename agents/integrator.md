@@ -12,7 +12,11 @@ incentive to notice.
 
 - `docs/plans/ROADMAP.md` — **you are the only session that edits this**
 - `AGENTS.md`
-- `agents/**` (this folder), including [`scopes.md`](scopes.md)
+- `agents/` **charters and registers**: the four role charters, [`scopes.md`](scopes.md),
+  [`branches.md`](branches.md), [`README.md`](README.md)
+- **Not** the hand-off files. [`box-queue.md`](box-queue.md) is appended to by Workers and drained by
+  the GPU-runner; [`box-results.md`](box-results.md) is written by the GPU-runner. You may read them
+  and you may flag problems, but the protocol requires those roles to write them.
 - Branch and PR hygiene across the repo
 
 ## Standing jobs

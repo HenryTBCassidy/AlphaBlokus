@@ -63,9 +63,19 @@ these, it did not happen.
 **1. One session owns the box.** There is one GPU. Only the GPU-runner starts box jobs. Two jobs on
 one GPU corrupt each other's timings and can OOM the machine — both have happened.
 
-**2. File ownership is exclusive.** Your charter lists what you own. Do not edit another role's
-files; raise it instead. `src/alphablokus/config.py` is the one shared file — flag it in your PR
-title when you touch it.
+**2. File ownership is exclusive, with three named exceptions.** Your charter lists what you own.
+Do not edit another role's files; raise it instead.
+
+The exceptions exist because the hand-offs require them:
+
+| File | Who writes it |
+|---|---|
+| [`box-queue.md`](box-queue.md) | **Workers append** job requests; the **GPU-runner** moves entries to Done |
+| [`box-results.md`](box-results.md) | **GPU-runner** only. Everyone else reads |
+| `src/alphablokus/config.py` | Any scope — but flag it in the PR title |
+
+Everything else in `agents/` — the charters, [`scopes.md`](scopes.md), [`branches.md`](branches.md) —
+is the Integrator's.
 
 **3. Never commit to `main`.** Branch as `feat/<scope>-<what>`. Never check out another session's
 branch. Work in your own worktree.
