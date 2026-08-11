@@ -1,10 +1,25 @@
 # Supervised-phase network improvements
 
 > **Status: N6/N7 ARE THE PRIORITY (2026-08-10).** This document is the home of the **value head**
-> workstream (formerly "Stream D"). N6 (outcome-balanced value sampling, weighted *conditionally
-> on colour*) and N7 (win/draw/loss head) are the next work on the project, because the 2026-08
-> investigation found the network — not search — is the constraint. Read
-> [`ROADMAP.md`](ROADMAP.md) for the prerequisite and the trap in N6 before starting.
+> workstream (formerly "Stream D"), because the 2026-08 investigation found the network — not
+> search — is the constraint.
+>
+> **N6 has two halves and the first is the better-evidenced one.** Read them in this order:
+>
+> 1. **Teacher-value λ-blend** — blend the outcome label with the search's own evaluation of that
+>    position. [`../research/alphazero-technique-review.md`](../research/alphazero-technique-review.md)
+>    ranks this **#1 of nine** techniques, with Stockfish NNUE (λ ≈ 0.7) and Lc0's Q-ratio as
+>    precedent. It attacks target *variance*: today a position 30 moves from the end is labelled
+>    only by who eventually won.
+> 2. **Outcome-balanced sampling**, weighted *conditionally on colour*. This is the standard ML
+>    answer to class imbalance, but note it discards true information — the first mover really does
+>    win ~73% of the time — so it trades one bias for another.
+>
+> A 2026-08-11 edit of this banner described N6 as only the balancing half, which led to the blend
+> being re-proposed later as though it were new. It was always N6.
+>
+> Read [`ROADMAP.md`](ROADMAP.md) for the shared prerequisite (positions do not record whose turn
+> it is) and the trap in the balancing half before starting.
 
 Turns the shortlist in [`../research/alphazero-technique-review.md`](../research/alphazero-technique-review.md)
 §3A/§3B into sequenced work. Everything here acts on the **stage-1 v2 corpus** and can therefore
