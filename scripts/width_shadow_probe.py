@@ -241,9 +241,18 @@ def main() -> None:
             root_log_pi = jnp.where(masks, log_pi, -jnp.inf)
             root_logits, root_ids = topk_legal(root_log_pi)
             root = mctx.RootFnOutput(prior_logits=root_logits, value=root_value, embedding=(states, root_ids))
+            # Split the key exactly as production ``search.make_search`` does
+            # (``noise_key, search_key = jax.random.split(rng_key)``) and use the
+            # second half. Passing ``rng_key`` straight through would give this
+            # tree a *different* Gumbel draw from the production search that
+            # produced the chosen action — so metric (c), the completed-Q delta on
+            # shared moves, would compare an action chosen in one search against Q
+            # values from an unrelated one. The whole probe rests on both searches
+            # seeing identical randomness.
+            _noise_key, search_key = jax.random.split(rng_key)
             policy_output = mctx.gumbel_muzero_policy(
                 params=p,
-                rng_key=rng_key,
+                rng_key=search_key,
                 root=root,
                 recurrent_fn=recurrent_fn,
                 num_simulations=args.sims,
@@ -285,7 +294,6 @@ def main() -> None:
         chosen_i = int(ri.chosen_global[0])
         changed = chosen_c != chosen_i
 
-        rank65_128_ids = ids_i[args.top_k_control :]
         rank65_128_visits = np.asarray(ri.visit_counts[0])[args.top_k_control :]
         entered_mask = rank65_128_visits > 0
         counts["b_rank65_128_slots_entered"] += int(entered_mask.sum())
