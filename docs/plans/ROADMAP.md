@@ -34,22 +34,6 @@ document and each maps to one commit.
 
 ---
 
-## How the work is split
-
-The project runs as **separate Claude Code sessions**, one per workstream, each pointed at its own
-charter in [`workstreams/`](workstreams/). Start there before starting anything:
-
-| Session | Charter | Owns | Box? |
-|---|---|---|---|
-| **Benchmark** | [`workstreams/benchmark.md`](workstreams/benchmark.md) | How strong we are; keeping the instruments honest | **exclusively** |
-| **Value head** | [`workstreams/value-head.md`](workstreams/value-head.md) | The network's "who's winning?" estimate, and its data plumbing | on request |
-| **Integrator** | [`workstreams/integrator.md`](workstreams/integrator.md) | This file, `AGENTS.md`, PR review, branch hygiene | no |
-
-[`workstreams/README.md`](workstreams/README.md) is the contract between them: file ownership, who
-owns the box, and the rule that findings go in files rather than chat.
-
----
-
 ## Status at a glance
 
 | Workstream | Plan doc | State |
