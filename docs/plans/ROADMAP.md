@@ -121,14 +121,21 @@ There is no way to generate self-play data without also training on it — every
 would unblock M3, supply a fresh held-out eval set, and settle whether the value head *degraded*
 or was merely graded against another net's games. It has not been written.
 
-### M6's threshold needs restating before it runs
+### M6's success bar, restated as a difference (2026-08-11)
 
-The pilot's pre-registered bar is "weighted ladder ≥ 0.375 at generation 15" against a 0.344
-baseline. **Both numbers counted draws as losses.** PR #71 scores a draw as half a win, which
-lifts every historical figure by 0.7–1.0 pp (measured on this project's own ladder files). Until
-the threshold is restated on the new convention the pre-registration is void — and
-pre-registration is the only thing standing between this run and the post-hoc reasoning that
-already cost three paid runs.
+The old bar was an absolute "weighted ladder ≥ 0.375" against a 0.344 baseline. Both numbers
+counted draws as losses; PR #71 scores a draw as half a win, which lifts every historical figure
+by 0.7–1.0 pp, so an absolute bar silently got easier. Absolute thresholds rot every time the
+measurement changes, and this measurement has now changed once.
+
+**The bar is therefore a difference, measured on one scale:** the pilot succeeds if its best
+checkpoint beats the warm-start checkpoint by **≥ 0.031 weighted ladder score, both measured under
+the same scoring convention and the same level range**. That is the original intent (0.375 − 0.344)
+expressed so it cannot drift again.
+
+**The real goal, stated plainly, is Henry's:** in a fair fight — equal thinking time, Pentobi as
+shipped with its book — does our net win the majority of games? The weighted ladder is a
+progress-tracking instrument, not the goal. F9 answers the goal directly.
 
 ---
 

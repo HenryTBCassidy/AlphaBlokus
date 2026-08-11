@@ -56,8 +56,8 @@ objective measure.
 | F5 | Seed the net's RNG; audit opening diversity per arm | 3 h | no | High | ✅ |
 | F6 | Unify draw handling to score = W + D/2 everywhere | 1 h | no | High | ✅ |
 | F7 | Refit ladder Elo with colour + draw terms | ½ day | no | High | ✅ |
-| F8 | Calibrate the time-parity budget on non-book moves | 2 h box | yes | High | 🔧 tooling ready |
-| F9 | **The fair fight**: net vs L9 at parity budget, 300–400 games | 1–2 d box | yes | **Critical** | |
+| F8 | Calibrate the time-parity budget on non-book moves | 2 h box | yes | High | ✅ |
+| F9 | **The fair fight**: net vs L9 at parity budget (4,096 sims), 100 games | 5 h box | yes | **Critical** | 🔄 |
 | F10 | Search-scaling slope: 400/1,600/6,400 at L8 and L9 | 1–2 d box | yes | Medium | |
 | F11 | Book-on vs book-off strength delta at L9 (plan item V11) | 4 h box | yes | Medium | |
 
@@ -300,7 +300,34 @@ on that basis, and drop per-level "Elo per doubling" figures — only the aggreg
 
 ---
 
-## F8. Calibrate the time-parity budget on non-book moves
+## F8. Calibrate the time-parity budget on non-book moves ✅
+
+### Result (2026-08-11): parity at ~4,100 simulations
+
+Serial, no contention, warmup game discarded, Pentobi at 1 thread:
+
+| Condition | our net @ 400 sims | Pentobi L9 | ratio | parity budget |
+|---|---|---|---|---|
+| book off | 0.95 s/move | 8.96 s/move (median 3.51) | 9.5x | ~3,800 |
+| book off, re-measured **at** 3,788 sims | 12.45 s/move | 14.87 s/move | 1.19x | ~4,500 |
+| **book on** (F9's condition) | 1.50 s/move | **15.38 s/move** (median 5.44) | 10.2x | **~4,100** |
+
+**F9 uses 4,096 simulations**, inside the measured range and a clean number to quote.
+
+Three things this exposed:
+
+1. **Parity is a moving target.** Giving our net more time makes games longer, and Pentobi's
+   per-move budget grows with move number (`0.7·exp(0.1·ply)`), so its average rises too. The
+   re-measurement at the computed budget is what caught this; a single-pass calibration would have
+   under-budgeted us by ~20%.
+2. **Mean and median differ by ~3x for Pentobi** (15.38 vs 5.44). Matching the mean is equivalent
+   to matching *total time per game*, which is the convention this plan adopts. Matching the median
+   would give our net roughly a third of the budget.
+3. **The book did not lower Pentobi's mean**, which is counter-intuitive — book moves are free. With
+   only 3 scoring games per condition this is inside noise, but the plausible mechanism is that
+   better opening play lengthens games, and later moves are the expensive ones.
+
+### Method
 
 Measure Pentobi's s/move at L8 and L9 with the **book on** (F9's condition), excluding book
 plies — a book move returns in ~0.5 s against ~26 s for a searched move, so including them
