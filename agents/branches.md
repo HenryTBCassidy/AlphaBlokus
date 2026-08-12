@@ -9,7 +9,7 @@ and another was closed by mistake while holding the config the box was actively 
 
 Naming: `feat/<scope>-<what>`, `chore/<what>`, `docs/<what>`. Never work directly on `main`.
 
-Last reconciled: 2026-08-11.
+Last reconciled: 2026-08-12.
 
 ---
 
@@ -17,10 +17,8 @@ Last reconciled: 2026-08-11.
 
 | Branch | PR | Ahead | Holds | Waiting on |
 |---|---|---|---|---|
-| `feat/eval-config-and-fair-fight` | **#73** | +8 | Eval config the box runs against, `docs/10-EVALUATION-SPEC.md`, F8 parity record, pilot-bar restatement, N6 banner fix, M2/F9 de-duplication | Codex review, then merge |
-| `chore/track-agents-protocol` | — | +2 | `agents/` protocol tracked instead of ignored (this file, the charters, the queue, the results log) | Henry's read, then merge. **Docs only — no code to review** |
-| `feat/benchmark-f9-result` | — | +1 | F9's result recorded in the plan and roadmap, including the colour split | Merge after #73 (touches the same plan file) |
-| `feat/width-shadow-probe` | — | +1, **−30 behind** | `scripts/width_shadow_probe.py` — 445 lines, **never reviewed, never run**. The deferred width experiment (M4) | Codex review in flight. Needs rebasing before it could run |
+| `feat/width-shadow-probe` | **#76** | +2 | The width probe, reviewed and both findings fixed | CI (a `ruff format` failure is fixed; `ruff check` alone is not enough) |
+| `docs/parity-verified` | — | +1 | The book-on parity verification at 4,096 sims | Merge |
 
 ## Rules that have been learned the hard way
 
@@ -34,6 +32,10 @@ Last reconciled: 2026-08-11.
    reviewing markdown. They still need a human read.
 4. **A branch more than ~10 commits behind main needs rebasing before its code can be trusted** —
    a review against stale main produces noise.
+5. **`ruff check` is not the lint gate — `ruff format --check src tests scripts` is the other half.**
+   A branch passed the first and failed CI on the second.
+6. **Merge means merge.** Raising a PR and reporting it as done is not the same thing; if the
+   instruction was to merge, merge it or say why you cannot.
 
 ## Merge order when several are open
 
@@ -45,6 +47,9 @@ because #73 and the F9 record both edit `docs/plans/fair-pentobi-benchmark.md`.
 
 | PR | Branch | What |
 |---|---|---|
+| #75 | `feat/benchmark-f9-result` | F9's fair-fight result and its colour split |
+| #74 | `chore/track-agents-protocol` | The agents protocol, tracked; five review findings fixed |
+| #73 | `feat/eval-config-and-fair-fight` | Eval config, evaluation spec, F8 calibration, plan corrections |
 | #72 | `docs/roadmap-and-stream-names` | ROADMAP, workstream names, investigation rescued into `docs/research/` |
 | #71 | `feat/fair-pentobi-benchmark` | Benchmark rework: book activation, condition separation, draw scoring, colour-aware Elo |
 | #70 | `audit/fable-bug-sweep-stream-c` | Exact tests for the Gumbel path and optimizer continuation |
