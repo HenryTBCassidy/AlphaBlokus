@@ -314,6 +314,26 @@ Serial, no contention, warmup game discarded, Pentobi at 1 thread:
 
 **F9 uses 4,096 simulations**, inside the measured range and a clean number to quote.
 
+### Verified at the budget actually used (2026-08-12)
+
+A reviewer caught that the book-on parity budget was extrapolated from a 400-simulation measurement
+and never re-verified — even though the book-off pass had already shown single-pass extrapolation to
+be ~19% out. That criticism was correct: the verification had not been done. It has now, at 4,096
+simulations with the book on and F9's exact settings:
+
+| | s/move (mean) | s/move (median) |
+|---|---|---|
+| our net @ 4,096 sims | **13.73** | 14.01 |
+| Pentobi L9, book on | **14.50** | 8.53 |
+
+Ratio **1.06×**, so true parity is ~4,324 simulations and F9 ran 5% under it — worth roughly 2–3 Elo
+at any plausible Elo-per-doubling. **F9's "equal thinking time" claim stands**, and the small error
+is in our disfavour, so 0.315 is if anything a floor.
+
+The general lesson holds regardless: **always re-measure at the computed budget.** Book-off it
+mattered (19% out); book-on it did not (6%). You cannot tell which case you are in without checking.
+
+
 Three things this exposed:
 
 1. **Parity is a moving target.** Giving our net more time makes games longer, and Pentobi's
