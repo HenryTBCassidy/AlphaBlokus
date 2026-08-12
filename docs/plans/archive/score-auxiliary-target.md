@@ -1,8 +1,9 @@
 # Score head — an auxiliary training target for the value body
 
-> **Status: PARKED (2026-08-10).** Code is built and merged; the A/B that would decide whether to
-> keep it (S7/S8) has never run. Three auxiliary heads are now in this position — built, default
-> off, unmeasured. Do not add a fourth before one is decided. See [`ROADMAP.md`](../ROADMAP.md).
+> **ARCHIVED 2026-08-12 — superseded by [`../network-experiments.md`](../network-experiments.md).**
+> S1–S6 built the score head; the A/B that would have decided it (S7/S8) never ran, and the one
+> comparison attempted was invalid. The decision now lives in the successor as E2/E3, alongside the
+> other two undecided heads.
 
 Adds a third output to the Blokus net predicting the **final score margin**, trained
 alongside the existing policy and value heads and **never read at play time**. The aim is

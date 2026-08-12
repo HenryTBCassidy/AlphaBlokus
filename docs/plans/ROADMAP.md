@@ -34,19 +34,47 @@ document and each maps to one commit.
 
 ---
 
-## Status at a glance
+## The five active plans
 
-| Workstream | Plan doc | State |
-|---|---|---|
-| **Instruments** | archived | ✅ Done — PR #69 merged |
-| **Bug sweep** | archived | ✅ Done — PR #70 merged |
-| **Benchmark integrity** | [`fair-pentobi-benchmark.md`](fair-pentobi-benchmark.md) | 🔄 **Live.** Code merged (#71); F1–F7 done, **F9 the fair fight is the outstanding one** |
-| **Free measurements** | this file, below | 🔄 2 of 7 done; 1 slipped; the pilot is the gate on spending |
-| **Value head** | [`supervised-network-improvements.md`](supervised-network-improvements.md) N6/N7 | ⬜ Not started. **Now the most promising direction** |
-| Corpus v2 | [`future/pentobi-corpus-v2.md`](future/pentobi-corpus-v2.md) | ⏸ Parked — 9/16 done, needs a 3-day box run |
-| Auxiliary heads | [`future/score-auxiliary-target.md`](future/score-auxiliary-target.md) | ⏸ Parked — code built, A/B never run |
+Each is owned by one **scope**, executed by the roles in [`../../agents/README.md`](../../agents/README.md).
+Every checklist row names the roles that carry it — see the Role column in
+[`../guides/PLAN-FORMAT.md`](../guides/PLAN-FORMAT.md).
+
+| Plan | Scope | What it answers | Depends on |
+|---|---|---|---|
+| [`evaluation-instruments.md`](evaluation-instruments.md) | `instruments` | How strong are we, and is the measurement honest? | nothing |
+| [`selfplay-data-and-loop.md`](selfplay-data-and-loop.md) | `data-loop` | Does the training loop improve the net at all? | nothing |
+| [`value-head.md`](value-head.md) | `value-head` | Why can the net not play from behind? | `data-loop` D1 |
+| [`network-experiments.md`](network-experiments.md) | `network` | Do auxiliary targets help, and is the trunk the constraint? | nothing |
+| [`corpus-scale-up.md`](corpus-scale-up.md) | `corpus` | Does more data help? (**measured: yes**) | nothing |
+
+**Three can run at once** — `instruments`, `network` and `corpus` are mutually independent; `data-loop`
+runs alongside them and unblocks `value-head`. All five compete for one GPU, so the queue is the real
+constraint, not the number of sessions.
+
+### The one hard dependency
+
+`data-loop` **D1** — recording whose turn it is on every stored position — must land before **D3**
+generates any data. Both replay buffers were deleted, so the schema change is nearly free right now and
+that window shuts the moment new data exists. `value-head` cannot start until D1 lands.
+
+### The tension worth arbitrating
+
+`corpus-scale-up` carries the only *measured* priority claim in the project: we are data-limited, and
+"generate more games" outranks all technique work. Everything in `network-experiments` and `value-head`
+is technique work. The resolution taken here is to run corpus generation as the **background stream** —
+it is a 3-day box job needing little attention — rather than to pause the technique work behind it.
 
 ---
+
+## Status at a glance
+
+| Workstream | State |
+|---|---|
+| Instruments (was Stream A) | ✅ Done — PR #69 |
+| Bug sweep (was Stream C) | ✅ Done — PR #70 |
+| Benchmark integrity (F1–F9) | ✅ Done — [`archive/fair-pentobi-benchmark.md`](archive/fair-pentobi-benchmark.md); remainder is `instruments` I2/I3 |
+| The five plans above | 🔄 Reorganised 2026-08-12, none started |
 
 ## What we learned in the 2026-08 investigation
 
@@ -97,83 +125,6 @@ The load-bearing conclusions, with what has changed since:
    the ranking of the value head above further search work as well-founded but not proven.
 
 Conclusion (6) plus (7) is why **Value head** is now ranked above further measurement.
-
----
-
-## Free measurements — the remaining items
-
-These were "Stream B". All cost £0. Kept here rather than in their own plan because most are
-one-command box runs, not multi-commit work.
-
-**Not listed here:** anything about *how fairly* we measure against Pentobi — including the
-equal-thinking-time comparison — lives in
-[`fair-pentobi-benchmark.md`](fair-pentobi-benchmark.md) as F1–F11, and nowhere else. An earlier
-version of this table carried a "superseded, became F9" row, which meant the same experiment
-appeared twice under two labels. One home per item.
-
-| ID | Item | State |
-|---|---|---|
-| M1 | Ladder the checkpoints around the best net, to check we warm-start from the right one | ✅ Done. gen-40 is the best; gen-32 ties it, gen-36 is worse. Question closed |
-| M3 | Learning-rate sweep on a frozen buffer | ⛔ **Blocked** — both historical replay buffers were deleted, and no generate-only entry point exists |
-| M4 | Width shadow test (`top_k` 64 vs 128) | Written on `feat/width-shadow-probe`, never run. Deferred until after the pilot by design — 15–30 box hours, informs a later run only |
-| M5 | bfloat16 vs float32 self-play A/B | ⚠️ **Slipped.** Harness exists (`scripts/validate_jax_search.py --dtype`), short, free, never run |
-| M6 | **The pilot** — 15–20 generations with a healthy training step | ⬜ Not run. Config is on main (`run_configurations/blokus_pilot_b6.json`). **This is the gate on all spending** |
-| M7 | Games-per-generation arm | ⬜ Optional second arm of M6 |
-
-### M3's blocker, stated once
-
-There is no way to generate self-play data without also training on it — every path calls
-`generate_games` then trains. A generate-only job (~5,000 games, frozen weights, ~80 min, £0)
-would unblock M3, supply a fresh held-out eval set, and settle whether the value head *degraded*
-or was merely graded against another net's games. It has not been written.
-
-### M6's success bar, restated as a difference (2026-08-11)
-
-The old bar was an absolute "weighted ladder ≥ 0.375" against a 0.344 baseline. Both numbers
-counted draws as losses; PR #71 scores a draw as half a win, which lifts every historical figure
-by 0.7–1.0 pp, so an absolute bar silently got easier. Absolute thresholds rot every time the
-measurement changes, and this measurement has now changed once.
-
-**The bar is therefore a difference, measured on one scale:** the pilot succeeds if its best
-checkpoint beats the warm-start checkpoint by **≥ 0.031 weighted ladder score, both measured under
-the same scoring convention and the same level range**. That is the original intent (0.375 − 0.344)
-expressed so it cannot drift again.
-
-**The real goal, stated plainly, is Henry's:** in a fair fight — equal thinking time, Pentobi as
-shipped with its book — does our net win the majority of games? The weighted ladder is a
-progress-tracking instrument, not the goal. F9 answers the goal directly.
-
----
-
-## Value head — the case for doing this next
-
-Was "Stream D". Its two live items already exist as **N6** and **N7** in
-[`supervised-network-improvements.md`](supervised-network-improvements.md); that document is the
-home, and the duplicate ideas registered in `IDEAS.md` (I8) should not be worked separately.
-
-| Item | What | Prerequisite |
-|---|---|---|
-| **N6** | Outcome-balanced value sampling, weighted **conditionally on colour** | Positions do not record whose turn it is |
-| **N7** | Win/draw/loss value head instead of one scalar | Follows N6 |
-
-**The trap in N6.** The skew lives in `P(win \| White to move) ≈ 0.73` while the *marginal* label
-split is ~50/50. So balancing the marginal does nothing at all — the weighting has to be
-conditional on colour. Three auxiliary heads have already been built and measured as doing
-nothing; this is the same failure mode waiting to happen.
-
-**The prerequisite.** `ProcessedExample` is `tuple[compact_board, (indices, probs), value]` — no
-colour. Two routes:
-
-- Derive it with `infer_mover_colour()`, which exists. Cheap, but its own docstring notes the
-  parity it relies on "breaks and the colour is genuinely unrecoverable" once a player has
-  passed — and passing happens in the **endgame**, precisely where the value target matters most.
-- Thread the true player through `episode.py` → self-play store → replay buffer → dataset. Exact,
-  and it also removes the workaround in the colour-value diagnostic.
-
-Take the second. **Both replay buffers being deleted means there is no legacy data to migrate**,
-so the schema change is unusually cheap right now, and that window closes the moment new data is
-generated. This is a live ordering argument: do the plumbing *before* the generate-only job, or
-the one dataset everything depends on will lack the column.
 
 ---
 

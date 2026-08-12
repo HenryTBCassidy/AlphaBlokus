@@ -1,5 +1,11 @@
 # Fair Pentobi benchmarking
 
+> **ARCHIVED 2026-08-12 — superseded by [`../evaluation-instruments.md`](../evaluation-instruments.md).**
+> F1–F9 landed here and their results are recorded below: the opening-book defect, Pentobi's simulation
+> table, the L7-vs-L9 measurement, the parity calibration, and **the fair fight** (0.315 at level 9 at
+> equal thinking time, with the 0.63 / 0.00 colour split). The two unfinished rows, F10 and F11, moved
+> to the successor as I2 and I3. **Read this for the results; plan new work there.**
+
 The ladder gives our net a fixed 400 MCTS simulations per move and Pentobi a fixed `--level N`.
 Both are search-effort settings and the two efforts are unrelated, so the ladder has never
 controlled for how much either side thinks. At level 9 Pentobi searches 5,546,695 simulations
@@ -9,9 +15,9 @@ It also fixes a discovered defect: **Pentobi's opening book has never been activ
 number the project has ever quoted is against a weaker-than-shipped opponent.
 
 Prerequisites: none. Everything through F6 is £0 and most of it needs no GPU.
-Companion docs: [`05-EVALUATION.md`](../05-EVALUATION.md),
-[`pentobi-corpus-v2.md`](future/pentobi-corpus-v2.md) (fact 13 — the book), and
-[`plan-format`](../guides/PLAN-FORMAT.md).
+Companion docs: [`05-EVALUATION.md`](../../05-EVALUATION.md),
+[`pentobi-corpus-v2.md`](../../../.claude/worktrees/worktree-checkbox-meaning-2134d9/docs/plans/pentobi-corpus-v2.md) (fact 13 — the book), and
+[`plan-format`](../../guides/PLAN-FORMAT.md).
 
 ---
 

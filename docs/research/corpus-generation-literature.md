@@ -1,7 +1,7 @@
 # Engine-generated training corpora — what the literature says (2026-07-28)
 
 Research supporting the v2 Pentobi-distillation corpus design
-([`../plans/pentobi-corpus-v2.md`](../plans/future/pentobi-corpus-v2.md)) and the search-space store
+([`../plans/pentobi-corpus-v2.md`](../../.claude/worktrees/worktree-checkbox-meaning-2134d9/docs/plans/pentobi-corpus-v2.md)) and the search-space store
 ([`../plans/archive/corpus-search-space-store.md`](../plans/archive/corpus-search-space-store.md)). The question —
 how to build a supervised corpus from a strong engine's play, and how to trade opening breadth
 against per-opening replication — is decades old; this note collects what the strongest prior
