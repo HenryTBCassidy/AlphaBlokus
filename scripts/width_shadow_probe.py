@@ -260,9 +260,7 @@ def main() -> None:
                 max_num_considered_actions=args.considered,
             )
             tree = policy_output.search_tree
-            completed_q = jax.vmap(mctx.qtransform_completed_by_mix_value, in_axes=[0, None])(
-                tree, tree.ROOT_INDEX
-            )
+            completed_q = jax.vmap(mctx.qtransform_completed_by_mix_value, in_axes=[0, None])(tree, tree.ROOT_INDEX)
             return root_ids, policy_output, completed_q
 
         return jax.jit(run)
