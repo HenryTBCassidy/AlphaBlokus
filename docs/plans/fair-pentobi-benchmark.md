@@ -346,7 +346,45 @@ time** is the more defensible convention.
 
 ---
 
-## F9. The fair fight: net vs L9 at parity budget
+## F9. The fair fight: net vs L9 at parity budget ✅
+
+### Result (2026-08-11): we do not win the majority — but the colour split is the finding
+
+100 games, 4,096 simulations (F8's parity budget), Pentobi level 9 with its **book on** (probe
+confirmed engaged), 6 workers, 7,407 s.
+
+| | W | L | D | games | score |
+|---|---|---|---|---|---|
+| **Total** | 30 | 67 | 3 | 100 | **0.315**, 95% CI [0.232, 0.411] |
+| as **White** (first mover) | 30 | 17 | 3 | 50 | **0.630** |
+| as **Black** (second mover) | **0** | 50 | 0 | 50 | **0.000** |
+
+**1. At equal thinking time we lose, and it is resolved.** The interval's upper bound is 0.411, so
+0.5 is excluded. "Does our best net beat Pentobi level 9 in a fair fight?" — no.
+
+**2. But search helped materially, and an earlier claim here was too strong.** At 400 simulations
+book-free the same net scored 0.22 at level 9; at parity it scores 0.315 — **against a Pentobi that
+now has its opening book**, i.e. a stronger opponent. So "search is not the lever" overstated it:
+10× more search is worth real strength. It is not *enough*, which is a different claim.
+The book's Elo value is unmeasured (F11), so the improvement cannot yet be split between "more
+search" and "harder opponent".
+
+**3. The colour split is the substantive result.** As first mover our net **beats level 9** (0.630).
+As second mover it won **zero of fifty games**, consistently across all six independent chunks.
+
+This is the sharpest corroboration yet of the value-head hypothesis. A value head that evaluates
+positions by "am I the first mover?" would play the advantaged side competently and have no usable
+signal from behind — which is exactly this shape. Note this is the **first run that recorded the
+colour split at all** (the telemetry landed in the benchmark rework), so we cannot say whether the
+pattern is new or has always been hidden inside the pooled ladder numbers.
+
+**Caveat that must be closed before strategy is built on it.** A 0-for-50 cell is extreme enough to
+be a defect rather than a finding, and this project has had colour-convention confusion before (GTP
+`b` is our White). The cheap decisive check is queued: play our net as second mover against a *weak*
+Pentobi. If it wins there, colour handling is fine and 0/50 is strength; if it loses to level 1 as
+Black, it is a bug.
+
+
 
 The direct answer to "how strong are we really", with no extrapolation.
 
