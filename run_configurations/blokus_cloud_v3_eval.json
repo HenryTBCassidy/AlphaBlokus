@@ -1,0 +1,40 @@
+{
+  "game": "blokusduo",
+  "run_name": "blokus_cloud_v3",
+  "seed": 42,
+  "num_generations": 0,
+  "num_eps": 0,
+  "root_directory": "./temp/",
+  "load_model": true,
+  "num_parallel_workers": 8,
+  "temp_threshold": 12,
+  "update_threshold": 0.55,
+  "num_arena_matches": 0,
+  "net_config": {
+    "preset": "large",
+    "learning_rate": 0.00025,
+    "dropout": 0.3,
+    "epochs": 1,
+    "batch_size": 1024,
+    "cuda": true,
+    "lr_scheduler": "cosine",
+    "lr_eta_min": 0.0001,
+    "policy_head": "conv",
+    "fp16_inference": true,
+    "perf": {
+      "autocast_dtype": "bf16",
+      "tf32": true,
+      "cudnn_benchmark": true,
+      "channels_last": true,
+      "compile": true
+    }
+  },
+  "mcts_config": {
+    "num_mcts_sims": 400,
+    "cpuct": 2.5,
+    "mcts_batch_size": 16,
+    "search_policy": "puct",
+    "sim_schedule": "flat",
+    "dirichlet_epsilon": 0.0
+  }
+}

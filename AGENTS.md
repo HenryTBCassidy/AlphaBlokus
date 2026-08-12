@@ -141,6 +141,7 @@ docs/
 ├── 07-DATA-STORAGE.md       # Parquet format, metrics tables, checkpoints
 ├── 08-TRAINING-ESTIMATES.md # Pre-optimisation cost model (superseded; kept for methodology)
 ├── 09-COMPUTE-OPTIONS.md    # Local + cloud hardware, cost per run, phasing
+├── 10-EVALUATION-SPEC.md    # What "a fair fight against Pentobi" means: measured resources both sides get
 ├── IDEAS.md                 # Register of candidate avenues not yet committed (distinct from plans/)
 ├── guides/
 │   ├── STYLE-GUIDE.md       # Code conventions + project layout (ALWAYS reference before writing code)

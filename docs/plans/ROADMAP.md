@@ -99,10 +99,15 @@ Conclusion (6) plus (7) is why **Value head** is now ranked above further measur
 These were "Stream B". All cost £0. Kept here rather than in their own plan because most are
 one-command box runs, not multi-commit work.
 
+**Not listed here:** anything about *how fairly* we measure against Pentobi — including the
+equal-thinking-time comparison — lives in
+[`fair-pentobi-benchmark.md`](fair-pentobi-benchmark.md) as F1–F11, and nowhere else. An earlier
+version of this table carried a "superseded, became F9" row, which meant the same experiment
+appeared twice under two labels. One home per item.
+
 | ID | Item | State |
 |---|---|---|
 | M1 | Ladder the checkpoints around the best net, to check we warm-start from the right one | ✅ Done. gen-40 is the best; gen-32 ties it, gen-36 is worse. Question closed |
-| M2 | Eval-time search scaling at the top levels | ➡️ Superseded — became F9/F10 in [`fair-pentobi-benchmark.md`](fair-pentobi-benchmark.md) |
 | M3 | Learning-rate sweep on a frozen buffer | ⛔ **Blocked** — both historical replay buffers were deleted, and no generate-only entry point exists |
 | M4 | Width shadow test (`top_k` 64 vs 128) | Written on `feat/width-shadow-probe`, never run. Deferred until after the pilot by design — 15–30 box hours, informs a later run only |
 | M5 | bfloat16 vs float32 self-play A/B | ⚠️ **Slipped.** Harness exists (`scripts/validate_jax_search.py --dtype`), short, free, never run |
@@ -116,14 +121,21 @@ There is no way to generate self-play data without also training on it — every
 would unblock M3, supply a fresh held-out eval set, and settle whether the value head *degraded*
 or was merely graded against another net's games. It has not been written.
 
-### M6's threshold needs restating before it runs
+### M6's success bar, restated as a difference (2026-08-11)
 
-The pilot's pre-registered bar is "weighted ladder ≥ 0.375 at generation 15" against a 0.344
-baseline. **Both numbers counted draws as losses.** PR #71 scores a draw as half a win, which
-lifts every historical figure by 0.7–1.0 pp (measured on this project's own ladder files). Until
-the threshold is restated on the new convention the pre-registration is void — and
-pre-registration is the only thing standing between this run and the post-hoc reasoning that
-already cost three paid runs.
+The old bar was an absolute "weighted ladder ≥ 0.375" against a 0.344 baseline. Both numbers
+counted draws as losses; PR #71 scores a draw as half a win, which lifts every historical figure
+by 0.7–1.0 pp, so an absolute bar silently got easier. Absolute thresholds rot every time the
+measurement changes, and this measurement has now changed once.
+
+**The bar is therefore a difference, measured on one scale:** the pilot succeeds if its best
+checkpoint beats the warm-start checkpoint by **≥ 0.031 weighted ladder score, both measured under
+the same scoring convention and the same level range**. That is the original intent (0.375 − 0.344)
+expressed so it cannot drift again.
+
+**The real goal, stated plainly, is Henry's:** in a fair fight — equal thinking time, Pentobi as
+shipped with its book — does our net win the majority of games? The weighted ladder is a
+progress-tracking instrument, not the goal. F9 answers the goal directly.
 
 ---
 
