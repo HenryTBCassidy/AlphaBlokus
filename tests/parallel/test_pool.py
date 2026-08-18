@@ -99,24 +99,24 @@ class TestDeriveEpisodeSeed:
 
 
 def _normalise_examples_for_comparison(per_episode_examples):
-    """Strip per-example floats down to a comparable shape.
+    """Strip per-example arrays down to a comparable shape.
 
-    Each example is ``(board_ndarray, policy_ndarray, value_float)``.
-    We hash each array's bytes (after coercing to a fixed dtype) and
-    keep the value as a Python float — so the per-episode list becomes
-    a tuple of ``(board_hash, policy_hash, value)`` triples that
-    compares cleanly with ``==``.
+    We hash each array's bytes (after coercing to a fixed dtype) and keep the
+    value and side to move as plain numbers — so the per-episode list becomes a
+    tuple of ``(board_hash, policy_hash, value, player)`` rows that compares
+    cleanly with ``==``. ``player`` is included because it is part of the stored
+    example, so determinism has to cover it too.
     """
     import numpy as np
 
     normalised = []
     for episode in per_episode_examples:
-        triples = []
-        for board, policy, value in episode:
-            board_bytes = np.asarray(board, dtype=np.float32).tobytes()
-            policy_bytes = np.asarray(policy, dtype=np.float32).tobytes()
-            triples.append((hash(board_bytes), hash(policy_bytes), float(value)))
-        normalised.append(tuple(triples))
+        rows = []
+        for example in episode:
+            board_bytes = np.asarray(example.board, dtype=np.float32).tobytes()
+            policy_bytes = np.asarray(example.policy, dtype=np.float32).tobytes()
+            rows.append((hash(board_bytes), hash(policy_bytes), float(example.value), int(example.player)))
+        normalised.append(tuple(rows))
     return normalised
 
 

@@ -164,7 +164,8 @@ def test_smoothed_targets_sum_to_one_over_exactly_the_legal_moves(
     rows = corpus_games[0]
     examples = [row.example for row in build_training_examples(game, [rows], epsilon=EPSILON, augment=False)]
     assert len(examples) == len(rows)
-    for (compact, pi, _value), action in zip(examples, rows.actions, strict=True):
+    for example, action in zip(examples, rows.actions, strict=True):
+        compact, pi = example.board, example.policy
         dense = as_dense(pi, game.get_action_size())
         assert dense.sum() == pytest.approx(1.0)
         assert dense[action] >= 1.0 - EPSILON

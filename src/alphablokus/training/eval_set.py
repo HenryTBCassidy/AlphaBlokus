@@ -178,6 +178,12 @@ def build_or_load_eval_set(
     # before provenance existed has no ids, and diagnostics that need intervals
     # skip rather than resample positions as if they were independent.
     game_ids_path = eval_dir / "source_game_ids.npy"
+    # Side to move per position (+1 White, -1 Black). Optional for the same
+    # reason. Persisted because the boards are canonical, so a diagnostic that
+    # splits by colour cannot recover it from them once a player has passed — it
+    # had to infer from piece parity and drop the ambiguous positions
+    # (``docs/plans/selfplay-data-and-loop.md`` D1).
+    players_path = eval_dir / "players.npy"
     # Content hashes of the source games, so training can withhold them across a
     # resume (buffer indices do not survive; content does).
     fingerprints_path = eval_dir / FINGERPRINTS_FILENAME
@@ -203,6 +209,7 @@ def build_or_load_eval_set(
             target_values=np.load(values_path),
             compact_boards=np.load(compact_path) if compact_path.exists() else None,
             source_game_ids=np.load(game_ids_path) if game_ids_path.exists() else None,
+            players=np.load(players_path) if players_path.exists() else None,
             source_fingerprints=_read_fingerprints(fingerprints_path),
             built_at_generation=int(built_at) if isinstance(built_at, int) else None,
         )
@@ -295,11 +302,12 @@ def build_or_load_eval_set(
     # densify to the full action-space vector the eval set holds.
     action_size = game.get_action_size()
     n = len(sampled)
-    sampled_compact = [ex[0] for ex in sampled]
+    sampled_compact = [ex.board for ex in sampled]
     compact_boards = np.array(sampled_compact)
     sampled_boards = np.array([game.encode_compact(b) for b in sampled_compact])
-    target_policies = np.array([as_dense(ex[1], action_size) for ex in sampled])
-    target_values = np.array([ex[2] for ex in sampled])
+    target_policies = np.array([as_dense(ex.policy, action_size) for ex in sampled])
+    target_values = np.array([ex.value for ex in sampled])
+    players = np.array([ex.player for ex in sampled], dtype=np.int8)
 
     if oracle is not None:
         target_policies, target_values = oracle.eval_targets(
@@ -313,6 +321,7 @@ def build_or_load_eval_set(
         target_values=target_values,
         compact_boards=compact_boards,
         source_game_ids=source_game_ids,
+        players=players,
         source_fingerprints=tuple(source_fingerprints),
         built_at_generation=generation,
     )
@@ -323,6 +332,7 @@ def build_or_load_eval_set(
     np.save(values_path, eval_set.target_values)
     np.save(compact_path, compact_boards)
     np.save(game_ids_path, source_game_ids)
+    np.save(players_path, players)
     fingerprints_path.write_text(json.dumps(source_fingerprints, indent=2))
     marker_path.write_text(expected_kind)
     n_games = eval_set.n_source_games or 0

@@ -79,6 +79,7 @@ from alphablokus.games.blokusduo.pentobi.corpus_v2 import (
     read_opening_meta,
 )
 from alphablokus.games.blokusduo.pentobi.store import canonical_key
+from alphablokus.selfplay.episode import ProcessedExample
 
 if TYPE_CHECKING:
     from collections.abc import Iterable, Mapping, Sequence
@@ -87,7 +88,6 @@ if TYPE_CHECKING:
     from numpy.typing import NDArray
 
     from alphablokus.games.blokusduo.game import BlokusDuoGame
-    from alphablokus.games.blokusduo.pentobi.corpus import CorpusExample
 
 # Games between progress log lines while building training examples (the legal-mask
 # pass is the only non-trivial cost of loading a large corpus).
@@ -495,13 +495,13 @@ class TrainingRow:
     survive ``rng.choice`` in alignment, and a misalignment would train each head on
     other positions' targets while every other metric looked fine.
 
-    ``ProcessedExample`` itself is untouched — ``example`` is exactly the
-    ``(compact_board, sparse_policy, value)`` tuple the trainer has always consumed, and
-    the auxiliary targets reach ``BaseNNetWrapper.train`` as separate arguments, so the
-    self-play pipeline never carries one.
+    ``ProcessedExample`` itself is untouched — ``example`` is exactly the row the
+    trainer has always consumed (its ``player`` field is the corpus's own stored side
+    to move), and the auxiliary targets reach ``BaseNNetWrapper.train`` as separate
+    arguments, so the self-play pipeline never carries one.
 
     Attributes:
-        example: ``(compact_board, sparse_policy, value)``.
+        example: The net-ready ``(board, policy, value, player)`` row.
         margin: Final score margin from the side to move; ``None`` = no single margin
             (v2 opening rows). Score head, plan S5.
         ownership: ``(rows, cols)`` ``{-1, 0, +1}`` map of who holds each cell when the
@@ -512,7 +512,7 @@ class TrainingRow:
             ``None`` on each game's final position. Reply head, plan N5.
     """
 
-    example: CorpusExample
+    example: ProcessedExample
     margin: float | None
     ownership: NDArray[np.int8] | None
     reply: tuple[NDArray[np.int32], NDArray[np.float32]] | None
@@ -687,7 +687,7 @@ def _rows_for_game(
         nxt = reply_index(index)
         built.append(
             TrainingRow(
-                example=(compact, policies[index], value),
+                example=ProcessedExample(compact, policies[index], value, player),
                 margin=margin,
                 ownership=by_player[player],
                 reply=None if nxt is None else policies[nxt],
@@ -696,7 +696,7 @@ def _rows_for_game(
         if augment:
             built.append(
                 TrainingRow(
-                    example=(np.ascontiguousarray(compact.T), twin_policies[index], value),
+                    example=ProcessedExample(np.ascontiguousarray(compact.T), twin_policies[index], value, player),
                     margin=margin,
                     ownership=by_player_twin[player],
                     reply=None if nxt is None else twin_policies[nxt],
@@ -856,8 +856,16 @@ def load_opening_examples(
                 blend_k=blend_k,
             )
             unit = ancestry[int(rows["node_id"][index])]
+            # The opening DAG stores the absolute side to move per node, so this
+            # path reads it rather than re-deriving it from the canonical board.
+            player = int(rows["player"][index])
             built.append(
-                TrainingRow(example=(compact, (indices, values), value), margin=None, ownership=None, reply=None)
+                TrainingRow(
+                    example=ProcessedExample(compact, (indices, values), value, player),
+                    margin=None,
+                    ownership=None,
+                    reply=None,
+                )
             )
             units.append(unit)
             if augment:
@@ -865,7 +873,7 @@ def load_opening_examples(
                 transposed_indices = np.array([game.transpose_action(int(a)) for a in indices], dtype=np.int32)
                 built.append(
                     TrainingRow(
-                        example=(transposed, (transposed_indices, values), value),
+                        example=ProcessedExample(transposed, (transposed_indices, values), value, player),
                         margin=None,
                         ownership=None,
                         reply=None,
