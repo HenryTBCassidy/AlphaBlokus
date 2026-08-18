@@ -5,7 +5,7 @@ comparable resources, so this document records exactly what each side gets, meas
 assumed, and where the comparison is still one-sided.
 
 Companion docs: [`05-EVALUATION.md`](05-EVALUATION.md) (metrics and the ladder),
-[`plans/fair-pentobi-benchmark.md`](plans/fair-pentobi-benchmark.md) (the work that produced these
+[`plans/fair-pentobi-benchmark.md`](plans/archive/fair-pentobi-benchmark.md) (the work that produced these
 numbers).
 
 Last measured: 2026-08-11, on the home box (RTX 3060 Ti 8 GB, 20 cores, 31 GB RAM).

@@ -5,7 +5,7 @@ two-player perfect-information board game — and how to tell whether ours is de
 [`corpus-generation-literature.md`](corpus-generation-literature.md), which covers generation
 *mechanics* (how the strong projects built their corpora); this note covers corpus *quality
 properties* — what to measure on a finished corpus, what values are healthy, and how the v2 Pentobi
-corpus ([`../plans/pentobi-corpus-v2.md`](../plans/future/pentobi-corpus-v2.md), generating now) scores on
+corpus ([`../plans/pentobi-corpus-v2.md`](../../.claude/worktrees/worktree-checkbox-meaning-2134d9/docs/plans/pentobi-corpus-v2.md), generating now) scores on
 each. Written for a reader without an ML research background; terms are defined where first used.
 
 **The corpus being scored** — measured on the first 400 games of the v2 stage-1 run:
@@ -515,4 +515,4 @@ Run down this list before declaring a corpus ready to train against:
 - [Tian et al. 2019, *ELF OpenGo*](https://arxiv.org/abs/1902.04522)
 - [Anthony, Tian & Barber 2017, *Expert Iteration*](https://arxiv.org/abs/1705.08439)
 - [*PAWN: Piece Value Analysis with Neural Networks* (game-level vs row-level splits)](https://arxiv.org/pdf/2604.15585)
-- Internal: [`corpus-generation-literature.md`](corpus-generation-literature.md), [`../plans/pentobi-corpus-v2.md`](../plans/future/pentobi-corpus-v2.md), [`../plans/archive/pentobi-distillation.md`](../plans/archive/pentobi-distillation.md), [`distillation-net-sizing.md`](distillation-net-sizing.md)
+- Internal: [`corpus-generation-literature.md`](corpus-generation-literature.md), [`../plans/pentobi-corpus-v2.md`](../../.claude/worktrees/worktree-checkbox-meaning-2134d9/docs/plans/pentobi-corpus-v2.md), [`../plans/archive/pentobi-distillation.md`](../plans/archive/pentobi-distillation.md), [`distillation-net-sizing.md`](distillation-net-sizing.md)

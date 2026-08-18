@@ -1,30 +1,15 @@
 # Supervised-phase network improvements
 
-> **Status: N6/N7 ARE THE PRIORITY (2026-08-10).** This document is the home of the **value head**
-> workstream (formerly "Stream D"), because the 2026-08 investigation found the network — not
-> search — is the constraint.
+> **ARCHIVED 2026-08-12 — split into two successors.** N6/N7 (value targets) moved to
+> [`../value-head.md`](../value-head.md); N3/N8 (auxiliary heads and the trunk) moved to
+> [`../network-experiments.md`](../network-experiments.md).
 >
-> **N6 is two arms to *measure*, not a recommendation to implement.** Read N6's own section before
-> planning around it — it overturns the technique review's ranking for a project-specific reason:
->
-> - The review ranks the **teacher λ-blend** first on cost and evidence. **N6 corrects that.**
->   Stockfish and Lc0 blend toward their own engine's evaluation because *matching that engine is the
->   goal*. Ours is the opposite — we are trying to **surpass** Pentobi, and the outcome labels are the
->   only signal that can disagree with it. Blending the teacher's opinion in dilutes the one channel
->   carrying information the teacher does not already have. **Expect to measure the blend and decline
->   it.**
-> - The real problem the blend points at is genuine: **every position in a game carries the same
->   label**, so a 30-ply game gives 30 boards stamped with one result and the value head cannot tell
->   an open opening from a decided endgame. The **margin (N3)** and **ownership map (N4)** supply that
->   missing within-game discrimination — and unlike the teacher's opinion, they are *facts*.
->
-> So the highest-value value-head work is **measuring the auxiliary heads that are already built**
-> (N3, which is `future/score-auxiliary-target.md` S7) rather than adding new value-target tricks.
->
-> Read [`ROADMAP.md`](ROADMAP.md) for the shared prerequisite (positions do not record whose turn
-> it is) and the trap in the balancing half before starting.
+> Two results here still matter and are why the successors are shaped as they are: the data-fraction
+> curve showing **we are data-limited, decisively**, and the four-arm auxiliary comparison being
+> **invalid** because its arms globbed different corpus shards. **Read this for the evidence; plan new
+> work in the successors.**
 
-Turns the shortlist in [`../research/alphazero-technique-review.md`](../research/alphazero-technique-review.md)
+Turns the shortlist in [`../research/alphazero-technique-review.md`](../../research/alphazero-technique-review.md)
 §3A/§3B into sequenced work. Everything here acts on the **stage-1 v2 corpus** and can therefore
 move the V15 ladder gate; the self-play techniques (§3C) are blocked on that gate and get their own
 plan later.
@@ -36,7 +21,7 @@ found to be confounded by a *side effect* of adding the head (it shifted the dat
 magnitude four times the effect being measured. Each row below is therefore build → measure →
 **keep or delete**, and a row that improves nothing is deleted rather than left in.
 
-**Depends on:** [`pentobi-corpus-v2.md`](future/pentobi-corpus-v2.md) V12 (the corpus, generating now) and
+**Depends on:** [`pentobi-corpus-v2.md`](../../../.claude/worktrees/worktree-checkbox-meaning-2134d9/docs/plans/pentobi-corpus-v2.md) V12 (the corpus, generating now) and
 the score head on `feat/score-auxiliary-head` (built, unmeasured). N3 below *is* that plan's S7.
 
 ---
@@ -167,7 +152,7 @@ Fit at 25%, 50% and 100% of the corpus and plot held-out policy agreement agains
 
 **Why this comes before the techniques.** Our corpus is ~300k positions where every comparable
 published effort used millions
-([`../research/corpus-quality-principles.md`](../research/corpus-quality-principles.md) §5). If a
+([`../research/corpus-quality-principles.md`](../../research/corpus-quality-principles.md) §5). If a
 later result is marginal, there are two explanations — the technique does not help, or *nothing*
 will help at this data volume — and without this curve we cannot tell them apart. That ambiguity
 would cost far more than the three hours this takes.

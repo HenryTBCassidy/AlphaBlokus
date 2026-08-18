@@ -28,7 +28,7 @@ links to companion docs.
 
 ## Checklist
 
-Table with columns: #, Item, Effort, Priority, Done.
+Table with columns: #, Item, Role, Effort, Priority, Done.
 Items numbered sequentially (S1, S2, ... or B1, B2, ... or Step 1, 2, ...).
 Ordered by execution sequence, not by topic.
 
@@ -45,6 +45,28 @@ code examples, effort estimate.
 
 ...and so on, one section per checklist row.
 ```
+
+### The Role column — who executes each row
+
+Every checklist row names the roles that carry it, because a plan is executed by
+[several sessions](../../agents/README.md), not one. Roles attach **per row, not per plan**: most
+rows are code-only, but a measurement row is a three-role relay and needs saying so.
+
+| Tag | Means |
+|---|---|
+| `W` | **Worker** only — code, tests, PR. No box time |
+| `W→R` | Worker builds it, **GPU-runner** runs it. Result needs no judgement (a artefact, a corpus) |
+| `W→R→A` | Worker builds, runner runs, **Analyst** decides what the numbers mean |
+| `R→A` | No code needed — runner runs an existing script, Analyst concludes |
+| `A` | **Analyst** only — reinterpreting results we already hold |
+
+Two rules that follow from this:
+
+1. **A row tagged `→A` must state the question it answers and the rule it will be judged against,
+   *before* it runs.** Otherwise the Analyst has nothing to judge against and the result gets read
+   post-hoc, which is how this project has previously talked itself into non-results.
+2. **A row tagged `→R` must carry a copy-pasteable command**, because the GPU-runner executes it
+   without owning the code. Prose gets bounced. See [`agents/box-queue.md`](../../agents/box-queue.md).
 
 ### Key rules
 

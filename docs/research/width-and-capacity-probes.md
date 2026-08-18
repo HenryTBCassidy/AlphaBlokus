@@ -190,7 +190,7 @@ Consequences, applied honestly to results already written down:
 **The rule this earns:** a single-run A/B in this pipeline cannot resolve anything below
 ~0.05 nats CE or ~0.022 weighted. Either run 2–3 replicates per arm and take the floor as
 the largest of their deltas, or do not report a delta smaller than that as a result. The
-[`supervised-network-improvements.md`](../plans/supervised-network-improvements.md) N4/N5
+[`supervised-network-improvements.md`](../plans/archive/supervised-network-improvements.md) N4/N5
 rows need re-running under that rule before either head is judged.
 
 ---

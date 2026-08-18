@@ -156,7 +156,7 @@ foundation if [I4](#i4-continuous-non-gated-training)'s parked async actor-learn
 
 ## I7. Error-seeking exploration
 
-**The observation.** While scoping the [v2 corpus](plans/future/pentobi-corpus-v2.md) we measured something
+**The observation.** While scoping the [v2 corpus](../.claude/worktrees/worktree-checkbox-meaning-2134d9/docs/plans/pentobi-corpus-v2.md) we measured something
 directly exploitable: at ply 2, Pentobi L9 commits **92.9% of its search visits** to a reply that an
 independent evaluation ranks **35th of 315**, 0.072 below the best available — roughly 5× the
 measurement noise (σ ≈ 0.014). A second opening showed the same pattern more mildly (73.9% of visits
@@ -210,7 +210,7 @@ step is the base-rate probe already scheduled as V2 of the v2 plan: thirty nodes
 tell us whether ply-2's blunder is a systematic property or two unlucky positions. If the rate is
 high, this graduates to a plan; if it is low, there is nothing to hunt.
 
-**Related:** [`plans/pentobi-corpus-v2.md`](plans/future/pentobi-corpus-v2.md) (V2's base-rate probe, V16's
+**Related:** [`plans/pentobi-corpus-v2.md`](../.claude/worktrees/worktree-checkbox-meaning-2134d9/docs/plans/pentobi-corpus-v2.md) (V2's base-rate probe, V16's
 net-in-the-loop phase), [`research/corpus-generation-literature.md`](research/corpus-generation-literature.md)
 §8 (why visit distributions are not move-quality distributions).
 
@@ -238,13 +238,13 @@ plausibly learning something real about the position.
 
 **Cost.** Three outputs instead of one, a cross-entropy loss instead of MSE, and a
 conversion at the inference boundary so callers still see a scalar. Checkpoint
-compatibility needs the same care as the score head ([`plans/score-auxiliary-target.md`](plans/future/score-auxiliary-target.md) S3).
+compatibility needs the same care as the score head ([`plans/score-auxiliary-target.md`](plans/archive/score-auxiliary-target.md) S3).
 
 **Why it is parked rather than planned.** It overlaps the score-head experiment, and running
 both at once makes neither A/B readable. Do the score head first; if the value head is still
 weak afterwards, this is the next lever.
 
-**Related:** [`plans/score-auxiliary-target.md`](plans/future/score-auxiliary-target.md) (the
+**Related:** [`plans/score-auxiliary-target.md`](plans/archive/score-auxiliary-target.md) (the
 auxiliary-target experiment that comes first),
 [`research/corpus-quality-principles.md`](research/corpus-quality-principles.md) (where the
 draw rate and the colour-prior floor are measured).
