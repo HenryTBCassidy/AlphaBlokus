@@ -67,6 +67,12 @@ Two consequences worth knowing:
   whole buffer, so a producer that drops the field fails at the boundary instead of surfacing later as
   a diagnostic measuring invented labels.
 
+`iter_corpus_examples` (in `pentobi/corpus.py`, the `corpus` scope's file) also had to change:
+its docstring promised "a trainer can consume either source through the same code", and a
+3-tuple stream stopped being interchangeable the moment the self-play row grew a field. It now
+yields `ProcessedExample` off the shard's existing `player` column. Nothing called it from a
+trainer, so nothing was broken — but leaving a false contract in place was the landmine.
+
 The jax legality test got stronger as a side effect: it used to check a position's policy against the
 *union* of both mover interpretations wherever the mover still held a full inventory, because the
 canonical board could not say which colour it was. It now reconstructs the absolute board from the

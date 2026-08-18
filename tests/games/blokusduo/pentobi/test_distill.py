@@ -103,12 +103,20 @@ def test_load_corpus_games_groups_rows_by_game(
     flat_boards = [b for g in corpus_games for b in g.boards]
     flat_actions = [a for g in corpus_games for a in g.actions]
     flat_values = [v for g in corpus_games for v in g.values]
-    for (board, (indices, values), value), grouped_board, action, grouped_value in zip(
-        iter_corpus_examples(corpus_shards(corpus_dir)), flat_boards, flat_actions, flat_values, strict=True
+    flat_players = [p for g in corpus_games for p in g.players]
+    for example, grouped_board, action, grouped_value, grouped_player in zip(
+        iter_corpus_examples(corpus_shards(corpus_dir)),
+        flat_boards,
+        flat_actions,
+        flat_values,
+        flat_players,
+        strict=True,
     ):
-        assert np.array_equal(board, grouped_board)
+        indices, values = example.policy
+        assert np.array_equal(example.board, grouped_board)
         assert indices.tolist() == [action] and values.tolist() == [1.0]
-        assert value == grouped_value
+        assert example.value == grouped_value
+        assert example.player == grouped_player
     assert all(p in (-1, 1) for g in corpus_games for p in g.players)
 
 
