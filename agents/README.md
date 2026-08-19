@@ -77,8 +77,23 @@ The exceptions exist because the hand-offs require them:
 Everything else in `agents/` — the charters, [`scopes.md`](scopes.md), [`branches.md`](branches.md) —
 is the Integrator's.
 
-**3. Never commit to `main`.** Branch as `feat/<scope>-<what>`. Never check out another session's
-branch. Work in your own worktree.
+**3. Never commit to `main`, and never work in the shared checkout.** The checkout at
+`/Users/henrycassidy/code/personal projects/AlphaBlokus` stays on `main`, always — it is the one place
+every session reads from, so a session that switches its branch silently moves the ground under
+everyone else. Make your own worktree:
+
+```bash
+git worktree add ~/ab-<slug> -b <branch> origin/main
+```
+
+Branch naming: `feat/<scope>-<what>` for Workers, `runner/<what>`, `analysis/<what>`,
+`chore/<what>`. Never check out another session's branch.
+
+**This applies to every role, including the ones whose only output is markdown.** The first time these
+sessions ran, the GPU-runner and Analyst both edited the shared checkout — which was sitting on a
+feature branch belonging to neither of them — and left finished work uncommitted, one `git checkout`
+away from being destroyed. Their charters said nothing about where to work; only the Worker's did.
+That gap is what this rule closes.
 
 **4. Findings go into a tracked file in the same commit as the work.** Not later, not batched. The
 entire 2026-08 investigation — the plan, two audits, every correction — sat in gitignored `temp/` for
@@ -96,6 +111,11 @@ measurements. Re-deriving what is already written down has cost this project rea
 ---
 
 ## Starting a session
+
+**Every launch prompt must tell the session to make its own worktree.** The first round of prompts
+said so for the two Workers and omitted it for the GPU-runner and the Analyst — and those two are
+exactly the ones that went wrong. The instruction is not optional boilerplate; it is the load-bearing
+line.
 
 Point the new chat at its charter by absolute path and state its scope. For example:
 

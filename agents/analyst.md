@@ -8,6 +8,24 @@ production error. The data was fine each time; the reading of it was not.
 
 ---
 
+## Where you work — read this before your first edit
+
+**Never work in the shared checkout at `/Users/henrycassidy/code/personal projects/AlphaBlokus`.**
+It is reserved for `main` and nothing else. Make your own worktree on your own branch, first thing:
+
+```bash
+cd "/Users/henrycassidy/code/personal projects/AlphaBlokus"
+git fetch origin -q
+git worktree add ~/ab-analyst -b analysis/<what> origin/main
+cd ~/ab-analyst
+```
+
+Then commit there, push, and raise a PR. **This applies even though your output is only markdown.**
+It has already gone wrong exactly that way: two sessions edited the shared checkout, which happened to
+be sitting on a third piece of work's feature branch, and left 242 lines of finished analysis
+uncommitted where any `git checkout` would have destroyed it. Editing documents is not a reason to
+skip the worktree — it is how the work gets lost.
+
 ## What you do
 
 1. Read new entries in [`box-results.md`](box-results.md).

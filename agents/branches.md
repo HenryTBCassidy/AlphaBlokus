@@ -1,7 +1,12 @@
 # Branch register
 
-Every branch that exists, what it holds, and what it is waiting on. The
-[Integrator](integrator.md) keeps this current; a branch missing from here is a branch nobody owns.
+Every branch that exists, what it holds, and what it is waiting on. A branch missing from here is a
+branch nobody owns.
+
+**Who keeps it current:** the [Integrator](integrator.md) when one is running — and **when one is not,
+whoever creates or merges a branch updates this file in the same action.** It went a week stale
+listing branches that had already been merged and deleted, because the Integrator was deliberately
+not started and the duty therefore belonged to nobody.
 
 **Update this file in the same action that creates, merges or deletes a branch.** The point is to
 stop branches accumulating unnoticed — one sat unpushed with five commits of real work for a week,
@@ -9,7 +14,7 @@ and another was closed by mistake while holding the config the box was actively 
 
 Naming: `feat/<scope>-<what>`, `chore/<what>`, `docs/<what>`. Never work directly on `main`.
 
-Last reconciled: 2026-08-12.
+Last reconciled: 2026-08-19.
 
 ---
 
@@ -17,8 +22,10 @@ Last reconciled: 2026-08-12.
 
 | Branch | PR | Ahead | Holds | Waiting on |
 |---|---|---|---|---|
-| `feat/width-shadow-probe` | **#76** | +2 | The width probe, reviewed and both findings fixed | CI (a `ruff format` failure is fixed; `ruff check` alone is not enough) |
-| `docs/parity-verified` | — | +1 | The book-on parity verification at 4,096 sims | Merge |
+| `feat/data-loop-player-field` | **#80** | +2 | D1 — the side to move recorded on every stored position, 33 files, tests updated. Touches `corpus.py`, flagged in the title | Review, then merge |
+| `analysis/h1-and-colour-check` | — | +1 | The H1 second-mover diagnosis and the F12 colour-check verdict, plus gotchas 23–24. **Rescued from the shared checkout** | Merge |
+| `runner/i3-book-delta-log` | — | +1 | The I3 book-delta run log and the `twogtp` harness facts. **Rescued from the shared checkout** | Merge |
+| `chore/fix-protocol-workspace-gap` | — | +1 | This file, and the charter fixes for the workspace gap | Merge |
 
 ## Rules that have been learned the hard way
 
@@ -36,6 +43,9 @@ Last reconciled: 2026-08-12.
    A branch passed the first and failed CI on the second.
 6. **Merge means merge.** Raising a PR and reporting it as done is not the same thing; if the
    instruction was to merge, merge it or say why you cannot.
+7. **Leave the shared checkout on `main`.** It was left on a feature branch, so the next two sessions
+   that opened the repo at the default path landed on someone else's branch and worked there. Whoever
+   finishes with a branch returns the shared checkout to `main`.
 
 ## Merge order when several are open
 

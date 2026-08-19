@@ -10,6 +10,10 @@ moves finished entries to the Done log at the bottom with a pointer to
 - **Fixed completion** — "run exactly this and stop" (a measurement whose every outcome is useful).
 - **Kill condition** — "stop early if X", for jobs that would otherwise continue into more arms.
 
+**Move an entry to Done the moment you launch its final batch, not when you get round to it.** The
+I3 run was recorded in `box-results.md` while still sitting in Pending, so the queue said one thing and
+the results said another. The queue is the only place anyone can see what is in flight.
+
 A job with neither gets bounced. So does a job whose **command is not copy-pasteable** — no prose, no
 brace expansion, no placeholders. If it needs three runs, write three commands.
 
