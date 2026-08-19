@@ -73,3 +73,76 @@ Re-measured at 946 sims: 2.99 vs 3.69 s/move (ratio 1.24×).
 CPU seconds per game: L9 195, L7 14 (**13.9×**). Nominal ratio from `counts_duo` is 25×.
 
 **Completion evidence:** both `.dat` files at 100/100 rows; no engines left running.
+
+---
+
+## I3 (queue F11) — what Pentobi's level-9 opening book is worth
+**In progress**, launched 2026-08-19 10:39 UTC. tmux session `i3_book` on `gpu-linux`.
+Driver `temp/run_i3_book_delta.sh`, log `temp/benchmarks/i3_book_delta.log`,
+output `temp/benchmarks/f11/{A_bookfirst,B_nobookfirst}.dat`.
+
+**Config as run** — exactly the queued commands, no parameters altered.
+- Batch A: `--black` = L9 book-on, `--white` = L9 `--nobook`, 100 games, `--threads 3`
+- Batch B: `--black` = L9 `--nobook`, `--white` = L9 book-on, 100 games, `--threads 3`
+- Box free at launch: GPU 41 MiB / 0%, 27 GB RAM available, 0 pentobi processes, 0 orphans
+
+**Book-engagement probe** (run before launch, single engine, empty board, level 9):
+
+| arm | first move | wall-clock | `move_values` |
+|---|---|---|---|
+| book on | `e8,e9,f9,d10,e10` | **0.50 s** | empty (no search tree) → book hit |
+| book off (`--nobook`) | `f8,e9,f9,g9,e10` | **31.69 s** | full tree, 941,555 sims on top move |
+
+`book_duo.blksgf` is present and symlinked beside the binary (dated 2026-08-05, the gotcha-18 fix).
+The two arms return different first moves, so the book changes play rather than only caching it.
+
+### Harness facts established while launching — these change how the `.dat` is read
+Not an interpretation of the result; a property of `twogtp` read off its source on the box
+(`/home/henry/code/pentobi/twogtp/TwoGtp.cpp`).
+
+1. **`twogtp` alternates colours by itself**, every game: `play_game()` line 90 sets
+   `player_black = game_number % nu_players`. So each 100-game batch is *already* colour-balanced
+   ~50/50, and no flag is needed to get that. The queue entry and
+   `docs/plans/evaluation-instruments.md` I3 both state that `twogtp` has no colour-alternation flag
+   and that an unswapped run would therefore measure colour rather than the book. The absence of a
+   *flag* is correct — `Main.cpp` has no such option — but the alternation happens regardless.
+2. **The `Result` column is normalised to the engine passed as `--black`, not to the black colour.**
+   `get_result()` takes the score from `Color(0)` and then applies `if (player_black != 0)
+   result = 1 - result`. The queue entry describes it as "black's score".
+3. **Consequence for combining the two batches.** Batch B is batch A with the roles of the two
+   engines exchanged, so B's column measures the *no-book* engine. B's book-side score is
+   `1 - Result`. Averaging A's and B's `Result` columns directly returns ~0.5 by construction,
+   whatever the book is actually worth.
+4. **Per-game colour is recoverable.** The `.dat` header is
+   `# Game	Result	Length	PlayerB	CpuB	CpuW	Fast`; `PlayerB` records which engine index played
+   black in that game, so a colour split can be computed after the fact.
+
+Filed for the `instruments` Worker, who owns the plan text and the queue entry's wording.
+
+### Batch A — verified complete
+`END A_bookfirst rc=0` at 2026-08-19 13:56:00 UTC. Elapsed 3 h 16 m 45 s for 100 games
+(0.51 games/min). Queue estimate for *both* batches was ~4 h; batch A alone took 3 h 17 m.
+
+**Completion evidence:** 100 data rows; game ids 0–99 with no duplicates and no gaps; header intact;
+every `Result` value in {0, 0.5, 1}; 0 failure signatures (`Killed|out of memory|Error:|is not
+running|Segmentation`) in the log; RAM never below 16 GB available during the batch.
+
+`Result` is the score of the **`--black`-slot engine**, which in batch A is the **book-on** engine.
+
+| batch A | W | D | L | n | score for book-on engine |
+|---|---|---|---|---|---|
+| pooled over both colours | 46 | 7 | 47 | 100 | **0.4950** |
+| `PlayerB=0` — book-on engine held the **black colour** | 45 | 3 | 2 | 50 | **0.9300** |
+| `PlayerB=1` — book-on engine held the **white colour** | 1 | 4 | 45 | 50 | **0.0600** |
+
+CPU seconds per game: book-on slot **153.4**, no-book slot **195.0**.
+Game length in plies: min 9, median 17, max 34.
+
+**Runner note, not an interpretation.** The two colour rows are near-absolute in opposite directions
+(0.93 / 0.06) while the pooled number sits at 0.495. Both engines are level 9 and differ only in the
+book, so the colour term here is large relative to the treatment. Flagging that the pooled column is
+the one the queue entry points at, and that reading the book's value requires the within-colour rows
+— the arithmetic is the Analyst's call, not mine. Batch B (roles exchanged) will give the second half.
+
+Raw file fetched to `temp/benchmarks/f11/A_bookfirst.dat` (also on the box). Parser used:
+scratchpad `parse_i3.py` — tallies only, no Elo.
