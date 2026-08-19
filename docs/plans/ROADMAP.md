@@ -29,8 +29,10 @@ them in new writing**.
 | Stream D | **Value head** | Candidate fixes for the leading hypothesis about why training stalled |
 | F1–F11 | **Benchmark integrity** | Make the Pentobi comparison fair and self-describing |
 
-Item IDs *within* a plan (F1, V11, N6, S7…) stay as they are — they are local to their
-document and each maps to one commit.
+Item IDs use a **unique prefix per plan** so an ID is unambiguous project-wide — `I` instruments,
+`D` data-loop, `H` value-head, `E` network, `V` corpus. See
+[`../guides/PLAN-FORMAT.md`](../guides/PLAN-FORMAT.md). IDs in archived plans (F1, N6, S7…) stay as
+they were written.
 
 ---
 
@@ -130,18 +132,16 @@ Conclusion (6) plus (7) is why **Value head** is now ranked above further measur
 
 ## The next decision
 
-Ranked by evidence, not by sequence:
+Merge order and dependencies live in the five-plan table above. The immediate sequence:
 
-1. **Merge PR #71.** CI green, reviewed twice independently (codex found 6 defects, an Opus pass
-   confirmed all 6 and found 4 more), all fixed, 1041 tests passing.
-2. **Start N6's plumbing.** No GPU needed, no file overlap with #71, and the schema window is
-   open only until new data is generated.
-3. **M5** — short, free, and it has slipped twice.
-4. **F9, the fair fight** — the one measurement that says where the project really stands.
-5. **Then decide on the pilot (M6)**, with its threshold restated first.
+1. **`data-loop` D1** — record whose turn it is on every stored position. The schema window is open
+   only while both replay buffers are absent; it shuts the moment D3 generates data.
+2. **`instruments` I1** — extend the `--condition` enum, which blocks I2.
+3. **Drain the box queue** — I2, I3, I4 are queued and the box is idle.
+4. **`value-head` H1** — pure analysis, no code, and it decides whether the second-mover collapse is a
+   *data* problem or a *learning* problem. Those imply completely different work.
 
-An honest option that stays on the table: the evidence now says search will not reach level 9 and
-the network is the constraint. If N6 and N7 both come back within noise, the remaining levers are
-architectural, and **scaling the goal down to level 6–7 or stopping** is a legitimate outcome
-rather than a failure. That was pre-registered in the investigation and should not be quietly
-dropped.
+An honest outcome that remains on the table: if the pilot (D5) comes back within noise, and then
+comes back within noise again with the value-head fixes layered on, the remaining levers are
+architectural. At that point scaling the goal down to level 6–7, or stopping, is a legitimate result
+rather than a failure — and should be called plainly rather than rationalised into another run.

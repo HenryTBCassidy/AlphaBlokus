@@ -42,15 +42,15 @@ gradient toward a plan, at any simulation count, net size or data volume.
 
 | # | Item | Role | Effort | Priority | Done |
 |---|---|---|---|---|---|
-| V1 | Diagnose: do our self-play games contain second-mover wins at all? | `A` | ½ d | **Critical** — gates V2–V3 | |
-| V2 | Colour-conditional value diagnostic on the fresh eval set | `W→R→A` | ½ d | High | |
-| V3 | Outcome-balanced value sampling, behind a flag, **A/B'd immediately** | `W→R→A` | 1 d + box | High | |
-| V4 | Teacher λ-blend — measure it, expecting to decline it | `W→R→A` | ½ d + box | Medium | |
-| V5 | Win/draw/loss value head | `W→R→A` | 2 d + box | Medium | |
+| H1 | Diagnose: do our self-play games contain second-mover wins at all? | `A` | ½ d | **Critical** — gates H2–H3 | |
+| H2 | Colour-conditional value diagnostic on the fresh eval set | `W→R→A` | ½ d | High | |
+| H3 | Outcome-balanced value sampling, behind a flag, **A/B'd immediately** | `W→R→A` | 1 d + box | High | |
+| H4 | Teacher λ-blend — measure it, expecting to decline it | `W→R→A` | ½ d + box | Medium | |
+| H5 | Win/draw/loss value head | `W→R→A` | 2 d + box | Medium | |
 
 ---
 
-## V1. Do our self-play games contain second-mover wins at all?
+## H1. Do our self-play games contain second-mover wins at all?
 
 **Pure analysis, no code, and it gates everything below.** Count, in the self-play data we hold: what
 fraction of games the first mover wins, and what fraction of *training positions* come from games the
@@ -63,7 +63,7 @@ failing to learn from them, which points at the target or the trunk instead.
 
 Those two diagnoses imply completely different work. Do not build until this is answered.
 
-## V2. Colour-conditional value diagnostic on data that is actually held out
+## H2. Colour-conditional value diagnostic on data that is actually held out
 
 The existing diagnostic reproduces to the digit, but it has only ever run on an eval set that was
 **sampled from the training buffer and never removed from it** — so its numbers are memorisation, not
@@ -76,7 +76,7 @@ first.
 **Note the precision limit:** on a 200-position set, value skill carries ~±0.17 measurement error. So
 judge the rows below on the **ladder** primarily, with value skill as a mechanism check.
 
-## V3. Outcome-balanced value sampling
+## H3. Outcome-balanced value sampling
 
 Weight the value loss so "the first mover usually wins" stops earning marks.
 
@@ -96,7 +96,7 @@ someday. If it wins, it becomes the default immediately and the flag is deleted.
 in this project are built, default-off and still unmeasured; an untested flag is worse than an
 untested default.
 
-## V4. Teacher λ-blend — measure it, expect to decline it
+## H4. Teacher λ-blend — measure it, expect to decline it
 
 `target = λ·pentobi_eval + (1−λ)·outcome`, λ ∈ {0, 0.3, 0.5}.
 
@@ -114,10 +114,10 @@ a decided endgame. The margin and ownership targets in
 [`network-experiments.md`](network-experiments.md) supply that missing discrimination — and unlike the
 teacher's opinion, they are *facts*.
 
-## V5. Win/draw/loss head
+## H5. Win/draw/loss head
 
 Three probabilities instead of one scalar. A scalar cannot separate "a certain draw" from "an even
 fight" — both are zero — and **22% of our games are draws**. Lc0 standard since 2019.
 
-Sequenced after V3: it changes the value head's shape, which would muddy every comparison above if
+Sequenced after H3: it changes the value head's shape, which would muddy every comparison above if
 done first. Touches torch, the jax bridge and the ONNX export.

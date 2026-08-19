@@ -46,6 +46,21 @@ code examples, effort estimate.
 ...and so on, one section per checklist row.
 ```
 
+### Item ID prefixes are unique per plan
+
+Each live plan owns a distinct prefix so an ID is unambiguous across the project. Two plans once both
+used `V`, which made "V2" mean two different things.
+
+| Prefix | Plan |
+|---|---|
+| `I` | `evaluation-instruments.md` |
+| `D` | `selfplay-data-and-loop.md` |
+| `H` | `value-head.md` (H for *head*) |
+| `E` | `network-experiments.md` (E for *experiment*) |
+| `V` | `corpus-scale-up.md` |
+
+Pick an unused letter for a new plan and record it here.
+
 ### The Role column — who executes each row
 
 Every checklist row names the roles that carry it, because a plan is executed by
