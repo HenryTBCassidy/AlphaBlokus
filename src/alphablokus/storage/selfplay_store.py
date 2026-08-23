@@ -6,6 +6,11 @@ policies are stored **sparse** as ``(indices, values)`` byte pairs — the same
 ``ProcessedExample`` form the live replay buffer holds — so neither save nor
 load ever materialises a dense policy vector (the dense-on-disk format
 OOM-killed 10k-game generations; see ``docs/plans/archive/oom-hardening.md`` O1/O2).
+
+Each row also records **which side was to move** (``player``: +1 White, -1 Black).
+The board beside it is canonical, so the absolute colour is not in the bytes and
+is not recoverable from them once either player has passed
+(``docs/plans/selfplay-data-and-loop.md`` D1).
 """
 
 from __future__ import annotations
@@ -41,15 +46,17 @@ class SelfPlayStore:
 
     Rows hold ``ProcessedExample`` tuples exactly as the live buffer does:
     boards in their **compact** form (``IBoard.to_compact`` — e.g. the int8
-    14×14 placement board for Blokus, the 3×3 grid for TicTacToe) and policies
+    14×14 placement board for Blokus, the 3×3 grid for TicTacToe), policies
     as sparse ``(indices, values)`` pairs (int32 action ids + float32
-    probabilities, only the nonzero entries — see ``storage/sparse_policy.py``).
+    probabilities, only the nonzero entries — see ``storage/sparse_policy.py``)
+    and the side to move as an int8 ``player`` column.
 
-    The schema carries two format markers, ``board_kind`` (``BOARD_KIND``) and
-    ``policy_kind`` (``POLICY_KIND``). Files written before either scheme lack
-    the corresponding marker — dense ``(C, N, N)`` boards and/or dense
-    full-action-space policies — and cannot be loaded into the sparse compact
-    buffer: ``load`` refuses them rather than silently misreading the bytes.
+    The schema carries three format markers, ``board_kind`` (``BOARD_KIND``),
+    ``policy_kind`` (``POLICY_KIND``) and ``player_kind`` (``PLAYER_KIND``).
+    Files written before a given scheme lack the corresponding marker — dense
+    ``(C, N, N)`` boards, dense full-action-space policies, and/or no side-to-move
+    column — and cannot be loaded into the current replay buffer: ``load``
+    refuses them rather than silently misreading the bytes or inventing a colour.
     Such runs must be resumed from their checkpoints instead.
 
     Args:
@@ -64,6 +71,14 @@ class SelfPlayStore:
     # ``policy_values`` columns). Its absence means a legacy file holding one
     # dense ``policy`` blob per row, which ``load`` refuses (see class docstring).
     POLICY_KIND: str = "sparse_v1"
+
+    # Schema marker for the explicit side-to-move column. Its absence means a file
+    # written before D1, whose absolute mover colour is genuinely gone: the stored
+    # board is canonical, and piece-count parity only recovers the colour until the
+    # first pass. ``load`` refuses such files rather than guessing (see class
+    # docstring) — deliberately, because a guessed colour would silently corrupt
+    # every colour-conditional value diagnostic built on top of it.
+    PLAYER_KIND: str = "explicit_v1"
 
     def __init__(self, directory: Path) -> None:
         self._directory = directory
@@ -110,6 +125,7 @@ class SelfPlayStore:
             "board_dtype": str(sample_board.dtype),
             "policy_kind": self.POLICY_KIND,
             "policy_size": str(policy_size),
+            "player_kind": self.PLAYER_KIND,
         }
         if game_sizes is not None:
             metadata["game_sizes"] = ",".join(str(s) for s in game_sizes)
@@ -120,6 +136,7 @@ class SelfPlayStore:
                 pa.field("policy_indices", pa.binary()),
                 pa.field("policy_values", pa.binary()),
                 pa.field("value", pa.float64()),
+                pa.field("player", pa.int8()),
             ],
             metadata={k.encode(): v.encode() for k, v in metadata.items()},
         )
@@ -151,6 +168,12 @@ class SelfPlayStore:
         if not filepath.exists():
             return None
 
+        # Imported here, not at module scope: ``selfplay.episode`` imports
+        # ``storage.sparse_policy``, which executes ``storage/__init__`` — which
+        # imports this module. A module-scope import would therefore be a genuine
+        # cycle for any entry point that reaches self-play first.
+        from alphablokus.selfplay.episode import ProcessedExample
+
         parquet_file = pq.ParquetFile(filepath)
         metadata = {k.decode(): v.decode() for k, v in (parquet_file.schema_arrow.metadata or {}).items()}
         self._refuse_legacy_formats(filepath.name, metadata)
@@ -164,17 +187,25 @@ class SelfPlayStore:
         # Only one batch of raw bytes is resident beyond the growing deque.
         examples: deque[ProcessedExample] = deque()
         for batch in parquet_file.iter_batches():
-            for board_bytes, indices_bytes, values_bytes, value in zip(
+            for board_bytes, indices_bytes, values_bytes, value, player in zip(
                 batch.column("board").to_pylist(),
                 batch.column("policy_indices").to_pylist(),
                 batch.column("policy_values").to_pylist(),
                 batch.column("value").to_pylist(),
+                batch.column("player").to_pylist(),
                 strict=True,
             ):
                 board = np.frombuffer(board_bytes, dtype=board_dtype).reshape(board_shape).copy()
                 indices = np.frombuffer(indices_bytes, dtype=np.int32).copy()
                 values = np.frombuffer(values_bytes, dtype=np.float32).copy()
-                examples.append((board, (indices, values), float(value)))
+                examples.append(
+                    ProcessedExample(
+                        board=board,
+                        policy=(indices, values),
+                        value=float(value),
+                        player=int(player),
+                    )
+                )
 
         logger.info(f"Loaded {len(examples)} examples from {filepath.name}")
         return examples
@@ -258,14 +289,15 @@ class SelfPlayStore:
         """Serialise one row-group chunk of examples to an Arrow table."""
         return pa.Table.from_pydict(
             {
-                "board": [board.tobytes() for board, _pi, _value in chunk],
+                "board": [example.board.tobytes() for example in chunk],
                 "policy_indices": [
-                    np.ascontiguousarray(indices, dtype=np.int32).tobytes() for _b, (indices, _v), _value in chunk
+                    np.ascontiguousarray(example.policy[0], dtype=np.int32).tobytes() for example in chunk
                 ],
                 "policy_values": [
-                    np.ascontiguousarray(values, dtype=np.float32).tobytes() for _b, (_i, values), _value in chunk
+                    np.ascontiguousarray(example.policy[1], dtype=np.float32).tobytes() for example in chunk
                 ],
-                "value": [float(value) for _b, _pi, value in chunk],
+                "value": [example.value for example in chunk],
+                "player": [example.player for example in chunk],
             },
             schema=schema,
         )
@@ -274,9 +306,10 @@ class SelfPlayStore:
         """Refuse legacy on-disk formats explicitly rather than misreading bytes.
 
         A file without ``board_kind`` holds dense ``(C, N, N)`` board encodings;
-        one without ``policy_kind`` holds dense full-action-space policy blobs.
-        Either way the bytes cannot be reinterpreted as the current sparse
-        compact format, so we fail loudly with the reason.
+        one without ``policy_kind`` holds dense full-action-space policy blobs;
+        one without ``player_kind`` has no side-to-move column at all. In no case
+        can the bytes be reinterpreted as the current format, so we fail loudly
+        with the reason.
         """
         board_kind = metadata.get("board_kind")
         if board_kind != self.BOARD_KIND:
@@ -294,6 +327,17 @@ class SelfPlayStore:
                 "cannot be loaded into the sparse replay buffer — resume such "
                 "runs from their checkpoints instead (see "
                 "docs/plans/archive/oom-hardening.md O1).",
+            )
+        player_kind = metadata.get("player_kind")
+        if player_kind != self.PLAYER_KIND:
+            raise ValueError(
+                f"{filename} has player_kind={player_kind!r}, expected "
+                f"{self.PLAYER_KIND!r}. Self-play files written before the "
+                "side-to-move column existed cannot be loaded: the stored boards "
+                "are canonical, so the absolute mover colour is not in them and "
+                "piece-count parity stops recovering it as soon as either player "
+                "passes. Resume such runs from their checkpoints instead (see "
+                "docs/plans/selfplay-data-and-loop.md D1).",
             )
 
     def _read_game_sizes(self, generation: int) -> list[int] | None:

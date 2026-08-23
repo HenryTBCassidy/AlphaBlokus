@@ -77,6 +77,13 @@ class EvalSet:
       position-level resample. ``None`` for eval sets built before provenance
       was recorded, in which case interval-bearing diagnostics are skipped
       rather than computed wrongly.
+    - ``players[i]`` (optional): which side was to move at position i — ``+1``
+      White (first mover), ``-1`` Black. ``boards[i]`` is canonical, so the
+      absolute colour is not in it: before this was recorded a colour-conditional
+      diagnostic had to infer the mover from piece-count parity and discard every
+      position where a pass had broken that parity. ``None`` for eval sets built
+      before the self-play example carried the side to move
+      (``docs/plans/selfplay-data-and-loop.md`` D1).
 
     Attributes:
         source_fingerprints: Content hashes of the source games, which the replay
@@ -96,6 +103,7 @@ class EvalSet:
     target_values: NDArray
     compact_boards: NDArray | None = None
     source_game_ids: NDArray | None = None
+    players: NDArray | None = None
     source_fingerprints: tuple[str, ...] = ()
     built_at_generation: int | None = None
 

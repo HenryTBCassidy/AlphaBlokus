@@ -10,7 +10,7 @@ the work.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
 
@@ -20,16 +20,43 @@ if TYPE_CHECKING:
     from alphablokus.interfaces import IGame
     from alphablokus.search.mcts import MCTS
 
-# (compact_board, sparse_policy, value) — the shape Coach passes to
-# ``nnet.train`` after a generation of self-play. The board is stored
-# **compact** (``IBoard.to_compact`` — e.g. the 196-byte int8 placement board
-# for Blokus, vs the ~34.5 KB dense ``(44,14,14)`` encoding); the trainer
-# re-encodes it lazily per mini-batch via ``IGame.encode_compact``. The policy
-# is stored **sparse** as ``(indices, values)`` (see :mod:`core.sparse_policy`)
-# because the dense 17,837-vector dominated replay-buffer RAM; the trainer
-# densifies it. Kept untyped at runtime (compact board is an int8 NDArray,
-# value is a float ∈ [-1, 1]).
-ProcessedExample = tuple[np.ndarray, tuple[np.ndarray, np.ndarray], float]
+
+class ProcessedExample(NamedTuple):
+    """One stored self-play position — the shape ``nnet.train`` consumes.
+
+    A ``NamedTuple`` rather than a bare tuple: the fields are read positionally in
+    a dozen places (storage, the datasets, the holdout metrics), and a silent
+    positional mix-up between ``value`` and ``player`` — two small numbers that
+    both look plausible in either slot — is exactly the class of defect this
+    project keeps paying for. It stays a tuple subclass so the existing
+    ``example[0]``/``zip(*examples)`` call sites and the pickling the worker pool
+    does are unaffected, and so a position still costs one tuple.
+
+    Attributes:
+        board: The position, stored **compact** (``IBoard.to_compact`` — e.g. the
+            196-byte int8 placement board for Blokus, against the ~34.5 KB dense
+            ``(44,14,14)`` encoding). The trainer re-encodes it lazily per
+            mini-batch via ``IGame.encode_compact``.
+        policy: The MCTS-improved policy, stored **sparse** as
+            ``(indices, values)`` (see :mod:`alphablokus.storage.sparse_policy`)
+            because the dense 17,837-vector dominated replay-buffer RAM. The
+            trainer densifies it per mini-batch.
+        value: The game outcome from the perspective of the side to move at this
+            position; a float in ``[-1, 1]``.
+        player: **Which side was actually to move** — ``+1`` White (the first
+            mover), ``-1`` Black. The board is canonical (side-to-move
+            perspective), so without this the absolute colour is gone: it can be
+            *inferred* from piece-count parity only until the first pass, and
+            passing happens in the endgame, precisely where the value signal
+            matters most. Recorded explicitly for that reason
+            (``docs/plans/selfplay-data-and-loop.md`` D1).
+    """
+
+    board: np.ndarray
+    policy: tuple[np.ndarray, np.ndarray]
+    value: float
+    player: int
+
 
 # One self-play game's positions, boundaries preserved so the games-sized
 # replay buffer can evict whole games.
@@ -62,12 +89,15 @@ def play_self_play_episode(
             ``RunConfig.temp_threshold``.
 
     Returns:
-        List of ``(board, policy, value)`` triples — one per position
-        visited (including symmetry augmentations from
-        ``game.get_symmetries``). The ``value`` field is filled in once
-        the game ends, based on the perspective of the player at that
-        position.
+        List of :class:`ProcessedExample` — one per position visited
+        (including symmetry augmentations from ``game.get_symmetries``).
+        The ``value`` field is filled in once the game ends, based on the
+        perspective of the player at that position, and ``player`` records
+        which side that was.
     """
+    # (canonical board object, side to move, MCTS policy) per visited position;
+    # the outcome is only known at the end, which is why this is not built as
+    # ``ProcessedExample`` directly.
     train_examples: list[tuple] = []
     board = game.initialise_board()
     current_player = 1
@@ -88,7 +118,7 @@ def play_self_play_episode(
         # position by the size of the symmetry group.
         symmetries = game.get_symmetries(canonical_board, np.asarray(pi))
         for symmetric_board, symmetric_pi in symmetries:
-            train_examples.append((symmetric_board, current_player, symmetric_pi, None))
+            train_examples.append((symmetric_board, current_player, symmetric_pi))
 
         # Sample the move from the post-temperature distribution.
         action = np.random.choice(len(pi), p=pi)
@@ -96,10 +126,14 @@ def play_self_play_episode(
 
         game_result = game.get_game_ended(board, current_player)
         if game_result != 0:
-            # End of game: convert (board_obj, player, pi, _) into the
-            # (compact_board, pi, value) shape the network trainer expects.
-            # The value sign flips for each position where the player to
-            # move differs from the player at game end.
+            # End of game: convert (board_obj, player, pi) into the
+            # ``ProcessedExample`` shape the network trainer expects. The
+            # value sign flips for each position where the player to move
+            # differs from the player at game end, and ``player`` carries the
+            # real mover through to storage — the canonical board it is stored
+            # alongside has already thrown the absolute colour away, and
+            # piece-count parity cannot recover it once either side has passed
+            # (``docs/plans/selfplay-data-and-loop.md`` D1).
             #
             # The board is stored **compact** (``to_compact()`` — the minimal
             # canonical array, game-agnostic via the IBoard seam) rather than the
@@ -113,10 +147,11 @@ def play_self_play_episode(
             # above operates on the dense ``pi``, so ``get_symmetries`` is
             # unaffected; we only sparsify the final stored result here.
             return [
-                (
-                    x[0].to_compact(),
-                    sparsify(np.asarray(x[2], dtype=np.float32)),
-                    game_result * ((-1) ** (x[1] != current_player)),
+                ProcessedExample(
+                    board=position.to_compact(),
+                    policy=sparsify(np.asarray(pi_at_position, dtype=np.float32)),
+                    value=game_result * ((-1) ** (mover != current_player)),
+                    player=mover,
                 )
-                for x in train_examples
+                for position, mover, pi_at_position in train_examples
             ]

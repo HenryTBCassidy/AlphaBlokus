@@ -20,6 +20,7 @@ import pytest
 import torch
 
 from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
+from alphablokus.selfplay.episode import ProcessedExample
 
 
 def _make_examples(game, n: int = 64):
@@ -29,10 +30,11 @@ def _make_examples(game, n: int = 64):
         board = game.initialise_board()
         pi = rng.dirichlet(np.ones(game.get_action_size()))
         out.append(
-            (
-                board.to_compact(),
-                (np.arange(game.get_action_size(), dtype=np.int32), pi.astype(np.float32)),
-                1.0,
+            ProcessedExample(
+                board=board.to_compact(),
+                policy=(np.arange(game.get_action_size(), dtype=np.int32), pi.astype(np.float32)),
+                value=1.0,
+                player=1,
             )
         )
     return out

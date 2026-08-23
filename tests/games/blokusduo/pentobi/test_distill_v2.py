@@ -127,11 +127,12 @@ def test_build_examples_uses_the_stored_target_verbatim_at_tau_one(
     """With ε = 0 and τ = 1 the training target *is* the stored distribution."""
     examples = [row.example for row in build_training_examples(game, games[:1], epsilon=0.0, augment=False)]
     assert games[0].policies is not None
-    for (_, (indices, values), _), (stored_indices, stored_values) in zip(
+    for example, (stored_indices, stored_values) in zip(
         examples,
         games[0].policies,
         strict=True,
     ):
+        indices, values = example.policy
         assert indices.tolist() == stored_indices.tolist()
         assert values.tolist() == pytest.approx(stored_values.tolist())
 
@@ -143,7 +144,8 @@ def test_target_temperature_softens_at_load(game: BlokusDuoGame, games: list[Cor
         row.example for row in build_training_examples(game, games[:1], epsilon=0.0, augment=False, temperature=2.0)
     ]
     changed = 0
-    for (_, (_, sharp_values), _), (_, (_, soft_values), _) in zip(sharp, soft, strict=True):
+    for sharp_row, soft_row in zip(sharp, soft, strict=True):
+        sharp_values, soft_values = sharp_row.policy[1], soft_row.policy[1]
         assert soft_values.sum() == pytest.approx(1.0, abs=1e-5)
         assert np.argmax(soft_values) == np.argmax(sharp_values)  # order-preserving
         if len(sharp_values) > 1 and soft_values.max() < sharp_values.max():
@@ -154,8 +156,8 @@ def test_target_temperature_softens_at_load(game: BlokusDuoGame, games: list[Cor
 def test_epsilon_floors_the_target_over_the_legal_set(game: BlokusDuoGame, games: list[CorpusGameRows]) -> None:
     """The legal-set floor is still available; it just is not the default any more."""
     examples = [row.example for row in build_training_examples(game, games[:1], epsilon=0.1, augment=False)]
-    board, (indices, values), _ = examples[0]
-    legal = np.flatnonzero(game.valid_move_masking(game.board_from_compact(board), 1))
+    indices, values = examples[0].policy
+    legal = np.flatnonzero(game.valid_move_masking(game.board_from_compact(examples[0].board), 1))
     assert indices.tolist() == legal.tolist()  # support widens to the whole legal set
     assert values.sum() == pytest.approx(1.0, abs=1e-5)
     assert float(values.min()) > 0.0
@@ -172,11 +174,15 @@ def test_a_target_outside_the_legal_set_is_a_desync(game: BlokusDuoGame) -> None
 def test_augmentation_transposes_the_whole_support(game: BlokusDuoGame, games: list[CorpusGameRows]) -> None:
     """Symmetry augmentation is unchanged: an arbitrary support transposes fine."""
     examples = [row.example for row in build_training_examples(game, games[:1], epsilon=0.0, augment=True)]
-    (board, (indices, values), value), (twin_board, (twin_indices, twin_values), twin_value) = examples[:2]
-    assert np.array_equal(twin_board, np.ascontiguousarray(board.T))
+    row, twin = examples[:2]
+    indices, values = row.policy
+    twin_indices, twin_values = twin.policy
+    assert np.array_equal(twin.board, np.ascontiguousarray(row.board.T))
     assert twin_indices.tolist() == [game.transpose_action(int(a)) for a in indices]
     assert twin_values.tolist() == pytest.approx(values.tolist())
-    assert twin_value == value
+    assert twin.value == row.value
+    # The twin is the same position from the same side, so it keeps the mover.
+    assert twin.player == row.player
     dense = densify(twin_indices, twin_values, game.get_action_size())
     assert float(dense.sum()) == pytest.approx(1.0, abs=1e-5)
 
@@ -253,12 +259,14 @@ def test_opening_examples_carry_a_blended_value(corpus: Path, game: BlokusDuoGam
 
     blended, teacher, outcomes = load("blend"), load("search"), load("outcome")
     assert len(blended) == len(teacher) == len(outcomes)
-    assert any(b != t for (_, _, b), (_, _, t) in zip(blended, teacher, strict=True))
-    for board, (indices, values), value in blended:
+    assert any(b.value != t.value for b, t in zip(blended, teacher, strict=True))
+    for example in blended:
+        indices, values = example.policy
         assert values.sum() == pytest.approx(1.0, abs=1e-5)
-        legal = set(np.flatnonzero(game.valid_move_masking(game.board_from_compact(board), 1)).tolist())
+        legal = set(np.flatnonzero(game.valid_move_masking(game.board_from_compact(example.board), 1)).tolist())
         assert set(indices.tolist()) <= legal
-        assert -1.0 <= value <= 1.0
+        assert -1.0 <= example.value <= 1.0
+        assert example.player in (1, -1)
 
 
 # --------------------------------------------------------------------------- #

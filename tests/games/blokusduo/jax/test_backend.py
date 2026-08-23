@@ -60,11 +60,13 @@ def test_example_format_matches_python_path(generated) -> None:
     action_size = game.get_action_size()
     for game_examples in games:
         assert len(game_examples) % 2 == 0, "transpose augmentation must double examples"
-        for board, (indices, values), value in game_examples:
+        for example in game_examples:
+            board, (indices, values), value = example.board, example.policy, example.value
             assert board.shape == (14, 14) and board.dtype == np.int8
             assert indices.dtype == np.int32 and values.dtype == np.float32
             assert np.all(np.diff(indices) > 0), "sparsify stores ascending unique indices"
             assert value in (1.0, -1.0, 1e-4, -1e-4)
+            assert example.player in (1, -1)
             dense = densify(indices, values, action_size)
             np.testing.assert_allclose(dense.sum(), 1.0, atol=1e-5)
 
@@ -75,12 +77,13 @@ def test_policies_are_legal_on_their_boards(generated) -> None:
     derived: a piece is unplayed iff absent from the board), masked by the
     parity-proven jax kernels.
 
-    The canonical form deliberately does not record which physical colour is
-    to move, and the two colours have different first-move start squares (the
-    canonical frame's start is (9,9) when the real mover was Black — the
-    engine swaps ``initial_actions`` in ``board.canonical``). So positions
-    where the mover has a full inventory are checked against the union of the
-    two mover interpretations; everywhere else the mask is unambiguous.
+    The canonical form does not record which physical colour is to move, and the
+    two colours have different first-move start squares (the canonical frame's
+    start is (9,9) when the real mover was Black — the engine swaps
+    ``initial_actions`` in ``board.canonical``). The stored ``player`` now says
+    which it was, so every position is checked against its own unambiguous mask;
+    this used to fall back to the union of both interpretations wherever the
+    mover still held a full inventory (plan D1).
     """
     import jax.numpy as jnp
 
@@ -104,37 +107,50 @@ def test_policies_are_legal_on_their_boards(generated) -> None:
         return np.asarray(kernels.legal_mask(state))
 
     for game_examples in games:
-        for board_compact, (indices, _values), _value in game_examples[0::2]:  # identity twins
-            canonical = board_compact.reshape(-1).astype(np.int8)
-            mask = mask_for(canonical, 1)
-            if not np.any(canonical > 0):  # mover's first move: colour ambiguous
-                mask = mask | mask_for(-canonical, -1)
-            assert mask[indices].all(), "policy mass on an illegal action"
+        for example in game_examples[0::2]:  # identity twins
+            canonical = example.board.reshape(-1).astype(np.int8)
+            # Canonical is the absolute placement board multiplied by the mover, so
+            # multiplying back recovers the real board the mask must be built from.
+            absolute = (canonical * example.player).astype(np.int8)
+            mask = mask_for(absolute, example.player)
+            assert mask[example.policy[0]].all(), "policy mass on an illegal action"
 
 
 def test_transpose_twins_are_consistent(generated) -> None:
     _config_, game, games, _stats = generated
     action_size = game.get_action_size()
     for game_examples in games:
-        for (board_a, pi_a, value_a), (board_b, pi_b, value_b) in zip(
-            game_examples[0::2], game_examples[1::2], strict=True
-        ):
-            assert value_a == value_b
-            np.testing.assert_array_equal(board_b, board_a.T)
+        for row, twin in zip(game_examples[0::2], game_examples[1::2], strict=True):
+            board_a, pi_a = row.board, row.policy
+            pi_b = twin.policy
+            assert twin.value == row.value
+            # The twin is the same position from the same side's perspective.
+            assert twin.player == row.player
+            np.testing.assert_array_equal(twin.board, board_a.T)
             dense_a = densify(*pi_a, action_size)
             dense_b = densify(*pi_b, action_size)
             np.testing.assert_allclose(dense_b, game.transpose_policy(dense_a), atol=0)
 
 
 def test_values_alternate_with_players(generated) -> None:
-    """Within a game (non-draw), consecutive identity positions alternate sign."""
+    """Consecutive identity positions swap side to move, and the value follows.
+
+    Blokus Duo's jax path never passes mid-game (a blocked side ends its game), so
+    the mover strictly alternates; the outcome each position is labelled with must
+    flip with it. Previously only the value sign could be checked, since the mover
+    was not stored — so a harvester that mislabelled *which* colour a value
+    belonged to was invisible.
+    """
     _config_, _game, games, _stats = generated
     for game_examples in games:
-        identity_values = [value for _b, _p, value in game_examples[0::2]]
-        if abs(identity_values[-1]) < 0.5:
+        identity = list(game_examples[0::2])
+        players = [example.player for example in identity]
+        assert players[0] == 1  # White opens
+        assert players == [1 if index % 2 == 0 else -1 for index in range(len(players))]
+        if abs(identity[-1].value) < 0.5:
             continue  # draw — signs follow the end-player convention instead
-        for first, second in zip(identity_values, identity_values[1:], strict=False):
-            assert first == -second
+        for first, second in zip(identity, identity[1:], strict=False):
+            assert first.value == -second.value
 
 
 def test_stats_schema(generated) -> None:
@@ -154,8 +170,9 @@ def test_deterministic_at_fixed_seed(generated, tmp_path) -> None:
     assert len(games_again) == len(games)
     for game_a, game_b in zip(games, games_again, strict=True):
         assert len(game_a) == len(game_b)
-        for (board_a, (idx_a, val_a), value_a), (board_b, (idx_b, val_b), value_b) in zip(game_a, game_b, strict=True):
-            np.testing.assert_array_equal(board_a, board_b)
-            np.testing.assert_array_equal(idx_a, idx_b)
-            np.testing.assert_array_equal(val_a, val_b)
-            assert value_a == value_b
+        for example_a, example_b in zip(game_a, game_b, strict=True):
+            np.testing.assert_array_equal(example_a.board, example_b.board)
+            np.testing.assert_array_equal(example_a.policy[0], example_b.policy[0])
+            np.testing.assert_array_equal(example_a.policy[1], example_b.policy[1])
+            assert example_a.value == example_b.value
+            assert example_a.player == example_b.player

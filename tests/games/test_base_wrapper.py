@@ -11,6 +11,7 @@ import pytest
 from alphablokus.games.base_wrapper import PVC_TOP_K, BaseNNetWrapper
 from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
 from alphablokus.interfaces import IPolicyValuePredictor
+from alphablokus.selfplay.episode import ProcessedExample
 from alphablokus.storage.metrics import EvalSet, MetricsCollector
 from alphablokus.storage.sparse_policy import sparsify
 
@@ -72,6 +73,26 @@ def test_cosine_default_eta_min_is_unchanged(ttt_game: TicTacToeGame, test_confi
     assert seq == ref, "Default lr_eta_min=0.0 changed the cosine schedule"
 
 
+def test_train_refuses_examples_with_no_side_to_move(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
+    """A position whose ``player`` is a placeholder fails at the interface boundary.
+
+    Nothing in the loss reads ``player`` today, so a producer that forgot to thread
+    it (or filled it with 0) would train perfectly happily and only surface much
+    later as a colour-conditional diagnostic measuring invented labels. The check
+    is over the whole buffer, not a sample, because a single mis-threaded producer
+    among several is exactly the case worth catching (plan D1).
+    """
+    wrapper = NNetWrapper(ttt_game, test_config)
+    compacts = _ttt_eval_positions(ttt_game, 4)
+    examples = [
+        ProcessedExample(compact, sparsify(_uniform_over_legal(ttt_game, compact)), 0.0, 1) for compact in compacts
+    ]
+    examples[-1] = examples[-1]._replace(player=0)
+
+    with pytest.raises(AssertionError, match="side-to-move"):
+        wrapper.train(examples, generation=1)
+
+
 def test_train_logs_actual_learning_rate(ttt_game: TicTacToeGame, test_config: RunConfig) -> None:
     """train() records the optimizer's actual LR once per epoch (L2).
 
@@ -83,7 +104,10 @@ def test_train_logs_actual_learning_rate(ttt_game: TicTacToeGame, test_config: R
     wrapper = NNetWrapper(ttt_game, config)
 
     compacts = _ttt_eval_positions(ttt_game, 4)
-    examples = [(compact, sparsify(_uniform_over_legal(ttt_game, compact)), 0.0) for compact in compacts]
+    examples = [
+        ProcessedExample(compact, sparsify(_uniform_over_legal(ttt_game, compact)), 0.0, 1 if i % 2 == 0 else -1)
+        for i, compact in enumerate(compacts)
+    ]
     metrics = MetricsCollector(config=config)
     wrapper.train(examples, generation=3, metrics=metrics)
 
@@ -298,7 +322,10 @@ def test_mcts_agreement_is_computed_and_logged(ttt_game: TicTacToeGame, test_con
     assert 0.0 <= top1 <= top5 <= 1.0
 
     # End-to-end: train one generation and confirm the new series is persisted.
-    examples = [(compact, sparsify(_uniform_over_legal(ttt_game, compact)), 0.0) for compact in compacts]
+    examples = [
+        ProcessedExample(compact, sparsify(_uniform_over_legal(ttt_game, compact)), 0.0, 1 if i % 2 == 0 else -1)
+        for i, compact in enumerate(compacts)
+    ]
     metrics = MetricsCollector(config=test_config)
     wrapper.train(examples, generation=1, metrics=metrics, eval_set=eval_set)
 
@@ -533,7 +560,10 @@ def test_pvc_computed_and_logged_end_to_end(ttt_game: TicTacToeGame, test_config
     mae = wrapper._compute_value_symmetry_mae(eval_set)
     assert mae is not None and mae >= 0.0
 
-    examples = [(compact, sparsify(_uniform_over_legal(ttt_game, compact)), 0.0) for compact in compacts]
+    examples = [
+        ProcessedExample(compact, sparsify(_uniform_over_legal(ttt_game, compact)), 0.0, 1 if i % 2 == 0 else -1)
+        for i, compact in enumerate(compacts)
+    ]
     metrics = MetricsCollector(config=test_config)
     wrapper.train(examples, generation=1, metrics=metrics, eval_set=eval_set)
 
