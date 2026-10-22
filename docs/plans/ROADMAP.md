@@ -115,8 +115,10 @@ The load-bearing conclusions, with what has changed since:
    best net scores **0.315** at level 9 (CI [0.232, 0.411]) — so we lose, and it is resolved. Two
    refinements to what was previously written here: 10× more search moved us from 0.22 to 0.315
    against a *stronger* opponent, so **"search is not the lever" was too strong** — it is real but
-   insufficient. And the split by colour is the actual finding: **0.630 as first mover (we beat level
-   9), 0.000 as second mover across 50 games.** A colour-handling defect has not yet been ruled out.
+   insufficient. By colour it is 0.630 moving first and 0.000 moving second (50 games each). That split
+   is not a defect: colour handling was checked (0.65 as second mover against level 1), and Pentobi
+   level 9 scores ~0.93 as first mover against itself, so a uniform gap of ~377 Elo predicts both
+   cells. See the 2026-10-22 correction in [`value-head.md`](value-head.md).
 8. **Previously written here, now superseded by (7):** Every net-vs-Pentobi
    number the project owns was taken at **400 simulations for us against Pentobi's own budget**,
    with Pentobi thinking ~12× longer per move at level 9. On that footing the best net is ~280 Elo
