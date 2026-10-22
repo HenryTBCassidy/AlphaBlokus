@@ -3,8 +3,10 @@
 > **ARCHIVED 2026-08-12 — superseded by [`../evaluation-instruments.md`](../evaluation-instruments.md).**
 > F1–F9 landed here and their results are recorded below: the opening-book defect, Pentobi's simulation
 > table, the L7-vs-L9 measurement, the parity calibration, and **the fair fight** (0.315 at level 9 at
-> equal thinking time, with the 0.63 / 0.00 colour split). The two unfinished rows, F10 and F11, moved
-> to the successor as I2 and I3. **Read this for the results; plan new work there.**
+> equal thinking time, with the 0.63 / 0.00 colour split) — plus **the F12 colour check**, which
+> refutes the colour-handling-bug explanation of that 0.00 and is written up under F9. The two
+> unfinished rows, F10 and F11, moved to the successor as I2 and I3. **Read this for the results;
+> plan new work there.**
 
 The ladder gives our net a fixed 400 MCTS simulations per move and Pentobi a fixed `--level N`.
 Both are search-effort settings and the two efforts are unrelated, so the ladder has never
@@ -63,9 +65,10 @@ objective measure.
 | F6 | Unify draw handling to score = W + D/2 everywhere | 1 h | no | High | ✅ |
 | F7 | Refit ladder Elo with colour + draw terms | ½ day | no | High | ✅ |
 | F8 | Calibrate the time-parity budget on non-book moves | 2 h box | yes | High | ✅ |
-| F9 | **The fair fight**: net vs L9 at parity budget (4,096 sims), 100 games | 5 h box | yes | **Critical** | 🔄 |
+| F9 | **The fair fight**: net vs L9 at parity budget (4,096 sims), 100 games | 5 h box | yes | **Critical** | ✅ |
 | F10 | Search-scaling slope: 400/1,600/6,400 at L8 and L9 | 1–2 d box | yes | Medium | |
 | F11 | Book-on vs book-off strength delta at L9 (plan item V11) | 4 h box | yes | Medium | |
+| F12 | Colour check: is F9's 0-for-50 as second mover real, or a bug? | ¼ h box | yes | **Critical** | ✅ |
 
 F1–F3 gate everything else: every later interpretation depends on them.
 
@@ -404,11 +407,74 @@ signal from behind — which is exactly this shape. Note this is the **first run
 colour split at all** (the telemetry landed in the benchmark rework), so we cannot say whether the
 pattern is new or has always been hidden inside the pooled ladder numbers.
 
-**Caveat that must be closed before strategy is built on it.** A 0-for-50 cell is extreme enough to
-be a defect rather than a finding, and this project has had colour-convention confusion before (GTP
-`b` is our White). The cheap decisive check is queued: play our net as second mover against a *weak*
-Pentobi. If it wins there, colour handling is fine and 0/50 is strength; if it loses to level 1 as
-Black, it is a bug.
+**Caveat that had to be closed before strategy was built on it — now closed.** A 0-for-50 cell is
+extreme enough to be a defect rather than a finding, and this project has had colour-convention
+confusion before (GTP `b` is our White). The cheap decisive check was queued as F12: play our net as
+second mover against a *weak* Pentobi. If it wins there, colour handling is fine and 0/50 is
+strength; if it loses to level 1 as Black, it is a bug. **It won** — see the colour check below.
+
+### The colour check (2026-08-12): the 0-for-50 is real, not a colour-handling bug ✅
+
+Queued as **F12** and run at levels 1 and 2, 20 games each (10 per colour), **400 simulations,
+book off**, seed 23.
+
+| Opponent | as White (first mover) | as Black (second mover) |
+|---|---|---|
+| Level 1 | 1.00 (10-0-0), 95% CI [0.722, 1.000] | **0.65** (6-3-1), 95% CI [0.354, 0.863] |
+| Level 2 | 1.00 (10-0-0), 95% CI [0.722, 1.000] | **0.50** (5-5-0), 95% CI [0.237, 0.763] |
+| Both levels pooled, as Black | — | **0.575** (11-8-1 over 20), 95% CI [0.364, 0.762] |
+
+**Judged against the rule written before the run** (`agents/box-queue.md`, F12): *"if the net also
+wins ~0 as second mover against level 1, stop and treat it as a bug — a net that beats level 9 as
+White cannot legitimately lose to level 1 as Black."*
+
+**Verdict: the kill condition is not met, and it is not met by a wide margin.** As Black against
+level 1 the net won 6 of 10 and drew 1; the interval's lower bound is 0.354, so a second-mover score
+anywhere near zero is excluded. The net wins as second mover through the same benchmark path, the
+same `Arena.play_games_by_colour` split and the same GTP colour mapping that produced F9's 0/50.
+**The colour-handling-bug hypothesis is refuted**, and F9's colour split stands as a strength result.
+
+This is a directional test and it only had to exclude one extreme, which it does cleanly: under a
+true Black score of 0.30 the observed 6 wins would be a ~3% outcome in the other direction, and we
+are not in the "too few games to detect anything" regime — we are in the "positively demonstrated"
+one.
+
+**What it does not establish.**
+
+- **It is not a strength measurement, and it must never be pooled with F9 or with the ladder.**
+  Different levels, 400 simulations against F9's 4,096, book off against F9's book on, 20 games
+  against 100. The bug test is self-contained inside F12; the cross-run comparison is not
+  like-for-like on any axis.
+- **The level-1 and level-2 cells do not differ from each other.** Ten games per colour carries a
+  ~±0.25 interval; 0.65 against 0.50 is noise, and no trend may be read across two rungs.
+- **The 1.00 White cells are not perfection.** Ten games bound them only at [0.722, 1.000].
+- **It leaves the second-mover deficit at level 9 unexplained, which was the point.** What it buys
+  is the right to build on F9's split: as Black the net scored 0.000, 95% CI [0.000, 0.071], against
+  0.630, 95% CI [0.491, 0.750], as White. Those intervals are disjoint by a wide margin, so the
+  colour gap at level 9 is real and large. No Elo is quoted for the Black cell — a score of zero
+  inverts to an unbounded gap, and `ladder_elo`'s colour-corrected inversion is defined for a
+  colour-balanced pooled score, not for one colour's half.
+
+Taken together with the level-1/2 cells, the shape is: the net plays both colours competently
+against weak opposition and loses only the second-mover side as the opponent strengthens. That is
+the corroboration [`../value-head.md`](../value-head.md) rests on, and it is now clean.
+
+**Recorded under the wrong condition label.** `--condition` accepts only `ladder` and `fair-fight`
+(`CONDITION_DIRNAMES`, `scripts/pentobi_benchmark.py`), so this run had to be submitted as
+`fair-fight` and its payload sits in `PentobiFairFight/` beside F9's. **It is not a fair-fight
+result** — nothing about it is at parity. Automated consumers are unharmed: `is_longitudinal()`
+admits only `condition == "ladder"`, so neither promotion, the drift circuit-breaker nor the report's
+ladder series can absorb it. The hazard is to human readers and to any future manual glob of that
+directory, which would silently mix two scales. `evaluation-instruments.md` I1 adds a `colour-check`
+value; until it lands, **read the sims and book fields, not the directory name.**
+
+**Raw-record gap.** This result was never written to `agents/box-results.md`, so its only record was
+an already-interpreted table in `value-head.md` and there is no payload path, no per-chunk tally and
+no completion evidence in the repo. That is the shape of the "96.3% of decisive arena games" failure
+— a load-bearing number whose raw data cannot be re-derived. The numbers above are judged as
+reported; the GPU-runner should backfill the raw entry, and if the payload is gone the run is cheap
+enough (~15 min, no GPU contention) to repeat.
+
 
 
 
