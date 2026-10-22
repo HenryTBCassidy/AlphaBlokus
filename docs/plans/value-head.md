@@ -36,6 +36,46 @@ when building its training target. An estimate that reads "am I the first mover?
 the board gives the search nothing to work with once the answer is no — so from behind it has no
 gradient toward a plan, at any simulation count, net size or data volume.
 
+### Correction (2026-10-22): the level-9 colour split is explained by the strength gap
+
+The play table above doesn't show a value-head defect. At level 9 the first-mover advantage is much
+bigger than the ~75%-of-decisive-games figure the ladder Elo assumes, and once you use the measured
+figure the 0.63 / 0.00 split comes straight out of an ordinary strength gap that is the same for both
+colours.
+
+The measurement is I3 batch A (`agents/box-results.md` on `runner/i3-book-delta-log`): Pentobi level
+9 against itself, book on against book off, 100 games with `twogtp` alternating colours. The first
+mover scored 0.93 with the book and 0.94 without, so the book makes little difference and colour
+makes nearly all of it. A first-mover score of 0.935 is 463 Elo through `colour_advantage_elo`,
+against the ~191 that 75% implies.
+
+Fitting with `alphablokus.evaluation.ladder_elo` and that advantage:
+
+| | Moving first | Moving second |
+|---|---|---|
+| Observed vs level 9 (fair fight, 50 games each) | 0.630 | 0.000 (0/50) |
+| Predicted from the pooled 0.315 alone (level 9 about 377 Elo above us) | 0.622 | 0.008 (0.4 expected wins, P(0/50) = 0.67) |
+
+The pooled score alone reproduces both cells, with no colour-specific term. "The deficit widens with
+opponent strength" fits the same model: stronger players convert the first move more reliably, so the
+advantage grows up the ladder and pushes every second-mover score towards zero, including Pentobi's
+own (0.06–0.07 against itself).
+
+What still stands is the value diagnostic in the first paragraph of this section. The head tracks
+mover colour more than outcomes do, and on production checkpoints it has no skill beyond colour. That
+was measured on positions, not inferred from match results, and it is still the reason for H2–H5.
+
+What doesn't stand is "the net can convert an advantage but cannot create one" as a finding from
+play, or reading the 0/50 as a failure specific to moving second. A net about 377 Elo weaker is
+expected to score 0/50 there.
+
+Caveats: the 463 comes from one 100-game mirror match between two copies of level 9, and our games
+against level 9 might not carry the same advantage. Batch B was never fetched from the box. So the
+fit is suggestive rather than proof, but it removes the need for a colour-specific explanation.
+
+For H2–H5 this means judging them on value skill and the pooled ladder score, not on the
+second-mover cell. A fix that really helps could still leave second-mover scores at level 9 near zero.
+
 ---
 
 ## Checklist

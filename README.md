@@ -2,13 +2,23 @@
 
 [![CI](https://github.com/HenryTBCassidy/AlphaBlokus/actions/workflows/ci.yml/badge.svg)](https://github.com/HenryTBCassidy/AlphaBlokus/actions/workflows/ci.yml)
 
-**A from-scratch AlphaZero implementation for Blokus Duo — Monte Carlo Tree Search + self-play reinforcement learning with deep ResNet policy/value networks (PyTorch), on a game-agnostic engine with a GPU-native JAX self-play backend.**
+An AlphaZero implementation for Blokus Duo, written from scratch. It learns the game by playing against itself, using Monte Carlo Tree Search (MCTS) guided by a ResNet with a policy head and a value head. Training is in PyTorch and self-play runs on the GPU in JAX.
 
-No human games, no handcrafted heuristics. The system learns Blokus Duo — a two-player territorial game on a 14×14 board with 21 polyomino pieces per player and a 17,837-action space — entirely through self-play, following [AlphaZero](https://www.science.org/doi/10.1126/science.aar6404). The benchmark opponent is [Pentobi](https://pentobi.sourceforge.io/) (MCTS + RAVE, the strongest open-source Blokus engine); the goal is to beat it at its maximum difficulty, level 9.
+There are no human games and no hand-written strategy in it. Blokus Duo is a two-player game on a 14×14 board where each player has 21 polyomino pieces, which gives 17,837 possible moves. I benchmark against [Pentobi](https://pentobi.sourceforge.io/), the strongest open-source Blokus engine (MCTS with RAVE). The goal is to beat it on its hardest setting, level 9.
 
-**Status (July 2026) — work in progress.** The current best network beats Pentobi convincingly at levels 1–2, holds a winning record through level 4, is statistically even at level 5, and clearly loses at level 6. Pure self-play has scaled on cloud GPUs (RTX 5090 via RunPod) with a larger network and ~10,000 self-play games per generation, but plateaued at level 4. The current direction is to break that plateau by distilling from Pentobi — supervised imitation of expert-level games, then continued self-play beyond the teacher, following the [AlphaGo](https://www.nature.com/articles/nature16961) bootstrap.
+## Status (October 2026)
 
-## Results vs Pentobi
+The best network beats Pentobi comfortably at levels 1 and 2, has a winning record up to level 4 and loses from level 6 up. Against level 9, with the same thinking time per move and Pentobi's opening book on, it scores 31.5%. Once you correct for how much moving first matters in Blokus Duo, that is about 375 Elo short.
+
+Training plateaued around level 4, so in August I stopped running bigger experiments and worked out why. What I found:
+
+- It isn't network size. A much bigger network did no better.
+- Three of my measurements were wrong. The held-out evaluation set had leaked into the training data, the arena that decided whether a new network replaced the old one was mostly measuring which colour moved first, and Pentobi's opening book had never been loaded.
+- The value head, the part of the network that estimates who is winning, mostly guesses from whose turn it is rather than reading the board.
+
+The next step is a training run from the best checkpoint with all of those fixes in, which hasn't been done yet. [`docs/plans/ROADMAP.md`](docs/plans/ROADMAP.md) has what's currently in progress.
+
+## Results against Pentobi
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/pentobi-ladder-dark.png">
@@ -24,36 +34,47 @@ No human games, no handcrafted heuristics. The system learns Blokus Duo — a tw
 | 5 | 18–22–0 | 45% | [31, 60] |
 | 6 | 8–30–2 | 20% | [10, 35] |
 
-Current best checkpoint — a 192-filter × 12-block ResNet (~ 8M parameters) after ~ 70 generations (~ 700k self-play games) — playing 40 games per level at 400 MCTS simulations per move, via the project's [Pentobi GTP harness](docs/05-EVALUATION.md). Levels 7–9 remain untested; level 6 is the current frontier.
+These are 40 games per level at 400 MCTS simulations per move, with the best checkpoint at the time: a 192-filter × 12-block ResNet (about 8M parameters) after roughly 70 generations and 700k self-play games, run through my [Pentobi GTP harness](docs/05-EVALUATION.md). Pentobi's opening book was off for these games because, as it turned out, it had never been loaded.
+
+For level 9 I gave both sides the same time per move, which works out at 4,096 simulations for my network, and turned Pentobi's opening book on. 100 games, half as each colour ([how the comparison is set up](docs/10-EVALUATION-SPEC.md)):
+
+| vs Pentobi level 9 | W–L–D | Score | 95% CI |
+|---|---|---|---|
+| Moving first | 30–17–3 | 0.63 | [0.49, 0.75] |
+| Moving second | 0–50–0 | 0.00 | [0.00, 0.07] |
+| Total | 30–67–3 | 0.315 | [0.23, 0.41] |
+
+Losing all 50 games as second mover looked like a bug, but it isn't: the same code scores 0.65 as second mover against level 1. Moving first is a huge advantage at this level. When Pentobi level 9 plays itself, whoever moves first scores about 0.93, so a network around 375 Elo weaker should expect to win almost nothing as second mover.
+
+Pentobi's levels are fixed simulation counts and the gaps between them aren't even (level 6 to 7 is a 30× jump). I measured level 9 at about 156 Elo above level 7.
 
 ## How it works
 
-Each *generation* of the training loop:
+Each generation:
 
-1. **Self-play** — the current network plays thousands of games against itself, guided by MCTS; visit distributions and outcomes become training targets.
-2. **Train** — the ResNet learns to predict MCTS move probabilities (policy head, KL loss) and game outcomes (value head, MSE loss).
-3. **Gate** — the candidate plays the incumbent in an arena; it is promoted only if it scores above a threshold (chess-style `wins + ½·draws`).
-4. **Evaluate** — relative Elo is tracked per generation, an end-of-run pooled [BayesElo tournament](docs/research/pool-elo-methodology.md) rates all checkpoints against each other (DeepMind's methodology), and checkpoints are benchmarked externally against Pentobi.
+1. Self-play. The current network plays thousands of games against itself, using MCTS to pick moves. The search's visit counts and the final results become the training data.
+2. Train. The network learns to predict the search's move probabilities (policy head, KL loss) and the result of the game (value head, MSE loss).
+3. Evaluate. Originally a new network had to beat the old one in an arena to be kept. In Blokus Duo that mostly measured who moved first, so the latest config keeps every generation and picks the best checkpoint by playing Pentobi. I also run a pooled [BayesElo tournament](docs/research/pool-elo-methodology.md) across checkpoints at the end of a run.
 
-The framework is game-agnostic (protocol interfaces for game rules, boards, and networks, with a single composition root) and was validated end-to-end on Tic-Tac-Toe — where it reaches near-perfect play against a minimax oracle within a couple of generations — before Blokus was plugged in. Algorithms are documented in [`docs/02-ALGORITHMS.md`](docs/02-ALGORITHMS.md), network architecture in [`docs/03-NEURAL-NETWORKS.md`](docs/03-NEURAL-NETWORKS.md).
+I got the framework working on Tic-Tac-Toe first, where it reaches near-perfect play against a minimax player within a couple of generations, then plugged Blokus in. The algorithms are written up in [`docs/02-ALGORITHMS.md`](docs/02-ALGORITHMS.md) and the network in [`docs/03-NEURAL-NETWORKS.md`](docs/03-NEURAL-NETWORKS.md).
 
-## Engineering highlights
+## Engineering
 
-Most of the work in an AlphaZero project is systems engineering — making self-play cheap enough, and evaluation trustworthy enough, to iterate at scale.
+Most of the work in an AlphaZero project is making self-play cheap enough, and the evaluation reliable enough, to iterate. The main pieces:
 
-- **GPU-native self-play in JAX** ([`games/blokusduo/jax/`](src/alphablokus/games/blokusduo/jax/)) — game rules reimplemented as batched int8 matmuls (placement legality, game end, legal-move masks), searched with [mctx](https://github.com/google-deepmind/mctx) [Gumbel AlphaZero](https://openreview.net/forum?id=bERaNdoegnO) over a top-K compacted action space, with an inference-only JAX net bridged from the torch checkpoint each generation. **~12× self-play throughput** at production net size, A/B-validated at strength parity with the python engine and parity-gated in CI ([study](docs/research/jax-pipeline-ab.md)).
-- **A ~14× optimisation stack on the python engine** — multiprocess self-play/arena workers (5.7× at 8 workers), Pentobi-style precomputed move-generation tables (9× per call), batched MCTS leaf evaluation with virtual loss, and a fully-convolutional policy head (21.6× fewer parameters). Each step was profiled, measured, and recorded ([tracker](docs/plans/archive/full-cycle-optimisation.md)); a cross-worker inference server was built, benchmarked, and deliberately **not** adopted when it showed no win.
-- **Memory engineering for long runs** — boards stored as 196-byte compact states in a rolling game-level replay buffer and lazily re-encoded to 44×14×14 tensors at batch time (~175× less buffer RAM); sparse on-disk policy storage with streamed parquet I/O (the dense format was ~71 KB/position); startup RAM-budget checks and peak-RSS logging.
-- **Cloud training** — Dockerised uv environment, S3-compatible checkpoint sync, and `--resume` from the last completed generation, so a spot GPU dying mid-run costs one generation, not the run.
-- **Evaluation you can trust** — gated arena promotion, pooled BayesElo tournaments across checkpoints (relative Elo curves don't saturate the way a fixed-baseline metric does), and an external anchor: a GTP client + move-translation layer driving real Pentobi binaries across its nine difficulty levels.
-- **Engineering discipline throughout** — installable `src/` package, strict mypy (`disallow_untyped_defs`), ruff lint + format in CI, tests mirroring the source tree, and bit-identical parity gates wherever two implementations of the same rules coexist (python vs JAX, python vs the TypeScript web port).
+- JAX self-play ([`games/blokusduo/jax/`](src/alphablokus/games/blokusduo/jax/)). I rewrote the rules as batched int8 matrix multiplies so thousands of games run on the GPU at once, searched with DeepMind's [mctx](https://github.com/google-deepmind/mctx) using [Gumbel AlphaZero](https://openreview.net/forum?id=bERaNdoegnO) over the top 64 candidate moves. The network is copied across from the PyTorch checkpoint each generation. At the production network size it is about 12× faster than the python engine, plays at the same strength in an A/B test, and CI checks it matches the python rules exactly ([write-up](docs/research/jax-pipeline-ab.md)).
+- Speeding up the python engine about 14×. Multiprocess workers (5.7× on 8 workers), Pentobi-style precomputed move generation tables (9× per call), batched MCTS leaf evaluation with virtual loss, and a fully convolutional policy head with 21.6× fewer parameters. Each step was profiled and recorded ([tracker](docs/plans/archive/full-cycle-optimisation.md)). I also built a cross-worker inference server, but once the network got smaller it didn't help, so I left it out.
+- Memory. Boards are stored as 196-byte arrays in a rolling replay buffer and only turned back into 44×14×14 tensors when a batch is built, which uses about 175× less RAM. Policies are stored sparsely on disk; the dense version was 71 KB per position.
+- Cloud training on rented RTX 5090s, with Docker, checkpoint sync to S3-compatible storage and `--resume`, so losing a spot GPU costs one generation rather than the whole run.
+- Evaluation. A GTP client that drives the real Pentobi binary at all nine levels. The internal evaluation set holds out whole games from training and its confidence intervals are bootstrapped by game, because treating positions as independent gave 95% intervals that covered the true value only 52% of the time in simulation. Every run records its code commit, config and data, and won't start from a config that isn't committed.
+- The usual hygiene. An installable `src/` package, strict mypy, ruff in CI, tests that mirror the source tree, and exact parity tests wherever the rules exist twice (python vs JAX, python vs the TypeScript web version).
 
 ## Architecture
 
 ```
 src/alphablokus/
 ├── interfaces.py       # IBoard / IGame / IPolicyValuePredictor / INeuralNetWrapper protocols
-├── registry.py         # Composition root — the only module naming concrete games/backends
+├── registry.py         # Composition root, the only module naming concrete games/backends
 ├── search/             # MCTS: PUCT, Dirichlet root noise, batched inference + virtual loss
 ├── selfplay/           # Episode loop + backend dispatch (serial / parallel / JAX)
 ├── parallel/           # Worker pool for self-play, arena, and Elo games
@@ -66,7 +87,7 @@ src/alphablokus/
     └── blokusduo/      # Board/rules/codecs, move-gen tables, Pentobi GTP, JAX backend, ResNet
 ```
 
-Framework code depends only on the protocol interfaces; adding a game means implementing them under `games/<name>/` and registering it in `registry.py`. Blokus specifics: a 44-channel board encoding (21 per-piece planes per player + 2 aggregate), immutable board states keyed by a 196-byte placement grid (so MCTS gets transposition handling for free), and codecs mapping the 17,837-action space. Tests live in `tests/`, mirroring the source tree one-to-one.
+Framework code only depends on the interfaces, so adding a game means implementing them under `games/<name>/` and registering it in `registry.py`. For Blokus the board is encoded as 44 channels (one plane per piece per player, plus two summary planes), board states are immutable and keyed by a 196-byte placement grid (which gives MCTS transpositions for free), and codecs map the 17,837 actions. Tests in `tests/` mirror the source tree.
 
 ## Quickstart
 
@@ -93,22 +114,22 @@ Set `"cuda": true/false` in the config's `net_config` to match your machine. Eve
 
 ## Play against it
 
-A browser build runs the full engine client-side — TypeScript rules port, MCTS, and the network via ONNX Runtime Web (WebGPU with WASM fallback) — plus a full-strength local tier serving the real torch + MCTS stack behind the same frontend. Fidelity is enforced, not assumed: the TS port replays fixture games byte-identically against the python engine, and full games are verified ply-by-ply across the two stacks. Setup in [`docs/plans/archive/web-play.md`](docs/plans/archive/web-play.md); calibration study in [`docs/research/web-play-calibration.md`](docs/research/web-play-calibration.md).
+There's a browser version that runs entirely client-side: a TypeScript port of the rules, MCTS, and the network through ONNX Runtime Web (WebGPU, falling back to WASM). There's also a local server that runs the full-strength PyTorch engine behind the same frontend. The TypeScript rules replay test games identically to the python engine, and full games are checked move by move across both. Setup is in [`docs/plans/archive/web-play.md`](docs/plans/archive/web-play.md) and calibration in [`docs/research/web-play-calibration.md`](docs/research/web-play-calibration.md).
 
 ## Documentation
 
-Design docs: [background & why Blokus](docs/01-BACKGROUND.md) · [algorithms](docs/02-ALGORITHMS.md) · [neural networks](docs/03-NEURAL-NETWORKS.md) · [Blokus Duo rules & pieces](docs/04-BLOKUS-DUO.md) · [evaluation & Elo](docs/05-EVALUATION.md) · [Pentobi interface](docs/06-INTERFACES.md) · [data storage](docs/07-DATA-STORAGE.md) · [compute options](docs/09-COMPUTE-OPTIONS.md).
+Design docs: [background and why Blokus](docs/01-BACKGROUND.md) · [algorithms](docs/02-ALGORITHMS.md) · [neural networks](docs/03-NEURAL-NETWORKS.md) · [Blokus Duo rules and pieces](docs/04-BLOKUS-DUO.md) · [evaluation and Elo](docs/05-EVALUATION.md) · [Pentobi interface](docs/06-INTERFACES.md) · [data storage](docs/07-DATA-STORAGE.md) · [compute options](docs/09-COMPUTE-OPTIONS.md).
 
-The project is developed against written implementation plans: [`docs/plans/archive/`](docs/plans/archive/) holds ~40 completed plans (the full engineering history — move generation, batched inference, the JAX pipeline, the replay-buffer refactor, OOM hardening, cloud scaling, …), and [`docs/research/`](docs/research/) holds the deeper investigations (profiling reports, A/B studies, the pool-Elo methodology).
+I work from written plans. [`docs/plans/archive/`](docs/plans/archive/) has about 60 finished ones, which together are the history of the project (move generation, batched inference, the JAX pipeline, the replay buffer, memory fixes, cloud training and so on). [`docs/research/`](docs/research/) has the longer investigations, including profiling, A/B tests, the pool Elo method and the [August 2026 plateau investigation](docs/research/investigation-2026-08/). [`docs/plans/ROADMAP.md`](docs/plans/ROADMAP.md) lists what's in progress.
 
 ## References
 
 - Silver et al., [Mastering the game of Go without human knowledge](https://www.nature.com/articles/nature24270) (AlphaGo Zero, 2017)
 - Silver et al., [A general reinforcement learning algorithm that masters chess, shogi, and Go through self-play](https://www.science.org/doi/10.1126/science.aar6404) (AlphaZero, 2018)
-- Danihelka et al., [Policy improvement by planning with Gumbel](https://openreview.net/forum?id=bERaNdoegnO) (2022) — the low-simulation search the JAX backend uses
-- [mctx](https://github.com/google-deepmind/mctx) (DeepMind) — JAX-native MCTS
-- [Pentobi](https://pentobi.sourceforge.io/) (Markus Enzenberger) — the benchmark opponent, and the source of the precomputed move-generation design
-- [alpha-zero-general](https://github.com/suragnair/alpha-zero-general) (Surag Nair) — the game-agnostic framework pattern this started from
+- Danihelka et al., [Policy improvement by planning with Gumbel](https://openreview.net/forum?id=bERaNdoegnO) (2022), the low-simulation search the JAX backend uses
+- [mctx](https://github.com/google-deepmind/mctx) (DeepMind), JAX-native MCTS
+- [Pentobi](https://pentobi.sourceforge.io/) (Markus Enzenberger), the benchmark opponent, and where the precomputed move-generation design came from
+- [alpha-zero-general](https://github.com/suragnair/alpha-zero-general) (Surag Nair), the framework this project started from
 
 ## License
 

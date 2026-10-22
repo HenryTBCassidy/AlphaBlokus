@@ -4,9 +4,9 @@
 
 ## What is this project?
 
-AlphaZero implementation for Blokus Duo. Self-play reinforcement learning on a 14x14 board with 21 polyomino pieces per player. The goal is to beat Pentobi (strongest open-source Blokus AI) at its maximum difficulty, level 9. Current best net holds a winning record through level 4 (2026-07 ladder: 80/75/60/55/45/20% at levels 1–6, 40 games/level).
+AlphaZero implementation for Blokus Duo. Self-play reinforcement learning on a 14x14 board with 21 polyomino pieces per player. The goal is to beat Pentobi (strongest open-source Blokus AI) at its maximum difficulty, level 9. The 2026-07 ladder showed a winning record through level 4 (80/75/60/55/45/20% at levels 1–6, 40 games/level, 400 sims, book off); the best net, `blokus_cloud_v3` gen-40, scores 0.315 against level 9 at equal thinking time with the book on (2026-08-11) — roughly 375 Elo short once first-mover advantage is corrected for.
 
-**Current state:** The full pipeline is built, optimised, and running scaled Blokus training on the home GPU (native Ubuntu). The code is an installable `src/alphablokus` package with CI (ruff + format check, strict mypy, base + jax test jobs). Scaled runs (15–30+ generations, ~1,000 games/gen) have executed; the Pentobi benchmark harness is built (`games/blokusduo/pentobi/`, `scripts/pentobi_benchmark.py`). The phase-by-phase history lives in `docs/plans/archive/` (the README links the highlights; regenerate its ladder chart via `scripts/plot_pentobi_ladder.py`).
+**Current state:** The full pipeline is built, optimised, and has run scaled Blokus training on the home GPU (native Ubuntu) and on rented RTX 5090s. The code is an installable `src/alphablokus` package with CI (ruff + format check, strict mypy, base + jax test jobs). Scaled runs (up to ~70 generations, ~10,000 games/gen on cloud GPUs) have executed; the Pentobi benchmark harness is built (`games/blokusduo/pentobi/`, `scripts/pentobi_benchmark.py`). The phase-by-phase history lives in `docs/plans/archive/` (the README links the highlights; regenerate its ladder chart via `scripts/plot_pentobi_ladder.py`).
 
 **JAX self-play backend (2026-07):** Blokus self-play generation can run GPU-native — rules as int8 matmuls, mctx search over a top-K compact action space, inference-only jnp net bridged from the torch checkpoint each generation (`games/blokusduo/jax/`). Selected per run via `RunConfig.selfplay_backend: "python" | "jax"`, reached through `registry.resolve_jax_selfplay_backend`; production Blokus configs use jax + Gumbel search (`search_policy: "gumbel"`, n=64 — validated at strength parity and ~3.5–12× wall-clock in `docs/research/jax-pipeline-ab.md`). The python path is unchanged, remains the dataclass default, and always drives arena/Elo/Pentobi evaluation. Requires `uv sync --extra jax` (Mac CPU) or `--extra jax-cuda` (box).
 
@@ -20,16 +20,24 @@ Workstreams have **names, not letters**. An earlier triage labelled them "Stream
 labels are retired and the roadmap carries a decoder for older documents. Do not introduce new
 letter labels.
 
-Where things stand (2026-08-10), in one line each:
-- **The network is the constraint, not search.** The best net is ~280 Elo below Pentobi level 9,
-  and equal thinking time buys only ~70–145 Elo. Pentobi level 9 is genuinely ~156 Elo above
-  level 7 (measured engine-vs-engine, 200 colour-balanced games).
-- The **value head** shows no skill beyond guessing from whose turn it is; that is the leading
-  hypothesis and the next work (`supervised-network-improvements.md` N6/N7).
-- **Pentobi's opening book had never been active** until 2026-08-05 — every historical Pentobi
-  number faced a book-free opponent. See gotcha 14.
+Where things stand (2026-10-22). Work paused on 2026-08-19 with four PRs open (#80–#83).
+- At equal thinking time with the book on, the best net scores 0.315 against level 9: 0.630 moving
+  first, 0.000 moving second. Level 9 is about 156 Elo above level 7 (engine vs engine).
+- The colour split is not a separate defect. At level 9 the first mover scores about 0.93 even when
+  Pentobi plays itself, which is roughly 460 Elo of colour advantage rather than the ~190 the ladder
+  assumes. With that, the pooled 0.315 on its own predicts 0.62 / 0.01, so we are about 375 Elo short
+  in both colours. See the 2026-10-22 correction in `docs/plans/value-head.md`.
+- It isn't capacity (xl did no better than large). More search helps but isn't enough (10× search
+  took us from 0.22 to 0.315).
+- The value head shows no skill beyond guessing from whose turn it is. That is the leading
+  hypothesis and the next work (`docs/plans/value-head.md`).
+- A clean training loop has never been run from the best net. The pilot
+  (`docs/plans/selfplay-data-and-loop.md` D5) decides whether the loop or the ceiling is the problem,
+  and it hasn't run.
+- Pentobi's opening book was never loaded before 2026-08-05, so every earlier Pentobi number was
+  against a book-free opponent. See gotcha 18.
 - The full investigation record is in [`docs/research/investigation-2026-08/`](docs/research/investigation-2026-08/);
-  `00-briefing.md` there is **superseded** by `00-briefing-erratum.md`.
+  `00-briefing.md` there is superseded by `00-briefing-erratum.md`.
 
 Candidate ideas queue in `docs/IDEAS.md`.
 
@@ -124,7 +132,7 @@ Follow `docs/guides/PLAN-FORMAT.md` when creating implementation plans.
 17. **The arena is telemetry, not a promotion signal, once `gate_mode: "always"` is set.** Promotion is `select_best` over Pentobi ladder results and the catastrophe stop is the drift circuit-breaker; both are armed by `ladder_check_every` (0 disables) and consume results produced out-of-process by `scripts/mini_ladder.py`. With the gate off, `best.pth.tar` is merely the latest candidate — the run's product is `Nets/best_by_ladder.json`. `arena_crash_floor` keeps the arena useful as a crash detector (a score far below the instrument's measured 0.485–0.530 floor means something broke, not that the candidate is slightly worse). Reference recipe: `run_configurations/blokus_pilot_b6.json`.
 18. **Pentobi's opening book was inactive for the project's entire history (fixed 2026-08-05).** `pentobi_gtp/Main.cpp` looks for `.blksgf` files beside the binary, and the build directory held none — while `param_base` still reported `use_book 1`, which is the *setting*, not the capability. So every Pentobi measurement before 2026-08-05 faced a book-free opponent, and "beat Pentobi level 9" never meant the shipped engine. Fixed by `ln -sfn ~/code/pentobi/opening_books/*.blksgf ~/code/pentobi/build/pentobi_gtp/`. A book hit is identifiable by an **empty `move_values`** response (no search tree) — at level 9, 0.47s with the book against 25.82s without. `PentobiPlayer` now requires `nobook` explicitly so a rebuild cannot silently flip it back. Net-vs-net comparisons are unaffected (all consistently book-free); the strength the book is worth is still unmeasured (`pentobi-corpus-v2.md` V11).
 19. **Pentobi's level is a hardcoded simulation count, and the scale is not even.** `counts_duo = {3, 21, 77, 213, 861, 7280, 221867, 1109339, 5546695}` in `libpentobi_mcts/Player.cpp`. The level 6→7 step is **30×** while every other step is 3–8×, so the ladder's levels are not evenly spaced in difficulty and a win-rate cliff there is the opponent's budget jumping, not the net falling over. Realised effort is lower than the table: measured level 9 / level 7 is ~14× (both wall-clock and CPU-time), not the tabled 25×, so treat the table as nominal. More threads change Pentobi's speed, **not** its strength.
-20. **Never invert a pooled ladder score with a plain logistic.** The ladder splits games evenly between colours, and Blokus Duo's first mover takes ~75% of decisive games; averaging a logistic over ±colour-advantage *flattens* it, so `-400*log10(1/s - 1)` **understates** the gap everywhere off 0.5 (at level 9: −220 naive against −280 corrected). Use `alphablokus.evaluation.ladder_elo`. And at 100 games near a score of 0.2, one percentage point is ~11 Elo — a single rung's 95% interval spans ~170 Elo, so adjacent-level Elo differences are not resolvable.
+20. **Never invert a pooled ladder score with a plain logistic, and fit the colour advantage at the level in question.** The ladder splits games evenly between colours; averaging a logistic over ±colour-advantage *flattens* it, so `-400*log10(1/s - 1)` **understates** the gap everywhere off 0.5. Use `alphablokus.evaluation.ladder_elo`. The advantage itself grows with strength: the first mover takes ~75% of decisive games at the 400-sim ladder levels (~190 Elo), but scores ~0.93 in a level-9 Pentobi mirror match (~460 Elo). The choice dominates the answer: the level-9 fair-fight 0.315 reads as −135 Elo naive, −176 at the assumed 190, and −377 at the measured 460 — so fit the advantage from a colour split at that level rather than assuming 75%. (The older "−280 corrected" figure was the 400-sim score of 0.22 at an assumed 190.) And at 100 games near a score of 0.2, one percentage point is ~11 Elo — a single rung's 95% interval spans ~170 Elo, so adjacent-level Elo differences are not resolvable.
 21. **Pentobi level 9 needs `--workers 6`, not 16 (2026-08-05).** A ladder worker costs **~3.4 GB** — `pentobi-gtp` preallocates a fixed ~1.96 GB search tree at L9, plus ~1.41 GB for the python/torch worker. 16 workers is ~54 GB against the box's 31 GB, so the kernel OOM-kills `pentobi-gtp` and the run dies with `GtpError: pentobi-gtp process is not running`. This silently lost all four L9 cells of the B1 sweep. 6 workers ≈ 20 GB and leaves ~8 GB headroom; 8 workers survives at only ~2 GB, which is too tight. L1–L8 are unaffected (smaller trees). Anything touching L9 — including B2's search-scaling sweep — must cap workers.
 22. **Don't write `rc=$?` after a command substitution in a queue script (2026-08-05).** `echo "[$(ts)] END $tag rc=$?"` reports the exit status of `ts`, not of the job — so B1's driver logged `rc=0` for all 26 steps including 4 crashes, and wrote its `B1_QUEUE_DONE` marker over them. Capture into a variable on the line straight after the job (`rc=$?`) before anything else runs. Reference driver: `temp/run_b1_l9.sh`.
 
