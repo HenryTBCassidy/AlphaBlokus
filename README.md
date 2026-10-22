@@ -6,6 +6,8 @@ An AlphaZero implementation for Blokus Duo, written from scratch. It learns the 
 
 There are no human games and no hand-written strategy in it. Blokus Duo is a two-player game on a 14×14 board where each player has 21 polyomino pieces, which gives 17,837 possible moves. I benchmark against [Pentobi](https://pentobi.sourceforge.io/), the strongest open-source Blokus engine (MCTS with RAVE). The goal is to beat it on its hardest setting, level 9.
 
+The current best network is [published](https://github.com/HenryTBCassidy/AlphaBlokus/releases/tag/v3-gen40), so you can download it and play it or benchmark it yourself ([how](#play-against-it)).
+
 ## Status (October 2026)
 
 The best network beats Pentobi comfortably at levels 1 and 2, has a winning record up to level 4 and loses from level 6 up. Against level 9, with the same thinking time per move and Pentobi's opening book on, it scores 31.5%. Once you correct for how much moving first matters in Blokus Duo, that is about 375 Elo short.
@@ -114,7 +116,41 @@ Set `"cuda": true/false` in the config's `net_config` to match your machine. Eve
 
 ## Play against it
 
-There's a browser version that runs entirely client-side: a TypeScript port of the rules, MCTS, and the network through ONNX Runtime Web (WebGPU, falling back to WASM). There's also a local server that runs the full-strength PyTorch engine behind the same frontend. The TypeScript rules replay test games identically to the python engine, and full games are checked move by move across both. Setup is in [`docs/plans/archive/web-play.md`](docs/plans/archive/web-play.md) and calibration in [`docs/research/web-play-calibration.md`](docs/research/web-play-calibration.md).
+My best network (generation 40 of the `blokus_cloud_v3` run) is attached to a [GitHub release](https://github.com/HenryTBCassidy/AlphaBlokus/releases/tag/v3-gen40). Everything below runs on your own machine; the release only holds the weights. From a clone of the repo:
+
+```bash
+uv run python scripts/download_model.py    # ~98 MB, checks the SHA-256
+```
+
+That puts the checkpoint where the commands below expect it.
+
+To play in your browser, export the network for the web app and build it (needs Node.js):
+
+```bash
+uv run --extra web python scripts/export_web_assets.py \
+    --config run_configurations/best_net_v3_gen40.json \
+    --checkpoint models/runs/blokus/v3_gen40/Nets/v3_gen40.pth.tar
+cd web && npm ci && npm run build && npm run preview
+```
+
+This version runs everything in the browser: a TypeScript port of the rules, MCTS, and the network through ONNX Runtime Web (WebGPU, or WebAssembly if WebGPU isn't available). The TypeScript rules replay test games identically to the python engine, and full games are checked move by move across both.
+
+For full strength, run the real PyTorch engine behind the same page instead of `npm run preview`, then open http://127.0.0.1:8000:
+
+```bash
+uv run --extra play alphablokus-play \
+    --config run_configurations/best_net_v3_gen40.json \
+    --checkpoint models/runs/blokus/v3_gen40/Nets/v3_gen40.pth.tar
+```
+
+To benchmark it against Pentobi, build `pentobi-gtp` ([instructions](docs/06-INTERFACES.md#building-pentobi)) and run:
+
+```bash
+uv run python scripts/pentobi_benchmark.py --config run_configurations/best_net_v3_gen40.json \
+    --net v3_gen40.pth.tar --levels 1-6 --games 40 --nobook
+```
+
+Set `"cuda": true` in the config if you have an NVIDIA GPU. The difficulty levels in the app are calibrated in [`docs/research/web-play-calibration.md`](docs/research/web-play-calibration.md).
 
 ## Documentation
 

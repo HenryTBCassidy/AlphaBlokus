@@ -32,3 +32,6 @@ docs/research/*.html
 *.gif
 *.webp
 
+
+# Downloaded release checkpoints (scripts/download_model.py)
+models/
