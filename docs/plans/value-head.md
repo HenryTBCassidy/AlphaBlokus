@@ -1,8 +1,8 @@
-# The value head, and why the net cannot play from behind
+# The value head, and why it guesses from whose turn it is
 
 The network's estimate of *who is winning* has no demonstrable skill beyond guessing from whose turn
-it is. This plan attacks that, and the concrete failure it appears to produce: **our net beats Pentobi
-level 9 as first mover and has never beaten it as second mover.**
+it is. This plan attacks that. The level-9 colour split that was first read as its symptom in play
+turns out to be first-mover advantage; see the correction below.
 
 **Scope owner:** `value-head`. **H2–H5 are blocked on
 [`selfplay-data-and-loop.md`](selfplay-data-and-loop.md) D1** — they cannot start until stored
@@ -36,8 +36,8 @@ near zero is excluded — through the same benchmark path, the same `Arena.play_
 and the same GTP colour mapping that produced the 0/50. Full judgement in
 [`archive/fair-pentobi-benchmark.md`](archive/fair-pentobi-benchmark.md) under F9. At level 9 the two
 colour cells are 0.630, 95% CI [0.491, 0.750], and 0.000, 95% CI [0.000, 0.071] — disjoint by a wide
-margin, so the gap is real and large. **The deficit widens with opponent strength.** The net can
-convert an advantage; it cannot create one.
+margin, so the gap is real and large. The deficit widens with opponent strength, which the correction
+below explains as first-mover advantage rather than a weakness specific to moving second.
 
 The level-1 and level-2 rows are 20 games each (10 per colour) at 400 simulations, book off; the
 level-9 row is 100 games at 4,096 simulations, book on. They establish the *shape*; they are not on
@@ -55,7 +55,7 @@ bigger than the ~75%-of-decisive-games figure the ladder Elo assumes, and once y
 figure the 0.63 / 0.00 split comes straight out of an ordinary strength gap that is the same for both
 colours.
 
-The measurement is I3 batch A (`agents/box-results.md` on `runner/i3-book-delta-log`): Pentobi level
+The measurement is I3 batch A (the I3 entry in [`agents/box-results.md`](../../agents/box-results.md)): Pentobi level
 9 against itself, book on against book off, 100 games with `twogtp` alternating colours. The first
 mover scored 0.93 with the book and 0.94 without, so the book makes little difference and colour
 makes nearly all of it. A first-mover score of 0.935 is 463 Elo through `colour_advantage_elo`,
