@@ -30,17 +30,6 @@ brace expansion, no placeholders. If it needs three runs, write three commands.
 
 ## Pending
 
-### W1 — extend `--condition` beyond two values *(code task, not a box job)*
-- **For:** the benchmark scope — **Priority:** high, it blocks F10
-- **Why:** `--condition` accepts only `ladder` and `fair-fight`, but the queue already needs
-  `search-scaling`, `colour-check` and `book-delta`. The mechanism exists to keep incomparable scales
-  apart, and having only two labels forces genuinely different experiments to share a directory —
-  which is the thing it was built to prevent. F12 had to be run mislabelled as `fair-fight` for
-  exactly this reason.
-- **Where:** `CONDITION_DIRNAMES` in `scripts/pentobi_benchmark.py`; `is_longitudinal()` in
-  `evaluation/ladder_selection.py` must keep filtering everything except `ladder`.
-- **Not a box job** — listed here only because two queued jobs are blocked on it.
-
 ### F12 — is 0-for-50 as second mover real, or a colour-handling bug?
 - **Requested by:** benchmark — **Priority:** **critical** — it gates how F9 is read
 - **Plan item:** `docs/plans/fair-pentobi-benchmark.md` F9 follow-up
@@ -61,25 +50,25 @@ brace expansion, no placeholders. If it needs three runs, write three commands.
 - **Plan item:** `docs/plans/fair-pentobi-benchmark.md` F10
 - **Question it answers:** how many Elo does *our* net gain per doubling of its own search? Decides
   whether more search is a route to level 9 at all, and how far F9's single point can be extrapolated.
-- **Blocked on:** W1 below — `--condition` currently accepts only `ladder` and `fair-fight`, so a
-  search-scaling arm has nowhere to write that is not one of those two scales.
-- **Commands** (three runs, sequential; `<cond>` becomes `search-scaling` once W1 lands):
+- **Blocked on:** nothing — W1 landed 2026-08-18 (`--condition search-scaling` now exists and writes
+  to `PentobiSearchScaling/`). Commands below are copy-pasteable as written.
+- **Commands** (three runs, sequential):
   ```bash
   uv run python scripts/pentobi_benchmark.py --config run_configurations/blokus_cloud_v3_eval.json \
-    --net accepted_40.pth.tar --levels 8,9 --games 100 --sims 400  --book --condition <cond> \
+    --net accepted_40.pth.tar --levels 8,9 --games 100 --sims 400  --book --condition search-scaling \
     --workers 6 --seed 11 --out temp/benchmarks/f10_sims400.html
   uv run python scripts/pentobi_benchmark.py --config run_configurations/blokus_cloud_v3_eval.json \
-    --net accepted_40.pth.tar --levels 8,9 --games 100 --sims 1600 --book --condition <cond> \
+    --net accepted_40.pth.tar --levels 8,9 --games 100 --sims 1600 --book --condition search-scaling \
     --workers 6 --seed 11 --out temp/benchmarks/f10_sims1600.html
   uv run python scripts/pentobi_benchmark.py --config run_configurations/blokus_cloud_v3_eval.json \
-    --net accepted_40.pth.tar --levels 8,9 --games 100 --sims 6400 --book --condition <cond> \
+    --net accepted_40.pth.tar --levels 8,9 --games 100 --sims 6400 --book --condition search-scaling \
     --workers 6 --seed 11 --out temp/benchmarks/f10_sims6400.html
   ```
 - **Expected cost:** ~10–14 h total at 6 workers. RAM ~22 GB.
 - **Stop condition:** kill-condition — if the 400→6,400 slope is under ~10 Elo per doubling, search
   is not the lever; stop and do not add a 25,600 arm.
-- **Prerequisites:** W1. **Note:** opening diversity shrinks as sims rise, so record distinct ply-8
-  positions per arm; the noise floor grows along the treatment axis.
+- **Prerequisites:** none (W1 landed). **Note:** opening diversity shrinks as sims rise, so record
+  distinct ply-8 positions per arm; the noise floor grows along the treatment axis.
 
 ### F11 — what is Pentobi's opening book worth?
 - **Requested by:** benchmark — **Priority:** medium
@@ -121,6 +110,13 @@ brace expansion, no placeholders. If it needs three runs, write three commands.
 ---
 
 ## Done
+
+### W1 — extend `--condition` beyond two values ✅ 2026-08-18 *(code task, not a box job)*
+All five conditions now exist — `ladder`, `fair-fight`, `search-scaling`, `colour-check`,
+`book-delta` — each writing to its own directory. `is_longitudinal()` still admits `ladder` only,
+now proved by tests parametrised over the whole set. Branch `feat/instruments-condition-enum`;
+recorded in `docs/plans/evaluation-instruments.md` I1 and `docs/10-EVALUATION-SPEC.md`.
+**F10 is unblocked.**
 
 ### F9 — the fair fight: gen-40 vs Pentobi L9 at equal thinking time ✅ 2026-08-11
 100 games, 4,096 sims, book on (probe confirmed engaged), 6 workers, 7,407 s.

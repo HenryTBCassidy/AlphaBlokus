@@ -39,6 +39,7 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from alphablokus.config import RunConfig, load_args
+from alphablokus.evaluation.ladder_conditions import LadderCondition
 from alphablokus.evaluation.ladder_selection import (
     DEFAULT_CONSECUTIVE_DROPS,
     DEFAULT_DROP,
@@ -112,7 +113,7 @@ def _run_one_net(config_path: str, config: RunConfig, net: str, args: argparse.N
     # This script only ever writes the longitudinal series, so its settings have to be
     # the ladder's: the same check the full benchmark applies to --condition ladder.
     conflict = pentobi_benchmark.condition_conflicts(
-        pentobi_benchmark.CONDITION_LADDER,
+        LadderCondition.LADDER,
         nobook=LONGITUDINAL_NOBOOK,
         sims=args.sims,
     )
@@ -155,7 +156,7 @@ def _run_one_net(config_path: str, config: RunConfig, net: str, args: argparse.N
         per_level=per_level,
         metrics=metrics,
         duration_s=duration_s,
-        condition=pentobi_benchmark.CONDITION_LADDER,
+        condition=LadderCondition.LADDER,
         context=pentobi_benchmark.build_context(
             argparse.Namespace(**{**vars(args), "nobook": LONGITUDINAL_NOBOOK}),
             config,

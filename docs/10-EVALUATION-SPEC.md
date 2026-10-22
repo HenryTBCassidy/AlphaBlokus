@@ -143,3 +143,37 @@ uv run python scripts/pentobi_benchmark.py \
 `blokus_cloud_v3_eval.json` exists because the config validator rejects the original run config on
 training-only grounds (learning rate, Gumbel knobs) even for a script that does no training. Same
 architecture, same checkpoint directory, no training knobs.
+
+---
+
+## Conditions: which instrument a result belongs to
+
+Every Pentobi result carries a `--condition`, and each condition writes into its own directory. The
+mechanism exists because `Coach` reads a results directory as *one* series and feeds it to
+keep-best-by-ladder and the drift circuit-breaker: a book-on 300-game level-9 score and a book-free
+100-game L1–9 weighted score are not the same measurement, and pooling them would corrupt promotion
+and could trip the catastrophe stop on nothing.
+
+| `--condition` | Directory | What it measures |
+|---|---|---|
+| `ladder` | `PentobiLadder/` | The longitudinal yardstick: **400 sims, book off, levels 1–9** |
+| `fair-fight` | `PentobiFairFight/` | Equal thinking time, book on, top levels only |
+| `search-scaling` | `PentobiSearchScaling/` | One arm of a sims sweep — strength per doubling of *our* search |
+| `colour-check` | `PentobiColourCheck/` | Colour-split diagnostic: is a lopsided record real or a bug? |
+| `book-delta` | `PentobiBookDelta/` | Book on vs book off — what Pentobi's opening book is worth |
+
+Two rules hold, and both are enforced in code
+(`src/alphablokus/evaluation/ladder_conditions.py`, tested in
+`tests/evaluation/test_ladder_conditions.py`):
+
+- **`ladder` is the only longitudinal condition.** Everything else is a one-off on its own scale and
+  is filtered out of the promotion series by `is_longitudinal()`. A payload with no `condition` key
+  predates 2026-08-05 and is a ladder result; an unrecognised value is *not* longitudinal, so a
+  condition added later is excluded by default.
+- **`ladder` may not change its own yardstick.** `--condition` defaults to `ladder`, so `--book` or
+  `--sims 6400` alone would silently redefine the series; the run is refused instead and told to pick
+  the condition that describes it.
+
+Pick the condition that describes the comparison. Sharing a label between two different experiments
+is the exact thing this prevents — a colour-check diagnostic was once recorded as a `fair-fight`
+because only those two labels existed.
