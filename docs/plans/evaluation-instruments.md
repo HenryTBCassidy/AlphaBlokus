@@ -16,7 +16,7 @@ here. Spec: [`../10-EVALUATION-SPEC.md`](../10-EVALUATION-SPEC.md).
 
 | # | Item | Role | Effort | Priority | Done |
 |---|---|---|---|---|---|
-| I1 | Extend `--condition` beyond two values | `W` | 1 h | **High** — blocks I2 | |
+| I1 | Extend `--condition` beyond two values | `W` | 1 h | **High** — blocks I2 | ✅ |
 | I2 | Search-scaling slope: does *our* search convert into strength? | `W→R→A` | 10–14 h box | **High** | |
 | I3 | What Pentobi's opening book is worth in Elo | `R→A` | 4 h box, no GPU | Medium | |
 | I4 | bfloat16 vs float32 self-play A/B | `R→A` | hours | Medium | |
@@ -24,16 +24,45 @@ here. Spec: [`../10-EVALUATION-SPEC.md`](../10-EVALUATION-SPEC.md).
 
 ---
 
-## I1. Extend `--condition` beyond two values
+## I1. Extend `--condition` beyond two values ✅
 
-`--condition` accepts only `ladder` and `fair-fight`, but the queue already needs `search-scaling`,
+`--condition` accepted only `ladder` and `fair-fight`, but the queue already needs `search-scaling`,
 `colour-check` and `book-delta`. The mechanism exists to stop incomparable scales being pooled, and
 with two labels genuinely different experiments are forced to share a directory — which is the exact
 thing it was built to prevent. The colour-check run had to be mislabelled `fair-fight` for this reason.
 
-Touch `CONDITION_DIRNAMES` in `scripts/pentobi_benchmark.py`. **`is_longitudinal()` in
-`evaluation/ladder_selection.py` must keep excluding everything except `ladder`** — that filter is
-what stops a one-off comparison driving promotion or tripping the drift breaker.
+**Done (2026-08-18).** All five conditions now exist, each with its own directory:
+
+| `--condition` | Directory |
+|---|---|
+| `ladder` | `PentobiLadder/` (the run's existing home) |
+| `fair-fight` | `PentobiFairFight/` |
+| `search-scaling` | `PentobiSearchScaling/` |
+| `colour-check` | `PentobiColourCheck/` |
+| `book-delta` | `PentobiBookDelta/` |
+
+The set moved out of `scripts/pentobi_benchmark.py` into a `LadderCondition` StrEnum in
+`src/alphablokus/evaluation/ladder_conditions.py`, because the producer (the benchmark script) and
+the two consumers (`Coach._check_ladder_and_drift`, `reporting/data.py`) have to agree on it — adding
+a condition is now one edit, not three. `condition_directory()` resolves the output directory and
+refuses an unknown label; `--condition` is typed by the enum so a misspelling fails at **parse** time
+rather than when the directory is resolved, which happens *after* the games have been played.
+
+`is_longitudinal()` is unchanged in behaviour — it still admits `ladder` and a missing key, and now
+delegates to `is_longitudinal_condition()` so there is one definition of "longitudinal". Four tests
+hold the line, all parametrised over the enum so a condition added later is covered without anyone
+remembering to cover it:
+
+- no one-off condition reaches `select_best` or `detect_drift`, tested with intruders built to do
+  maximum damage if they leaked (one scoring 0.95, which would be crowned; two scoring ~0.05, which
+  would trip the drift breaker's two-consecutive-drop rule)
+- the same, end to end, with both conditions written into *one* directory and read back
+- exactly one condition is longitudinal, so widening that is a deliberate test-breaking act
+- every module that calls `load_ladder_results` also applies the filter — so a third consumer cannot
+  forget it
+
+Spec: [`../10-EVALUATION-SPEC.md`](../10-EVALUATION-SPEC.md) now carries the condition table and the
+two rules. **I2 is unblocked** — its three arms write to `--condition search-scaling`.
 
 ## I2. Search-scaling slope
 

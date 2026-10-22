@@ -58,6 +58,7 @@ from typing import TYPE_CHECKING
 
 from alphablokus.config import RunConfig, load_args
 from alphablokus.evaluation.arena import Arena, ColourTally
+from alphablokus.evaluation.ladder_conditions import LadderCondition, condition_directory
 from alphablokus.evaluation.ladder_selection import SCORING_WIN_DRAW_HALF
 from alphablokus.evaluation.players import NetworkPlayer
 from alphablokus.games.blokusduo.pentobi.book import BookProbe, probe_book
@@ -78,14 +79,13 @@ DEFAULT_WORKERS_WHEN_PARALLEL = 4  # VRAM-safe default on the 8 GB 3060 Ti; lowe
 # where it is read back: the selection logic uses it to tell a pre-2026-08-05
 # draws-as-losses result from a current one and put both on the same scale.
 
-# Where each condition's results live. They MUST stay in separate directories:
-# Coach's cadence check (keep-best-by-ladder + the drift circuit-breaker) reads
-# every ladder_*.json in one directory as a single series, and comparing a
-# book-on 300-game L9-only score against a book-free 100-game L1-9 weighted score
-# would corrupt promotion decisions and could trip the catastrophe stop on nothing.
-CONDITION_LADDER = "ladder"  # longitudinal instrument: 400 sims, book off, L1-9
-CONDITION_FAIR_FIGHT = "fair-fight"  # equal-time, book on, top levels only
-CONDITION_DIRNAMES = {CONDITION_LADDER: "PentobiLadder", CONDITION_FAIR_FIGHT: "PentobiFairFight"}
+# Which conditions exist, and where each one's results live, is
+# ``alphablokus.evaluation.ladder_conditions`` — the producer here and the consumer in
+# ``Coach`` have to agree on the set, so it is defined once in the package. They MUST
+# stay in separate directories: Coach's cadence check (keep-best-by-ladder + the drift
+# circuit-breaker) reads every ladder_*.json in one directory as a single series, and
+# comparing a book-on 300-game L9-only score against a book-free 100-game L1-9 weighted
+# score would corrupt promotion decisions and could trip the catastrophe stop on nothing.
 
 
 def _eval_mcts_config(base, sims: int, batch: int = 1):
@@ -510,8 +510,8 @@ def condition_conflicts(condition: str, *, nobook: bool, sims: int) -> str | Non
     Returns:
         A message explaining the conflict, or ``None`` if the settings are coherent.
     """
-    if condition != CONDITION_LADDER:
-        return None
+    if condition != LadderCondition.LADDER:
+        return None  # every other condition is a one-off, free to use any settings
     problems = []
     if not nobook:
         problems.append("--book (the ladder's whole history is book-free)")
@@ -520,10 +520,11 @@ def condition_conflicts(condition: str, *, nobook: bool, sims: int) -> str | Non
     if not problems:
         return None
     return (
-        f"The {CONDITION_LADDER!r} condition is incompatible with {' and '.join(problems)}. "
+        f"The '{LadderCondition.LADDER}' condition is incompatible with {' and '.join(problems)}. "
         f"A result on a different scale must not enter the longitudinal series that drives "
-        f"keep-best-by-ladder and the drift circuit-breaker: record it as a one-off instead "
-        f"(scripts/pentobi_benchmark.py --condition {CONDITION_FAIR_FIGHT})."
+        f"keep-best-by-ladder and the drift circuit-breaker: record it as a one-off instead, "
+        f"under whichever condition describes it "
+        f"({', '.join(c.value for c in LadderCondition if c is not LadderCondition.LADDER)})."
     )
 
 
@@ -663,6 +664,29 @@ Score: {metrics["score"]:.3f} &nbsp;|&nbsp; Weighted: {metrics["weighted_score"]
     out_path.write_text(html)
 
 
+def add_condition_argument(parser: argparse.ArgumentParser) -> None:
+    """Add ``--condition``, accepting every condition in :class:`LadderCondition`.
+
+    Split out of :func:`main` so a test can bind the real CLI surface: the whole point
+    of the flag is that a genuinely different experiment gets its own label and its own
+    directory, and until 2026-08-18 it accepted only two values — which forced a
+    colour-check diagnostic to be recorded as a ``fair-fight``.
+
+    ``type=LadderCondition`` means an unknown label fails at parse time rather than when
+    the output directory is resolved, which happens *after* the games have been played.
+    """
+    parser.add_argument(
+        "--condition",
+        type=LadderCondition,
+        choices=list(LadderCondition),
+        default=LadderCondition.LADDER,
+        help="Which instrument this run belongs to. Decides the output directory and is "
+        "recorded in the payload; Coach only ever reads the 'ladder' condition. Pick the "
+        "one that describes the comparison — sharing a label between two different "
+        "experiments is what the mechanism exists to prevent.",
+    )
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Benchmark a net against Pentobi → HTML report")
     ap.add_argument("--config", required=True, help="Run config JSON (net arch + game + net dir)")
@@ -729,13 +753,7 @@ def main() -> None:
         help="Let Pentobi use its opening book, i.e. the engine as shipped. Requires the "
         "*.blksgf files to sit beside the pentobi-gtp binary; the run verifies engagement.",
     )
-    ap.add_argument(
-        "--condition",
-        choices=sorted(CONDITION_DIRNAMES),
-        default=CONDITION_LADDER,
-        help="Which instrument this run belongs to. Decides the output directory and is "
-        "recorded in the payload; Coach only ever reads the 'ladder' condition.",
-    )
+    add_condition_argument(ap)
     args = ap.parse_args()
 
     if find_pentobi_gtp() is None:
@@ -882,11 +900,7 @@ def main() -> None:
     # Persist the summary in the directory belonging to this condition. The
     # longitudinal ladder keeps its historical home; anything else is quarantined
     # so Coach's cadence check can never absorb it into the promotion series.
-    out_dir = (
-        config.pentobi_ladder_directory
-        if args.condition == CONDITION_LADDER
-        else config.pentobi_ladder_directory.parent / CONDITION_DIRNAMES[args.condition]
-    )
+    out_dir = condition_directory(config.pentobi_ladder_directory, args.condition)
     ladder_path = write_ladder_result(
         out_dir,
         net=args.net or "freshnet",
