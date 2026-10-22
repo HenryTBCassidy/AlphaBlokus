@@ -17,11 +17,11 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from alphablokus.config import NET_PRESETS
+from alphablokus.selfplay.episode import ProcessedExample
 
 if TYPE_CHECKING:
     from alphablokus.config import RunConfig
     from alphablokus.interfaces import IGame, INeuralNetWrapper
-    from alphablokus.selfplay.episode import ProcessedExample
 
 # Fallback when self-play measurement is skipped: mean TRAINING EXAMPLES one
 # Blokus Duo self-play game contributes — ~28 moves × 2 symmetry augmentation.
@@ -173,7 +173,16 @@ def measure_train_seconds_per_position(
         # buffer's real storage format, so densify cost is measured too.
         support = rng.choice(action_size, size=min(30, action_size), replace=False).astype(np.int32)
         values = rng.dirichlet(np.ones(len(support))).astype(np.float32)
-        examples.append((compact, (np.sort(support), values), float(rng.uniform(-1, 1))))
+        # Alternating side to move, as a real game's positions do — the field is
+        # validated at ``train()``'s boundary, so a placeholder would fail there.
+        examples.append(
+            ProcessedExample(
+                board=compact,
+                policy=(np.sort(support), values),
+                value=float(rng.uniform(-1, 1)),
+                player=1 if len(examples) % 2 == 0 else -1,
+            )
+        )
 
     start = time.perf_counter()
     wrapper.train(examples, generation=0)

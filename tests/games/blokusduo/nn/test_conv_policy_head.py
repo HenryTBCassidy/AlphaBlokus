@@ -30,6 +30,7 @@ from alphablokus.games.blokusduo.game import BlokusDuoGame
 from alphablokus.games.blokusduo.nn.net import ConvPolicyHead, build_action_permutation
 from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper
 from alphablokus.games.blokusduo.pieces import default_pieces_path
+from alphablokus.selfplay.episode import ProcessedExample
 from alphablokus.testing.positions import load_cache, replay_to_board_and_player
 
 if TYPE_CHECKING:
@@ -252,7 +253,9 @@ def test_conv_net_trains_and_loss_drops(tmp_path: Path) -> None:
         target_pi = valids / valids.sum()
         # train() now consumes compact boards and re-encodes lazily, so store
         # the compact form; encode below for the direct forward-pass check.
-        examples.append((canonical.to_compact(), target_pi, float((-1) ** i) * 0.5))
+        examples.append(
+            ProcessedExample(canonical.to_compact(), target_pi, float((-1) ** i) * 0.5, 1 if i % 2 == 0 else -1)
+        )
         action = int(rng.choice(np.where(valids > 0)[0]))
         board, player = game.get_next_state(board, player, action)
 

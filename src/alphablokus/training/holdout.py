@@ -162,7 +162,7 @@ def evaluate_holdout(
 
     Args:
         predictor: Anything with ``predict_encoded`` (e.g. a net wrapper).
-        examples: Held-out ``(compact_board, sparse_policy, value)`` tuples.
+        examples: Held-out :class:`~alphablokus.selfplay.episode.ProcessedExample` rows.
         encode_fn: ``IGame.encode_compact`` for the game the boards came from.
         action_size: Dense action-space size the sparse policies index into.
         batch_size: Forward-pass batch size (memory knob only).
@@ -175,9 +175,9 @@ def evaluate_holdout(
     mse_sum = 0.0
     for start in range(0, len(examples), batch_size):
         batch = examples[start : start + batch_size]
-        planes = np.stack([encode_fn(board) for board, _pi, _value in batch])
-        targets = np.stack([as_dense(pi, action_size) for _board, pi, _value in batch])
-        outcomes = np.array([value for _board, _pi, value in batch], dtype=np.float64)
+        planes = np.stack([encode_fn(example.board) for example in batch])
+        targets = np.stack([as_dense(example.policy, action_size) for example in batch])
+        outcomes = np.array([example.value for example in batch], dtype=np.float64)
 
         policies, values = predictor.predict_encoded(planes)
         log_policies = np.log(np.clip(policies.astype(np.float64), _LOG_EPS, None))
@@ -239,7 +239,7 @@ def evaluate_score_head(
 
     Args:
         predictor: Anything with ``predict_encoded_aux``.
-        examples: Held-out ``(compact_board, sparse_policy, value)`` tuples.
+        examples: Held-out :class:`~alphablokus.selfplay.episode.ProcessedExample` rows.
         margins: Raw margins index-aligned with ``examples``; ``None`` = no margin.
         score_scale: ``NetConfig.score_scale`` — must match the value trained with, or the
             reported MSE is against a different target than the one optimised.
@@ -256,7 +256,7 @@ def evaluate_score_head(
     predicted = np.empty(len(examples), dtype=np.float64)
     for start in range(0, len(examples), batch_size):
         batch = examples[start : start + batch_size]
-        planes = np.stack([encode_fn(board) for board, _pi, _value in batch])
+        planes = np.stack([encode_fn(example.board) for example in batch])
         _, _, aux = predictor.predict_encoded_aux(planes)
         if "score" not in aux:
             return None
@@ -321,7 +321,7 @@ def evaluate_ownership_head(
 
     Args:
         predictor: Anything with ``predict_encoded_aux``.
-        examples: Held-out ``(compact_board, sparse_policy, value)`` tuples.
+        examples: Held-out :class:`~alphablokus.selfplay.episode.ProcessedExample` rows.
         ownership: ``{-1, 0, +1}`` maps in each position's own canonical frame,
             index-aligned with ``examples``; ``None`` = no final board.
         encode_fn: ``IGame.encode_compact`` for the game the boards came from.
@@ -411,7 +411,7 @@ def evaluate_reply_head(
 
     Args:
         predictor: Anything with ``predict_encoded_aux``.
-        examples: Held-out ``(compact_board, sparse_policy, value)`` tuples.
+        examples: Held-out :class:`~alphablokus.selfplay.episode.ProcessedExample` rows.
         replies: The opponent's next-ply distribution per position (sparse
             ``(indices, values)`` or dense), index-aligned with ``examples``;
             ``None`` = no next ply.
@@ -555,7 +555,7 @@ def evaluate_imitation_diagnostics(
 
     Args:
         predictor: Anything with ``predict_encoded`` (e.g. a net wrapper).
-        examples: Held-out ``(compact_board, sparse_policy, value)`` tuples with
+        examples: Held-out :class:`~alphablokus.selfplay.episode.ProcessedExample` rows with
             smoothed (legal-support) sparse policies.
         expert_actions: The expert's action index per position.
         players: Side to move per position (+1 / -1).
@@ -575,10 +575,11 @@ def evaluate_imitation_diagnostics(
     predicted_values = np.empty(len(examples), dtype=np.float64)
     for start in range(0, len(examples), batch_size):
         batch = examples[start : start + batch_size]
-        planes = np.stack([encode_fn(board) for board, _pi, _value in batch])
+        planes = np.stack([encode_fn(example.board) for example in batch])
         policies, values = predictor.predict_encoded(planes)
         predicted_values[start : start + len(batch)] = values.astype(np.float64)
-        for row, (_board, pi, _value) in enumerate(batch):
+        for row, example in enumerate(batch):
+            pi = example.policy
             support = pi[0] if isinstance(pi, tuple) else np.flatnonzero(pi)
             expert = int(expert_actions[start + row])
             # One argsort over the legal support serves both ranks; ``[::-1]`` puts the
@@ -588,7 +589,7 @@ def evaluate_imitation_diagnostics(
             top3_hits += int(expert in {int(action) for action in ranked[:_TOP_K_AGREEMENT]})
 
     player_arr = np.asarray(players, dtype=np.int64)
-    outcomes = np.array([value for _board, _pi, value in examples], dtype=np.float64)
+    outcomes = np.array([example.value for example in examples], dtype=np.float64)
     calibration = tuple(
         _colour_calibration(colour, predicted_values[player_arr == colour], outcomes[player_arr == colour])
         for colour in sorted(set(player_arr.tolist()))

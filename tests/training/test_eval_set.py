@@ -15,6 +15,7 @@ import numpy as np
 import pytest
 
 from alphablokus.config import RunConfig
+from alphablokus.selfplay.episode import ProcessedExample
 from alphablokus.storage.sparse_policy import sparsify
 from alphablokus.training.eval_set import METADATA_FILENAME, build_or_load_eval_set, should_rebuild
 from alphablokus.training.replay_buffer import ReplayBuffer
@@ -64,7 +65,10 @@ def games(ttt_game) -> list[list]:
             board[ply // 3, ply % 3] = game_index + 1
             policy = np.zeros(action_size, dtype=np.float32)
             policy[rng.integers(action_size)] = 1.0
-            positions.append((board, sparsify(policy), float((-1) ** game_index)))
+            # The side to move alternates by ply, as it does in a real game.
+            positions.append(
+                ProcessedExample(board, sparsify(policy), float((-1) ** game_index), 1 if ply % 2 == 0 else -1)
+            )
         built.append(positions)
     return built
 
@@ -106,6 +110,28 @@ def test_records_source_game_for_every_position(tmp_path, ttt_game, run_config_f
     assert eval_set.built_at_generation == 1
 
 
+def test_records_the_side_to_move_for_every_position(tmp_path, ttt_game, run_config_factory, games) -> None:
+    """Each sampled position keeps the mover its source example recorded.
+
+    The eval set stores canonical boards, so a colour-conditional diagnostic run
+    on it cannot recover the mover from the board once a game has a pass in it —
+    it used to infer from piece parity and discard what it could not read. This
+    checks the value carried here is the sampled position's own, matched back
+    through ``source_game_ids`` rather than re-derived (plan D1).
+    """
+    config = run_config_factory(tmp_path, seed=11)
+
+    eval_set = build_or_load_eval_set(config, ttt_game, None, games, size=20, generation=1)
+
+    assert eval_set is not None
+    assert eval_set.players is not None
+    assert len(eval_set.players) == len(eval_set)
+    assert set(eval_set.players.tolist()) <= {1, -1}
+    # Every stored (board, player) pair must exist in the game it is attributed to.
+    for board, player, game_id in zip(eval_set.compact_boards, eval_set.players, eval_set.source_game_ids, strict=True):
+        assert any(np.array_equal(example.board, board) and example.player == player for example in games[int(game_id)])
+
+
 def test_writes_game_ids_and_metadata_to_disk(tmp_path, ttt_game, run_config_factory, games) -> None:
     config = run_config_factory(tmp_path, seed=3)
 
@@ -113,6 +139,7 @@ def test_writes_game_ids_and_metadata_to_disk(tmp_path, ttt_game, run_config_fac
 
     eval_dir = config.eval_set_directory
     assert (eval_dir / "source_game_ids.npy").exists()
+    assert (eval_dir / "players.npy").exists()
     metadata = json.loads((eval_dir / METADATA_FILENAME).read_text())
     assert metadata["built_at_generation"] == 4
     assert metadata["n_positions"] == 16
@@ -131,6 +158,7 @@ def test_reload_restores_game_ids_and_vintage(tmp_path, ttt_game, run_config_fac
     assert second.built_at_generation == 4
     np.testing.assert_array_equal(first.source_game_ids, second.source_game_ids)
     np.testing.assert_array_equal(first.compact_boards, second.compact_boards)
+    np.testing.assert_array_equal(first.players, second.players)
 
 
 def test_force_rebuild_resamples(tmp_path, ttt_game, run_config_factory, games) -> None:

@@ -40,7 +40,7 @@ def game_fingerprint(game: GameExamples) -> str:
     digest = hashlib.sha256()
     digest.update(str(len(game)).encode())
     if game:
-        digest.update(game[-1][0].tobytes())
+        digest.update(game[-1].board.tobytes())
     return digest.hexdigest()
 
 

@@ -169,10 +169,12 @@ def test_export_round_trips_through_the_trainer_reader(
     examples = [row.example for row in rows]
     assert len(examples) == meta.num_rows
     assert len(units) == len(examples)
-    for board_compact, (indices, values), value in examples:
+    for example in examples:
+        board_compact, (indices, values), value = example.board, example.policy, example.value
         assert board_compact.dtype == np.int8
         assert values.sum() == pytest.approx(1.0, abs=1e-5)
         assert len(indices) == len(values)
+        assert example.player in (1, -1)
         board = game.board_from_compact(board_compact)
         legal = np.flatnonzero(game.valid_move_masking(board, 1))
         assert set(indices.tolist()) <= set(legal.tolist())  # support ⊆ legal, never equality

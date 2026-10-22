@@ -669,8 +669,8 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         ``epochs × (replay_buffer_games / num_eps)``, logged by the Coach.
 
         Args:
-            examples: The whole replay buffer flattened to (board, policy, value)
-                tuples.
+            examples: The whole replay buffer flattened to
+                :class:`~alphablokus.selfplay.episode.ProcessedExample` rows.
             generation: Current training generation (for logging).
             metrics: Optional metrics collector for parquet/W&B logging.
             eval_set: Optional frozen held-out positions. When provided, three
@@ -703,10 +703,14 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
 
         Note:
             Every auxiliary target is a **separate argument on purpose**:
-            ``ProcessedExample`` keeps its ``(board, policy, value)`` shape, so
-            self-play, the replay buffer and storage never carry one
+            ``ProcessedExample`` carries only what self-play itself produces —
+            board, policy, outcome and side to move — so the replay buffer and
+            storage never carry an auxiliary target
             (docs/plans/score-auxiliary-target.md S4). No auxiliary head is read when
-            choosing a move.
+            choosing a move. A head that wants the side to move reads
+            ``example.player`` off these same rows and supplies it as one more
+            index-aligned target source, which is what keeps the dataset item shape
+            ``(board, pi, value)`` + one tensor per built head.
         """
         if not examples:
             logger.warning("No training examples provided, skipping training.")
@@ -721,7 +725,7 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         )
         aux_names = tuple(aux_sources)
 
-        boards_np, raw_pis, vs_np = zip(*examples, strict=True)
+        boards_np, raw_pis, vs_np, players = zip(*examples, strict=True)
         action_size = self.game.get_action_size()
 
         # Validate training data at the interface boundary. Boards are stored
@@ -741,6 +745,16 @@ class BaseNNetWrapper(INeuralNetWrapper, ABC):
         )
         assert abs(sample_pi.sum() - 1.0) < 0.01, f"Policy vector sums to {sample_pi.sum()}, expected ~1.0"
         assert -1.0 <= sample_v <= 1.0, f"Value {sample_v} outside [-1, 1]"
+        # Every position must name the side that was to move. Checked across the
+        # whole buffer, not just the sample: a producer that drops the field (or
+        # fills it with a placeholder 0) is invisible to the loss — it only shows
+        # up much later as a colour-conditional diagnostic quietly measuring the
+        # wrong thing, which is the failure mode this column exists to end.
+        distinct_players = set(players)
+        assert distinct_players <= {1, -1}, (
+            f"Training examples carry side-to-move values {sorted(distinct_players)}; "
+            "every position must record +1 (White) or -1 (Black)."
+        )
 
         # DataLoader workers must not each pickle a full copy of the buffer.
         # forkserver/spawn workers receive a *pickled* dataset, so the in-RAM

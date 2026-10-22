@@ -64,6 +64,7 @@ from torch.utils.data import DataLoader, Dataset
 from alphablokus.config import RunConfig, load_args
 from alphablokus.games.base_wrapper import _LazyPolicyDataset, resolve_dataloader_context
 from alphablokus.registry import instantiate_game
+from alphablokus.selfplay.episode import ProcessedExample
 from alphablokus.storage.sparse_policy import sparsify
 from alphablokus.training.diagnostics import available_ram_bytes, estimate_peak_ram_bytes
 from alphablokus.training.memmap_dataset import MemmapPolicyDataset
@@ -249,7 +250,7 @@ def _verdict(measured_bytes: int, available_bytes: int) -> str:
 
 
 def build_synthetic_buffer(action_size: int, num_games: int, positions_per_game: int, nnz: int, seed: int) -> list:
-    """A full-size replay buffer of synthetic positions (compact board, sparse policy, value).
+    """A full-size replay buffer of synthetic positions (compact board, sparse policy, value, player).
 
     Shaped like Blokus self-play output: 14×14 int8 compact boards and sparse
     ``nnz``-nonzero policies. The point is the *volume and layout*, not the
@@ -263,7 +264,14 @@ def build_synthetic_buffer(action_size: int, num_games: int, positions_per_game:
         idx = rng.choice(action_size, size=nnz, replace=False)
         weights = rng.random(nnz).astype(np.float32)
         dense[idx] = weights / weights.sum()
-        examples.append((board, sparsify(dense), float(rng.uniform(-1.0, 1.0))))
+        examples.append(
+            ProcessedExample(
+                board=board,
+                policy=sparsify(dense),
+                value=float(rng.uniform(-1.0, 1.0)),
+                player=1 if len(examples) % 2 == 0 else -1,
+            )
+        )
     return examples
 
 
@@ -298,7 +306,7 @@ def probe_workers(
     """Build the dataset + loader at ``workers`` workers, iterate once, return peak physical bytes."""
     game = instantiate_game(config)
     action_size = game.get_action_size()
-    boards_np, raw_pis, vs_np = zip(*examples, strict=True)
+    boards_np, raw_pis, vs_np, _players = zip(*examples, strict=True)
 
     memmap_dir: Path | None = None
     dataset: Dataset

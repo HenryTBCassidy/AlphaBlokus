@@ -20,28 +20,35 @@ DUMMY_POLICY_SIZE = 10
 
 
 def _make_dummy_examples(n: int = 5) -> deque[ProcessedExample]:
-    """Create dummy (board, sparse_policy, value) examples for testing.
+    """Create dummy examples for testing.
 
     Policies are sparse ``(indices, values)`` pairs — the live-buffer (and
-    on-disk) representation.
+    on-disk) representation. The side to move alternates, as it does in a real
+    game, so a round-trip that dropped or transposed the column shows up.
     """
     examples: deque[ProcessedExample] = deque()
-    for _ in range(n):
+    for index in range(n):
         board = np.random.rand(3, 3).astype(np.float64)
         policy = sparsify(np.random.dirichlet(np.ones(DUMMY_POLICY_SIZE)).astype(np.float32))
         value = np.random.choice([-1.0, 1.0])
-        examples.append((board, policy, value))
+        examples.append(
+            ProcessedExample(
+                board=board,
+                policy=policy,
+                value=value,
+                player=1 if index % 2 == 0 else -1,
+            )
+        )
     return examples
 
 
 def _assert_examples_equal(actual: ProcessedExample, expected: ProcessedExample) -> None:
-    """One example equals another: board, sparse policy pair, and value."""
-    actual_board, (actual_indices, actual_values), actual_value = actual
-    expected_board, (expected_indices, expected_values), expected_value = expected
-    np.testing.assert_array_almost_equal(actual_board, expected_board)
-    np.testing.assert_array_equal(actual_indices, expected_indices)
-    np.testing.assert_array_almost_equal(actual_values, expected_values)
-    assert pytest.approx(actual_value) == expected_value
+    """One example equals another: board, sparse policy pair, value and side to move."""
+    np.testing.assert_array_almost_equal(actual.board, expected.board)
+    np.testing.assert_array_equal(actual.policy[0], expected.policy[0])
+    np.testing.assert_array_almost_equal(actual.policy[1], expected.policy[1])
+    assert pytest.approx(actual.value) == expected.value
+    assert actual.player == expected.player
 
 
 @pytest.fixture
@@ -84,12 +91,14 @@ def test_save_load_roundtrip_shapes(store: SelfPlayStore):
     loaded = store.load(generation=0)
     assert loaded is not None
 
-    board, (indices, values), value = loaded[0]
-    assert board.shape == (3, 3)
+    example = loaded[0]
+    indices, values = example.policy
+    assert example.board.shape == (3, 3)
     assert indices.dtype == np.int32
     assert values.dtype == np.float32
     assert indices.shape == values.shape
-    assert isinstance(value, float)
+    assert isinstance(example.value, float)
+    assert isinstance(example.player, int)
 
 
 def test_metadata_contains_shapes(store: SelfPlayStore, test_config: RunConfig):
@@ -181,7 +190,11 @@ def test_compact_board_roundtrip_reencodes(blokus_game, test_config: RunConfig):
     action_size = blokus_game.get_action_size()
     policy = np.zeros(action_size, dtype=np.float32)
     policy[0] = 1.0
-    store.save(deque([(compact, sparsify(policy), 1.0)]), generation=0, policy_size=action_size)
+    store.save(
+        deque([ProcessedExample(compact, sparsify(policy), 1.0, -1)]),
+        generation=0,
+        policy_size=action_size,
+    )
 
     loaded = store.load(generation=0)
     assert loaded is not None

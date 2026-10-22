@@ -233,14 +233,18 @@ def test_shard_roundtrip_and_one_hot_policies(game: BlokusDuoGame, tmp_path: Pat
     examples = list(iter_corpus_examples([path]))
     assert len(examples) == rows
     flat = [p for g in games for p in g.plies]
-    for (board, (indices, values), value), harvested in zip(examples, flat, strict=True):
+    for example, harvested in zip(examples, flat, strict=True):
+        board, (indices, values) = example.board, example.policy
         assert board.dtype == np.int8
         assert np.array_equal(board, harvested.compact_board)
         # One-hot of the played action, densifiable into the full action space.
         dense = densify(indices, values, game.get_action_size())
         assert dense.sum() == 1.0
         assert dense[harvested.action] == 1.0
-        assert value in (-1.0, 0.0, 1.0)
+        assert example.value in (-1.0, 0.0, 1.0)
+        # The side to move comes off the shard's own column, so a trainer can consume
+        # these rows and self-play's interchangeably (plan D1).
+        assert example.player == harvested.player
         # The board must rebuild into the exact 44-channel net input.
         planes = game.encode_compact(board)
         assert planes.shape == (44, game.board_size, game.board_size)
@@ -252,8 +256,9 @@ def test_examples_are_symmetry_augmentable(game: BlokusDuoGame, tmp_path: Path) 
     games = _play_games(game, 1)
     path = tmp_path / shard_filename(0)
     write_shard(path, games, policy_size=game.get_action_size(), level=9, opening_random_plies=4)
-    board_compact, (indices, values), _value = next(iter(iter_corpus_examples([path])))
-    board = game.board_from_compact(board_compact)
+    first = next(iter(iter_corpus_examples([path])))
+    indices, values = first.policy
+    board = game.board_from_compact(first.board)
     dense = densify(indices, values, game.get_action_size())
     symmetries = game.get_symmetries(board, dense)
     assert len(symmetries) == 2

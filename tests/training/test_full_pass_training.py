@@ -14,6 +14,7 @@ from typing import TYPE_CHECKING
 import numpy as np
 
 from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
+from alphablokus.selfplay.episode import ProcessedExample
 
 if TYPE_CHECKING:
     from alphablokus.config import RunConfig
@@ -43,7 +44,7 @@ def _buffer(action_size: int, n: int) -> list:
         board = np.zeros((3, 3), dtype=np.int8)
         board.flat[i % 9] = 1
         policy = np.full(action_size, 1.0 / action_size, dtype=np.float64)
-        examples.append((board, policy, float((-1) ** i)))
+        examples.append(ProcessedExample(board, policy, float((-1) ** i), 1 if i % 2 == 0 else -1))
     return examples
 
 

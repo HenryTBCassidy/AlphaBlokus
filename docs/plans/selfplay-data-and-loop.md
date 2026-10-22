@@ -13,7 +13,7 @@ change before it can start.
 
 | # | Item | Role | Effort | Priority | Done |
 |---|---|---|---|---|---|
-| D1 | Record whose turn it is on every stored position | `W` | 1–2 d | **Critical** — window closing | |
+| D1 | Record whose turn it is on every stored position | `W` | 1–2 d | **Critical** — window closing | ✅ |
 | D2 | A generate-only entry point (frozen weights, no training) | `W` | ½ d | **Critical** | |
 | D3 | Generate a ~5,000-game dataset with the current best net | `W→R` | 80 min box | High | |
 | D4 | Learning-rate sweep on the frozen dataset | `W→R→A` | 9 short jobs | High | |
@@ -39,6 +39,44 @@ a player has passed — and passing happens in the **endgame**, precisely where 
 strongest. Thread the real value.
 
 Threading `player` through also removes the piece-parity workaround in the colour-value diagnostic.
+
+### Done (2026-08-18)
+
+`ProcessedExample` is now a `NamedTuple` — `(board, policy, value, player)`, `player` being `+1`
+White / `-1` Black — and every producer supplies the real mover: the python episode loop, the jax
+harvester (straight off the wave trace), and the Pentobi distillation reader (off the corpus's own
+`player` column, which already existed). It is persisted as an int8 parquet column behind a
+`player_kind` schema marker, in the same refuse-don't-guess style as `board_kind`/`policy_kind`: a
+self-play file written before this **fails to load** rather than being read colour-blind. Nothing on
+disk needed migrating, which was the point of doing it now.
+
+A `NamedTuple` rather than a 4-tuple because `value` and `player` are two small numbers that look
+plausible in either slot, and the fields are read positionally in a dozen places.
+
+Two consequences worth knowing:
+
+- **The eval set carries the column too** (`EvalSet.players`, persisted as `players.npy`, `None` for
+  older sets). That is the half of "removes the piece-parity workaround" that lives in this scope;
+  flipping `evaluation/colour_value.py` to read it belongs to `value-head` V2, whose file it is. Until
+  then the diagnostic still infers and still drops what it cannot read.
+- **The dataset item shape is deliberately unchanged** — `(board, pi, value)` plus one tensor per built
+  auxiliary head, which `_AuxTargetDataset` and the training loop's `zip(aux_names, extra,
+  strict=True)` both depend on. `train()` receives the examples themselves, so a colour-conditional
+  loss term reads `example.player` and supplies it through the existing aux-target-source seam rather
+  than shifting every head's position. `train()` now asserts every position carries `±1`, over the
+  whole buffer, so a producer that drops the field fails at the boundary instead of surfacing later as
+  a diagnostic measuring invented labels.
+
+`iter_corpus_examples` (in `pentobi/corpus.py`, the `corpus` scope's file) also had to change:
+its docstring promised "a trainer can consume either source through the same code", and a
+3-tuple stream stopped being interchangeable the moment the self-play row grew a field. It now
+yields `ProcessedExample` off the shard's existing `player` column. Nothing called it from a
+trainer, so nothing was broken — but leaving a false contract in place was the landmine.
+
+The jax legality test got stronger as a side effect: it used to check a position's policy against the
+*union* of both mover interpretations wherever the mover still held a full inventory, because the
+canonical board could not say which colour it was. It now reconstructs the absolute board from the
+stored `player` and checks one unambiguous mask.
 
 ## D2. A generate-only entry point
 

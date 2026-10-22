@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 
 from alphablokus.games.tictactoe.nn.wrapper import NNetWrapper
+from alphablokus.selfplay.episode import ProcessedExample
 from alphablokus.storage.sparse_policy import sparsify
 from alphablokus.training.holdout import evaluate_holdout, evaluate_imitation_diagnostics, split_games_holdout
 
@@ -94,10 +95,11 @@ def test_evaluate_holdout_matches_closed_form() -> None:
     """One-hot targets vs a uniform predictor have CE = ln(A) and KL = ln(A)."""
     action_size = 10
     examples = [
-        (
+        ProcessedExample(
             np.zeros((3, 3), dtype=np.int8),
             (np.array([i % action_size], dtype=np.int32), np.array([1.0], dtype=np.float32)),
             1.0,
+            1 if i % 2 == 0 else -1,
         )
         for i in range(5)
     ]
@@ -125,7 +127,7 @@ def test_evaluate_holdout_on_a_real_wrapper(ttt_game: TicTacToeGame, test_config
     compact = ttt_game.get_canonical_form(board, 1).to_compact()
     action_size = ttt_game.get_action_size()
     uniform = np.full(action_size, 1.0 / action_size)
-    examples = [(compact, sparsify(uniform), 0.0)]
+    examples = [ProcessedExample(compact, sparsify(uniform), 0.0, 1)]
 
     metrics = evaluate_holdout(
         wrapper,
@@ -189,12 +191,13 @@ def _imitation_fixture() -> tuple[list, list[int], list[int], _TablePredictor]:
     policies[3, [6, 7]] = [0.6, 0.4]  # hit
     predicted_values = np.array([0.95, -0.05, 0.5, -0.99], dtype=np.float32)
     examples = [
-        (
+        ProcessedExample(
             np.full((3, 3), i, dtype=np.int8),
             (np.array(legal, dtype=np.int32), np.full(len(legal), 1.0 / len(legal), dtype=np.float32)),
             outcome,
+            player,
         )
-        for i, (legal, outcome) in enumerate(zip(legal_sets, outcomes, strict=True))
+        for i, (legal, outcome, player) in enumerate(zip(legal_sets, outcomes, players, strict=True))
     ]
     return examples, expert_actions, players, _TablePredictor(policies, predicted_values)
 
@@ -244,11 +247,16 @@ def test_imitation_diagnostics_calibration_is_colour_conditional() -> None:
 def test_imitation_diagnostics_accepts_dense_policies_and_validates_inputs() -> None:
     examples, expert_actions, players, predictor = _imitation_fixture()
     # A dense target works too: its nonzero support is the legal set.
-    board, (indices, values), outcome = examples[0]
+    first = examples[0]
+    indices, values = first.policy
     dense = np.zeros(10, dtype=np.float32)
     dense[indices] = values
     diagnostics = evaluate_imitation_diagnostics(
-        predictor, [(board, dense, outcome)], expert_actions[:1], players[:1], encode_fn=_encode_fake
+        predictor,
+        [ProcessedExample(first.board, dense, first.value, first.player)],
+        expert_actions[:1],
+        players[:1],
+        encode_fn=_encode_fake,
     )
     assert diagnostics.top1_accuracy == 1.0
 
@@ -275,7 +283,7 @@ def test_imitation_diagnostics_report_the_colour_only_value_floor() -> None:
 
     # The fixture's outcomes are [1, -1] for each colour, so each colour's mean is 0 and
     # the colour-only predictor scores the outcome variance.
-    outcomes = np.array([value for _board, _policy, value in examples])
+    outcomes = np.array([example.value for example in examples])
     assert diagnostics.colour_only_value_mse == pytest.approx(float(np.mean(outcomes**2)))
     assert diagnostics.value_mse > 0.0
     assert diagnostics.value_skill == pytest.approx(1.0 - diagnostics.value_mse / diagnostics.colour_only_value_mse)
@@ -336,12 +344,13 @@ def _scoring_predictor(scores: np.ndarray | None) -> _AuxPredictor:
 
 def _score_examples(count: int) -> list:
     return [
-        (
+        ProcessedExample(
             np.zeros((3, 3), dtype=np.int8),
             (np.array([0], dtype=np.int32), np.array([1.0], dtype=np.float32)),
             1.0,
+            1 if index % 2 == 0 else -1,
         )
-        for _ in range(count)
+        for index in range(count)
     ]
 
 
@@ -439,7 +448,10 @@ def test_imitation_diagnostics_top3_is_a_rank_three_window() -> None:
     policies = np.zeros((2, 8), dtype=np.float32)
     policies[:, legal] = [0.30, 0.25, 0.20, 0.15, 0.10]  # ranking is 0, 1, 2, 3, 4
     predictor = _TablePredictor(policies, np.zeros(2, dtype=np.float32))
-    examples = [(np.full((3, 3), i, dtype=np.int8), (legal, np.full(5, 0.2, dtype=np.float32)), 0.0) for i in range(2)]
+    examples = [
+        ProcessedExample(np.full((3, 3), i, dtype=np.int8), (legal, np.full(5, 0.2, dtype=np.float32)), 0.0, 1)
+        for i in range(2)
+    ]
 
     diagnostics = evaluate(predictor, examples, [2, 3], [1, -1], encode_fn=_encode_fake)
 
@@ -470,10 +482,11 @@ def _ownership_fixture() -> tuple[list, list, _AuxPredictor]:
         None,  # no final board — masked, and never shown to the predictor
     ]
     examples = [
-        (
+        ProcessedExample(
             np.full((3, 3), i, dtype=np.int8),
             (np.array([0], dtype=np.int32), np.array([1.0], dtype=np.float32)),
             0.0,
+            1 if i % 2 == 0 else -1,
         )
         for i in range(3)
     ]
@@ -533,10 +546,11 @@ def _reply_fixture() -> tuple[list, list, _AuxPredictor]:
         None,  # a game's final position
     ]
     examples = [
-        (
+        ProcessedExample(
             np.full((3, 3), i, dtype=np.int8),
             (np.array([0], dtype=np.int32), np.array([1.0], dtype=np.float32)),
             0.0,
+            1 if i % 2 == 0 else -1,
         )
         for i in range(3)
     ]

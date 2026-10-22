@@ -235,12 +235,15 @@ def test_game_shard_round_trip_and_validation(store: SearchSpaceStore, game: Blo
     examples = [row.example for row in build_training_examples(game, loaded, epsilon=0.0, augment=False)]
     assert len(examples) == rows
     flat = [ply for g in games for ply in g.plies]
-    for (board, (indices, values), value), ply in zip(examples, flat, strict=True):
-        assert np.array_equal(board, ply.compact_board)
-        dense = densify(indices, values, game.get_action_size())
+    for example, ply in zip(examples, flat, strict=True):
+        assert np.array_equal(example.board, ply.compact_board)
+        dense = densify(*example.policy, game.get_action_size())
         assert dense.sum() == pytest.approx(1.0, abs=1e-5)
         assert dense[ply.action] > 0.0
-        assert value in (-1.0, 0.0, 1.0)
+        assert example.value in (-1.0, 0.0, 1.0)
+        # The side to move rides through the reader from the corpus's own column,
+        # never re-derived from the canonical board (plan D1).
+        assert example.player == ply.player
 
 
 def test_validator_rejects_a_tampered_policy(store: SearchSpaceStore, game: BlokusDuoGame, tmp_path: Path) -> None:

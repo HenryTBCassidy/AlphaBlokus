@@ -26,9 +26,9 @@ impossible, not merely improbable. :func:`compute_diversity` quantifies the resu
 than assumed to be.
 
 **Schema compatibility.** Shards carry the exact ``board``/``policy_indices``/
-``policy_values``/``value`` columns and ``board_kind``/``policy_kind`` markers of
+``policy_values``/``value``/``player`` columns and ``board_kind``/``policy_kind`` markers of
 :class:`alphablokus.storage.selfplay_store.SelfPlayStore` (asserted equal in tests), plus
-corpus-only columns (``margin``, ``player``, ``game_id``, ``ply``, ``action``) and
+corpus-only columns (``margin``, ``game_id``, ``ply``, ``action``) and
 footer metadata. See ``docs/plans/pentobi-distillation.md`` for the schema table.
 """
 
@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Protocol, TypeAlias
+from typing import TYPE_CHECKING, Protocol
 
 import numpy as np
 import pyarrow as pa
@@ -46,6 +46,7 @@ from loguru import logger
 from alphablokus.games.blokusduo.pentobi.gtp import PentobiGtp
 from alphablokus.games.blokusduo.pentobi.translation import PASS, PentobiMoveTranslator
 from alphablokus.interfaces import RESIGN_ACTION
+from alphablokus.selfplay.episode import ProcessedExample
 
 if TYPE_CHECKING:
     from collections.abc import Iterator, Sequence
@@ -56,10 +57,6 @@ if TYPE_CHECKING:
     from alphablokus.games.blokusduo.board import BlokusDuoBoard
     from alphablokus.games.blokusduo.game import BlokusDuoGame
 
-# One training example: (compact canonical board, sparse one-hot policy, value).
-# Structurally identical to ``alphablokus.selfplay.episode.ProcessedExample`` — kept as a
-# local alias so game-layer code does not import the framework's self-play module.
-CorpusExample: TypeAlias = "tuple[NDArray[np.int8], tuple[NDArray[np.int32], NDArray[np.float32]], float]"
 
 # Storage format markers. Deliberately the same values as ``SelfPlayStore.BOARD_KIND`` /
 # ``POLICY_KIND`` (tests assert equality) so trainers can share row-decoding code, plus a
@@ -539,27 +536,33 @@ def read_shard_meta(path: Path) -> ShardMeta:
     )
 
 
-def iter_corpus_examples(paths: Sequence[Path]) -> Iterator[CorpusExample]:
-    """Stream ``(board, (indices, values), value)`` training tuples from shards.
+def iter_corpus_examples(paths: Sequence[Path]) -> Iterator[ProcessedExample]:
+    """Stream net-ready training rows from shards.
 
-    The tuple is structurally identical to the self-play pipeline's
-    ``ProcessedExample`` — a trainer can consume either source through the same code.
+    Yields the self-play pipeline's own ``ProcessedExample``, side to move
+    included — read from the shard's ``player`` column, which the corpus has
+    always stored — so a trainer really can consume either source through the same
+    code. It used to yield a structurally-identical 3-tuple, which stopped being
+    interchangeable the moment the self-play row grew its side-to-move field
+    (``docs/plans/selfplay-data-and-loop.md`` D1).
     """
     for path in paths:
         meta = read_shard_meta(path)
         parquet_file = pq.ParquetFile(path)
-        for batch in parquet_file.iter_batches(columns=["board", "policy_indices", "policy_values", "value"]):
-            for board_bytes, indices_bytes, values_bytes, value in zip(
+        columns = ["board", "policy_indices", "policy_values", "value", "player"]
+        for batch in parquet_file.iter_batches(columns=columns):
+            for board_bytes, indices_bytes, values_bytes, value, player in zip(
                 batch.column("board").to_pylist(),
                 batch.column("policy_indices").to_pylist(),
                 batch.column("policy_values").to_pylist(),
                 batch.column("value").to_pylist(),
+                batch.column("player").to_pylist(),
                 strict=True,
             ):
                 board = np.frombuffer(board_bytes, dtype=np.dtype(meta.board_dtype)).reshape(meta.board_shape).copy()
                 indices = np.frombuffer(indices_bytes, dtype=np.int32).copy()
                 values = np.frombuffer(values_bytes, dtype=np.float32).copy()
-                yield board, (indices, values), float(value)
+                yield ProcessedExample(board, (indices, values), float(value), int(player))
 
 
 # --------------------------------------------------------------------------- #

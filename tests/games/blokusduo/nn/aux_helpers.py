@@ -18,6 +18,7 @@ import torch
 from alphablokus.config import MCTSConfig, NetConfig, RunConfig
 from alphablokus.games.blokusduo.nn.net import AlphaBlokusDuo
 from alphablokus.games.blokusduo.nn.wrapper import NNetWrapper as BlokusDuoNNetWrapper
+from alphablokus.selfplay.episode import ProcessedExample
 from tests.conftest import RecordingMetrics
 
 if TYPE_CHECKING:
@@ -84,7 +85,7 @@ def examples(game: BlokusDuoGame, board: BlokusDuoBoard, count: int) -> list:
         indices = np.array([action], dtype=np.int32)
         values = np.array([1.0], dtype=np.float32)
         compact = np.asarray(board.to_compact(), dtype=np.int8)
-        built.append((compact, (indices, values), float((-1) ** i)))
+        built.append(ProcessedExample(compact, (indices, values), float((-1) ** i), 1 if i % 2 == 0 else -1))
         board, player = game.get_next_state(board, player, action)
         board = game.get_canonical_form(board, player)
         player = 1

@@ -13,7 +13,9 @@ Consumes :class:`games.blokusduo.jax.actors.WaveTrace` rows (as numpy) and produ
   transpose, 2× examples);
 - value: game outcome from that position's player perspective, with the python
   path's draw-sign convention (+1e-4 to the terminal state's player-to-move,
-  −1e-4 to the opponent — see ``selfplay/episode.py::play_self_play_episode``).
+  −1e-4 to the opponent — see ``selfplay/episode.py::play_self_play_episode``);
+- player: the side that was actually to move (+1 White, -1 Black), taken from the
+  trace rather than re-derived from the canonical board.
 
 Games truncated by the end of the final wave are dropped (and counted) — the
 same trailing-truncation policy as pgx's value mask; nothing is silently lost.
@@ -26,12 +28,12 @@ from typing import TYPE_CHECKING
 
 import numpy as np
 
+from alphablokus.selfplay.episode import ProcessedExample
 from alphablokus.storage.sparse_policy import sparsify
 
 if TYPE_CHECKING:
     from alphablokus.games.blokusduo.game import BlokusDuoGame
     from alphablokus.games.blokusduo.jax.actors import WaveTrace
-    from alphablokus.selfplay.episode import ProcessedExample
 
 #: Board side (Blokus Duo); kept in sync with BlokusDuoBoard.N via the tests.
 _BOARD_SIZE = 14
@@ -132,8 +134,11 @@ class TraceHarvester:
             entropies.append(float(-(nonzero * np.log(nonzero)).sum()))
             transposed_board = board.T.copy()
             transposed_pi = dense[self._transpose_perm]
-            examples.append((board, sparsify(dense), float(value)))
-            examples.append((transposed_board, sparsify(transposed_pi), float(value)))
+            # ``mover`` is the real side to move, carried straight through to the
+            # stored row — the transpose twin is the same position from the same
+            # side, so it takes the same value (D1).
+            examples.append(ProcessedExample(board, sparsify(dense), float(value), mover))
+            examples.append(ProcessedExample(transposed_board, sparsify(transposed_pi), float(value), mover))
         return HarvestedGame(
             examples=examples,
             num_moves=len(slot.boards),

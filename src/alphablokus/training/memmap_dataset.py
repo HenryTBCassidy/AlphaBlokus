@@ -104,8 +104,9 @@ class MemmapPolicyDataset(Dataset):
         """Write the buffer to flat memmap files and return a dataset over them.
 
         Args:
-            examples: The whole flattened replay buffer as ``(compact_board,
-                (indices, values), value)`` triples (sparse policies).
+            examples: The whole flattened replay buffer as
+                :class:`~alphablokus.selfplay.episode.ProcessedExample` rows
+                (sparse policies).
             action_size: Dense action-space length the sparse policies index into.
             encode_fn: ``game.encode_compact`` — compact board → dense planes.
             directory: Destination directory for the memmap files (created;
@@ -126,8 +127,8 @@ class MemmapPolicyDataset(Dataset):
         # output); dense arrays (hand-built fixtures) are accepted too, matching
         # ``storage.sparse_policy.as_dense``.
         offsets = np.zeros(num_positions + 1, dtype=np.int64)
-        for i, (_board, policy, _value) in enumerate(examples):
-            offsets[i + 1] = offsets[i] + len(cls._sparse_arrays(policy)[0])
+        for i, example in enumerate(examples):
+            offsets[i + 1] = offsets[i] + len(cls._sparse_arrays(example.policy)[0])
         total_nnz = int(offsets[-1])
 
         boards_mm = np.memmap(
@@ -144,12 +145,12 @@ class MemmapPolicyDataset(Dataset):
         for start in range(0, num_positions, _BUILD_CHUNK_POSITIONS):
             end = min(start + _BUILD_CHUNK_POSITIONS, num_positions)
             chunk = examples[start:end]
-            boards_mm[start:end] = np.stack([board for board, _pi, _value in chunk])
-            values_mm[start:end] = np.asarray([value for _board, _pi, value in chunk], dtype=np.float32)
+            boards_mm[start:end] = np.stack([example.board for example in chunk])
+            values_mm[start:end] = np.asarray([example.value for example in chunk], dtype=np.float32)
             nnz_start = int(offsets[start])
             nnz_end = int(offsets[end])
             if nnz_end > nnz_start:
-                sparse = [cls._sparse_arrays(policy) for _board, policy, _value in chunk]
+                sparse = [cls._sparse_arrays(example.policy) for example in chunk]
                 indices_mm[nnz_start:nnz_end] = np.concatenate([indices for indices, _values in sparse])
                 pi_values_mm[nnz_start:nnz_end] = np.concatenate([values for _indices, values in sparse])
 

@@ -17,6 +17,7 @@ import numpy as np
 import torch
 
 from alphablokus.games.base_wrapper import _LazyPolicyDataset
+from alphablokus.selfplay.episode import ProcessedExample
 from alphablokus.storage.sparse_policy import sparsify
 from alphablokus.training.memmap_dataset import MemmapPolicyDataset
 
@@ -38,7 +39,9 @@ def _synthetic_buffer(action_size: int, num_positions: int, seed: int = 0) -> li
         idx = rng.choice(action_size, size=nnz, replace=False)
         weights = rng.random(nnz).astype(np.float32)
         dense[idx] = weights / weights.sum()
-        examples.append((board, sparsify(dense), float((-1) ** i * rng.random())))
+        examples.append(
+            ProcessedExample(board, sparsify(dense), float((-1) ** i * rng.random()), 1 if i % 2 == 0 else -1)
+        )
     return examples
 
 
@@ -46,7 +49,7 @@ def test_memmap_dataset_matches_in_ram_dataset(blokus_game: BlokusDuoGame, tmp_p
     """Every item equals the in-RAM ``_LazyPolicyDataset`` item — training stays identical."""
     action_size = blokus_game.get_action_size()
     examples = _synthetic_buffer(action_size, 32)
-    boards_np, raw_pis, vs_np = zip(*examples, strict=True)
+    boards_np, raw_pis, vs_np, _players = zip(*examples, strict=True)
 
     in_ram = _LazyPolicyDataset(list(boards_np), list(raw_pis), list(vs_np), action_size, blokus_game.encode_compact)
     memmap = MemmapPolicyDataset.build(examples, action_size, blokus_game.encode_compact, tmp_path / "mm")
@@ -104,7 +107,7 @@ def test_memmap_dataset_works_for_tictactoe_shape(ttt_game: TicTacToeGame, tmp_p
         board = np.zeros((3, 3), dtype=np.int8)
         board.flat[i % 9] = 1
         dense = np.full(action_size, 1.0 / action_size, dtype=np.float32)
-        examples.append((board, sparsify(dense), float((-1) ** i)))
+        examples.append(ProcessedExample(board, sparsify(dense), float((-1) ** i), 1 if i % 2 == 0 else -1))
     dataset = MemmapPolicyDataset.build(examples, action_size, ttt_game.encode_compact, tmp_path / "ttt")
     board, pi, value = dataset[0]
     assert pi.shape == (action_size,)
